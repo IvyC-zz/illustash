@@ -91,6 +91,8 @@ Claude Code 通过 `CLAUDE.md` 引入本文件，Codex 等直接读本文件。�
 
 ## 代码约定
 
+Cargo 布局（2026-11-15，#311、#397）：core、platform、relation-fft、terms、desktop 属于根 workspace，共用根 `Cargo.lock` 和 `target/`；IQDB 保持独立的 `crates/iqdb/Cargo.lock`、`crates/iqdb/target/` 和 profile。成员依赖与 features 留在各自 manifest，根 workspace 的 profile 和 tiny_http patch 只写在根 `Cargo.toml`。修改构建、打包或验收入口时按这两个构建根处理；现行设置与已批准例外见 [开发说明](docs/DEVELOPMENT.md#快速开始)。
+
 2026-10-29 用户定：
 
 - 代码注释用简体中文，包括 `///`、`//!` 文档注释、Python docstring 和 unsafe 块的安全说明（`// SAFETY:` 这个前缀保留英文，clippy 按它识别）。存量的英文注释同样翻译成中文；工具指令、第三方许可声明、原样引用的外部文字和 rustdoc 的 `# Panics` 等小节标题保留原文。

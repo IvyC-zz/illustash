@@ -452,6 +452,24 @@ class CandidateExampleWiringTest(unittest.TestCase):
         probes = {'READ_HTTP': 'read-http', 'RECOGNITION_COMPUTE': 'recognition-compute',
                   'INDEX_COMPUTE': 'index-compute', 'RESEARCH_COMPUTE': 'research-compute',
                   'RELATION_PROBE': 'relation-probe', 'PROVENANCE_COMPUTE': 'provenance-compute'}
+        # 与打包入口核对完整路径，不能让旧的 native/terms/target 因包含 target 子串而通过。
+        with patch.dict(os.environ):
+            os.environ.pop('CARGO_TARGET_DIR', None)
+            target = pack.target().relative_to(ROOT).as_posix() + '/release/'
+            iqdb_target = pack.target(ROOT / 'crates/iqdb').relative_to(ROOT).as_posix() + '/release/'
+        expected = {'ILLUSTASH_TERMS_BIN': target + 'illustash-terms',
+                    'ILLUSTASH_IQDB_BINARY': iqdb_target + 'illustash-iqdb',
+                    'ILLUSTASH_RESEARCH_ADAPTER_BIN': target + 'illustash-worker',
+                    'ILLUSTASH_INDEX_ADAPTER_BIN': target + 'illustash-worker',
+                    **{'ILLUSTASH_' + key + '_BIN': target + 'examples/' + example
+                       for key, example in probes.items()}}
+        for source, pattern in (
+            (shell, r'export (ILLUSTASH_\w+)="\$root/([^"\n]+)"'),
+            (ci, r'^\s+(ILLUSTASH_\w+): \$\{\{ github\.workspace \}\}/(\S+)'),
+        ):
+            actual = dict(re.findall(pattern, source, re.M))
+            for key, path in expected.items():
+                self.assertEqual(actual.get(key), path, key)
         for key, example in probes.items():
             for source in (shell, ci):
                 build_at = source.index('--example ' + example)

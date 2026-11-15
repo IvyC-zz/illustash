@@ -42,7 +42,8 @@ class MigrationInventoryTest(unittest.TestCase):
         self.assertEqual([], current['warnings'])
         self.assertEqual(inventory.dump_spec(spec), text, '运行 python -m tools.migration_inventory fmt')
         # 预算按内容计，不计每条一行的空白。
-        self.assertLess(len(json.dumps(spec, ensure_ascii=False, separators=(',', ':')).encode()), 72_000)
+        # FFT crate 新增了必要的指纹与编译入口登记，内容预算相应扩至 73 KB（#311）。
+        self.assertLess(len(json.dumps(spec, ensure_ascii=False, separators=(',', ':')).encode()), 73_000)
         self.assertNotIn('coverage', spec)
         self.assertNotIn('sites', spec)
         self.assertNotIn('tools/verify_read_http.py', spec['sources'])

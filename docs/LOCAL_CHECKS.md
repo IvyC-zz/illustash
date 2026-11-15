@@ -1,12 +1,12 @@
 # 本地全量验收
 
-现行参考，2026-11-14。本文补充 [AGENTS.md](../AGENTS.md) 的本地验收约定；CI 覆盖及允许跳过仍以 `.github/workflows/ci.yml`、`tools/check_all.sh` 为准。
+现行参考，2026-11-15。本文补充 [AGENTS.md](../AGENTS.md) 的本地验收约定；CI 覆盖及允许跳过仍以 `.github/workflows/ci.yml`、`tools/check_all.sh` 为准。
 
 ## 开发检查与完整入口
 
-开发 worktree 先跑新改测试和相关定向检查。`tools/check_all.sh` 先验证测试文件语法及验收工具合成测试，再执行 crates/core 与 crates/platform 独立 fmt/clippy/test/locked build、宿主 fmt/clippy、JS、桌面 clippy/test，随后执行原有 Rust 与 crates/iqdb 的 fmt/clippy/test、release 构建、屏蔽退役参考目录导入的 Python discover 和空 PATH 契约重放。Python 全套由 `tests.run_fixed_suite` 执行，调度和参数见下文；覆盖、失败即退出、跳过白名单不变。导入源位于 `tests/reference/`、`web/` 或 #53 已退役的旧索引工具文件时立即拒绝，任何被捕获的导入尝试也使检查失败。构建前只运行固定的测试语法、验收工具合成测试等纯轻量项。任意指定的定向测试使用 `CHECK_ALL_TARGETED_TESTS='tests.test_native_http.TestCase'`（使用完整模块路径，在仓库根执行，以实际类名为准），在本轮候选 release 核心、测试读宿主及 IQDB 准备完成并设置二进制路径之后、Python discover 之前运行；输出候选 head，不提前读取旧 target。旧变量 `CHECK_ALL_PREFLIGHT_TESTS` 非空时明确退出 2，不静默改变其含义。额外定向结果不能代替全量，也不缩小 discover 的覆盖。
+开发 worktree 先跑新改测试和相关定向检查。`tools/check_all.sh` 先验证测试文件语法及验收工具合成测试，再执行根 workspace 中 crates/core 与 crates/platform 的 fmt/clippy/test/locked build、crates/relation-fft 的 fmt/clippy/test、宿主 fmt/clippy、JS、桌面 clippy/test，随后执行原有 Rust 与 crates/iqdb 的 fmt/clippy/test、release 构建、屏蔽退役参考目录导入的 Python discover 和空 PATH 契约重放。Python 全套由 `tests.run_fixed_suite` 执行，调度和参数见下文；覆盖、失败即退出、跳过白名单不变。导入源位于 `tests/reference/`、`web/` 或 #53 已退役的旧索引工具文件时立即拒绝，任何被捕获的导入尝试也使检查失败。构建前只运行固定的测试语法、验收工具合成测试等纯轻量项。任意指定的定向测试使用 `CHECK_ALL_TARGETED_TESTS='tests.test_native_http.TestCase'`（使用完整模块路径，在仓库根执行，以实际类名为准），在本轮候选 release 核心、测试读宿主及 IQDB 准备完成并设置二进制路径之后、Python discover 之前运行；输出候选 head，不提前读取旧 target。旧变量 `CHECK_ALL_PREFLIGHT_TESTS` 非空时明确退出 2，不静默改变其含义。额外定向结果不能代替全量，也不缩小 discover 的覆盖。
 
-当前候选的 `read-http`、`recognition-compute`、`index-compute`、`research-compute`、`relation-probe`、`provenance-compute` examples 在本轮 release 构建中显式准备，再导出各自 `ILLUSTASH_*_BIN`；研究/索引安装适配器同样显式指向本轮 `illustash-worker`。本地与 CI 使用相同接线，缺产物不能靠测试默认跳过形成通过。模型的专项授权及平台证据仍单列。
+当前候选的 `read-http`、`recognition-compute`、`index-compute`、`research-compute`、`relation-probe`、`provenance-compute` examples 在本轮 release 构建中显式准备，再导出各自 `ILLUSTASH_*_BIN`；研究/索引安装适配器同样显式指向本轮 `illustash-worker`。宿主、worker 和 examples 位于根 `target/release/`，IQDB 位于独立的 `crates/iqdb/target/release/`。本地与 CI 使用相同接线，缺产物不能靠测试默认跳过形成通过。模型的专项授权及平台证据仍单列。
 
 直接执行 `tools/check_all.sh` 仍要求已提交的干净候选，运行期间 head/已跟踪文件保持不变。验收工具合成测试的前置与全量都使用 `unittest -b` 捕获模式，文本捕获器不提供二进制输出流时仍保留原始完整日志及其摘要。脚本独立执行不会生成可复用签名记录。缓存速度没有固定承诺。
 
@@ -24,18 +24,19 @@
 
 2026-10-13 的合成数据实测：Apple M2 8 核、macOS 26.6.2 arm64，Python 3.12.12、Node 22.23.2、Rust/Cargo 1.94.1。最终已测 head `5ad38c9`（包含 #131 全部优化）单次完整检查为 **569 秒（9 分 29 秒）**，其中 Python 全套 8 进程为 122 秒（638 项、611 通过、27 白名单跳过），Rust 重放为 220 秒；依赖缓存已存在。此前 `0748ced` 单次完整检查为 903 秒，包含 dev 依赖优化级别变化后的约 190 秒一次性重编。验收详情分别见 [PR #134](https://github.com/shio-vinyl/illustash/pull/134) 和 [PR #131](https://github.com/shio-vinyl/illustash/pull/131)；这两轮未覆盖 Windows，不能把耗时外推到其他机器、平台或冷缓存，也不表示后续 main 已重新完整运行。
 
-全量耗时包含依赖准备、fmt/clippy、测试编译、Rust/JS/Python 执行、release 构建和空 PATH 重放；Python 汇总及 Rust 重放各只是其中一部分。比较时写明已测 head、平台、进程数、数据口径和缓存是否已存在，分别列出编译与执行时间。当前 Rust 重放缓存每个场景的路径替换规则并预筛无目标字符串的单元格；`native/terms/Cargo.toml` 的 dev profile 优化第三方依赖，自有 core/platform 和修改过的 tiny_http 保持未优化。依赖重编的单次总时长、测试执行时间与固定验收缓存复用是不同口径，不能合成一个提速数字。
+全量耗时包含依赖准备、fmt/clippy、测试编译、Rust/JS/Python 执行、release 构建和空 PATH 重放；Python 汇总及 Rust 重放各只是其中一部分。比较时写明已测 head、平台、进程数、数据口径和缓存是否已存在，分别列出编译与执行时间。当前 Rust 重放缓存每个场景的路径替换规则并预筛无目标字符串的单元格；根 `Cargo.toml` 的 dev profile 优化第三方依赖，自有 workspace 成员和修改过的 tiny_http 保持未优化；三个 Tauri 工具包的例外及 IQDB 独立配置见[开发说明](DEVELOPMENT.md#快速开始)。依赖重编的单次总时长、测试执行时间与固定验收缓存复用是不同口径，不能合成一个提速数字。
+
+2026-11-15，#311/#397 在相同产品基点的隔离 worktree 中比较两项结构改动：Apple M2 / macOS 26.7.1 arm64 / Rust 1.94.1，下载缓存已有、target 为空、sccache 关闭，各经空闲门槛做一次 terms 与 desktop 顺序冷编，合计 172.953→192.965 秒（+11.6%）；同一 Rust 文件三次注释增量的中位数 9.441→4.613 秒（−51.1%），FFT 对象未重编。该结果不表示整体冷编提速，也不能拆分为 workspace 与 FFT 各自的收益；首轮候选与修正后全部样本见 [PR #479](https://github.com/shio-vinyl/illustash/pull/479)。
 
 ## dev 构建的调试信息（#362）
 
-2026-11-14 起，5 个 Cargo 项目（`crates/core`、`crates/platform`、`crates/iqdb`、`native/terms`、`desktop`）的 `Cargo.toml` 各自写了同一套 dev profile：自己的 crate 用 `debug = "line-tables-only"`（只带行号表），第三方依赖用 `debug = false`。`cargo test` 用的 test profile 继承 dev。release 的设置没动，安装包内容不变。
+dev/test 沿用 #362 采用的调试信息设置：自有 crate 用 `debug = "line-tables-only"`（只带行号表），第三方依赖用 `debug = false`。配置现集中在根 workspace 与独立 IQDB 两处 `Cargo.toml`；成员清单、优化等级及例外见[开发说明](DEVELOPMENT.md#快速开始)。`cargo test` 用的 test profile 继承 dev，release 设置不变。
 
-- **范围**：自己的 crate 指项目本身和不在本项目 workspace 里的 path 依赖（`illustash-core`、`illustash-platform`，desktop 里还有 `illustash-terms`）。后者会落进 `[profile.dev.package."*"]`，所以在每个项目里单列一条，否则它们也拿不到行号表。vendored 的 `tiny_http` 当第三方处理。
-- **回溯**：panic 和测试失败的回溯里，自己的代码仍有 `文件:行:列`，标准库的栈帧也有；第三方依赖的栈帧没有文件名和行号，只有函数名。要用调试器或需要变量信息时，临时把对应 `Cargo.toml` 里的 `debug` 几行删掉（用完 `git checkout -- <Cargo.toml>`）。Cargo 输出的 `Finished `test` profile [unoptimized + debuginfo]` 是固定的 profile 名称，不反映 `debug` 的取值。
-- **将来合成 workspace（#311）**：profile 只能写在根 `Cargo.toml`，到时把这几段并到根上。
-- **三种设置**：现状（默认，完整调试信息）、甲（上面这套，采用）、乙（全部 `line-tables-only`）。选甲的理由：冷编译比乙更快、体积更小，增量编译在两个平台上都不比乙慢；乙多出来的只是第三方依赖栈帧里的文件名和行号，开发会话用不到。
+- **范围**：根 workspace 的自有成员由根 `[profile.dev]` 设置行号表，不再逐个覆盖 path 依赖；独立 IQDB 由自身 `[profile.dev]` 设置。第三方使用 `[profile.dev.package."*"]`，vendored tiny_http 也不带调试信息，其 opt-level 0 单独保留。
+- **回溯**：panic 和测试失败的回溯里，自己的代码仍有 `文件:行:列`，标准库的栈帧也有；第三方依赖的栈帧没有文件名和行号，只有函数名。要用调试器或需要变量信息时，临时调整对应构建根 `Cargo.toml` 里的 `debug` 设置，用完后仅还原本次临时改动。Cargo 输出的 `Finished `test` profile [unoptimized + debuginfo]` 是固定的 profile 名称，不反映 `debug` 的取值。
+- **历史对比的三种设置**：当时的原设置（完整调试信息，表中称「现状」）、甲（上面这套，采用）、乙（全部 `line-tables-only`）。选甲的理由：冷编译比乙更快、体积更小，增量编译在两个平台上都不比乙慢；乙多出来的只是第三方依赖栈帧里的文件名和行号，开发会话用不到。
 
-测量口径（构建的是 `cargo test --locked --no-run`，每个设置用一个新的临时 `CARGO_TARGET_DIR`，量完删除；基线 main `0b41d543`，三种设置在同一提交上只改 `Cargo.toml`；设置是否生效用 `cargo -v` 里每个 rustc 的 `-C debuginfo=` 核对过；没有用 sccache）：
+下面是 workspace 合并前的 #362 历史测量，不代表当前根 workspace 的耗时。测量口径（构建的是 `cargo test --locked --no-run`，每个设置用一个新的临时 `CARGO_TARGET_DIR`，量完删除；基线 main `0b41d543`，三种设置在同一提交上只改 `Cargo.toml`；设置是否生效用 `cargo -v` 里每个 rustc 的 `-C debuginfo=` 核对过；没有用 sccache）：
 
 | | 现状 | 甲 | 乙 |
 |---|---|---|---|
@@ -149,7 +150,7 @@ python3.12 tools/local_acceptance.py result <候选SHA>
 
 环境指纹包含同一固定路径、机器名、OS/架构、全部传入环境变量的摘要、Python/Node/Bash/Rust 工具链版本和文件摘要、实际 rustup 工具链、Cargo/Git 配置、macOS SDK/实际 clang 和明确区分的 Command Line Tools 安装身份或完整 Xcode 版本（探针失败不忽略），以及已安装 Python 依赖文件和模式。环境变量明文不会写入记录；`PWD` 固定化，`_`/`OLDPWD`/`SHLVL` 等壳层状态和被完整脚本明确 unset 的 `CARGO_TARGET_DIR` 移除后传给检查。首次安装 Python 依赖按完整脚本要求执行，记录安装后的实际依赖指纹；其余工具链/环境在运行前后必须一致。
 
-被忽略的 `packaging/desktop-resources` 内容纳入指纹。桌面构建输出仅窄识别 `desktop/build.rs` 复制的 `desktop/dist/splash.js`、`desktop/dist/i18n.js` 及 `desktop/gen/schemas` 下的 `acl-manifests.json`、`capabilities.json`、`desktop-schema.json` 和 `macOS-schema.json`。这两份复制必须与已跟踪的普通文件 `web/static/splash.js`、`web/static/i18n.js` 逐字节一致；Tauri 文件必须为普通 JSON object 文件，首次由完整检查生成后记录各自内容和模式，签名记录同时绑定已跟踪的 build.rs、capabilities/permissions、Cargo.lock 等源输入及工具链。复用时这些已测输出也须逐项匹配，删除/篡改使复用失效；完整命令之后缺少要求输出不得记录成功。输入指纹不因这些具体输出从无到有而变动，产物证据与输入分别校验。旧候选的复制不一致时拒绝复用，但可由新的完整检查重新复制源并校验后登记；不泛化豁免整个 dist 或 gen，未知文件/符号链接仍拒绝。ONNX Runtime 1.30 导入会生成根目录 `:memory:.ses`，只将这一普通文件的时间戳/UUID 固定格式纳入同样的签名生成输出证据，不豁免任意 `:memory:*`；未知名称或格式拒绝，文件变化使复用失效。记录格式为 v3，旧 v1/v2 记录失效并需完整执行。未知忽略输入（例如外部 models/reference）直接拒绝，不读取内容；各已登记 crate（包括 crates/platform）的 target、工具 `.venv` 缓存、Python 字节码和 `.DS_Store` 属于可再生输出。固定区不得额外放置外部输入；若引入新的被忽略构建输入，应先修改策略和合成测试。旧图库升级输入使用 `tests/fixtures/library_upgrade` 中提交的历史 v5/v6 合成包；每项测试复制后升级，不在全量检查期间构建历史版本。
+被忽略的 `packaging/desktop-resources` 内容纳入指纹。桌面构建输出仅窄识别 `desktop/build.rs` 复制的 `desktop/dist/splash.js`、`desktop/dist/i18n.js` 及 `desktop/gen/schemas` 下的 `acl-manifests.json`、`capabilities.json`、`desktop-schema.json` 和 `macOS-schema.json`。这两份复制必须与已跟踪的普通文件 `web/static/splash.js`、`web/static/i18n.js` 逐字节一致；Tauri 文件必须为普通 JSON object 文件，首次由完整检查生成后记录各自内容和模式，签名记录同时绑定已跟踪的 build.rs、capabilities/permissions、Cargo.lock 等源输入及工具链。复用时这些已测输出也须逐项匹配，删除/篡改使复用失效；完整命令之后缺少要求输出不得记录成功。输入指纹不因这些具体输出从无到有而变动，产物证据与输入分别校验。旧候选的复制不一致时拒绝复用，但可由新的完整检查重新复制源并校验后登记；不泛化豁免整个 dist 或 gen，未知文件/符号链接仍拒绝。ONNX Runtime 1.30 导入会生成根目录 `:memory:.ses`，只将这一普通文件的时间戳/UUID 固定格式纳入同样的签名生成输出证据，不豁免任意 `:memory:*`；未知名称或格式拒绝，文件变化使复用失效。记录格式为 v3，旧 v1/v2 记录失效并需完整执行。未知忽略输入（例如外部 models/reference）直接拒绝，不读取内容；根 `target/`、独立 IQDB 的 `crates/iqdb/target/`、旧候选的五个项目 target（core、platform、IQDB、terms、desktop）、工具 `.venv` 缓存、Python 字节码和 `.DS_Store` 属于可再生输出。固定区不得额外放置外部输入；若引入新的被忽略构建输入，应先修改策略和合成测试。旧图库升级输入使用 `tests/fixtures/library_upgrade` 中提交的历史 v5/v6 合成包；每项测试复制后升级，不在全量检查期间构建历史版本。
 
 本机私有权限密钥对记录作 HMAC 校验，完整日志也校验摘要；缺字段、失败、定向命令、签名/日志篡改、输入或环境不匹配均拒绝。该记录用于防止误改/手工修改记录后的复用；拥有本机密钥和工具源码写权限的人不是安全隔离边界。不能把记录移到另一机器或平台冒称覆盖。密钥丢失则旧记录无效，从头完整运行。
 
@@ -161,7 +162,7 @@ PR 应明确区分“当前 head 上完整执行退出 0”和“当前候选仅
 
 **开发会话**：做完定向检查和平台相关验收（Windows 定向构建与测试、虚拟机走查、浏览器走查），在 PR 描述里写明结果和检查级别（界面 / 普通代码 / 数据层 / 只改文档），转为 Ready 并写「待集成」。不跑本机全量，不合并。
 
-改了 Rust 代码的 PR，转 Ready 之前先对改过的 Cargo 项目跑格式和 clippy（2026-10-19 用户定，#240；起因是第 11 批全量因为一个 PR 没过 `cargo fmt --check` 白跑一次）。参数与 `tools/check_all.sh` 相同：`crates/core`、`crates/platform`、`crates/iqdb`、`desktop`、`native/terms` 跑 `cargo fmt --manifest-path <项目>/Cargo.toml --check`；`crates/core`、`crates/platform`、`crates/iqdb`、`desktop` 跑 `cargo clippy --locked --manifest-path <项目>/Cargo.toml --all-targets -- -D warnings`，`native/terms` 在 `--all-targets` 后面再加 `--all-features`。clippy 经 `collab_run.py bg` 运行。之后合了最新 main 或又改了代码，要重跑。PR 描述写明在哪个 head 上跑的、结果如何。前后叠着的 PR（例如同一件事拆成几块）在描述里写明顺序。
+改了 Rust 代码的 PR，转 Ready 之前先对改过的 Cargo 项目跑格式和 clippy（2026-10-19 用户定，#240；起因是第 11 批全量因为一个 PR 没过 `cargo fmt --check` 白跑一次）。参数与 `tools/check_all.sh` 相同：`crates/core`、`crates/platform`、`crates/relation-fft`、`crates/iqdb`、`desktop`、`native/terms` 跑 `cargo fmt --manifest-path <项目>/Cargo.toml --check`；`crates/core`、`crates/platform`、`crates/relation-fft`、`crates/iqdb`、`desktop` 跑 `cargo clippy --locked --manifest-path <项目>/Cargo.toml --all-targets -- -D warnings`，`native/terms` 在 `--all-targets` 后面再加 `--all-features`。clippy 经 `collab_run.py bg` 运行。之后合了最新 main 或又改了代码，要重跑。PR 描述写明在哪个 head 上跑的、结果如何。前后叠着的 PR（例如同一件事拆成几块）在描述里写明顺序。
 
 **集成会话**，每一批：
 
@@ -181,13 +182,13 @@ PR 应明确区分“当前 head 上完整执行退出 0”和“当前候选仅
 
 **触发**：`ci.yml` 在目标为 main 的 PR 打开、推送新提交、重新打开、转 Ready 时运行；草稿 PR 和来自 fork 的 PR 不跑。push 到 main 时也跑一次，作用是写编译缓存：GitHub 的缓存按分支隔离，PR 写的缓存只有同一个 PR 读得到，main 上写的所有 PR 都能读。也可以在 Actions 页面对任意分支手动触发。仓库私有时（`github.event.repository.private`）自动触发的运行一律跳过，只有手动触发的会跑，所以这个 PR 在公开前合入也不会耗分钟数。同一 PR 有新提交时取消旧运行；集成会话连续合入几个 PR 时，main 上只有最后一次跑完。
 
-**job**：「改动范围」先判断改了什么：只改 `docs/` 和根目录的 Markdown 时跳过其余构建与测试；`docs/THIRD_PARTY.md` 和 `docs/BACKEND_TASKS.md` 随安装包分发，仍须检查。之后是与 `tools/check_all.sh` 对齐的五个 job：Rust 核心（core、platform、terms、iqdb 的 fmt/clippy/test）、Python 全量（release 构建后跑 `tests.run_fixed_suite`，跳过白名单与本机相同）、前端 JS（Ubuntu）、桌面壳 clippy/test、原生固定契约空 PATH 重放。除 JS 外都跑在 Apple 芯片的 `macos-latest` 上，因为固定期望在 Apple 芯片上录制。最后一个「全部检查」汇总前面的结果：代码改动要求五个 job 全部成功，只有确认纯文档改动才允许跳过；分流失败、缺失输出、失败、取消或意外跳过都判失败，fork PR 没跑检查也判失败。分支保护只要求「全部检查」这一项，job 改名或增减时不用改保护规则。
+**job**：「改动范围」先判断改了什么：只改 `docs/` 和根目录的 Markdown 时跳过其余构建与测试；`docs/THIRD_PARTY.md` 和 `docs/BACKEND_TASKS.md` 随安装包分发，仍须检查。之后是与 `tools/check_all.sh` 对齐的五个 job：Rust 核心（core、platform、relation-fft、terms、iqdb 的 fmt/clippy/test）、Python 全量（release 构建后跑 `tests.run_fixed_suite`，跳过白名单与本机相同）、前端 JS（Ubuntu）、桌面壳 clippy/test、原生固定契约空 PATH 重放。除 JS 外都跑在 Apple 芯片的 `macos-latest` 上，因为固定期望在 Apple 芯片上录制。最后一个「全部检查」汇总前面的结果：代码改动要求五个 job 全部成功，只有确认纯文档改动才允许跳过；分流失败、缺失输出、失败、取消或意外跳过都判失败，fork PR 没跑检查也判失败。分支保护只要求「全部检查」这一项，job 改名或增减时不用改保护规则。
 
 **改检查项时**：`ci.yml` 和 `tools/check_all.sh` 一起改，`tests/test_packaging_resources.py` 核对两边的候选二进制接线和跳过白名单一致，并检查触发条件和权限。`native-upgrade.yml` 是升级测试的单独手动入口，要求整类零跳过；PR 自动检查的 Python job 已经包含这一类。
 
 **冻结输入**：索引参考的 SQLite 输入哈希若因 SQL 导出的小数位格式变化而不匹配，只有整库 schema、类型、值（浮点逐位）、rowid 和版本标记与冻结数据库完全一致时，才使用冻结 SQL 的原始哈希重查。数组、资产 ID、参数和结果仍精确匹配；不刷新录制，也不把真实数据差异当作格式差异。
 
-**缓存与权限**：Rust 编译缓存用 `Swatinem/rust-cache`，每个 job 一份，覆盖该 job 构建的 Cargo 项目；key 含各项目 Cargo.lock 的哈希，lock 变了时按前缀回退到最近一份，再增量编译。只在 main 上保存，PR 只读，免得 PR 的缓存挤掉 main 的（每个仓库合计 10 GB，超了按最久未用淘汰）。rustc 每 6 周升级一次 stable，升级后第一次是冷编译。workflow 只有 `contents: read`，checkout 不留凭据，不用 secret。每个 job 设了超时，卡住时不会耗满默认的 6 小时。
+**缓存与权限**：Rust 编译缓存用 `Swatinem/rust-cache`，每个 job 一份，根 workspace 缓存映射为 `.`（根 `target/`），构建 IQDB 的 core/Python job 另外映射 `crates/iqdb`；key 含对应 `Cargo.lock` 的哈希，lock 变了时按前缀回退到最近一份，再增量编译。只在 main 上保存，PR 只读，免得 PR 的缓存挤掉 main 的（每个仓库合计 10 GB，超了按最久未用淘汰）。rustc 每 6 周升级一次 stable，升级后第一次是冷编译。workflow 只有 `contents: read`，checkout 不留凭据，不用 secret。每个 job 设了超时，卡住时不会耗满默认的 6 小时。
 
 **和合并队列的关系**：本机全量和集成会话的做法不变（见上一节）。集成会话组批时看一眼各 PR 的「全部检查」：失败的先退回原会话查明原因；只是 runner 故障或排队取消的，重跑一次再说。CI 跑的是 PR 与当时 main 的合并结果，不是候选，所以通过了也照样在候选上跑本机全量。
 
@@ -220,20 +221,20 @@ PR 应明确区分“当前 head 上完整执行退出 0”和“当前候选仅
 **布局**：验收机上的 `D:\illustash-build\persistent`。`src` 是 git 检出（本地分支 `win-acceptance`）；`sccache` 是编译缓存；`runs\<run-id>` 放每次的步骤日志、`status.txt` 和 sccache 统计；`tools` 放入口脚本（`run.cmd`、`run.ps1`、`pyrun.py`、`clean.ps1`）和 sccache。入口脚本和本机这一侧的驱动脚本 `win_run.sh` 都不进仓库，因为里面有 SSH 别名。
 
 **一次运行**：
-- 仓库是私有的，验收机没有 GitHub 凭据。本机打一个以验收机当前 HEAD 为基的增量 git bundle，经 scp 送过去。验收机 `git fetch` 以后 checkout 到 `win-acceptance`，再 `git clean -ffdx`，只保留 5 个 Cargo 项目的 `target`。各项目用仓库内默认的 target，不设 `CARGO_TARGET_DIR`。不用 detached HEAD，原因见 #327。
+- 本机打一个以验收机当前 HEAD 为基的增量 git bundle，经 scp 送过去，不要求验收机持有 GitHub 凭据。验收机 `git fetch` 后 checkout 到 `win-acceptance`，再清理构建输入；workspace 候选须保留根 `target/` 和 `crates/iqdb/target/`，兼顾历史候选时也保留旧五个项目的 target。使用各构建根默认的产物目录，不设 `CARGO_TARGET_DIR`。不用 detached HEAD，原因见 #327。
 - 环境只在 `run.cmd` 里设置：vcvars、`RUSTC_WRAPPER`（sccache）、`ILLUSTASH_*`。不改验收机的全局配置。`.cargo/config.toml` 的 crt-static 照常生效。
-- 完整检查的 14 步：core、platform、terms、desktop 的 clippy，core、platform、desktop、terms、iqdb 的 test，js，terms、examples、iqdb 的 release 构建，Python 全套。也可以只跑其中几步，或者另加定向 unittest。
+- 检查入口按候选布局选择：根 workspace 与独立 IQDB 的 fmt、各自有 crate 的 clippy、相关 Rust 测试及 JS、terms/examples/IQDB 的 release 构建和 Python 全套；FFT crate 编译检查与宿主内的固定数值测试分别覆盖。具体步骤和跳过项写进当次记录，也可以只跑受影响项或另加定向 unittest。
 - 长任务经 WMI 启动，SSH 断开或本机休眠都不会中断。本机用 `collab_run.py run --slot windows -- win_run.sh …` 包住，轮询 `status.txt`，直到出现 `done`。
 
-**清理规则**（2026-11-12 定）：入口脚本每次同步之后检查下面三条，命中任一条就清掉 5 个项目的 target（检出保留）：
+**清理规则**（2026-11-12 定）：入口脚本每次同步之后检查下面三条，命中任一条就清掉 target 缓存，检出保留。运行 workspace 候选的入口须将根 target 纳入清理范围，并保留 IQDB 与旧项目目录的清理规则：
 
 - `rustc -V` 和上次记录的不同；
-- 所有 target 合计超过 40 GB（一次完整构建约 14.5 GB）；
+- 所有 target 合计超过 40 GB；
 - D 盘剩余空间低于 30 GB。
 
 Cargo.lock 变了不清，交给增量编译处理。sccache 上限 20 GB，超了自动淘汰最旧的。手动全清（target 和 sccache 缓存）在验收机上运行 `powershell -NoProfile -ExecutionPolicy Bypass -File D:\illustash-build\persistent\tools\clean.ps1`，加 `-TargetsOnly` 时只清 target。需要隔离的特殊验收（打包、安装）仍可以临时建一个一次性目录，用完删掉。
 
-**耗时**（2026-11-12，head `687bb63`，完整 14 步，`CARGO_BUILD_JOBS=4`，单次）：
+**历史耗时**（workspace 合并前，2026-11-12，head `687bb63`，完整 14 步，`CARGO_BUILD_JOBS=4`，单次）：
 
 | 情况 | 墙钟 |
 |---|---|
