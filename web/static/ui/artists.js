@@ -11,7 +11,7 @@ import {renderHeading} from './shell.js';
 // ---------- 画师（provenance/，这里只读）：只在找到时显示，从不显示成空栏 ----------
 const artistNames = {};
 // ---------- 按需查找画师（docs/PROVENANCE.md 第 9 节）：点击即授权这一次查找 ----------
-const LOOKUP_NOTE = t('查找画师会把所选图片的像素哈希和 IQDB 签名（一串文本，不是图片）发给 Danbooru，按结果显示画师和原帖。\n「找 TA 的其他图」会下载这位画师公开作品的小缩略图，只在本机比对，比完不留图。\n\n以后点这两个按钮不再提示。继续吗？');
+const LOOKUP_NOTE = t('查找画师会把所选图片的像素哈希和 IQDB 签名（一串文本，不是图片）发给 Danbooru，按结果显示画师和原帖。\n「找 TA 的其他图」会下载这位画师公开作品的小缩略图，只在本机比对；缩略图比完就删，只留比对用的签名。\n\n以后点这两个按钮不再提示。继续吗？');
 let lookupTimer = null;
 async function lookupAllowed() {
   try { if (localStorage.getItem('artistLookupOk')) return true; } catch {}
