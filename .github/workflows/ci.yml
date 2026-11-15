@@ -308,6 +308,7 @@ jobs:
             crates/core
             crates/platform
             desktop
+            crates/relation-fft
       - uses: actions/setup-python@v5
         with:
           python-version: ${{ env.PYTHON_VERSION }}
@@ -371,6 +372,11 @@ jobs:
           cargo clippy --locked --manifest-path crates/platform/Cargo.toml --all-targets -- -D warnings
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           cargo test --locked --manifest-path crates/platform/Cargo.toml
+      - name: relation-fft clippy/test
+        run: |
+          cargo clippy --locked --manifest-path crates/relation-fft/Cargo.toml --all-targets -- -D warnings
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          cargo test --locked --manifest-path crates/relation-fft/Cargo.toml
       - name: Desktop clippy/test
         run: |
           cargo clippy --locked --manifest-path desktop/Cargo.toml --all-targets -- -D warnings
