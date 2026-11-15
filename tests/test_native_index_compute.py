@@ -224,9 +224,19 @@ class NativeIndexComputeTest(unittest.TestCase):
                             claims.append(dict(asset=asset,character=entity,distance=float(distances[a]),
                                                threshold=float(limits[a]),confidence=1-float(distances[a])))
                 expected.append((kind,entities,claims,boundary))
+            tamper_asset,tamper_character='asset128','large003'
+            # 某内核把 asset128 合法归到 large003，固定替换就不再修改 sidecar。
+            # 显式同机窗口只按独立期望选一个现存但不获认领的 ID，仍须严格拒绝篡改。
+            if 'numpy' in references:
+                accepted={claim['character'] for kind,_,claims,_ in expected if kind=='numpy'
+                          for claim in claims if claim['asset']==tamper_asset}
+                if tamper_character in accepted:
+                    tamper_character=next(cid for cid in ids if cid not in accepted)
+            for _,_,claims,_ in expected:
+                self.assertNotIn(tamper_character,{claim['character'] for claim in claims if claim['asset']==tamper_asset})
             request=dict(mode='claims',shared=str(old),source=str(old/'pi.db'),assets=assets,features=features,
                          identity=dict(package=str(root),library_id='synthetic',generation=1,session='0'*64,task_id='1'*32),
-                         tamper_asset='asset128',tamper_character='large003')
+                         tamper_asset=tamper_asset,tamper_character=tamper_character)
             (root/'claims-request.json').write_text(json.dumps(request))
             proc=subprocess.run([str(binary),str(root/'claims-request.json'),str(root/'claims-response.json')],env=os.environ|{'PATH':''},capture_output=True)
             self.assertEqual(proc.returncode,0,proc.stderr.decode());got=json.loads((root/'claims-response.json').read_text())
