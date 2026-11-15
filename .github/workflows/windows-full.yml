@@ -152,39 +152,43 @@ jobs:
           path: ${{ runner.temp }}/numpy-wheel
           key: ${{ steps.numpy-wheel.outputs.cache-primary-key }}
       # ---- 完整回归 ----
+      # Rust 测试经隔离名单的入口运行（#501）：名单里本平台的测试单独跑、只汇报，其余照常决定成败。
+      - name: 核对隔离名单
+        if: env.SCOPE == 'full'
+        run: python tools/quarantine.py check
       - name: Core clippy/test
         if: env.SCOPE == 'full'
         run: |
           cargo clippy --locked --manifest-path crates/core/Cargo.toml --all-targets -- -D warnings
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-          cargo test --locked --manifest-path crates/core/Cargo.toml
+          python tools/quarantine.py cargo-test --manifest-path crates/core/Cargo.toml
       - name: Platform clippy/test
         if: env.SCOPE == 'full'
         run: |
           cargo clippy --locked --manifest-path crates/platform/Cargo.toml --all-targets -- -D warnings
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-          cargo test --locked --manifest-path crates/platform/Cargo.toml
+          python tools/quarantine.py cargo-test --manifest-path crates/platform/Cargo.toml
       - name: relation-fft clippy/test
         if: env.SCOPE == 'full'
         run: |
           cargo clippy --locked --manifest-path crates/relation-fft/Cargo.toml --all-targets -- -D warnings
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-          cargo test --locked --manifest-path crates/relation-fft/Cargo.toml
+          python tools/quarantine.py cargo-test --manifest-path crates/relation-fft/Cargo.toml
       - name: Desktop clippy/test
         if: env.SCOPE == 'full'
         run: |
           cargo clippy --locked --manifest-path desktop/Cargo.toml --all-targets -- -D warnings
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-          cargo test --locked --manifest-path desktop/Cargo.toml
+          python tools/quarantine.py cargo-test --manifest-path desktop/Cargo.toml
       - name: Terms clippy/test
         if: env.SCOPE == 'full'
         run: |
           cargo clippy --locked --manifest-path native/terms/Cargo.toml --all-targets --all-features -- -D warnings
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-          cargo test --locked --manifest-path native/terms/Cargo.toml
+          python tools/quarantine.py cargo-test --manifest-path native/terms/Cargo.toml
       - name: IQDB test
         if: env.SCOPE == 'full'
-        run: cargo test --locked --manifest-path crates/iqdb/Cargo.toml
+        run: python tools/quarantine.py cargo-test --manifest-path crates/iqdb/Cargo.toml
       - name: 构建被测核心与 IQDB
         if: env.SCOPE == 'full'
         run: |

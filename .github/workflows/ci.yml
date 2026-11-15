@@ -1,5 +1,7 @@
 # PR 自动检查（#4）：目标为 main 的同库 PR 自动运行，作为额外保障；
 # 合入 main 的门槛仍是集成会话在候选上跑的 tools/check_all.sh（AGENTS.md）。
+# PR 和 push 上只做快速冒烟（#501）：格式、clippy、编译、前端 JS、原生固定契约和 Windows 快检。
+# 各 Rust 项目的 cargo test 和 Python 全量每天定时跑（macos-full.yml、windows-full.yml），不挡合并。
 # 只用仓库内合成数据；不接触真实图库、账号、Photos 或网络凭据，也不用任何 secret。
 name: CI
 
@@ -82,7 +84,7 @@ jobs:
   core:
     needs: changes
     if: needs.changes.outputs.code == 'true'
-    name: Rust 核心
+    name: Rust 格式、clippy 与编译
     concurrency:
       group: ci-core-${{ github.event_name == 'push' && github.ref || github.run_id }}
       cancel-in-progress: true
@@ -104,7 +106,6 @@ jobs:
             crates/core
             crates/platform
             crates/relation-fft
-      # http_browse 的对照测试调用 python3 运行参考实现。
       - uses: actions/setup-python@v5
         with:
           python-version: ${{ env.PYTHON_VERSION }}
@@ -117,118 +118,30 @@ jobs:
         run: python tools/check_frontend.py --strict-stale
       - name: Style guide sync
         run: python tools/check_styleguide.py
-      - name: Core fmt/clippy/test/build
+      # cargo test 在 macos-full.yml 里每天定时跑（#501）；这里只查格式、clippy（含测试目标）和编译。
+      - name: Core fmt/clippy/build
         run: |
           cargo fmt --manifest-path crates/core/Cargo.toml --check
           cargo clippy --locked --manifest-path crates/core/Cargo.toml --all-targets -- -D warnings
-          cargo test --locked --manifest-path crates/core/Cargo.toml
           cargo build --locked --manifest-path crates/core/Cargo.toml
-      - name: Platform fmt/clippy/test/build
+      - name: Platform fmt/clippy/build
         run: |
           cargo fmt --manifest-path crates/platform/Cargo.toml --check
           cargo clippy --locked --manifest-path crates/platform/Cargo.toml --all-targets -- -D warnings
-          cargo test --locked --manifest-path crates/platform/Cargo.toml
           cargo build --locked --manifest-path crates/platform/Cargo.toml
-      - name: relation-fft fmt/clippy/test
+      - name: relation-fft fmt/clippy
         run: |
           cargo fmt --manifest-path crates/relation-fft/Cargo.toml --check
           cargo clippy --locked --manifest-path crates/relation-fft/Cargo.toml --all-targets -- -D warnings
-          cargo test --locked --manifest-path crates/relation-fft/Cargo.toml
       - name: fmt
         run: cargo fmt --manifest-path native/terms/Cargo.toml --check
       - name: clippy
         run: cargo clippy --locked --manifest-path native/terms/Cargo.toml --all-targets --all-features -- -D warnings
-      - name: test
-        run: cargo test --locked --manifest-path native/terms/Cargo.toml
       # 0.7071 常数须与 haar.cpp 逐位一致，在源码里用 #[expect(clippy::approx_constant)] 写明，不按 clippy 改。
-      - name: iqdb fmt/clippy/test
+      - name: iqdb fmt/clippy
         run: |
           cargo fmt --manifest-path crates/iqdb/Cargo.toml --check
           cargo clippy --locked --manifest-path crates/iqdb/Cargo.toml --all-targets -- -D warnings
-          cargo test --locked --manifest-path crates/iqdb/Cargo.toml
-
-  # 跑在 macOS arm64：固定期望（tests/fixtures/ 下的录制值）在 Apple Silicon 上录制，
-  # float32 结果在 x86 上差 1 ulp；另有错误文案、zsh 启动脚本等平台差异。Windows 另行处理。
-  python:
-    needs: changes
-    if: needs.changes.outputs.code == 'true'
-    name: Python 全量 (macOS)
-    concurrency:
-      group: ci-python-${{ github.event_name == 'push' && github.ref || github.run_id }}
-      cancel-in-progress: true
-    runs-on: macos-latest
-    timeout-minutes: 60
-    steps:
-      - uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
-          persist-credentials: false
-      - uses: dtolnay/rust-toolchain@stable
-      - uses: Swatinem/rust-cache@v2
-        with:
-          save-if: ${{ github.ref == 'refs/heads/main' }}
-          workspaces: |
-            native/terms
-            crates/iqdb
-            crates/core
-            crates/platform
-            crates/relation-fft
-      - uses: actions/setup-python@v5
-        with:
-          python-version: ${{ env.PYTHON_VERSION }}
-          cache: pip
-          cache-dependency-path: tests/requirements.txt
-      - run: pip install -r tests/requirements.txt
-      - name: 构建被测核心与 IQDB
-        run: |
-          cargo build --release --locked --manifest-path native/terms/Cargo.toml
-          # 读路由固定期望用的测试读宿主（tests/read_http_harness.py 按 release/examples 定位）。
-          cargo build --release --locked --manifest-path native/terms/Cargo.toml --features test-read-host --example read-http --example recognition-compute --example index-compute --example research-compute --example relation-probe --example provenance-compute
-          cargo build --release --locked --manifest-path crates/iqdb/Cargo.toml
-      - name: unittest
-        env:
-          ILLUSTASH_TERMS_BIN: ${{ github.workspace }}/native/terms/target/release/illustash-terms
-          ILLUSTASH_NATIVE_ROOT: ${{ github.workspace }}
-          ILLUSTASH_IQDB_BINARY: ${{ github.workspace }}/crates/iqdb/target/release/illustash-iqdb
-          ILLUSTASH_READ_HTTP_BIN: ${{ github.workspace }}/native/terms/target/release/examples/read-http
-          ILLUSTASH_RECOGNITION_COMPUTE_BIN: ${{ github.workspace }}/native/terms/target/release/examples/recognition-compute
-          ILLUSTASH_INDEX_COMPUTE_BIN: ${{ github.workspace }}/native/terms/target/release/examples/index-compute
-          ILLUSTASH_RELATION_PROBE_BIN: ${{ github.workspace }}/native/terms/target/release/examples/relation-probe
-          ILLUSTASH_PROVENANCE_COMPUTE_BIN: ${{ github.workspace }}/native/terms/target/release/examples/provenance-compute
-          ILLUSTASH_RESEARCH_COMPUTE_BIN: ${{ github.workspace }}/native/terms/target/release/examples/research-compute
-          ILLUSTASH_RESEARCH_ADAPTER_BIN: ${{ github.workspace }}/native/terms/target/release/illustash-worker
-          ILLUSTASH_INDEX_ADAPTER_BIN: ${{ github.workspace }}/native/terms/target/release/illustash-worker
-        run: |
-          set -o pipefail
-          # -b：失败测试的输出（如被测服务日志）附在末尾失败报告里，不散落在日志中段。
-          python -m tests.run_fixed_suite -v -b 2>&1 | tee "$RUNNER_TEMP/unittest.log"
-      - name: 上传测试日志
-        if: failure()
-        uses: actions/upload-artifact@v4
-        with:
-          name: unittest-log
-          path: ${{ runner.temp }}/unittest.log
-          retention-days: 7
-      # 跳过必须可见：列出全部跳过及原因。只允许平台限制和依赖真实图库的数据缺失；
-      # 其余跳过（缺被测二进制等）在 CI 中视为未验收，判失败。
-      - name: 跳过清单
-        if: always()
-        run: |
-          log="$RUNNER_TEMP/unittest.log"
-          [ -f "$log" ] || exit 0
-          grep -E " \.\.\. skipped " "$log" > "$RUNNER_TEMP/skips.txt" || true
-          {
-            echo "### Python 跳过：$(wc -l < "$RUNNER_TEMP/skips.txt") 项"
-            echo '```'
-            cat "$RUNNER_TEMP/skips.txt"
-            echo '```'
-            tail -n 3 "$log"
-          } >> "$GITHUB_STEP_SUMMARY"
-          allowed="full-features\.npy not present|POSIX|posix|Unix|macOS/Linux only|Windows pinned OpenBLAS backend only|explicit Windows native development calculator only|explicit Windows development App publication only|Linux is frozen: no local computation"
-          if grep -Ev "$allowed" "$RUNNER_TEMP/skips.txt"; then
-            echo "::error::以上跳过不属于平台限制或真实图库数据缺失，CI 中视为未验收"
-            exit 1
-          fi
 
   js:
     needs: changes
@@ -248,7 +161,7 @@ jobs:
   desktop:
     needs: changes
     if: needs.changes.outputs.code == 'true'
-    name: 桌面壳 (macOS)
+    name: 桌面壳 fmt/clippy (macOS)
     concurrency:
       group: ci-desktop-${{ github.event_name == 'push' && github.ref || github.run_id }}
       cancel-in-progress: true
@@ -269,8 +182,6 @@ jobs:
         run: cargo fmt --manifest-path desktop/Cargo.toml --check
       - name: clippy
         run: cargo clippy --locked --manifest-path desktop/Cargo.toml --all-targets -- -D warnings
-      - name: test
-        run: cargo test --locked --manifest-path desktop/Cargo.toml
 
   contracts:
     needs: changes
@@ -342,6 +253,15 @@ jobs:
           cache: pip
           cache-dependency-path: tests/requirements.txt
       - run: python -m pip install -r tests/requirements.txt
+      # 实验（#501）：工作目录、临时目录和 Rust 工具链加进 Defender 排除项，量编译和测试耗时。
+      # 命令失败（例如 runner 没开实时保护或不允许改）不影响 job。
+      - name: Defender 排除工作目录（实验）
+        continue-on-error: true
+        run: |
+          $status = Get-MpComputerStatus -ErrorAction SilentlyContinue
+          "实时保护：$($status.RealTimeProtectionEnabled)；按访问扫描：$($status.OnAccessProtectionEnabled)"
+          Add-MpPreference -ExclusionPath $env:GITHUB_WORKSPACE, $env:TEMP, $env:RUNNER_TEMP, "$env:USERPROFILE\.cargo", "$env:USERPROFILE\.rustup"
+          (Get-MpPreference).ExclusionPath
       - name: 构建被测核心与测试读宿主
         run: |
           cargo build --release --locked --manifest-path native/terms/Cargo.toml
@@ -374,7 +294,7 @@ jobs:
       always() &&
       (github.event_name == 'workflow_dispatch' || !github.event.repository.private) &&
       !(github.event_name == 'pull_request' && github.event.pull_request.draft)
-    needs: [changes, core, python, js, desktop, contracts]
+    needs: [changes, core, js, desktop, contracts]
     name: 全部检查
     runs-on: ubuntu-latest
     timeout-minutes: 5

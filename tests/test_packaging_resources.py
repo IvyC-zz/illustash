@@ -446,7 +446,8 @@ class CandidateExampleWiringTest(unittest.TestCase):
     def test_full_runners_build_and_export_each_current_candidate_before_discovery(self):
         shell = (ROOT / 'tools/check_all.sh').read_text(encoding='utf-8')
         ci = (ROOT / '.github/workflows/ci.yml').read_text(encoding='utf-8')
-        # #501：Windows 的全部 example 接线在完整回归里；PR 的快检只用核心和测试读宿主。
+        # #501：macOS Python 全量和 Windows 的全部 example 接线在两份定时回归里；PR 的快检只用核心和测试读宿主。
+        mac = (ROOT / '.github/workflows/macos-full.yml').read_text(encoding='utf-8')
         full = (ROOT / '.github/workflows/windows-full.yml').read_text(encoding='utf-8')
         windows = full.split('      # ---- 完整回归 ----\n', 1)[1].split('      # ---- 定向复跑 ----\n', 1)[0]
         probes = {'READ_HTTP': 'read-http', 'RECOGNITION_COMPUTE': 'recognition-compute',
@@ -454,7 +455,7 @@ class CandidateExampleWiringTest(unittest.TestCase):
                   'RELATION_PROBE': 'relation-probe', 'PROVENANCE_COMPUTE': 'provenance-compute'}
         for key, example in probes.items():
             for source, suffix, runner in ((shell, '', 'tests.run_fixed_suite -v -b'),
-                                           (ci, '', 'tests.run_fixed_suite -v -b'),
+                                           (mac, '', 'tests.run_fixed_suite -v -b'),
                                            (windows, '.exe', 'tests.windows_fixed_suite')):
                 build_at = source.index('--example ' + example)
                 export_at = source.index('ILLUSTASH_' + key + '_BIN')
@@ -478,14 +479,19 @@ class CandidateExampleWiringTest(unittest.TestCase):
                 self.assertIn('\npermissions:\n  contents: read\n', text)
                 self.assertNotIn('secrets.', text)
                 self.assertNotRegex(text, r'(?m)^ +permissions:')
-        self.assertIn('!github.event.repository.private', ci)
-        self.assertIn('!github.event.repository.private', full)
+        for text in (ci, mac, full):
+            self.assertIn('!github.event.repository.private', text)
+        # PR 和 push 上不再跑 cargo test 和 Python 全量；两份定时回归覆盖它们。
+        self.assertNotRegex(ci, r'(?m)^\s+(run: )?cargo test --locked --manifest-path')
+        self.assertNotIn('tests.run_fixed_suite', ci)
+        for text in (mac, full):
+            self.assertIn("cron: '17 18 * * *'", text)
 
 
     def test_full_runners_accept_research_platform_skips_but_not_missing_candidates_or_models(self):
         import re
         patterns = []
-        for name in ('tools/check_all.sh', '.github/workflows/ci.yml'):
+        for name in ('tools/check_all.sh', '.github/workflows/macos-full.yml'):
             source = (ROOT / name).read_text(encoding='utf-8')
             pattern = re.search(r"allowed=['\"]([^'\"]+)['\"]", source).group(1)
             patterns.append(pattern)

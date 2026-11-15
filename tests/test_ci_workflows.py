@@ -163,7 +163,7 @@ class CiWorkflowTest(unittest.TestCase):
         self.assertEqual(self.output.read_text().strip(), 'code=true')
 
     def needs(self, code='true', result='success', changes='success'):
-        jobs = dict.fromkeys(('core', 'python', 'js', 'desktop', 'contracts'), {'result': result})
+        jobs = dict.fromkeys(('core', 'js', 'desktop', 'contracts'), {'result': result})
         return {**jobs, 'changes': {'result': changes, 'outputs': {'code': code}}}
 
     def check_result(self, needs, success):
@@ -180,7 +180,7 @@ class CiWorkflowTest(unittest.TestCase):
         source = (ROOT / '.github/workflows/ci.yml').read_text(encoding='utf-8')
         top = re.search(r'^concurrency:\n  group: (.*)$', source, re.M).group(1)
         self.assertIn("github.event_name == 'push' && format('push-{0}', github.run_id)", top)
-        for job in ('core', 'python', 'desktop', 'contracts', 'windows'):
+        for job in ('core', 'desktop', 'contracts', 'windows'):
             with self.subTest(job=job):
                 body = job_body(job)
                 self.assertIn("if: needs.changes.outputs.code == 'true'", body)
@@ -198,11 +198,11 @@ class CiWorkflowTest(unittest.TestCase):
     def test_summary_does_not_wait_for_windows(self):
         # #501：Windows 试运行不计入通过判定，也不在 needs 里，汇总不用等它跑完。
         needs = re.search(r'^    needs: \[(.*)\]$', job_body('ok'), re.M).group(1).split(', ')
-        self.assertEqual(needs, ['changes', 'core', 'python', 'js', 'desktop', 'contracts'])
+        self.assertEqual(needs, ['changes', 'core', 'js', 'desktop', 'contracts'])
         self.assertNotIn('windows', job_script('ok'))
 
     def test_summary_rejects_failed_cancelled_and_unexpected_skipped_checks(self):
-        for job in ('core', 'python', 'js', 'desktop', 'contracts'):
+        for job in ('core', 'js', 'desktop', 'contracts'):
             for status in ('failure', 'cancelled', 'skipped'):
                 with self.subTest(job=job, status=status):
                     needs = self.needs()

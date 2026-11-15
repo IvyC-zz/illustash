@@ -7,6 +7,9 @@
 `--select 前缀`（可重复）只运行 ID 等于前缀或以「前缀.」开头的测试，如 `test_native_research.NativeResearchTest`，
 供 Windows 快检和定向复跑使用（#501）。发现和导入照旧覆盖全部测试文件，导入失败仍会报出；
 某个前缀一项也没选中时判失败，不把空选择当成通过。定向结果不代替全量。
+
+隔离名单（`tests/quarantine.json`，#501）：名单里的测试照跑，在本平台的失败不计入结果，单列「隔离名单中的失败」；
+名单格式错误、条目到期或找不到对应测试时入口失败。规则见 tools/quarantine.py。
 """
 import importlib.abc
 import importlib.machinery
@@ -18,6 +21,8 @@ import sys
 import tempfile
 import time
 import unittest
+
+from tools import quarantine
 
 ROOT=Path(__file__).resolve().parents[1]
 BLOCKED=(ROOT/'tests/reference',ROOT/'web')
@@ -69,10 +74,34 @@ class RecordingResult(unittest.TextTestResult):
     def startTest(self,test):
         self.ran.append(test.id()); super().startTest(test)
 
+def owner(test):
+    """失败所属测试的 ID；subTest 的失败记到所在的测试方法上。"""
+    return getattr(test,'test_case',test).id()
+
+def failed_ids(result):
+    return [owner(test) for test,_ in result.failures+result.errors]+[owner(test) for test in result.unexpectedSuccesses]
+
 def counts(result):
     return {'run':result.testsRun,'failures':len(result.failures),'errors':len(result.errors),
             'skipped':len(result.skipped),'expected':len(result.expectedFailures),
-            'unexpected':len(result.unexpectedSuccesses),'ran':result.ran}
+            'unexpected':len(result.unexpectedSuccesses),'ran':result.ran,'failed':failed_ids(result)}
+
+def held_entries(tests):
+    """读取并核对隔离名单：Python 条目都要对应一个发现到的测试。返回本平台适用的条目（按 ID）。"""
+    entries=[entry for entry in quarantine.load() if entry['kind']=='python']
+    known={test.id() for test in tests}
+    missing=[entry for entry in entries if entry['id'] not in known]
+    if missing:
+        raise quarantine.QuarantineError('隔离名单里的 Python 测试找不到，删掉或改正这些条目：\n'
+                                         +'\n'.join('  '+quarantine.describe(entry) for entry in missing))
+    return {entry['id']:entry for entry in entries if quarantine.platform() in entry['platforms']}
+
+def split_failures(ids,held):
+    """把失败分成计入结果的和隔离名单里的；后者输出单独一节。"""
+    counted=[name for name in ids if name not in held]
+    isolated={name:ids.count(name) for name in dict.fromkeys(ids) if name in held}
+    quarantine.report([f'{quarantine.describe(held[name])}：{times} 处失败' for name,times in isolated.items()])
+    return counted,sum(isolated.values())
 
 def run_in_process(tests,verbosity,buffer):
     """在本进程执行并输出逐项结果和失败详情，不打印 Ran/OK 汇总。"""
@@ -141,15 +170,20 @@ def select(tests,prefixes):
 def parallel(jobs,verbosity,buffer,passthrough,prefixes=()):
     start=time.perf_counter()
     loader=unittest.defaultTestLoader
-    tests,empty=select(list(flatten(loader.discover(str(ROOT/'tests')))),prefixes)
+    discovered=list(flatten(loader.discover(str(ROOT/'tests'))))
+    try:
+        held=held_entries(discovered)
+    except quarantine.QuarantineError as error:
+        sys.stderr.write(f'{error}\n'); return False
+    tests,empty=select(discovered,prefixes)
     for prefix in empty: sys.stderr.write(f'定向选择没有匹配任何测试：{prefix}\n')
     queue,local=groups(tests)
     expected={test.id() for _,members in queue for test in members}
     total={'run':0,'failures':0,'errors':0,'skipped':0,'expected':0,'unexpected':0}
-    ran=[];attempts=list(ATTEMPTS);broken=[]
+    ran=[];attempts=list(ATTEMPTS);broken=[];failing=[]
     def add(data):
         for key in total: total[key]+=data[key]
-        ran.extend(data['ran']);attempts.extend(data.get('attempts',()))
+        ran.extend(data['ran']);attempts.extend(data.get('attempts',()));failing.extend(data['failed'])
     if local:
         add(run_in_process(local,verbosity,buffer))
     pool=[item for item in queue if item[0] not in SERIAL];serial=[item for item in queue if item[0] in SERIAL]
@@ -199,9 +233,11 @@ def parallel(jobs,verbosity,buffer,passthrough,prefixes=()):
     for line in broken: sys.stderr.write(f'并行执行失败：{line}\n')
     if missing: sys.stderr.write(f'未运行的测试 {len(missing)} 项：{", ".join(sorted(missing)[:20])}\n')
     sys.stderr.write(f'{RULE}\nRan {total["run"]} tests in {elapsed:.3f}s（并行 {jobs} 进程）\n\n')
-    failed=total['failures'] or total['errors'] or total['unexpected'] or broken or missing or empty
+    counted,isolated=split_failures(failing,held)
+    failed=counted or broken or missing or empty
     parts=[f'{label}={total[key]}' for key,label in (('failures','failures'),('errors','errors'),('skipped','skipped'),
            ('expected','expected failures'),('unexpected','unexpected successes')) if total[key]]
+    if isolated: parts.append(f'其中隔离名单={isolated}')
     sys.stderr.write(('FAILED' if failed else 'OK')+(f' ({", ".join(parts)})' if parts else '')+'\n')
     sys.stderr.flush()
     print(f'退役参考导入尝试：{len(attempts)}',flush=True)
@@ -229,9 +265,14 @@ if __name__=='__main__':
     guard()
     if jobs==1 and prefixes: raise SystemExit('--select 只用于并行模式；--jobs 1 请直接传 unittest 参数')
     if jobs==1:
+        try:
+            held=held_entries(list(flatten(unittest.defaultTestLoader.discover(str(ROOT/'tests')))))
+        except quarantine.QuarantineError as error:
+            raise SystemExit(str(error))
         program=unittest.main(module=None,argv=[sys.argv[0],'discover','-s','tests',*rest],exit=False)
         print(f'退役参考导入尝试：{len(ATTEMPTS)}')
-        sys.exit(not program.result.wasSuccessful() or bool(ATTEMPTS))
+        counted,_=split_failures(failed_ids(program.result),held)
+        sys.exit(bool(counted) or bool(ATTEMPTS))
     unknown=[arg for arg in rest if arg not in ('-v','-b')]
     if unknown: raise SystemExit(f'并行模式只支持 -v/-b，其余参数请配合 --jobs 1：{" ".join(unknown)}')
     sys.exit(not parallel(jobs,2 if '-v' in rest else 1,'-b' in rest,rest,prefixes))
