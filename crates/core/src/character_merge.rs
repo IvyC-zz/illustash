@@ -115,6 +115,21 @@ pub fn merge(c: &Connection, args: &Value) -> Result<Value> {
         .prepare("SELECT action_id FROM reviews WHERE entity=?")?
         .query_map([&source], |r| r.get(0))?
         .collect::<rusqlite::Result<_>>()?;
+    let review_conflicts: Vec<(i64, String, String)> = c
+        .prepare(
+            "SELECT s.action_id,s.reviewed_at,t.reviewed_at
+        FROM reviews s JOIN reviews t ON t.action_id=s.action_id WHERE s.entity=?1 AND t.entity=?2",
+        )?
+        .query_map([&source, &target], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)))?
+        .collect::<rusqlite::Result<_>>()?;
+    // 同一导入 action 可以检查多个人物。合并后的一个逻辑键取较新时间，撤销保留两份原值。
+    for (action, source_at, target_at) in &review_conflicts {
+        c.execute("DELETE FROM reviews WHERE action_id=?1 AND entity=?2", params![action, source])?;
+        c.execute(
+            "UPDATE reviews SET reviewed_at=?3 WHERE action_id=?1 AND entity=?2",
+            params![action, target, source_at.max(target_at)],
+        )?;
+    }
     c.execute("UPDATE reviews SET entity=? WHERE entity=?", [&target, &source])?;
     c.execute(&format!("UPDATE term_tree SET merged_into=?2 WHERE {OF}"), [&source, &target])?;
     let mut touched: BTreeSet<String> = BTreeSet::new();
@@ -134,12 +149,15 @@ pub fn merge(c: &Connection, args: &Value) -> Result<Value> {
     character_projection::refresh_candidates(c, &touched)?;
     character_projection::evidence(c, Some(&touched))?;
     character_projection::memberships(c, Some(&touched))?;
-    let before = vec![json!({"merge": {
+    let mut before = vec![json!({"merge": {
         "source": source, "target": target, "moved": moved, "kept": kept,
         "candidates": cands.iter().map(|(u, k, s)| json!([u, k, s])).collect::<Vec<_>>(),
         "target_prev": prev.iter().map(|(u, k, s)| json!([u, k, s])).collect::<Vec<_>>(),
         "variants": variants, "aliases": added, "pins": pins, "reviews": reviews, "uuids": touched,
     }})];
+    if !review_conflicts.is_empty() {
+        before[0]["merge"]["review_conflicts"] = json!(review_conflicts);
+    }
     let mut shown = Shown::new();
     let label = format!(
         "已将 {left} 合并到 {right}（{moved} 条人工结论）",
@@ -194,7 +212,26 @@ pub fn undo(c: &Connection, action: i64, m: &Value) -> Result<()> {
         c.execute("UPDATE prefs SET value=? WHERE key='pins'", [p])?;
     }
     for r in list("reviews") {
-        c.execute("UPDATE reviews SET entity=? WHERE action_id=?", params![source, r.as_i64()])?;
+        let collision = list("review_conflicts").iter().any(|row| row[0] == r);
+        if !collision {
+            c.execute(
+                "UPDATE reviews SET entity=?1 WHERE action_id=?2 AND entity=?3",
+                params![source, r.as_i64(), target],
+            )?;
+        }
+    }
+    for row in list("review_conflicts") {
+        let (Some(id), Some(source_at), Some(target_at)) = (row[0].as_i64(), row[1].as_str(), row[2].as_str()) else {
+            return invalid("合并的检查记录快照不完整");
+        };
+        c.execute(
+            "UPDATE reviews SET reviewed_at=?3 WHERE action_id=?1 AND entity=?2",
+            params![id, target, target_at],
+        )?;
+        c.execute(
+            "INSERT INTO reviews(entity,reviewed_at,action_id) VALUES (?1,?2,?3)",
+            params![source, source_at, id],
+        )?;
     }
     let uuids: Vec<String> = list("uuids").iter().filter_map(|u| u.as_str().map(str::to_owned)).collect();
     restore_candidates(c, action, m, source, target)?;

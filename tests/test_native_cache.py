@@ -44,6 +44,8 @@ class NativeCacheTest(unittest.TestCase):
         self.assertEqual(new['status'], 200)
         # 参考结果录自 POSIX；Windows 文件名不区分大小写，所以也会删掉 keep.JPG。
         recorded, payload = json.loads(old['body']), json.loads(new['body'])
+        self.assertIs(type(payload['package']['library_bytes']), int)
+        self.assertIs(type(payload['library']['bytes']), int)
         if os.name == 'nt':
             recorded['removed'] = payload['removed']
             self.assertEqual(payload, recorded)

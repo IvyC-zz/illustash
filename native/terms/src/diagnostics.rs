@@ -288,7 +288,7 @@ fn classify(error: &Error) -> (Cause, Option<i32>) {
             };
             (cause, e.raw_os_error())
         }
-        Error::Invalid(_) | Error::NeedId(_) => (Cause::InvalidInput, None),
+        Error::Invalid(_) | Error::Limit(_) | Error::NeedId(_) => (Cause::InvalidInput, None),
         Error::Network(_) => (Cause::Network, None),
         Error::Conflict(_) => (Cause::Conflict, None),
         Error::Schema(_) => (Cause::Schema, None),

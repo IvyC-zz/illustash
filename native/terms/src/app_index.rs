@@ -344,10 +344,11 @@ impl Updater {
         }
     }
     pub fn progress(&self) -> Json {
+        let state = self.public_state(self.state.lock().expect("index state mutex poisoned").value());
         Json::object([(
             "state",
             ordered(
-                &self.state.lock().expect("index state mutex poisoned").value(),
+                &state,
                 &[
                     "status",
                     "started_at",
@@ -363,10 +364,21 @@ impl Updater {
             ),
         )])
     }
+    /// 终态允许调用方立即发起下一次操作；与 `start` 使用同一线程退出边界，确保资源已释放。
+    fn public_state(&self, mut state: Value) -> Value {
+        if matches!(state["status"].as_str(), Some("checked" | "done" | "paused" | "error"))
+            && self.task.as_ref().is_some_and(Task::running)
+        {
+            state["status"] = json!("cleaning");
+            state.as_object_mut().expect("索引状态是对象").remove("finished_at");
+        }
+        state
+    }
     pub fn info(&self, lib: &Library) -> Result<Json> {
         let c = crate::app_library::read_connection(&lib.db())?;
         crate::http_read::register_names(&c)?;
         let (state, mut history) = state_and_history(&self.state, &self.dir);
+        let state = self.public_state(state);
         history.truncate(6);
         for h in &mut history {
             if let Some(h) = h.as_object_mut() {
@@ -623,6 +635,7 @@ impl Updater {
                     ctx.check()?;
                     write_check(&dir.join("check.json"), &checked)?;
                     update(&state, json!({"status":"checked","found":found,"finished_at":now()}));
+                    pause_after_done();
                     Ok(())
                 } else {
                     patch(
@@ -1479,7 +1492,7 @@ fn prune_backups(dir: &Path) -> Result<()> {
     Ok(())
 }
 
-/// 仅供测试：拉长任务刚报告完成之后的那一刻（#123）；生产环境不设置。
+/// 仅供测试：拉长内部完成状态已写下、线程尚未退出的窗口（#123、#505）；生产环境不设置。
 fn pause_after_done() {
     if let Some(ms) = std::env::var("ILLUSTASH_TEST_INDEX_DONE_PAUSE_MS").ok().and_then(|v| v.parse().ok()) {
         std::thread::sleep(Duration::from_millis(ms));

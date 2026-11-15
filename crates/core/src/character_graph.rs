@@ -118,8 +118,13 @@ pub fn graph(c: &Connection) -> Result<Graph> {
 
 /// 还没复核的继承层级所在的人物：已接受的皮肤从属关系带着继承层级的证据，而关系最新的一条决议没有复核过这条证据。
 /// 每条关系最新的决议先算一次，不在每行里重算决议片段。
-fn pending_query() -> String {
-    format!(
+fn pending_query(c: &Connection) -> Result<String> {
+    let portable: bool = c.query_row(
+        "SELECT EXISTS(SELECT 1 FROM sqlite_master WHERE name='human_relation_review_context')",
+        [],
+        |r| r.get(0),
+    )?;
+    let local = format!(
         "WITH latest(relation_id, id) AS (
            SELECT d.relation_id, max(d.id) FROM {DECISIONS} d GROUP BY d.relation_id
          )
@@ -131,7 +136,24 @@ fn pending_query() -> String {
          WHERE r.kind = 'form_of' AND r.status = 'accepted' AND NOT EXISTS(
            SELECT 1 FROM {DECISION_EVIDENCE} x WHERE x.fingerprint = e.fingerprint AND x.decision_id = l.id
          )"
-    )
+    );
+    if !portable {
+        return Ok(local);
+    }
+    // 本地新增证据仍按原指纹逐条检查；仅当前有效决议携带的便携上下文参与未复核判定。
+    Ok(format!("WITH seen(relation_id,fingerprint) AS (
+        SELECT e.relation_id,'legacy-hierarchy:'||json_extract(e.data,'$.legacy_fingerprint')
+            FROM term_evidence e WHERE e.source='legacy-hierarchy'
+        UNION SELECT v.relation_id,h.fingerprint FROM human_relation_review_context h
+            JOIN term_relation_latest v ON v.id=h.verdict_id WHERE h.fingerprint LIKE 'legacy-hierarchy:%'
+        ) SELECT DISTINCT n.character_id FROM {RELATIONS} r
+        JOIN identity_nodes n ON n.id=r.a JOIN term_relation_latest v ON v.relation_id=r.core_id
+        JOIN seen s ON s.relation_id=r.core_id
+        WHERE r.kind='form_of' AND r.status='accepted'
+        AND NOT EXISTS(SELECT 1 FROM human_relation_review_context h
+            WHERE h.verdict_id=v.id AND h.fingerprint=s.fingerprint AND h.reviewed=1)
+        AND NOT EXISTS(SELECT 1 FROM json_each(v.reviewed) j JOIN term_evidence e ON e.id=j.value
+            WHERE e.source='legacy-hierarchy' AND 'legacy-hierarchy:'||json_extract(e.data,'$.legacy_fingerprint')=s.fingerprint)"))
 }
 
 pub fn version(c: &Connection) -> Result<String> {
@@ -140,7 +162,7 @@ pub fn version(c: &Connection) -> Result<String> {
         .query_map([], |r| Ok(json!([r.get::<_, String>(0)?, r.get::<_, Option<String>>(1)?, r.get::<_, String>(2)?])))?
         .collect::<rusqlite::Result<_>>()?;
     let pending: BTreeSet<String> =
-        c.prepare_cached(&pending_query())?.query_map([], |r| r.get(0))?.collect::<rusqlite::Result<_>>()?;
+        c.prepare_cached(&pending_query(c)?)?.query_map([], |r| r.get(0))?.collect::<rusqlite::Result<_>>()?;
     Ok(crate::strict_json::sha256_hex(character_json::dump(&json!([rows, pending]), true).as_bytes()))
 }
 

@@ -80,12 +80,22 @@ pub fn propose(c: &Connection, a: &str, b: &str, kind: &str, evidence: Option<&V
                 _ => (ta, tb, RelationKind::DifferentFrom),
             };
             let core = crate::store::relation(c, ta, tb, relation_kind)?;
-            let id = next_id(c, "relation")?;
-            c.execute(
-                "INSERT INTO term_legacy_ids(kind,legacy_id,core_id) VALUES ('relation',?,?)",
-                params![id, core],
-            )?;
-            id
+            if let Some(id) = c
+                .query_row("SELECT legacy_id FROM term_legacy_ids WHERE kind='relation' AND core_id=?1", [core], |r| {
+                    r.get(0)
+                })
+                .optional()?
+            {
+                // 导入撤销保留历史编号；普通入口重新激活物理关系时沿用它。
+                id
+            } else {
+                let id = next_id(c, "relation")?;
+                c.execute(
+                    "INSERT INTO term_legacy_ids(kind,legacy_id,core_id) VALUES ('relation',?,?)",
+                    params![id, core],
+                )?;
+                id
+            }
         }
     };
     if let Some(evidence) = evidence {
@@ -160,6 +170,7 @@ pub fn decide(
         ],
     )?;
     let decision_core = c.last_insert_rowid();
+    crate::human_conclusions::relations::acknowledge(c, decision_core)?;
     let decision = next_id(c, "decision")?;
     c.execute(
         "INSERT INTO term_legacy_ids(kind,legacy_id,core_id) VALUES ('decision',?,?)",

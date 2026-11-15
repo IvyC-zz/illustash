@@ -87,10 +87,29 @@ fn apply(
     Ok(out)
 }
 
-fn compare(want: &BTreeMap<String, baseline::State>, got: &BTreeMap<String, baseline::State>, at: &str) {
+fn compare(
+    want: &BTreeMap<String, baseline::State>,
+    got: &BTreeMap<String, baseline::State>,
+    at: &str,
+    historical: Option<i64>,
+) {
     let mut problems = Vec::new();
     for name in DATABASES {
-        let (w, g) = (want.get(name), got.get(name));
+        let (w, original) = (want.get(name), got.get(name));
+        let projected = if let ("library.sqlite", Some(recorded), Some(got)) = (name, historical, original) {
+            Some(
+                baseline::historical_projection(
+                    got,
+                    w.unwrap_or(&baseline::State::new()),
+                    recorded,
+                    illustash_terms::SCHEMA_VERSION,
+                )
+                .unwrap_or_else(|error| panic!("{at}: {error}")),
+            )
+        } else {
+            None
+        };
+        let g = projected.as_ref().or(original);
         if w != g {
             let empty = baseline::State::new();
             problems.extend(
@@ -261,6 +280,7 @@ fn check_backup(
         &BTreeMap::from([("library.sqlite".to_owned(), before["library.sqlite"].clone())]),
         &states_at(&check, root, recorded),
         &format!("{category}/pre-upgrade backup"),
+        None,
     );
     fs::remove_dir_all(&check).unwrap();
 }
@@ -292,7 +312,7 @@ fn replay(category: &str) {
     let (_host, origin, token) =
         launch(&root, &package, category, upgrade, Path::new(env!("CARGO_BIN_EXE_illustash-terms")));
     let mut want = apply(&before, fixture.get("startup")).unwrap();
-    compare(&want, &states(&package, &root), &format!("{category}/startup"));
+    compare(&want, &states(&package, &root), &format!("{category}/startup"), Some(recorded));
     if upgrade {
         check_backup(&package, &root, &before, recorded, category);
     }
@@ -334,7 +354,7 @@ fn replay(category: &str) {
         assert_eq!(Value::Object(headers), step["headers"], "{at}: headers");
         assert_eq!(json!(session_token(&masks.output(&reply))), step["reply"], "{at}: reply");
         want = apply(&want, step.get("change")).unwrap_or_else(|e| panic!("{at}: {e}"));
-        compare(&want, &states(&package, &root), &at);
+        compare(&want, &states(&package, &root), &at, Some(recorded));
     }
     assert!(!root.join("python-launched").exists());
 }

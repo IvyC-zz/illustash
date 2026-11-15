@@ -328,10 +328,11 @@ class NativeLibraryUpgradeTest(unittest.TestCase):
             except subprocess.TimeoutExpired:
                 process.kill(); process.wait(3)
 
-    def start(self, lib, *, upgrade=True, sync=False):
+    def start(self, lib, *, upgrade=True, sync=False, backup_gate=None):
         port = free_port(); origin = f'http://127.0.0.1:{port}'
         log = tempfile.TemporaryFile(); self.addCleanup(log.close)
-        process = subprocess.Popen(self.args(lib, upgrade=upgrade, port=port, sync=sync), env=self.env, stdout=log, stderr=log, **SPAWN)
+        env = self.env if backup_gate is None else {**self.env, 'ILLUSTASH_TEST_HUMAN_BACKUP_GATE': str(backup_gate)}
+        process = subprocess.Popen(self.args(lib, upgrade=upgrade, port=port, sync=sync), env=env, stdout=log, stderr=log, **SPAWN)
         self.addCleanup(self.stop, process)
         try:
             enter(origin, log, process, timeout=10)
@@ -386,6 +387,9 @@ class NativeLibraryUpgradeTest(unittest.TestCase):
     def test_true_v5_v6_upgrade_matches_existing_migrate_history_undo_and_27_reads(self):
         for version in (5, 6):
             with self.subTest(version=version):
+                # 原完整状态比较只覆盖迁移与撤销；首备份含随机 ID 和发布时间，等比较完成再释放并验收。
+                backup_gate = self.root / f'backup-v{version}.gate'
+                backup_gate.touch()
                 lib, action = self.package(version, f'v{version}')
                 before, source = database(lib.db), lib.source.read_bytes()
                 existing = {p.relative_to(lib.path).as_posix() for p in lib.path.rglob('*.sqlite')}
@@ -396,7 +400,7 @@ class NativeLibraryUpgradeTest(unittest.TestCase):
                 # 比较等价的启动消费者：单独的 migrate CLI 让裁决事件留在待处理，而原生 HTTP 宿主会执行不带学习器的
                 # 分派。原 Python 消费者的结果已录制（tests/fixed_expectations.py）。
                 self.rec.package(f'drained-v{version}', baseline)
-                process, origin = self.start(lib)
+                process, origin = self.start(lib, backup_gate=backup_gate)
                 # 按 #201 的规则：录制的已排空图库包处于 core 第 7 版，恢复时做过升级，所以它的物理行所在的 rowid
                 # 可能与直接升级一次后的不同。
                 self.assertEqual(baseline_state(lib.path)['app'], baseline_state(baseline)['app'])
@@ -410,6 +414,7 @@ class NativeLibraryUpgradeTest(unittest.TestCase):
                     self.assertEqual(c.execute("SELECT value FROM meta WHERE key='terms_schema'").fetchone()[0], str(TERMS_VERSION))
                     self.assertEqual(c.execute("SELECT count(*) FROM sqlite_schema WHERE name IN ('identity_claims','identity_calibration')").fetchone()[0], 0)
                 self.stop(process)
+                self.assertEqual(process.returncode, 0, '首备份闸门等待必须允许宿主正常退出')
                 results = []
                 for db in (lib.db, baseline / 'library.sqlite'):
                     out = subprocess.run([str(self.binaries['current']), 'undo', '--db', str(db), '--action', str(action)],
@@ -420,9 +425,10 @@ class NativeLibraryUpgradeTest(unittest.TestCase):
                 # 按 #201 的规则：录制的已排空图库包处于 core 第 7 版，恢复时做过升级，所以它的物理行所在的 rowid
                 # 可能与直接升级一次后的不同。
                 self.assertEqual(baseline_state(lib.path)['app'], baseline_state(baseline)['app'])
-                process, origin = self.start(lib, upgrade=False)
+                process, origin = self.start(lib, upgrade=False, backup_gate=backup_gate)
                 self.reads(lib, origin)
                 self.stop(process)
+                self.assertEqual(process.returncode, 0, '撤销后的闸门等待必须允许宿主正常退出')
                 # 只在上面所有 HTTP/SQLite 连接都关闭之后，恢复一份新的、静止的、测试自有的克隆。
                 # 绝不对 current7 运行旧的产出者。
                 restored = self.root / f'restored-v{version}.pilib'
@@ -437,11 +443,16 @@ class NativeLibraryUpgradeTest(unittest.TestCase):
                     self.assertEqual(c.execute("SELECT value FROM meta WHERE key='terms_schema'").fetchone()[0], str(version))
                     self.assertEqual(c.execute('SELECT undone FROM actions WHERE id=?', (action,)).fetchone()[0], 0)
                 recovered = Library(restored)
-                process, origin = self.start(recovered)
+                process, origin = self.start(recovered, backup_gate=backup_gate)
                 self.assertEqual(database(recovered.db), upgraded)
                 self.assertEqual(recovered.source.read_bytes(), source)
                 self.reads(recovered, origin)
+                backup_gate.unlink()
+                automatic = lifecycle.wait_human_backup(self, origin)
+                self.assertIsNotNone(automatic['protected_revision'], automatic)
+                self.assertEqual(len(automatic['snapshots']), 1, automatic)
                 self.stop(process)
+                self.assertEqual(process.returncode, 0)
 
 
     def test_plain_startup_rejects_true_old_schemas_without_changes(self):

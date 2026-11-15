@@ -1,6 +1,41 @@
 //! 宿主文件系统的细节。创建、校验和错误处理的策略仍由调用方决定。
 use std::{fs, io, path::Path};
 
+/// 在同一卷内原子发布新文件；目标已存在时失败，不能覆盖已有快照或用户文件。
+pub fn publish_new(source: &Path, target: &Path) -> io::Result<()> {
+    #[cfg(target_os = "macos")]
+    {
+        use std::os::unix::ffi::OsStrExt;
+        let source = std::ffi::CString::new(source.as_os_str().as_bytes()).map_err(io::Error::other)?;
+        let target = std::ffi::CString::new(target.as_os_str().as_bytes()).map_err(io::Error::other)?;
+        // SAFETY: 两个参数均是调用期间存活的 NUL 结尾路径；RENAME_EXCL 由系统保证不覆盖目标。
+        if unsafe { libc::renamex_np(source.as_ptr(), target.as_ptr(), libc::RENAME_EXCL) } != 0 {
+            return Err(io::Error::last_os_error());
+        }
+        Ok(())
+    }
+    #[cfg(windows)]
+    {
+        use std::os::windows::ffi::OsStrExt;
+        #[link(name = "kernel32")]
+        extern "system" {
+            fn MoveFileExW(from: *const u16, to: *const u16, flags: u32) -> i32;
+        }
+        let from: Vec<u16> = source.as_os_str().encode_wide().chain(Some(0)).collect();
+        let to: Vec<u16> = target.as_os_str().encode_wide().chain(Some(0)).collect();
+        // SAFETY: 两个缓冲区均为存活的 NUL 结尾 UTF-16 路径；不传覆盖或跨卷复制标志。
+        if unsafe { MoveFileExW(from.as_ptr(), to.as_ptr(), 0) } == 0 {
+            return Err(io::Error::last_os_error());
+        }
+        Ok(())
+    }
+    #[cfg(not(any(target_os = "macos", windows)))]
+    {
+        fs::hard_link(source, target)?;
+        fs::remove_file(source)
+    }
+}
+
 pub fn private_file_options(options: &mut fs::OpenOptions) {
     #[cfg(unix)]
     {

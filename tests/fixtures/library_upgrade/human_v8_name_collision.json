@@ -1,0 +1,372 @@
+{
+  "producer_commit": "02b6437d",
+  "terms_schema": 8,
+  "commands": [
+    {
+      "op": "create_entity",
+      "id": "synthetic-character",
+      "name": "合成 标为已检查（1 张）",
+      "lang": "zh"
+    },
+    {
+      "op": "change",
+      "action": "unknown",
+      "asked": [
+        "synthetic-a"
+      ]
+    },
+    {
+      "op": "change",
+      "action": "confirmed",
+      "entity": "synthetic-character",
+      "asked": [
+        "synthetic-a"
+      ]
+    }
+  ],
+  "tables": {
+    "actions": {
+      "columns": [
+        "id",
+        "label",
+        "before_json",
+        "ts",
+        "undone",
+        "label_kind",
+        "label_count"
+      ],
+      "rows": [
+        [
+          1,
+          "已跳过 1 张",
+          "[{\"terms\":{\"before\":[{\"assertion\":null,\"deferred\":false,\"entity\":null,\"uuid\":\"synthetic-a\"}],\"type\":\"snapshot\",\"v\":2}}]",
+          "2026-11-15 08:02:37",
+          0,
+          null,
+          null
+        ],
+        [
+          2,
+          "已将 1 张设为 合成 标为已检查（1 张）",
+          "[{\"terms\":{\"before\":[{\"assertion\":null,\"deferred\":true,\"entity\":\"synthetic-character\",\"uuid\":\"synthetic-a\"}],\"type\":\"snapshot\",\"v\":2}}]",
+          "2026-11-15 08:02:37",
+          0,
+          "set",
+          "1"
+        ]
+      ]
+    },
+    "assertions": {
+      "columns": [
+        "uuid",
+        "entity",
+        "status",
+        "origin"
+      ],
+      "rows": [
+        [
+          "synthetic-a",
+          "synthetic-character",
+          "confirmed",
+          "review"
+        ]
+      ]
+    },
+    "assets": {
+      "columns": [
+        "uuid",
+        "filename",
+        "src_path",
+        "width",
+        "height",
+        "added_at",
+        "src_kind"
+      ],
+      "rows": [
+        [
+          "synthetic-a",
+          null,
+          null,
+          null,
+          null,
+          null,
+          null
+        ]
+      ]
+    },
+    "memberships": {
+      "columns": [
+        "uuid",
+        "entity",
+        "status",
+        "origin",
+        "sources",
+        "score",
+        "source_count",
+        "ccip_only",
+        "skey"
+      ],
+      "rows": [
+        [
+          "synthetic-a",
+          "synthetic-character",
+          "confirmed",
+          "review",
+          "",
+          null,
+          0,
+          0,
+          "1110000001.0000000000001"
+        ]
+      ]
+    },
+    "meta": {
+      "columns": [
+        "key",
+        "value"
+      ],
+      "rows": [
+        [
+          "schema_version",
+          "36"
+        ],
+        [
+          "terms_artists",
+          "core"
+        ],
+        [
+          "terms_labels",
+          "core"
+        ],
+        [
+          "terms_characters",
+          "core"
+        ],
+        [
+          "terms_names",
+          "core"
+        ],
+        [
+          "indexed",
+          "synthetic"
+        ],
+        [
+          "general_indexed",
+          "synthetic"
+        ],
+        [
+          "rating_indexed",
+          "synthetic"
+        ],
+        [
+          "names_version",
+          "0"
+        ],
+        [
+          "terms_compact_pending",
+          "1"
+        ],
+        [
+          "terms_schema",
+          "8"
+        ],
+        [
+          "names_display_projected",
+          "0"
+        ],
+        [
+          "names_projected",
+          "0"
+        ]
+      ]
+    },
+    "term_assets": {
+      "columns": [
+        "id",
+        "namespace",
+        "key",
+        "md5",
+        "added_at",
+        "removed_at"
+      ],
+      "rows": [
+        [
+          1,
+          "library",
+          "synthetic-a",
+          null,
+          "2026-11-15 08:02:37",
+          null
+        ]
+      ]
+    },
+    "term_name_display": {
+      "columns": [
+        "entity",
+        "skin_only",
+        "name",
+        "name_source",
+        "zh",
+        "ja",
+        "en",
+        "tag"
+      ],
+      "rows": [
+        [
+          "synthetic-character",
+          0,
+          "合成 标为已检查（1 张）",
+          "user",
+          null,
+          null,
+          null,
+          ""
+        ],
+        [
+          "synthetic-character",
+          1,
+          "合成 标为已检查（1 张）",
+          "user",
+          null,
+          null,
+          null,
+          ""
+        ]
+      ]
+    },
+    "term_names": {
+      "columns": [
+        "term_id",
+        "lang",
+        "value",
+        "role",
+        "source",
+        "preferred",
+        "position",
+        "seq"
+      ],
+      "rows": [
+        [
+          1,
+          "zh",
+          "合成 标为已检查（1 张）",
+          "display",
+          "user",
+          1,
+          0,
+          1
+        ]
+      ]
+    },
+    "term_projection": {
+      "columns": [
+        "asset_id",
+        "term_id",
+        "state",
+        "score",
+        "sources"
+      ],
+      "rows": [
+        [
+          1,
+          1,
+          "confirmed",
+          null,
+          ""
+        ]
+      ]
+    },
+    "term_tree": {
+      "columns": [
+        "term_id",
+        "parent_id",
+        "merged_into",
+        "work_id",
+        "work_text",
+        "review_status",
+        "review_note",
+        "parent_locked",
+        "variant",
+        "artist",
+        "label_only",
+        "mascot",
+        "mascot_origin",
+        "original",
+        "seq"
+      ],
+      "rows": [
+        [
+          1,
+          null,
+          null,
+          null,
+          "",
+          null,
+          null,
+          null,
+          "",
+          "",
+          0,
+          0,
+          null,
+          0,
+          1
+        ]
+      ]
+    },
+    "term_verdicts": {
+      "columns": [
+        "id",
+        "action_id",
+        "asset_id",
+        "term_id",
+        "relation_id",
+        "verdict",
+        "origin",
+        "reason",
+        "reviewed",
+        "created_at",
+        "batch_id",
+        "anchor",
+        "via"
+      ],
+      "rows": [
+        [
+          1,
+          2,
+          1,
+          1,
+          null,
+          "yes",
+          "user",
+          "",
+          "[]",
+          "2026-11-15 08:02:37",
+          null,
+          2,
+          "review"
+        ]
+      ]
+    },
+    "terms": {
+      "columns": [
+        "id",
+        "key",
+        "kind",
+        "origin",
+        "attrs",
+        "created_at"
+      ],
+      "rows": [
+        [
+          1,
+          "synthetic-character",
+          "character",
+          "user",
+          "{}",
+          "2026-11-15 08:02:37"
+        ]
+      ]
+    }
+  }
+}

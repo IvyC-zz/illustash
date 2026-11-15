@@ -43,7 +43,7 @@ pub struct New<'a> {
 pub fn create(c: &Connection, e: &New, origin: &str) -> Result<()> {
     c.prepare_cached("INSERT INTO terms(key, kind, origin) VALUES (?1, ?2, ?3)")?
         .execute(params![e.id, e.kind, origin])?;
-    let term = c.last_insert_rowid();
+    let term: i64 = c.query_row("SELECT id FROM terms WHERE key=?1", [e.id], |r| r.get(0))?;
     c.prepare_cached(&format!(
         "INSERT INTO term_tree(term_id, parent_id, merged_into, work_id, work_text, variant, artist, label_only, mascot,
            mascot_origin, original, seq)

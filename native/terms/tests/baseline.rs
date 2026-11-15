@@ -142,6 +142,10 @@ impl Replay<'_> {
         self.state_at(path, illustash_terms::SCHEMA_VERSION)
     }
 
+    fn historical_state(&self, path: &Path, frozen: &baseline::State) -> Result<baseline::State, String> {
+        baseline::historical_projection(&self.state(path), frozen, self.recorded, illustash_terms::SCHEMA_VERSION)
+    }
+
     /// 参与比较的内容；`version` 是当前的词条核心版本（按录制原样的检查点则用录制时的版本）。
     fn state_at(&self, path: &Path, version: i64) -> baseline::State {
         if !path.exists() {
@@ -235,7 +239,7 @@ impl Replay<'_> {
         }
         // 升级带来的改动（例如修复过期的镜像）本身不算失败：后面每个调用都会与对照基准比较，改动一旦显现就在那里失败，
         // 届时也会列出这项改动。
-        let after = self.state(path);
+        let after = self.historical_state(path, base)?;
         Ok((after != *base).then(|| {
             format!(
                 "upgrading checkpoint {} changed {:?}",
@@ -272,7 +276,7 @@ impl Replay<'_> {
         let mut before = db.as_ref().and_then(|d| self.expected.get(d).cloned()).unwrap_or_default();
         if let (Some(d), Some(change)) = (&db, call.get("before")) {
             before = baseline::apply(&before, change).map_err(|e| format!("{at}: before: {e}"))?;
-            let actual = self.state(d);
+            let actual = self.historical_state(d, &before)?;
             if actual != before {
                 return Err(format!("{at}: state before the call: {:?}", baseline::differences(&before, &actual, 5)));
             }
@@ -344,7 +348,7 @@ impl Replay<'_> {
                 Some(change) => baseline::apply(&before, change).map_err(|e| format!("{at}: {e}"))?,
                 None => before,
             };
-            let got = self.state(&d);
+            let got = self.historical_state(&d, &want)?;
             if got != want {
                 return Err(format!("{at}: state differs: {:?}", baseline::differences(&want, &got, 5)));
             }
