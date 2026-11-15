@@ -65,7 +65,7 @@
 
  "crates/core/src/human_conclusions/state.rs":"433c6a4b4b4cd476dfb8d030697c4664b5535e16bab3e176019a35a0be154f0b",
 
- "crates/core/src/human_conclusions/upgrade.rs":"bd04372d75ee85fc1ae1829d95a22cf47fca075e5a96225a0dc920a6c9ec55af",
+ "crates/core/src/human_conclusions/upgrade.rs":"85ae74b0e0b7e3003d310fd9825e5a2109f3571b39017b863f2890a8c6ae491f",
 
  "crates/core/src/legacy_characters.rs":"e74652ae0eb641f8414ac652e596178f50ff974b1983cb536cc5ede62dc94d67",
 
@@ -283,7 +283,7 @@
 
  "native/terms/src/app_updates.rs":"e7b51e4afd108af07dbf92e76d44251709635984f8387d3e702922190b9834ba",
 
- "native/terms/src/app_upgrade.rs":"21646f4c21e41bf067c087fafcf10833781116d73285ac0cf13841b17d2f9d3d",
+ "native/terms/src/app_upgrade.rs":"fa1067d5a0a6bcf1d68e4b0fa7a9888030f92d62ad097e80edd86491878d4277",
 
  "native/terms/src/bin/illustash-terms.rs":"04ee80bb280034a16f8ddd9fe97e8de0700713259c44f76858f70b8713d4c594",
 

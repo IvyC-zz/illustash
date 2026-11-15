@@ -477,6 +477,83 @@ mod tests {
         }
     }
     #[test]
+    fn genuine_v8_counted_operation_survives_name_collision_upgrade_and_undo() {
+        use illustash_core::human_conclusions::state::{self, Domain, State};
+        use serde_json::{json, Value};
+        // 固定数据由未改动的 02b6437d/v8 核心实际执行夹具 commands 生成；构建时未运行新状态代码。
+        // Fixture::new(8) 用真正迁移建立同版 DDL，再装入产出方的非空行；没有降版本号或手写动作载荷。
+        let input: Value =
+            serde_json::from_str(include_str!("../../../tests/fixtures/library_upgrade/human_v8_name_collision.json"))
+                .unwrap();
+        assert_eq!(input["producer_commit"], "02b6437d");
+        assert_eq!(input["terms_schema"], 8);
+        let f = Fixture::new(8);
+        let mut c = f.connection();
+        let tx = c.transaction().unwrap();
+        tx.execute_batch("PRAGMA defer_foreign_keys=ON").unwrap();
+        crate::schema::begin_writing(&tx).unwrap();
+        for (table, data) in input["tables"].as_object().unwrap() {
+            assert!([
+                "actions",
+                "assertions",
+                "assets",
+                "memberships",
+                "meta",
+                "term_assets",
+                "term_name_display",
+                "term_names",
+                "term_projection",
+                "term_tree",
+                "term_verdicts",
+                "terms"
+            ]
+            .contains(&table.as_str()));
+            let columns: Vec<_> = data["columns"].as_array().unwrap().iter().map(|v| v.as_str().unwrap()).collect();
+            assert!(columns.iter().all(|v| v.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'_')));
+            let values: Vec<_> = (0..columns.len()).map(|i| format!("json_extract(?1,'$[{i}]')")).collect();
+            let verb = if table == "meta" { "INSERT OR REPLACE" } else { "INSERT" };
+            let sql = format!("{verb} INTO {table} ({}) SELECT {}", columns.join(","), values.join(","));
+            for row in data["rows"].as_array().unwrap() {
+                tx.execute(&sql, [row.to_string()]).unwrap();
+            }
+        }
+        crate::schema::commit_writing(tx).unwrap();
+        let (label, kind, count): (String, String, String) = c
+            .query_row("SELECT label,label_kind,label_count FROM actions WHERE id=2", [], |r| {
+                Ok((r.get(0)?, r.get(1)?, r.get(2)?))
+            })
+            .unwrap();
+        assert_eq!((kind.as_str(), count.as_str()), ("set", "1"));
+        assert_eq!(crate::undo_labels::UndoLabel::recognize(&label).unwrap().0, crate::undo_labels::UndoLabel::Sweep);
+        assert_eq!(c.query_row("SELECT count(*) FROM deferred", [], |r| r.get::<_, i64>(0)).unwrap(), 0);
+        drop(c);
+        run(&needed(&f.0).unwrap(), None).unwrap();
+        let read = || state::read(&f.connection(), Domain::Deferred, "synthetic-a").unwrap();
+        assert!(matches!(read(),State::Absent(m) if m.owner_action_id==2));
+        let context = crate::http::LibraryContext {
+            db: f.0.join("library.sqlite"),
+            generation: "synthetic".into(),
+            library: Some(f.0.clone()),
+            tags: f.0.join("unused.csv"),
+            source: Some(f.0.join("source.sqlite")),
+            token: Some("synthetic".into()),
+            read_only: None,
+        };
+        for id in [2, 1] {
+            crate::app_commands::request(
+                &context,
+                "/api/undo",
+                &crate::http_json::parse_request(&json!({"id":id}).to_string()).unwrap(),
+            )
+            .unwrap();
+            if id == 2 {
+                assert_eq!(read(), State::Positive(json!(true)));
+            } else {
+                assert_eq!(read(), State::Undecided);
+            }
+        }
+    }
+    #[test]
     fn failure_before_commit_rolls_back_all_core_changes_and_retains_backup() {
         let f = Fixture::new(5);
         let p = prepare(&f.0).unwrap();

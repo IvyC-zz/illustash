@@ -118,17 +118,31 @@ fn character_snapshot(v: &Value) -> bool {
 }
 
 // 句式只用来区分已验证快照的操作语义，不能单独凭「已恢复」或「交回自动规则」制造结论。
-fn character_effects(label: &str) -> Option<(Effect, Effect, bool)> {
+fn character_effects(label: &str, kind: Option<&str>, count: Option<&str>) -> Option<(Effect, Effect, bool)> {
     use crate::undo_labels::UndoLabel;
-    if counted(label, "已恢复 ", " 张") {
+    let operation = match (kind, count) {
+        // v8 的真实命令持久化种类和张数。角色名可包含任何句式片段，不能再从显示文案反推操作。
+        (Some(kind), Some(count)) if counted(count, "", "") => Some(UndoLabel::parse(kind)?),
+        (None, None) => {
+            // 更早的载荷只有文案；有多种解释时保持未决定，不按句式的尝试顺序猜。
+            let mut kinds = UndoLabel::ALL.into_iter().filter(|kind| kind.count(label).is_some());
+            let first = kinds.next();
+            if kinds.next().is_some() {
+                return None;
+            }
+            first
+        }
+        _ => return None,
+    };
+    if let Some(kind) = operation {
+        let effect = if kind == UndoLabel::Sweep { Effect::Preserve } else { Effect::Clear };
+        Some((effect, effect, false))
+    } else if counted(label, "已恢复 ", " 张") {
         Some((Effect::Clear, Effect::Preserve, true))
     } else if counted(label, "已跳过 ", " 张") {
         Some((Effect::Present, Effect::Preserve, false))
     } else if label == "已保留身份未定" {
         Some((Effect::Preserve, Effect::Present, false))
-    } else if let Some((kind, _)) = UndoLabel::recognize(label) {
-        let effect = if kind == UndoLabel::Sweep { Effect::Preserve } else { Effect::Clear };
-        Some((effect, effect, false))
     } else if label
         .strip_prefix("已确认 ")
         .and_then(|s| s.split_once(" 张是 "))
@@ -155,12 +169,20 @@ fn backfill(c: &Connection) -> Result<()> {
             .map(|(domain, _)| domain)
             .collect();
     let mut histories: BTreeMap<(Domain, String), Vec<Step>> = BTreeMap::new();
-    let mut actions = c.prepare("SELECT id,label,before_json,ts FROM actions WHERE undone=0 ORDER BY id")?;
+    let mut actions =
+        c.prepare("SELECT id,label,before_json,ts,label_kind,label_count FROM actions WHERE undone=0 ORDER BY id")?;
     let rows = actions.query_map([], |r| {
-        Ok((r.get::<_, i64>(0)?, r.get::<_, String>(1)?, r.get::<_, String>(2)?, r.get::<_, String>(3)?))
+        Ok((
+            r.get::<_, i64>(0)?,
+            r.get::<_, String>(1)?,
+            r.get::<_, String>(2)?,
+            r.get::<_, String>(3)?,
+            r.get::<_, Option<String>>(4)?,
+            r.get::<_, Option<String>>(5)?,
+        ))
     })?;
     for row in rows {
-        let (action, label, body, at) = row?;
+        let (action, label, body, at, kind, count) = row?;
         let Ok(body) = crate::strict_json::parse(&body) else { continue };
         let mut seen = BTreeSet::new();
         let mut add = |domain, key: &str, before_present, effect, explicit_absence| {
@@ -200,7 +222,7 @@ fn backfill(c: &Connection) -> Result<()> {
         let envelope = body[0].get("terms");
         let valid_envelope = envelope.is_none_or(|v| keys(v, &["v", "type", "before"]) && v["type"] == "snapshot");
         let valid = valid_envelope && !items.is_empty() && items.iter().all(character_snapshot);
-        let effects = character_effects(&label).filter(|_| valid);
+        let effects = character_effects(&label, kind.as_deref(), count.as_deref()).filter(|_| valid);
         for item in items {
             let Some(key) = asset_key(&item["uuid"]) else { continue };
             add(

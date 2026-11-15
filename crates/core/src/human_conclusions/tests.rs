@@ -252,3 +252,28 @@ fn genuine_legacy_resume_payload_and_v2_envelope_preserve_explicit_empty_resumes
         );
     }
 }
+
+#[test]
+fn unknown_counted_metadata_and_ambiguous_legacy_text_do_not_guess_an_operation() {
+    let mut c = fixture(8);
+    for (key, kind, count) in [
+        ("ambiguous", None, None),
+        ("unknown-kind", Some("future"), Some("1")),
+        ("missing-count", Some("set"), None),
+        ("bad-count", Some("set"), Some("not-a-count")),
+    ] {
+        let id = named_action(
+            &c,
+            "已将 1 张设为 合成 标为已检查（1 张）",
+            &json!([
+                {"uuid":key,"entity":"synthetic","assertion":null,"deferred":true}
+            ])
+            .to_string(),
+        );
+        c.execute("UPDATE actions SET label_kind=?1,label_count=?2 WHERE id=?3", rusqlite::params![kind, count, id])
+            .unwrap();
+    }
+    crate::schema_rules::migrate_to(&mut c, schema::SCHEMA_VERSION).unwrap();
+    assert_eq!(c.query_row("SELECT count(*) FROM human_state_marks", [], |r| r.get::<_, i64>(0)).unwrap(), 0);
+    assert_eq!(c.query_row("SELECT count(*) FROM human_state_mark_undo", [], |r| r.get::<_, i64>(0)).unwrap(), 0);
+}
