@@ -20,6 +20,8 @@ pub struct Detail {
     pub record_key: String,
     /// applied、already_present 或拒绝原因。
     pub result: String,
+    /// 资产未核验等结果的具体原因；不与上层结果重复计数。
+    pub reason: Option<String>,
 }
 
 /// 单次导入结果；定义数和人工逻辑记录数分开计数。
@@ -44,12 +46,17 @@ pub struct Report {
 
 impl Report {
     fn record(&mut self, record: &Record, result: &str) {
+        self.record_reason(record, result, None);
+    }
+
+    fn record_reason(&mut self, record: &Record, result: &str, reason: Option<&str>) {
         *self.records.entry(result.into()).or_default() += 1;
         if self.details.len() < 500 {
             self.details.push(Detail {
                 kind: record.identity().0.into(),
                 record_key: record.identity().1.into(),
                 result: result.into(),
+                reason: reason.map(str::to_owned),
             });
         } else {
             self.details_omitted += 1;
@@ -127,6 +134,7 @@ fn match_reason(result: &Match) -> &'static str {
     match result {
         Match::Matched { .. } => "matched",
         Match::Unmatched => "unmatched_asset",
+        Match::ContentChanged => "content_changed",
         Match::Ambiguous { .. } => "ambiguous_asset",
         Match::Unverified { .. } => "unverified_asset",
     }
@@ -195,11 +203,17 @@ pub fn apply_in(
         if matches!(source, Record::Asset { .. } | Record::Entity { .. }) {
             continue;
         }
-        if let Some(reason) = source.assets().into_iter().find_map(|a| match assets[a] {
+        if let Some((result, reason)) = source.assets().into_iter().find_map(|a| match assets[a] {
             Match::Matched { .. } => None,
-            result => Some(match_reason(result)),
+            result => Some((
+                match_reason(result),
+                match result {
+                    Match::Ambiguous { reason } | Match::Unverified { reason } => Some(reason.as_str()),
+                    _ => None,
+                },
+            )),
         }) {
-            report.record(source, reason);
+            report.record_reason(source, result, reason);
             continue;
         }
         if source.terms().iter().any(|t| !terms.contains_key(*t)) {

@@ -102,6 +102,8 @@ pub enum Match {
     Matched { target: String, method: Method },
     /// 候选核验完整，且没有相同内容。
     Unmatched,
+    /// 同库原资产仍存在，但其当前字节与源快照不同；不能改投其他副本。
+    ContentChanged,
     /// 有多个相同内容目标，或多个源资产将写入同一目标。
     Ambiguous { reason: String },
     /// 缺源摘要，或完整候选核验尚未完成。
@@ -142,10 +144,14 @@ pub fn match_assets(same_library: bool, source: &[SourceAsset], target: &[Target
     let mut claimed: BTreeMap<String, Vec<usize>> = BTreeMap::new();
     for asset in source {
         let result = if let Some(content) = asset.hash.content()? {
-            if same_library
-                && matches!(targets.get(asset.key.as_str()), Some(TargetHash::Verified(found)) if found == content)
-            {
-                Match::Matched { target: asset.key.clone(), method: Method::IdAndSha256 }
+            if let Some(target) = targets.get(asset.key.as_str()).filter(|_| same_library) {
+                match target {
+                    TargetHash::Verified(found) if found == content => {
+                        Match::Matched { target: asset.key.clone(), method: Method::IdAndSha256 }
+                    }
+                    TargetHash::Verified(_) => Match::ContentChanged,
+                    TargetHash::Unverified { .. } => Match::Unverified { reason: "same_id_unverified".into() },
+                }
             } else {
                 let matches =
                     contents.get(&(content.sha256.as_str(), content.byte_length, content.representation.as_str()));
@@ -197,10 +203,29 @@ mod tests {
     }
     #[test]
     fn same_id_requires_bytes_and_does_not_claim_content_uniqueness() {
-        assert_eq!(match_assets(true, &[source("a")], &[target("a", 2)]).unwrap(), [Match::Unmatched]);
+        assert_eq!(match_assets(true, &[source("a")], &[target("a", 2)]).unwrap(), [Match::ContentChanged]);
         assert_eq!(
             match_assets(true, &[source("a")], &[target("a", 1), target("copy", 1), offline("missing", None)]).unwrap(),
             [Match::Matched { target: "a".into(), method: Method::IdAndSha256 }]
+        );
+    }
+    #[test]
+    fn present_same_library_id_never_falls_back_to_another_copy() {
+        assert_eq!(
+            match_assets(true, &[source("a")], &[target("a", 2), target("copy", 1)]).unwrap(),
+            [Match::ContentChanged]
+        );
+        assert_eq!(
+            match_assets(true, &[source("a")], &[offline("a", None), target("copy", 1)]).unwrap(),
+            [Match::Unverified { reason: "same_id_unverified".into() }]
+        );
+        assert_eq!(
+            match_assets(true, &[source("a")], &[target("copy", 1)]).unwrap(),
+            [Match::Matched { target: "copy".into(), method: Method::ContentUnique }]
+        );
+        assert_eq!(
+            match_assets(false, &[source("a")], &[target("a", 2), target("copy", 1)]).unwrap(),
+            [Match::Matched { target: "copy".into(), method: Method::ContentUnique }]
         );
     }
     #[test]
@@ -238,7 +263,7 @@ mod tests {
     fn cached_target_is_never_a_match_and_missing_source_is_not_unmatched() {
         assert_eq!(
             match_assets(true, &[source("a")], &[offline("a", Some(10))]).unwrap(),
-            [Match::Unverified { reason: "candidate_set_incomplete".into() }]
+            [Match::Unverified { reason: "same_id_unverified".into() }]
         );
         let source = SourceAsset { key: "a".into(), hash: SourceHash::Missing };
         assert_eq!(

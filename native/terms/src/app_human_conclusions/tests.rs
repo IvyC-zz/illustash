@@ -183,6 +183,60 @@ fn target_human_state_wins_and_independent_change_refuses_undo_atomically() {
 }
 
 #[test]
+fn same_library_replaced_or_offline_id_cannot_redirect_conclusions_to_a_copy() {
+    let source = Fixture::new("same-library");
+    source.source();
+    let path = source.export();
+    let target = Fixture::new("same-library");
+    let replaced = target.asset("a", "replaced.png", 9);
+    target.asset("copy-a", "old-content-copy.png", 1);
+    target.term("source-artist", "synthetic_artist");
+    let changed = import_file(&target.db, &target.id, &path, &|| Ok(())).unwrap();
+    assert_eq!(changed.action_id, None);
+    assert_eq!(changed.assets["content_changed"], 1);
+    assert_eq!(changed.records["content_changed"], 3);
+    assert_eq!(target.count("SELECT count(*) FROM actions"), 0);
+    fs::remove_file(replaced).unwrap();
+    let offline = import_file(&target.db, &target.id, &path, &|| Ok(())).unwrap();
+    assert_eq!(offline.action_id, None);
+    assert_eq!(offline.records["unverified_asset"], 8);
+    assert_eq!(offline.details.iter().filter(|d| d.reason.as_deref() == Some("same_id_unverified")).count(), 3);
+    assert_eq!(target.count("SELECT count(*) FROM actions"), 0);
+    assert_eq!(target.count("SELECT count(*) FROM term_verdicts"), 0);
+    // 原 ID 真正离开候选集后，才允许按唯一内容认回。
+    crate::open(&target.db).unwrap().execute("DELETE FROM assets WHERE uuid='a'", []).unwrap();
+    let absent = import_file(&target.db, &target.id, &path, &|| Ok(())).unwrap();
+    assert_eq!(absent.records["applied"], 3);
+    assert_eq!(target.count("SELECT count(*) FROM curation WHERE uuid='copy-a'"), 1);
+}
+
+#[test]
+fn generic_cli_refuses_human_import_without_partially_undoing_exclusion() {
+    let source = Fixture::new("source-library");
+    source.source();
+    crate::open(&source.db).unwrap().execute("UPDATE curation SET status='excluded' WHERE uuid='a'", []).unwrap();
+    let path = source.export();
+    let target = Fixture::new("target-library");
+    target.target();
+    assert_eq!(import_file(&target.db, &target.id, &path, &|| Ok(())).unwrap().action_id, Some(1));
+    assert_eq!(target.count("SELECT count(*) FROM excluded WHERE uuid='new-a'"), 1);
+    let code = crate::cli::run(&[
+        "undo".into(),
+        "--db".into(),
+        target.db.to_string_lossy().into_owned(),
+        "--action".into(),
+        "1".into(),
+    ]);
+    assert_eq!(code, 3);
+    assert_eq!(target.count("SELECT count(*) FROM actions WHERE undone=0"), 1);
+    assert_eq!(target.count("SELECT count(*) FROM curation WHERE status='excluded' AND uuid='new-a'"), 1);
+    assert_eq!(target.count("SELECT count(*) FROM excluded WHERE uuid='new-a'"), 1);
+    target.undo(1).unwrap();
+    assert_eq!(target.count("SELECT count(*) FROM curation"), 0);
+    assert_eq!(target.count("SELECT count(*) FROM excluded"), 0);
+}
+
+#[test]
 fn incomplete_candidates_and_cancellation_do_not_create_partial_actions() {
     let source = Fixture::new("source-library");
     source.source();
