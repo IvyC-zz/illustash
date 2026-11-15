@@ -100,6 +100,7 @@ fn cli_validates_with_exit_codes() {
 
 #[test]
 fn cli_package_descriptions_do_not_export_secret_urls_or_claim_human_names() {
+    let _env = crate::shared();
     use illustash_core::human_conclusions::{
         export,
         format::{Header, Policy},
@@ -107,7 +108,6 @@ fn cli_package_descriptions_do_not_export_secret_urls_or_claim_human_names() {
     use serde_json::{json, Value};
     use std::io::Write;
     use std::process::Stdio;
-    let _env = crate::shared();
     let dir = scratch("human-export");
     let evidence = fs::read_to_string(dir.join("evidence.jsonl")).unwrap().replace("\"photos\"", "\"library\"");
     let descriptions = format!(
