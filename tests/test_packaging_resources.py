@@ -14,6 +14,7 @@ from unittest.mock import patch
 import zipfile
 
 from tests.windows_fixed_suite import skip_allowed
+from tools.wait_limit import WAIT
 
 ROOT = Path(__file__).resolve().parents[1]
 
@@ -427,13 +428,13 @@ class PackagingResourcesTest(unittest.TestCase):
         for script, args in (('start.sh', ['http', '--native']), ('desktop.sh', [])):
             with self.subTest(script=script):
                 result = subprocess.run(['/bin/sh', str(moved / script), '--library', 'synthetic.pilib'],
-                                        cwd=cwd, env=env, capture_output=True, text=True, timeout=10)
+                                        cwd=cwd, env=env, capture_output=True, text=True, timeout=WAIT)
                 self.assertEqual(result.returncode, 0, result.stderr)
                 self.assertEqual(result.stdout.splitlines(), expected + args + [
                     '--root', str(moved / 'resources'), '--library', 'synthetic.pilib'])
                 overrides = {key: str(self.root / ('override ' + key)) for key in keys}
                 result = subprocess.run(['/bin/sh', str(moved / script)], cwd=cwd,
-                                        env={**env, **overrides}, capture_output=True, text=True, timeout=10)
+                                        env={**env, **overrides}, capture_output=True, text=True, timeout=WAIT)
                 self.assertEqual(result.returncode, 0, result.stderr)
                 self.assertEqual(result.stdout.splitlines(), list(overrides.values()) + args + [
                     '--root', overrides['ILLUSTASH_ROOT']])

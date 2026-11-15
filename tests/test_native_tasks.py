@@ -5,6 +5,7 @@ import time
 import unittest
 from tests import library_fixture as library
 from tests.test_native_folder import NativeFolderHTTPTest
+from tools.wait_limit import WAIT
 
 
 class NativeTasksHTTPTest(unittest.TestCase):
@@ -19,7 +20,7 @@ class NativeTasksHTTPTest(unittest.TestCase):
     sync = NativeFolderHTTPTest.sync
 
     def running(self):
-        until = time.monotonic() + 3
+        until = time.monotonic() + WAIT
         while time.monotonic() < until:
             with sqlite3.connect(self.lib.db) as c:
                 if c.execute("SELECT count(*) FROM sync_runs WHERE status='running'").fetchone()[0]:
@@ -61,7 +62,7 @@ class NativeTasksHTTPTest(unittest.TestCase):
         with large.open('wb') as f: f.truncate(256 * 1024 * 1024)
         self.assertEqual(self.request('/api/sync', {})['status'], 200)
         self.running()
-        self.process.kill(); self.process.wait(3)
+        self.process.kill(); self.process.wait(WAIT)
         with sqlite3.connect(self.lib.db) as c:
             self.assertEqual(c.execute('SELECT status FROM sync_runs ORDER BY id DESC LIMIT 1').fetchone()[0], 'running')
         large.unlink()

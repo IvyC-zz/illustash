@@ -11,6 +11,7 @@ from tests import test_native_human_curation as curation
 from tests.fixed_expectations import unclocked
 from tools.verify_read_http import cookie, fetch
 from tests.test_read_http import wait_until
+from tools.wait_limit import WAIT
 
 
 class NativeHumanIdentityTest(unittest.TestCase):
@@ -170,7 +171,7 @@ class NativeHumanIdentityTest(unittest.TestCase):
                         self.assertEqual(c.execute('SELECT status FROM backend_effects ORDER BY id DESC LIMIT 1').fetchone()[0],'pending')
                     c.execute('DROP TRIGGER fail_ack'); c.commit()
             drained = self.rec.state('drained')
-            wait_until(lambda:drained==labels.states(self.right),timeout=5)
+            wait_until(lambda:drained==labels.states(self.right))
             self.undo_latest()
 
     def test_write_lock_refuses_without_partial_commit(self):
@@ -194,7 +195,7 @@ class NativeHumanIdentityTest(unittest.TestCase):
             token=json.loads(fetch(self.origin,{'url':'/api/bootstrap'},self.origin)['body'])['token']
             before_old,before_new=labels.states(self.right),labels.states(newer)
             data=json.dumps(body).encode()
-            conn=http.client.HTTPConnection('127.0.0.1',self.port,timeout=5); self.addCleanup(conn.close)
+            conn=http.client.HTTPConnection('127.0.0.1',self.port,timeout=WAIT); self.addCleanup(conn.close)
             conn.putrequest('POST',url,skip_host=True)
             for k,v in {'Host':self.origin.split('://')[1],'Origin':self.origin,'Cookie':cookie(self.origin),'Content-Type':'application/json',
                         'X-CSRF-Token':token,'Content-Length':str(len(data))}.items(): conn.putheader(k,v)

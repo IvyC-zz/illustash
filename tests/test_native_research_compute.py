@@ -17,6 +17,7 @@ import numpy as np
 from tests import native_commands as terms_core
 from tests.research_fixture import Features, decode
 from tests import learn_fixture as reference_learning
+from tools.wait_limit import WAIT
 
 
 class NativeResearchComputeTest(unittest.TestCase):
@@ -66,7 +67,7 @@ class NativeResearchComputeTest(unittest.TestCase):
                                 ILLUSTASH_TEST_PROTOTYPES_ONLY='1')
         env.pop('ILLUSTASH_WORKER_PYTHON', None)
         result = subprocess.run([str(self.binary), str(input_path), str(output)], env=env,
-                                capture_output=True, timeout=30)
+                                capture_output=True, timeout=WAIT)
         return result, output, snapshot
 
     @staticmethod

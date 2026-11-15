@@ -15,6 +15,7 @@ from unittest.mock import patch
 
 from tests.fixed_expectations import Expectations
 from tools import verify_read_http as verify
+from tools.wait_limit import WAIT
 
 # Windows 没有 SIGINT：宿主放在独立进程组里启动，用 CTRL_BREAK 走它的控制台退出处理。
 SPAWN = {'creationflags': subprocess.CREATE_NEW_PROCESS_GROUP} if os.name == 'nt' else {}
@@ -27,7 +28,8 @@ def free_port():
         return s.getsockname()[1]
 
 
-def wait_until(predicate, timeout=15):
+def wait_until(predicate, timeout=WAIT):
+    """等 `predicate()` 返回真值并返回它。`timeout` 是只防挂死的等待上限（#508），只在要等过产品自身某个时限时才加长。"""
     deadline = time.monotonic() + timeout
     while time.monotonic() < deadline:
         try:
@@ -37,7 +39,7 @@ def wait_until(predicate, timeout=15):
         except (OSError, http.client.HTTPException, ValueError):
             pass
         time.sleep(.03)
-    raise AssertionError('temporary HTTP service did not reach expected state')
+    raise AssertionError(f'temporary HTTP service did not reach expected state within {timeout:g}s')
 
 
 def stop_process(process):
@@ -45,10 +47,10 @@ def stop_process(process):
     if process.poll() is None:
         process.send_signal(INTERRUPT)
         try:
-            process.wait(12)
+            process.wait(WAIT)
         except subprocess.TimeoutExpired:
             process.kill()
-            process.wait(3)
+            process.wait(WAIT)
     for stream in (process.stdout, process.stderr):
         if stream:
             stream.close()
@@ -83,7 +85,7 @@ def prepare_human_backup(test, package):
              '--port', origin.rsplit(':', 1)[1], '--no-sync', '--no-auto-sync', '--no-names',
              '--no-index-check', '--no-provenance'], env=test.env, stdout=log, stderr=log, **SPAWN)
         try:
-            verify.enter(origin, log, process, timeout=5)
+            verify.enter(origin, log, process)
             wait_human_backup(test, origin)
         finally:
             stop_process(process)
@@ -123,14 +125,14 @@ class ComparatorTest(unittest.TestCase):
         # #140：每个请求仍是一条新连接，读完响应后以 RST 关闭，本机不留 TIME_WAIT；服务端据此看到复位而非 EOF。
         listener = socket.create_server(('127.0.0.1', 0))
         self.addCleanup(listener.close)
-        listener.settimeout(10)
+        listener.settimeout(WAIT)
         seen = []
 
         def serve(count):
             for index in range(count):
                 conn, (_, port) = listener.accept()
                 with conn:
-                    conn.settimeout(10)
+                    conn.settimeout(WAIT)
                     data = b''
                     while b'\r\n\r\n' not in data:
                         data += conn.recv(4096)
@@ -153,7 +155,7 @@ class ComparatorTest(unittest.TestCase):
         origin = f'http://127.0.0.1:{listener.getsockname()[1]}'
         bodies = [verify.fetch(origin, item, origin)['body'] for item in (
             {'url': '/'}, {'url': '/', 'method': 'POST', 'body': b'{"x":1}'}, {'url': '/last'})]
-        server.join(10)
+        server.join(WAIT)
         self.assertEqual(bodies, [b'GET ', b'POST {"x":1}', b'GET '])
         self.assertEqual([ending for _, ending in seen], ['reset'] * 3)
         self.assertEqual(len({port for port, _ in seen}), 3)

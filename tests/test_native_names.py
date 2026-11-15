@@ -24,6 +24,7 @@ from tests.fixed_expectations import RETIRED, SKIP_COLUMNS, unclocked
 from tests.test_read_http import INTERRUPT, SPAWN, free_port, wait_until
 from tests.name_providers import Providers
 from tools.verify_read_http import enter, fetch
+from tools.wait_limit import WAIT
 
 
 class TextService:
@@ -32,7 +33,7 @@ class TextService:
         self.calls = []
         self.entered, self.release = threading.Event(), threading.Event()
         self.block = False
-        self.hold_deadline = 5
+        self.hold_deadline = WAIT
         self.failure = None
         self.failures_left = 0
         self.bad_json = False
@@ -91,7 +92,7 @@ class TextService:
         parsed = urllib.parse.urlsplit(url)
         path = parsed.path + ('?' + parsed.query if parsed.query else '')
         data = json.dumps(body).encode() if body is not None else None
-        with urllib.request.urlopen(urllib.request.Request(self.base + path, data=data), timeout=5) as response:
+        with urllib.request.urlopen(urllib.request.Request(self.base + path, data=data), timeout=WAIT) as response:
             return json.load(response)
 
 
@@ -106,7 +107,7 @@ class NativeNamesTest(unittest.TestCase):
         if not getattr(self, 'enabled', False): args += ['--no-names']
         process = subprocess.Popen(args, env=self.env, stdout=log, stderr=log, **SPAWN)
         self.addCleanup(self.stop, process)
-        enter(self.origin, log, process, timeout=5)
+        enter(self.origin, log, process)
         lifecycle.wait_human_backup(self, self.origin)
         return process, log
     def setUp(self):
@@ -127,7 +128,7 @@ class NativeNamesTest(unittest.TestCase):
             value = json.loads(self.request('/api/names?progress=1')['body'])['state']
             return value if value['status']==status else False
         # 后续名称事件可以立即开始，断言轮询命中时的状态。
-        return wait_until(complete, timeout=8)
+        return wait_until(complete)
     def events(self):
         with closing(sqlite3.connect(self.lib.db)) as c:
             return c.execute("SELECT id,status,error FROM backend_effects WHERE kind LIKE 'names:%' ORDER BY id").fetchall()
@@ -153,7 +154,7 @@ class NativeNamesTest(unittest.TestCase):
             event='names:'+json.dumps({'entity':ident,'refresh':False})
             c.executemany('INSERT INTO backend_effects(kind) VALUES (?)',[(event,),(event,)])
         self.stop(self.process); self.process,self.log=self.start(self.lib.path); self.finish()
-        wait_until(lambda:all(s=='done' for _,s,_ in self.events()),timeout=8)
+        wait_until(lambda:all(s=='done' for _,s,_ in self.events()))
         count=len(self.service.calls)
         self.stop(self.process);self.process,self.log=self.start(self.lib.path);self.finish()
         self.assertEqual(len(self.service.calls),count)
@@ -218,7 +219,7 @@ class NativeNamesTest(unittest.TestCase):
             self.assertEqual(c.execute("SELECT count(*) FROM name_cache WHERE key LIKE '%wiki_pages%' OR key LIKE '[\"done\", 1, \"character\",%'").fetchone()[0],0)
         self.service.failure=None
         self.stop(self.process);self.process,self.log=self.start(self.lib.path);self.finish()
-        wait_until(lambda:all(s=='done' for _,s,_ in self.events()),timeout=8)
+        wait_until(lambda:all(s=='done' for _,s,_ in self.events()))
     def enable_error(self):
         self.stop(self.process);self.enabled=True;self.process,self.log=self.start(self.lib.path);self.finish('error')
     def test_busy_refresh_cancel_switch_same_id_and_late_result(self):
@@ -226,20 +227,20 @@ class NativeNamesTest(unittest.TestCase):
         second.config['id']=self.lib.config['id'];second.save()
         self.service.block=True
         self.assertEqual(self.request('/api/names',{'action':'refresh'})['status'],200)
-        self.assertTrue(self.service.entered.wait(3))
+        self.assertTrue(self.service.entered.wait(WAIT))
         self.assertEqual(self.request('/api/names',{'action':'refresh'})['status'],400)
         with closing(sqlite3.connect(self.lib.db)) as c: before=c.execute(NAMES+' ORDER BY t.key,n.value').fetchall()
         with ThreadPoolExecutor() as pool:
             switched=pool.submit(self.request,'/api/libraries/open',{'path':str(second.path)})
             time.sleep(.1);self.service.release.set()
-            self.assertEqual(switched.result(timeout=5)['status'],200)
+            self.assertEqual(switched.result(timeout=WAIT)['status'],200)
         with closing(sqlite3.connect(self.lib.db)) as c: self.assertEqual(before,c.execute(NAMES+' ORDER BY t.key,n.value').fetchall())
         self.assertTrue(any(s=='pending' for _,s,_ in self.events()))
         self.assertFalse(self.sentinel.exists())
     def test_exit_waits_cancellation_and_keeps_pending_for_recovery(self):
         self.enable();self.service.block=True
-        self.request('/api/names',{'action':'refresh'});self.assertTrue(self.service.entered.wait(3))
-        self.process.send_signal(INTERRUPT);time.sleep(.1);self.service.release.set();self.process.wait(5)
+        self.request('/api/names',{'action':'refresh'});self.assertTrue(self.service.entered.wait(WAIT))
+        self.process.send_signal(INTERRUPT);time.sleep(.1);self.service.release.set();self.process.wait(WAIT)
         self.assertEqual(self.process.returncode,0)
         self.assertTrue(any(s=='pending' for _,s,_ in self.events()))
     def test_transient_retry(self):
@@ -249,7 +250,7 @@ class NativeNamesTest(unittest.TestCase):
         self.enable();ident=self.alice
         response=self.request('/api/character/profile',{'entity':ident,'tag':'synthetic_(Example)'})
         self.assertEqual(response['status'],200,response['body'])
-        wait_until(lambda:all(s=='done' for _,s,_ in self.events()),timeout=8)
+        wait_until(lambda:all(s=='done' for _,s,_ in self.events()))
         self.assertTrue(any('/related_tag.json' in path for path,_ in self.service.calls))
         self.assertTrue(any('synthetic_' in path for path,_ in self.service.calls))
 
@@ -273,7 +274,7 @@ class NativeNamesTest(unittest.TestCase):
         self.stop(self.process)
         with sqlite3.connect(self.lib.db) as c:c.execute('DROP TRIGGER synthetic_ack_failure')
         self.process,self.log=self.start(self.lib.path);self.finish()
-        wait_until(lambda:all(s=='done' for _,s,_ in self.events()),timeout=8)
+        wait_until(lambda:all(s=='done' for _,s,_ in self.events()))
         with closing(sqlite3.connect(self.lib.db)) as c:self.assertEqual(formal,c.execute(NAMES+' ORDER BY t.key,n.role,n.source,n.value').fetchall())
 
     def test_query_source_changed_while_pending_rejects_old_name(self):
@@ -281,7 +282,7 @@ class NativeNamesTest(unittest.TestCase):
         self.service.block=True
         refresh=self.request('/api/names',{'action':'refresh','entity':ident})
         self.assertEqual(refresh['status'],200,refresh['body'])
-        self.assertTrue(self.service.entered.wait(3))
+        self.assertTrue(self.service.entered.wait(WAIT))
         event_id, _, _ = self.events()[-1]
         # 这期间保存了一个用户名称（以前经过旧 Store，现在走应用自己的路由）。
         edited=self.request('/api/character/profile',{'entity':ident,'name':'人工保留名'})
@@ -290,7 +291,7 @@ class NativeNamesTest(unittest.TestCase):
         self.assertIn('名称来源已改变',state['error'])
         profile=json.loads(self.request('/api/character/profile?entity='+urllib.parse.quote(ident))['body'])
         self.assertEqual(profile['user_name'],'人工保留名')
-        wait_until(lambda:(event_id,'pending',state['error']) in self.events(),timeout=8)
+        wait_until(lambda:(event_id,'pending',state['error']) in self.events())
 
     def test_malformed_event_does_not_block_new_valid_request(self):
         self.enable()
@@ -299,7 +300,7 @@ class NativeNamesTest(unittest.TestCase):
         self.finish('error')
         ident=self.alice
         self.assertEqual(self.request('/api/names',{'action':'refresh','entity':ident})['status'],200)
-        wait_until(lambda:self.events()[-1][1]=='done',timeout=8)
+        wait_until(lambda:self.events()[-1][1]=='done')
         self.assertTrue(any(s=='pending' and e for _,s,e in self.events()))
 
     def test_explicit_no_network_and_key_save_cannot_authorize(self):
@@ -316,32 +317,32 @@ class NativeNamesTest(unittest.TestCase):
         self.service.block=True
         with ThreadPoolExecutor() as pool:
             pending=pool.submit(self.request,'/api/names',{'action':'model_api_test'})
-            self.assertTrue(self.service.entered.wait(3))
+            self.assertTrue(self.service.entered.wait(WAIT))
             self.assertEqual(self.request('/api/libraries/open',{'path':str(second.path)})['status'],200)
             self.service.release.set()
-            self.assertEqual(pending.result(timeout=5)['status'],403)
+            self.assertEqual(pending.result(timeout=WAIT)['status'],403)
         self.assertFalse(self.sentinel.exists())
 
 
     def test_process_killed_while_query_pending_restarts_actual_consumer(self):
         self.enable();self.service.block=True
         self.assertEqual(self.request('/api/names',{'action':'refresh'})['status'],200)
-        self.assertTrue(self.service.entered.wait(3))
-        self.process.kill();self.process.wait(5)
+        self.assertTrue(self.service.entered.wait(WAIT))
+        self.process.kill();self.process.wait(WAIT)
         self.assertTrue(any(s=='pending' for _,s,_ in self.events()))
         self.service.release.set();self.service.block=False
         self.process,self.log=self.start(self.lib.path);self.finish()
-        wait_until(lambda:all(s=='done' for _,s,_ in self.events()),timeout=8)
+        wait_until(lambda:all(s=='done' for _,s,_ in self.events()))
         self.assertFalse(self.sentinel.exists())
 
     def test_inflight_transport_timeout_retries_and_commits_after_recovery(self):
         self.enable();self.service.block=True;self.service.hold_deadline=32
         before=len(self.service.calls)
         self.assertEqual(self.request('/api/names',{'action':'refresh'})['status'],200)
-        self.assertTrue(self.service.entered.wait(3))
+        self.assertTrue(self.service.entered.wait(WAIT))
         timer=threading.Timer(26,self.service.release.set);timer.start();self.addCleanup(timer.cancel)
-        wait_until(lambda:json.loads(self.request('/api/names?progress=1')['body'])['state']['status']=='done',timeout=35)
-        wait_until(lambda:all(s=='done' for _,s,_ in self.events()),timeout=8)
+        wait_until(lambda:json.loads(self.request('/api/names?progress=1')['body'])['state']['status']=='done',timeout=26+WAIT)
+        wait_until(lambda:all(s=='done' for _,s,_ in self.events()))
         attempted=[path for path,_ in self.service.calls[before:]]
         self.assertGreaterEqual(attempted.count(attempted[0]),2)
 

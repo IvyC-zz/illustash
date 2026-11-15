@@ -3,14 +3,6 @@
   "entries": [
     {
       "kind": "python",
-      "id": "test_native_lifecycle.NativeLifecycleTest.test_native_library_new_invalid_inputs_and_reference_errors_are_byte_exact",
-      "platforms": ["macos"],
-      "issue": 510,
-      "added": "2026-11-15",
-      "expires": "2026-11-29"
-    },
-    {
-      "kind": "python",
       "id": "test_native_research.NativeResearchTest.test_similar_ignores_human_verdict_and_retries_on_its_own_inputs",
       "platforms": ["windows"],
       "issue": 498,

@@ -507,7 +507,7 @@ mod tests {
         command.args(["--ignored", "--exact", "app_onboarding::tests::failing_check_worker_fixture", "--nocapture"]);
         o.start_check_task(&lib, command).unwrap();
         let task = o.task.as_mut().unwrap();
-        assert!(task.wait(Duration::from_secs(30)));
+        assert!(task.wait(crate::test_wait::limit()));
         let log = std::env::temp_dir().join(format!("illustash-check-{}.log", task.context().identity().task_id));
         assert!(!log.exists());
         assert_eq!(
@@ -527,12 +527,12 @@ mod tests {
             .args(["--ignored", "--exact", "app_onboarding::tests::failing_check_worker_fixture", "--nocapture"])
             .stderr(stderr);
         let identity = TaskIdentity::new(&lib, 1, "token").unwrap();
-        let mut task = Task::start(identity, Some(Duration::from_secs(30)), move |ctx| {
+        let mut task = Task::start(identity, Some(crate::test_wait::limit()), move |ctx| {
             let status = ctx.process(&mut command)?;
             assert_eq!(status.code(), Some(7));
             Ok(())
         });
-        assert!(task.wait(Duration::from_secs(30)));
+        assert!(task.wait(crate::test_wait::limit()));
         assert_eq!(task.outcome(), crate::app_tasks::TaskOutcome::Done);
         assert_eq!(std::fs::metadata(log).unwrap().len(), 0);
     }

@@ -63,7 +63,7 @@ class PackagingTest(unittest.TestCase):
                                         '--no-sync', '--no-open', '--no-names', '--no-index-check'],
                                        env=env, cwd=install, stdout=log, stderr=log, **lifecycle.SPAWN)
             try:
-                enter(origin, log, process, timeout=8)
+                enter(origin, log, process)
                 for name in ('index.html', 'app.js', 'app.css', 'theme.js', 'splash.js', 'favicon.svg'):
                     url = '/' if name == 'index.html' else '/' + name
                     response = fetch(origin, {'url': url}, origin)

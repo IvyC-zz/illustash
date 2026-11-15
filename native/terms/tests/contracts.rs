@@ -25,6 +25,8 @@ use std::time::{Duration, Instant};
 mod baseline;
 #[path = "common/entry.rs"]
 mod entry;
+#[path = "common/wait.rs"]
+mod wait;
 
 const DATABASES: [&str; 3] = ["source.sqlite", "library.sqlite", "provenance.sqlite"];
 
@@ -240,7 +242,7 @@ fn launch(root: &Path, package: &Path, category: &str, upgrade: bool, binary: &P
         if let Ok(line) = lines.recv_timeout(Duration::from_millis(20)) {
             break line;
         }
-        assert!(start.elapsed() < Duration::from_secs(15), "host startup timeout");
+        assert!(start.elapsed() < wait::limit(), "host startup timeout");
     };
     entry::enter(&line);
     let (status, bootstrap, _) = request(&origin, "/api/bootstrap", None, "");
@@ -343,7 +345,7 @@ fn replay(category: &str) {
                 {
                     break;
                 }
-                assert!(start.elapsed() < Duration::from_secs(10), "recovery timeout");
+                assert!(start.elapsed() < wait::limit(), "recovery timeout");
                 thread::sleep(Duration::from_millis(10));
             }
         }

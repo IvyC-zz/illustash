@@ -140,7 +140,7 @@ mod tests {
         drop(a);
         // 其他测试同时派生的子进程可能继承 `a`，直到它 exec 时才关闭，租约因此多持有片刻；
         // 调用方会重试，测试也照样重试。
-        let until = std::time::Instant::now() + std::time::Duration::from_secs(5);
+        let until = crate::test_wait::deadline();
         while let Err(error) = acquire(&b) {
             assert!(should_retry(&error) && std::time::Instant::now() < until, "lease not released: {error}");
             std::thread::sleep(std::time::Duration::from_millis(1));
@@ -162,7 +162,7 @@ mod tests {
         assert!(acquire_unobstructed(&b).is_err());
         assert_eq!(std::fs::read(&path).unwrap(), Vec::<u8>::new());
         drop(a);
-        let until = std::time::Instant::now() + std::time::Duration::from_secs(5);
+        let until = crate::test_wait::deadline();
         while acquire_unobstructed(&b).is_err() {
             assert!(std::time::Instant::now() < until, "lease not released");
             std::thread::sleep(std::time::Duration::from_millis(1));

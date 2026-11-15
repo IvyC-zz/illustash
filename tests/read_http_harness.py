@@ -22,6 +22,7 @@ from urllib.parse import quote
 from tests.fixed_expectations import RECORDED_TODAY, Expectations
 from tests.test_read_http import SPAWN, free_port, stop_process, wait_until
 from tools import verify_read_http as verify
+from tools.wait_limit import WAIT
 
 ROOT = Path(__file__).resolve().parents[1]
 HEADERS = ('Content-Type', 'Content-Length', 'Cache-Control', 'Vary', 'X-Content-Type-Options',
@@ -78,7 +79,7 @@ class HTTPHarness(unittest.TestCase):
     def tearDownClass(cls):
         if os.name == 'nt' and cls.host.poll() is None:
             cls.host.terminate()   # 测试宿主不处理控制台信号
-            cls.host.wait(12)
+            cls.host.wait(WAIT)
         stop_process(cls.host)
         cls.log.close()
         cls.temp.cleanup()

@@ -818,7 +818,12 @@ mod tests {
         }
         *LAST_PROGRESS.lock().unwrap() = Some((600, "正在备份图库".into(), Instant::now()));
         let alive = Keepalive::start(Duration::from_millis(40), print);
-        thread::sleep(Duration::from_millis(300));
+        // 等到至少两次心跳；只防挂死，不限定多快打出来（#508）。
+        let deadline = crate::test_wait::deadline();
+        while PRINTED.lock().unwrap().len() < 2 {
+            assert!(Instant::now() < deadline, "keepalive did not print twice");
+            thread::sleep(Duration::from_millis(5));
+        }
         drop(alive);
         let printed = PRINTED.lock().unwrap().clone();
         assert!(printed.len() >= 2, "{printed:?}");

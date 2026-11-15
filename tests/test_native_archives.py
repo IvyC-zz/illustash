@@ -16,6 +16,7 @@ from tests import test_native_lifecycle as lifecycle
 from tests.test_native_human_labels import snapshot
 from tests.test_read_http import wait_until
 from tests import library_fixture as library
+from tools.wait_limit import WAIT
 
 
 class NativeArchivesTest(unittest.TestCase):
@@ -45,7 +46,7 @@ class NativeArchivesTest(unittest.TestCase):
         return json.loads(response['body'])
 
     def done(self):
-        wait_until(lambda: self.state()['status'] in ('done', 'error'), timeout=15)
+        wait_until(lambda: self.state()['status'] in ('done', 'error'))
         result = self.state()
         self.assertEqual(result['status'], 'done', result)
         return Path(result['path'])
@@ -196,7 +197,7 @@ class NativeArchivesTest(unittest.TestCase):
         before = snapshot(self.lib.db)
         legacy = library.export_library(self.lib, self.root / 'failure-legacy.zip')
         self.begin()
-        wait_until(lambda: self.state()['status'] == 'error', timeout=10)
+        wait_until(lambda: self.state()['status'] == 'error')
         self.assertEqual(dest.read_bytes(), published)
         self.assertEqual(list(dest.parent.glob('.illustash-export-*')), [])
         imports = set(library.HOME.glob('*')) if library.HOME.exists() else set()
@@ -370,7 +371,7 @@ class NativeArchivesTest(unittest.TestCase):
         archive, declared = self.large_archive()
         registry = self.support / 'libraries.json'
         seen = []
-        response = self.archive_import({'path': str(archive)}, seen=seen, timeout=600)
+        response = self.archive_import({'path': str(archive)}, seen=seen, timeout=WAIT * 10)
         self.assertEqual(response['status'], 200, response)
         order = ['reading', 'unpacking', 'cleaning', 'checking', 'publishing']
         stages = [s['stage'] for s in seen if s['status'] == 'running' and 'stage' in s]
@@ -387,8 +388,8 @@ class NativeArchivesTest(unittest.TestCase):
         self.assertIn(str(path), [r['path'] for r in json.loads(registry.read_text())['recent']])
 
     def test_archive_import_cancel_switch_and_quit_remove_what_it_unpacked(self):
-        # #88（#26）：取消按钮、切换图库和退出都会在 5 秒内停止解包（退出时进程在 8 秒内结束），
-        # 删除新目录，不动登记表。
+        # #88（#26）：取消按钮、切换图库和退出都会停止解包、删除新目录，不动登记表。停没停在解包阶段由
+        # 终态的 stage 和 done < total 判定，退出则由图库目录没有多出新包判定；不另设耗时上界（#508）。
         archive, _ = self.large_archive()
         other = self.root / 'other.pilib'
         self.clone_closed_library(other)
@@ -400,15 +401,11 @@ class NativeArchivesTest(unittest.TestCase):
                 r = self.request('/api/libraries/import', {'path': str(archive)})
                 self.assertEqual(r['status'], 200, r)
                 task = json.loads(r['body'])['task']
-                wait_until(lambda: self.imports().get('done', 0) > 0, timeout=20)
-                # 解包期间读取请求照常应答。
-                started = time.monotonic()
+                wait_until(lambda: self.imports().get('done', 0) > 0)
+                # 解包期间读取请求照常应答（要是等解包完，下面的终态就不会停在解包阶段）。
                 self.assertEqual(self.request('/api/bootstrap')['status'], 200)
-                self.assertLess(time.monotonic() - started, 2)
-                started = time.monotonic()
                 if how == 'quit':
                     self.stop(self.process)
-                    self.assertLess(time.monotonic() - started, 8)
                     self.process, self.log = self.start(self.lib.path)
                     self.token = json.loads(self.request('/api/bootstrap')['body'])['token']
                 else:
@@ -418,8 +415,7 @@ class NativeArchivesTest(unittest.TestCase):
                     else:
                         self.assertEqual(self.request('/api/libraries/open', {'path': str(other)})['status'], 200)
                         reason = '图库已切换，导入已取消'
-                    wait_until(lambda: self.imports()['status'] in lifecycle.IMPORT_ENDED, timeout=10)
-                    self.assertLess(time.monotonic() - started, 5)
+                    wait_until(lambda: self.imports()['status'] in lifecycle.IMPORT_ENDED)
                     end = self.imports()
                     self.assertEqual((end['id'], end['status'], end['reason'], end['stage']),
                                      (task['id'], 'cancelled', reason, 'unpacking'), end)
@@ -463,10 +459,9 @@ class NativeArchivesTest(unittest.TestCase):
         initial = self.begin()
         self.assertEqual(self.request('/api/libraries/export', {})['status'], 400)
         self.assertEqual(self.state(), initial)
-        before = time.monotonic()
+        # 写锁一直不放：切换要是等备份，就会一直卡到等待上限而失败。
         opened = self.request('/api/libraries/open', {'path':str(other.path)})
         self.assertEqual(opened['status'], 200, opened)
-        self.assertLess(time.monotonic()-before, 2)
         self.assertEqual(self.state()['status'], 'idle')
         self.assertFalse(Path(initial['path']).exists())
         self.assertEqual(list(Path(initial['path']).parent.glob('.illustash-export-*')), [])
@@ -481,7 +476,7 @@ class NativeArchivesTest(unittest.TestCase):
     def test_export_error_atomic_existing_destination_and_retry(self):
         initial = self.begin(); dest = self.done(); before = dest.read_bytes()
         feature = self.lib.features / 'full-features.npy'; feature.mkdir()
-        self.begin(); wait_until(lambda:self.state()['status']=='error', timeout=10)
+        self.begin(); wait_until(lambda:self.state()['status']=='error')
         self.assertEqual(dest.read_bytes(), before)
         self.assertEqual(list(dest.parent.glob('.illustash-export-*')), [])
         feature.rmdir(); feature.write_bytes(b'retry')
@@ -501,7 +496,7 @@ class NativeArchivesTest(unittest.TestCase):
             barrier.wait(); responses.append(self.request('/api/libraries/export', {})['status'])
         threads = [threading.Thread(target=start) for _ in range(8)]
         for t in threads: t.start()
-        for t in threads: t.join(5)
+        for t in threads: t.join(WAIT)
         self.assertEqual(sorted(responses), [200] + [400]*7)
         initial = self.state()
         self.assertEqual(self.request('/api/libraries/open', {'path':str(self.root / 'missing.pilib')})['status'], 400)

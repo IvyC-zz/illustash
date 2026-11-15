@@ -11,6 +11,7 @@ from pathlib import Path
 from tests import test_native_lifecycle as life
 from tests.test_read_http import free_port, wait_until
 from tools.verify_read_http import enter, fetch
+from tools.wait_limit import WAIT
 
 
 class DesktopLifecycleTest(unittest.TestCase):
@@ -30,7 +31,7 @@ class DesktopLifecycleTest(unittest.TestCase):
         self.addCleanup(log.close)
         self.addCleanup(lambda: process.stdin.close() if not process.stdin.closed else None)
         self.addCleanup(self.stop, process)
-        enter(self.origin, log, process, timeout=10)
+        enter(self.origin, log, process)
         return process, log
 
     def assert_port_released(self):
@@ -58,7 +59,7 @@ class DesktopLifecycleTest(unittest.TestCase):
         # 正常打开时，就绪之前不做完整的完整性检查（#212）。
         self.assertFalse(any('检查图库数据' in stage for stage in self.progress(self.log)))
         # 崩溃之后，下一次打开先检查两个数据库，并报告这一步。
-        self.process.kill(); self.process.wait(5)
+        self.process.kill(); self.process.wait(WAIT)
         _, log = self.start(self.lib.path)
         self.assertIn('上次没有正常关闭，正在检查图库数据（source.sqlite）', self.progress(log))
 
@@ -67,21 +68,21 @@ class DesktopLifecycleTest(unittest.TestCase):
         response = self.request('/api/libraries/open', {'path': str(second.path)})
         self.assertEqual(response['status'], 200)
         self.process.stdin.close()
-        self.assertEqual(self.process.wait(10), 0)
+        self.assertEqual(self.process.wait(WAIT), 0)
         self.assert_port_released()
         self.assertFalse(self.sentinel.exists())
 
     def test_explicit_port_conflict_fails_without_killing_existing_host(self):
         args = [str(self.binary), 'http', '--native', '--library', str(self.lib.path),
                 '--port', str(self.port), '--root', str(self.resources), '--no-names', '--no-index-check']
-        result = subprocess.run(args, env=self.env, capture_output=True, timeout=10)
+        result = subprocess.run(args, env=self.env, capture_output=True, timeout=WAIT)
         self.assertNotEqual(result.returncode, 0)
         self.assertIsNone(self.process.poll())
         self.assertEqual(self.request('/api/bootstrap')['status'], 200)
 
     def test_parent_crash_closes_pipe_and_native_host_exits(self):
         self.process.stdin.close()
-        self.process.wait(10)
+        self.process.wait(WAIT)
         code = ('import json,subprocess,sys; '
                 'p=subprocess.Popen(json.loads(sys.argv[1]),stdin=subprocess.PIPE,stdout=open(sys.argv[2],"wb"),stderr=subprocess.DEVNULL); '
                 'p.stdin.write(bytes([1])); p.stdin.flush(); print(p.pid,flush=True); sys.stdin.read()')
@@ -95,15 +96,15 @@ class DesktopLifecycleTest(unittest.TestCase):
         self.addCleanup(parent.stdout.close)
         self.addCleanup(lambda: parent.kill() if parent.poll() is None else None)
         child_pid = int(parent.stdout.readline())
-        enter(self.origin, log, timeout=10)
-        parent.kill(); parent.wait(5)
+        enter(self.origin, log)
+        parent.kill(); parent.wait(WAIT)
         def released():
             try:
                 self.assert_port_released(); return True
             except OSError:
                 return False
         try:
-            wait_until(released, timeout=10)
+            wait_until(released)
         finally:
             if not released():
                 os.kill(child_pid, getattr(signal, 'SIGKILL', signal.SIGTERM))
@@ -128,15 +129,15 @@ class DesktopResearchLifecycleTest(unittest.TestCase):
         self.mode.write_text('hang')
         self.pid.unlink(missing_ok=True)
         self.assertEqual(self.request('/api/similar', {})['status'], 200)
-        wait_until(self.pid.exists, timeout=5)
+        wait_until(self.pid.exists)
         pid = int(self.pid.read_text())
         self.process.stdin.close()
-        self.assertEqual(self.process.wait(10), 0)
-        wait_until(lambda: not research.group_exists(pid), timeout=5)
+        self.assertEqual(self.process.wait(WAIT), 0)
+        wait_until(lambda: not research.group_exists(pid))
         DesktopLifecycleTest.assert_port_released(self)
 
     def test_parent_crash_during_worker_removes_worker_group(self):
-        self.process.stdin.close(); self.process.wait(10)
+        self.process.stdin.close(); self.process.wait(WAIT)
         self.mode.write_text('hang'); self.pid.unlink(missing_ok=True)
         code = ('import json,subprocess,sys; '
                 'p=subprocess.Popen(json.loads(sys.argv[1]),stdin=subprocess.PIPE,stdout=open(sys.argv[2],"wb"),stderr=subprocess.DEVNULL); '
@@ -148,7 +149,7 @@ class DesktopResearchLifecycleTest(unittest.TestCase):
                                   env={**self.env, 'ILLUSTASH_DESKTOP_STDIN': '1'}, stdin=subprocess.PIPE, stdout=subprocess.PIPE)
         def cleanup():
             if parent.poll() is None: parent.kill()
-            parent.wait(5); parent.stdin.close(); parent.stdout.close()
+            parent.wait(WAIT); parent.stdin.close(); parent.stdout.close()
         self.addCleanup(cleanup)
         host_pid = int(parent.stdout.readline())
         def stop_host_if_needed():
@@ -156,14 +157,14 @@ class DesktopResearchLifecycleTest(unittest.TestCase):
             try: os.kill(host_pid, signal.SIGTERM)
             except ProcessLookupError: pass
         self.addCleanup(stop_host_if_needed)
-        enter(self.origin, log, timeout=10)
+        enter(self.origin, log)
         self.token = json.loads(self.request('/api/bootstrap')['body'])['token']
         self.assertEqual(self.request('/api/similar', {})['status'], 200)
-        wait_until(self.pid.exists, timeout=5)
+        wait_until(self.pid.exists)
         worker_pid = int(self.pid.read_text())
-        parent.kill(); parent.wait(5)
-        wait_until(lambda: not research.group_exists(worker_pid), timeout=10)
-        wait_until(lambda: self.host_gone(), timeout=10)
+        parent.kill(); parent.wait(WAIT)
+        wait_until(lambda: not research.group_exists(worker_pid))
+        wait_until(lambda: self.host_gone())
 
     def host_gone(self):
         try:

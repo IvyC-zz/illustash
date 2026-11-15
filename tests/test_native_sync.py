@@ -13,6 +13,7 @@ from tests.test_native_folder import NativeFolderHTTPTest
 from tests import photos_fixture
 from tests.test_native_human_labels import snapshot
 from tests.test_read_http import wait_until
+from tools.wait_limit import WAIT
 
 # 给那些 worker 不能被当成卡住的测试用的空闲窗口：远长于繁忙机器上 worker 的启动时间（#219）。
 # 产品默认值是 10 分钟，保持不变。
@@ -243,7 +244,7 @@ if failures: Path(sys.argv[2]).write_text(json.dumps(dict(identity=r['identity']
     def finish(self):
         import time
         # 比这里最宽的空闲窗口还长：卡住的 worker 由宿主停下，而不是靠这个等待。
-        until=time.monotonic()+60
+        until=time.monotonic()+WIDE_IDLE_MS/1000+WAIT
         while time.monotonic()<until:
             response=self.request('/api/sync')
             self.assertEqual(response['status'],200)
@@ -322,9 +323,9 @@ if failures: Path(sys.argv[2]).write_text(json.dumps(dict(identity=r['identity']
             if s['status'] not in ('scanning','importing','recognising'): self.fail(seen[-5:])
             return s['status']=='recognising' and s.get('stage')==stage and s.get('done')==done
         # 测试看到每个值之后 worker 才往下走，不论哪一边跑得多慢（#219）。
-        wait_until(lambda: shown('preparing',0),timeout=60);(self.root/'go-1').touch()
-        wait_until(lambda: shown('recognising',1),timeout=60);(self.root/'go-2').touch()
-        wait_until(lambda: shown('recognising',2),timeout=60)
+        wait_until(lambda: shown('preparing',0));(self.root/'go-1').touch()
+        wait_until(lambda: shown('recognising',1));(self.root/'go-2').touch()
+        wait_until(lambda: shown('recognising',2))
         total=seen[-1]['total']
         self.assertGreaterEqual(total,3)
         self.assertEqual(seen[-1]['failed'],0)
@@ -406,13 +407,13 @@ if failures: Path(sys.argv[2]).write_text(json.dumps(dict(identity=r['identity']
             state=json.loads(self.request('/api/sync')['body'])['state']
             if state['status'] not in ('scanning','importing','recognising'): self.fail(state)
             return state['status']=='recognising' and state.get('stage')==stage and state.get('done')==done and state
-        total=wait_until(lambda: shown('preparing',0),timeout=60)['total']
+        total=wait_until(lambda: shown('preparing',0))['total']
         self.assertEqual(total,len(photos)+1)
         first=time.monotonic()
         for step in range(1,total+2):
             time.sleep(PACE_S)
             (self.root/f'step-{step}').touch()
-            if step<=total: wait_until(lambda: shown('recognising',step),timeout=60)
+            if step<=total: wait_until(lambda: shown('recognising',step))
         value=self.finish()
         self.assertEqual(value['state']['status'],'done',value)
         self.assertEqual(value['state']['done'],value['state']['total'])
@@ -557,7 +558,7 @@ if failures: Path(sys.argv[2]).write_text(json.dumps(dict(identity=r['identity']
         log=tempfile.TemporaryFile();self.addCleanup(log.close)
         self.process=subprocess.Popen(args,env=self.env,stdout=log,stderr=subprocess.DEVNULL,**SPAWN)
         self.addCleanup(self.stop,self.process)
-        enter(self.origin,log,self.process,timeout=5)
+        enter(self.origin,log,self.process)
         self.token=json.loads(self.request('/api/bootstrap')['body'])['token']
         state=self.sync()['state']
         self.assertEqual((state['status'],state['problem']),('error','photos_permission'),state)

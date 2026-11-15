@@ -19,6 +19,10 @@ from PIL import Image
 from tests import test_native_lifecycle as lifecycle
 from tests.fixed_expectations import unclocked
 from tests.test_read_http import wait_until
+from tools.wait_limit import WAIT
+
+# 不测超时的用例给研究任务配的时限：它只是兜底，按等待上限放宽（#508）；要触发超时的用例另配短时限。
+TASK_LIMIT_MS = str(int(WAIT * 1000))
 
 
 class NativeResearchTest(unittest.TestCase):
@@ -79,7 +83,7 @@ Path(sys.argv[2]).write_text(json.dumps(v,allow_nan=False))
 note('正常结束')
 ''')
         self.worker.chmod(0o755)
-        self.env.update(ILLUSTASH_RESEARCH_WORKER=worker_command(self.worker),ILLUSTASH_RESEARCH_TIMEOUT_MS='10000',ILLUSTASH_RESEARCH_RETRY_MS='300')
+        self.env.update(ILLUSTASH_RESEARCH_WORKER=worker_command(self.worker),ILLUSTASH_RESEARCH_TIMEOUT_MS=TASK_LIMIT_MS,ILLUSTASH_RESEARCH_RETRY_MS='300')
         with sqlite3.connect(self.lib.source) as c:
             c.execute('CREATE TABLE IF NOT EXISTS embeddings(uuid TEXT,model TEXT,vec BLOB,PRIMARY KEY(uuid,model))')
             v=np.zeros(768,np.float32);v[0]=1
@@ -101,11 +105,11 @@ note('正常结束')
         self.token=json.loads(self.request('/api/bootstrap')['body'])['token']
 
     def state(self): return json.loads(self.request('/api/similar')['body'])['state']
-    def wait(self,predicate,timeout=15,what='等待超时'): return wait_for(self,predicate,timeout,what)
+    def wait(self,predicate,timeout=WAIT,what='等待超时'): return wait_for(self,predicate,timeout,what)
     def why(self,*context): return why(self,*context)
     def finished(self, status='idle'):
         # 直接调用模块级函数：别的测试类借用 setUp 和 finished 时不必再借这些辅助方法。
-        wait_for(self,lambda:self.state()['status'] in ('idle','error'),timeout=20,what='研究任务没有结束')
+        wait_for(self,lambda:self.state()['status'] in ('idle','error'),what='研究任务没有结束')
         self.assertEqual(self.state()['status'],status,why(self))
     def rows(self, tables):
         with sqlite3.connect(self.lib.db) as c:
@@ -163,43 +167,43 @@ note('正常结束')
             with sqlite3.connect(self.lib.db) as c:
                 self.assertGreater(c.execute("SELECT count(*) FROM research_runs WHERE status='pending'").fetchone()[0],0)
             self.assertEqual(self.request('/api/assets/count')['status'],200)
-        self.mode.write_text('ok');self.env['ILLUSTASH_RESEARCH_TIMEOUT_MS']='10000'
+        self.mode.write_text('ok');self.env['ILLUSTASH_RESEARCH_TIMEOUT_MS']=TASK_LIMIT_MS
         self.stop(self.process);self.restart();self.finished()
         self.assertEqual(self.pending(),0)
 
     def test_inflight_human_change_cancel_switch_exit_no_process_group(self):
         self.mode.write_text('held')
         self.request('/api/regroup',{})
-        self.wait(lambda:self.pid.exists() and self.state()['status']=='learning',timeout=30)
+        self.wait(lambda:self.pid.exists() and self.state()['status']=='learning')
         self.request('/api/tag',{'ids':['a'],'tag':'合成'})
         self.mode.write_text('ok');self.release()
         self.finished()
         self.mode.write_text('hang')
         self.pid.unlink(missing_ok=True)
         self.request('/api/similar',{})
-        self.wait(self.pid.exists,timeout=5)
+        self.wait(self.pid.exists)
         pid=int(self.pid.read_text())
         with sqlite3.connect(self.lib.db) as c: pending=c.execute('SELECT count(*) FROM research_runs').fetchone()[0]
         for _ in range(3):self.assertEqual(self.request('/api/similar',{})['body'],b'{"started": true}')
         with sqlite3.connect(self.lib.db) as c:self.assertEqual(c.execute('SELECT count(*) FROM research_runs').fetchone()[0],pending)
         self.assertEqual(self.request('/api/similar',{'action':'cancel'})['status'],200)
-        self.wait(lambda:not group_exists(pid),timeout=5)
+        self.wait(lambda:not group_exists(pid))
         self.assertEqual(self.state()['status'],'idle')
         self.request('/api/similar',{})
-        self.wait(lambda:self.pid.exists() and int(self.pid.read_text())!=pid,timeout=5)
+        self.wait(lambda:self.pid.exists() and int(self.pid.read_text())!=pid)
         pid=int(self.pid.read_text())
         replacement = self.package('same-id')
         config=replacement.config;config['id']=self.lib.config['id'];(replacement.path/'library.json').write_text(json.dumps(config))
         self.assertEqual(self.request('/api/libraries/open',{'path':str(replacement.path)})['status'],200)
-        self.wait(lambda:not group_exists(pid),timeout=5)
+        self.wait(lambda:not group_exists(pid))
         self.token=json.loads(self.request('/api/bootstrap')['body'])['token']
         with sqlite3.connect(replacement.db) as c:self.assertEqual(c.execute("SELECT count(*) FROM research_runs WHERE id='startup'").fetchone()[0],1)
         self.request('/api/similar',{'action':'cancel'})
         self.pid.unlink(missing_ok=True)
         self.request('/api/similar',{})
-        self.wait(self.pid.exists,timeout=5)
+        self.wait(self.pid.exists)
         pid=int(self.pid.read_text());self.stop(self.process)
-        self.wait(lambda:not group_exists(pid),timeout=5)
+        self.wait(lambda:not group_exists(pid))
 
     def test_inflight_input_change_retries_on_fresh_snapshot(self):
         # #194：worker 计算期间来了一条人工裁决；过期的结果被拒绝、绝不发布，任务在更新的快照上自行完成。
@@ -209,7 +213,7 @@ note('正常结束')
         runs=len(self.versions())
         self.mode.write_text('held')
         self.request('/api/regroup',{})
-        self.wait(lambda:len(self.versions())>runs and self.state()['status']=='learning',timeout=30)
+        self.wait(lambda:len(self.versions())>runs and self.state()['status']=='learning')
         self.assertEqual(self.request('/api/change',{'ids':['unmatched6'],'action':'confirmed','entity':self.alice})['status'],200)
         self.mode.write_text('ok');self.release()
         seen=[]
@@ -220,7 +224,7 @@ note('正常结束')
                 self.assertIn('自动重试',s['message'])
             seen.append(s['status'])
             return s['status'] in ('idle','error')
-        self.wait(settled,timeout=20)
+        self.wait(settled)
         # 按结束等待时的状态判断：下一次恢复轮询（每秒一次）可能已经为这条裁决启动排队中的 events 运行，
         # 而 regroup 不确认这些事件。
         self.assertEqual(seen[-1],'idle',self.why(seen))
@@ -240,7 +244,7 @@ note('正常结束')
         runs=len(self.versions())
         self.mode.write_text('held')
         result=start()
-        self.wait(lambda:len(self.versions())>runs,timeout=30)
+        self.wait(lambda:len(self.versions())>runs)
         with sqlite3.connect(self.lib.db) as c: write(c)
         self.mode.write_text('ok');self.release()
         seen=[]
@@ -248,7 +252,7 @@ note('正常结束')
             seen.append(self.state()['status'])
             return seen[-1] in ('idle','error')
         # 放行后可能还要退避再重跑；繁忙机器上 20 秒不够（#418）。上限高于 `retry_visibly` 的任务时限，卡住的运行仍会报 `error`。
-        try:wait_until(settled,timeout=70)
+        try:wait_until(settled,timeout=60+WAIT)
         except AssertionError:self.fail(self.why('运行没有结束',seen[-20:]))
         return result,seen,len(self.versions())-runs
 
@@ -263,7 +267,7 @@ note('正常结束')
                 c.execute("UPDATE embeddings SET vec=? WHERE uuid=? AND model='ccip'",(v.tobytes(),'seed'+str(i)))
         self.restart()
         self.poke_event()
-        self.wait(lambda:self.pending()==0,timeout=20)
+        self.wait(lambda:self.pending()==0)
         self.finished()
         claims=self.rows(['proto_claims'])['proto_claims']
         seeds={u:s for u,e,s in claims if e==self.alice and u.startswith('seed')}
@@ -305,7 +309,7 @@ note('正常结束')
         def drained():
             drain.append(self.state()['status'])
             return drain[-1]=='error' or drain[-1]=='idle' and self.pending()==0
-        try:wait_until(drained,timeout=90)
+        try:wait_until(drained,timeout=60+WAIT)
         except AssertionError:self.fail(self.why('裁决排出的学习没有跑完',seen,drain,self.pending()))
         kinds=self.run_kinds()[before:]
         self.assertEqual(self.state()['status'],'idle',self.why(seen,drain,kinds))
@@ -326,7 +330,7 @@ note('正常结束')
         with ThreadPoolExecutor(1) as pool:
             answer,_,runs=self.inflight(lambda:pool.submit(self.request,'/api/oc/groups?entity='+self.alice),
                 lambda c:c.execute("INSERT OR REPLACE INTO prefs VALUES ('synthetic_view','list')"))
-            actual=answer.result(timeout=20)
+            actual=answer.result(timeout=WAIT)
         self.assertEqual(actual['status'],200,actual)
         self.assertEqual(actual['body'],expected['body'])
         self.assertEqual(runs,1)
@@ -340,10 +344,10 @@ note('正常结束')
         self.request('/api/regroup',{})
         # 每次尝试被卡住时都会遇到一次写入：第一次运行和全部五次重试。
         for i in range(1,7):
-            self.wait(lambda:len(self.versions())-runs>=i,timeout=30)
+            self.wait(lambda:len(self.versions())-runs>=i)
             self.assertEqual(self.request('/api/tag',{'ids':['a'],'tag':f'合成持续{i}'})['status'],200)
             self.release()
-        self.wait(lambda:self.state()['status']=='error',timeout=30)
+        self.wait(lambda:self.state()['status']=='error')
         state=self.state()
         self.assertIn('自动重试 5 次',state['message'],self.why())
         self.assertEqual(len(self.versions())-runs,6,self.why())
@@ -359,7 +363,7 @@ note('正常结束')
         def drained():
             with sqlite3.connect(self.lib.db) as c:
                 return self.state()['status']=='idle' and c.execute("SELECT count(*) FROM research_runs WHERE status='pending'").fetchone()[0]==0
-        self.wait(drained,timeout=20)
+        self.wait(drained)
         self.assertEqual(self.pending(),0)
 
     def test_ack_failure_replay_is_atomic_and_restart_recovers(self):
@@ -369,7 +373,7 @@ note('正常结束')
             c.execute("CREATE TRIGGER fail_ack BEFORE UPDATE ON backend_effects WHEN NEW.status='done' BEGIN SELECT RAISE(ABORT,'synthetic ack'); END")
         with sqlite3.connect(self.lib.db) as c:c.execute("INSERT INTO backend_effects(kind) VALUES ('index_changed')")
         # 恢复可能在这里发出任何请求之前就启动运行（#263）：判断结果，而不是判断它有没有启动。
-        self.wait(lambda:self.state()['status']=='error',timeout=30)
+        self.wait(lambda:self.state()['status']=='error')
         self.assertIn('synthetic ack',self.state()['message'])
         self.assertGreater(self.pending(),0)
         # 被拒绝的确认让整个发布回滚了。
@@ -400,7 +404,7 @@ note('正常结束')
         self.assertEqual(lifecycle.import_task(self,'/api/recognition/import',{'path':str(package)})['status'],200)
         def completed():
             with sqlite3.connect(self.lib.db) as c:return c.execute("SELECT count(*) FROM research_runs WHERE status='done'").fetchone()[0]>before
-        self.wait(completed,timeout=20)
+        self.wait(completed)
         self.assertEqual(history,self.rows(['assertions','actions']))
         with sqlite3.connect(self.lib.db) as c:count=c.execute('SELECT count(*) FROM research_runs').fetchone()[0]
         # 确认失败时重新分派同一条已存的事件；意图键必须保持不变。
@@ -460,10 +464,10 @@ def why(test,*context):
     return Why()
 
 
-def wait_for(test,predicate,timeout=15,what='等待超时'):
+def wait_for(test,predicate,timeout=WAIT,what='等待超时'):
     """同 wait_until，时限不变；超时报告里附上失败证据。"""
     try: return wait_until(predicate,timeout=timeout)
-    except AssertionError: test.fail(f'{what}（{timeout} 秒）\n{evidence(test)}')
+    except AssertionError: test.fail(f'{what}（{timeout:g} 秒）\n{evidence(test)}')
 
 
 def group_exists(pid):

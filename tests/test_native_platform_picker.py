@@ -5,6 +5,7 @@ import threading
 import unittest
 from concurrent.futures import ThreadPoolExecutor
 from tests import test_native_lifecycle as lifecycle
+from tools.wait_limit import WAIT
 
 
 class Shell(http.server.BaseHTTPRequestHandler):
@@ -14,7 +15,7 @@ class Shell(http.server.BaseHTTPRequestHandler):
     def do_POST(self):
         self.server.calls.append((self.path, self.headers.get('X-Illustash-Token')))
         self.server.entered.set()
-        self.server.release.wait(8)
+        self.server.release.wait(WAIT)
         data = json.dumps(self.server.reply).encode()
         self.send_response(200)
         self.send_header('Content-Length', str(len(data)))
@@ -78,7 +79,7 @@ class NativePlatformPickerTest(unittest.TestCase):
         self.shell.release.clear()
         with ThreadPoolExecutor() as pool:
             pending = pool.submit(self.request, '/api/libraries/choose', {'kind': 'folder'})
-            self.assertTrue(self.shell.entered.wait(4))
+            self.assertTrue(self.shell.entered.wait(WAIT))
             response = self.request('/api/libraries/open', {'path': str(other.path)})
             self.assertEqual(response['status'], 200, response)
             self.shell.release.set()
@@ -92,7 +93,7 @@ class NativePlatformPickerTest(unittest.TestCase):
         self.shell.release.clear()
         with ThreadPoolExecutor() as pool:
             pending = pool.submit(self.request, '/api/libraries/choose', {'kind': 'folder'})
-            self.assertTrue(self.shell.entered.wait(4))
+            self.assertTrue(self.shell.entered.wait(WAIT))
             self.stop(self.process)
             self.assertIsNotNone(self.process.poll())
             self.shell.release.set()

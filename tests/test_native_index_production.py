@@ -27,6 +27,7 @@ from tests import test_native_index_compute as compute
 from tests.native_worker_fixture import command, exists as process_exists
 from tests.test_native_human_labels import snapshot
 from tests.test_read_http import wait_until
+from tools.wait_limit import WAIT
 
 
 class CandidateIndexAdapter:
@@ -76,7 +77,7 @@ class IndexTransitionRoutingTest(CandidateIndexAdapter, unittest.TestCase):
             request, response = root/'request.json', root/'response.json'
             request.write_text('{"format":"illustash-index/1","identity":{}}')
             result = subprocess.run([str(adapter), str(request), str(response)],
-                                    env=self.isolated_env(resources), capture_output=True, timeout=10)
+                                    env=self.isolated_env(resources), capture_output=True, timeout=WAIT)
             self.assertNotEqual(result.returncode, 0)
             self.assertNotIn('ILLUSTASH_WORKER_PYTHON', result.stderr.decode(errors='replace'))
             self.assertFalse(response.exists())
@@ -114,7 +115,7 @@ class InstalledIndexComputeTest(CandidateIndexAdapter, unittest.TestCase):
                     request.update(action='drop', rows=[dict(short_tag='last')], reason='合成最后角色')
                 (review/'request.json').write_text(json.dumps(request))
                 result = subprocess.run([str(adapter), str(review/'request.json'), str(review/'response.json')],
-                                        env=self.isolated_env(resources), capture_output=True, timeout=10)
+                                        env=self.isolated_env(resources), capture_output=True, timeout=WAIT)
                 self.assertEqual(result.returncode, 0, result.stderr.decode(errors='replace'))
                 value = json.loads((review/'response.json').read_text())
                 self.assertEqual(value['characters'], []); self.assertEqual(value['labels'], [])
@@ -143,7 +144,7 @@ class InstalledIndexComputeTest(CandidateIndexAdapter, unittest.TestCase):
             (new/'request.json').write_text(json.dumps(request))
             shutil.copy2(tags,resources/'tags/tags_v3.csv')
             result=subprocess.run([str(adapter),str(new/'request.json'),str(new/'response.json')],
-                                  env=self.isolated_env(resources),capture_output=True,timeout=10)
+                                  env=self.isolated_env(resources),capture_output=True,timeout=WAIT)
             self.assertEqual(result.returncode,0,result.stderr.decode(errors='replace'))
             actual=json.loads((new/'response.json').read_text())
             for kind,folder,value in expected:
@@ -159,14 +160,14 @@ class InstalledIndexComputeTest(CandidateIndexAdapter, unittest.TestCase):
     def test_check_and_invalid_requests_fail_before_python_and_without_response(self):
         with tempfile.TemporaryDirectory(prefix='illustash-index-invalid-') as tmp:
             root = Path(tmp); adapter, resources = self.install(root); env = self.isolated_env(resources)
-            result = subprocess.run([str(adapter), '--check'], env=env, capture_output=True, timeout=10)
+            result = subprocess.run([str(adapter), '--check'], env=env, capture_output=True, timeout=WAIT)
             self.assertNotEqual(result.returncode, 0)
             self.assertNotIn('ILLUSTASH_WORKER_PYTHON', result.stderr.decode(errors='replace'))
             request, output = root/'request.json', root/'response.json'
             for value in ('{"format":"illustash-index/1","format":"other"}',
                           '{"format":"illustash-index/1","identity":{}}'):
                 request.write_text(value)
-                result = subprocess.run([str(adapter), str(request), str(output)], env=env, capture_output=True, timeout=10)
+                result = subprocess.run([str(adapter), str(request), str(output)], env=env, capture_output=True, timeout=WAIT)
                 self.assertNotEqual(result.returncode, 0)
                 self.assertNotIn('ILLUSTASH_WORKER_PYTHON', result.stderr.decode(errors='replace'))
                 self.assertFalse(output.exists())
@@ -310,14 +311,14 @@ class InstalledIndexAppTest(CandidateIndexAdapter, unittest.TestCase):
             + 'shutil.copyfile('+repr(str(saved))+',sys.argv[2])\n'
             + 'Path('+repr(str(self.ready))+').write_text(str(os.getpid()))\n'
             + 'while not Path('+repr(str(self.gate))+').exists(): time.sleep(.02)\n')
-        wait_until(lambda: self.ready.is_file() and self.ready.read_text().strip().isdigit(), timeout=30)
+        wait_until(lambda: self.ready.is_file() and self.ready.read_text().strip().isdigit())
         job = json.loads((self.lib.path/'index-job.json').read_text())
         self.assertTrue((Path(job['folder'])/'response.json').is_file())
 
     def start_held(self):
         self.check(); self.seed_reference(); self.index({'action':'apply','tags':['carol_example']})
         # 就绪文件在一次真实的索引计算之后才出现，并行跑全量时这一步可能远超 5 秒。
-        wait_until(lambda: self.ready.is_file() and self.ready.read_text().strip().isdigit(), timeout=30)
+        wait_until(lambda: self.ready.is_file() and self.ready.read_text().strip().isdigit())
         job = json.loads((self.lib.path/'index-job.json').read_text())
         result = Path(job['folder'])/'response.json'
         self.assertTrue(result.is_file())
@@ -389,7 +390,7 @@ class InstalledIndexAppTest(CandidateIndexAdapter, unittest.TestCase):
         (other.path/'library.json').write_text(json.dumps(other.config)); other_before = snapshot(other.source)
         result = self.request('/api/libraries/open', {'path':str(other.path)})
         self.assertEqual(result['status'], 200, result['body'])
-        wait_until(lambda: not process_exists(worker_pid), timeout=3)
+        wait_until(lambda: not process_exists(worker_pid))
         self.token = json.loads(self.request('/api/bootstrap')['body'])['token']
         self.assertEqual(self.index()['state']['status'], 'idle')
         self.assertEqual(snapshot(other.source), other_before)
@@ -400,7 +401,7 @@ class InstalledIndexAppTest(CandidateIndexAdapter, unittest.TestCase):
     def test_changed_input_after_actual_compute_rejected_on_restart(self):
         self.hold_after_actual_compute(); self.start_held(); worker_pid = int(self.ready.read_text())
         self.process.kill(); self.process.wait(); self.gate.touch()
-        wait_until(lambda: not process_exists(worker_pid), timeout=3)
+        wait_until(lambda: not process_exists(worker_pid))
         with contextlib.closing(sqlite3.connect(self.lib.source)) as c, c: c.execute("UPDATE labels SET conf=.5 WHERE dim='character' AND uuid='b'")
         before = snapshot(self.lib.source)
         self.env['ILLUSTASH_INDEX_WORKER'] = str(self.adapter); self.restart(); result = self.finish()
@@ -417,7 +418,7 @@ class InstalledIndexAppTest(CandidateIndexAdapter, unittest.TestCase):
         worker_pid = int(self.ready.read_text()); result = self.finish()
         self.assertEqual(result['state']['status'], 'error', result)
         self.assertIn('超时', result['state']['message'])
-        wait_until(lambda: not process_exists(worker_pid), timeout=3)
+        wait_until(lambda: not process_exists(worker_pid))
         for table in ('characters','character_aliases','labels'):
             self.assertEqual(snapshot(self.lib.source)[table], before[table])
         self.assertEqual(snapshot(self.lib.db)['actions'], self.human)

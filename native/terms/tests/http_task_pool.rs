@@ -1,5 +1,8 @@
 #![allow(clippy::unwrap_used)]
 
+#[path = "common/wait.rs"]
+mod wait;
+
 // 直接纳入 vendored 源码，让私有调度的回归随宿主现有锁文件和测试入口运行。
 // 也可用 rustc --test 单独运行，不需要给 vendor 新增 Cargo 配置或锁文件。
 mod task_pool {
@@ -11,7 +14,7 @@ mod task_pool {
         use std::time::Instant;
 
         let pool = TaskPool::new();
-        let deadline = Instant::now() + Duration::from_secs(10);
+        let deadline = crate::wait::deadline();
         let mut queue = loop {
             let queue = pool.sharing.todo.lock().unwrap();
             if pool.sharing.waiting_tasks.load(Ordering::Acquire) == MIN_THREADS {
@@ -57,22 +60,22 @@ mod task_pool {
         );
         drop(queue);
         for _ in 0..MIN_THREADS {
-            started_rx.recv_timeout(Duration::from_secs(10)).unwrap();
+            started_rx.recv_timeout(crate::wait::limit()).unwrap();
         }
 
         // 四个已有任务仍未释放；第五个任务必须已经有独立的执行机会。
-        let result = extra_rx.recv_timeout(Duration::from_secs(2));
+        let result = extra_rx.recv_timeout(crate::wait::limit());
         drop(releases);
         // 失败路径也释放所有长任务，并确认排队任务最终执行，排除任务本身失效。
         for _ in 0..=MIN_THREADS {
-            done_rx.recv_timeout(Duration::from_secs(10)).unwrap();
+            done_rx.recv_timeout(crate::wait::limit()).unwrap();
         }
         if result.is_err() {
-            extra_rx.recv_timeout(Duration::from_secs(10)).unwrap();
+            extra_rx.recv_timeout(crate::wait::limit()).unwrap();
         }
         let (reused_tx, reused_rx) = mpsc::channel();
         pool.spawn(Box::new(move || reused_tx.send(()).unwrap()));
-        reused_rx.recv_timeout(Duration::from_secs(10)).unwrap();
+        reused_rx.recv_timeout(crate::wait::limit()).unwrap();
         assert!(result.is_ok(), "排队任务重复占用了同一空闲线程，后续连接被阻塞: {result:?}");
     }
 }

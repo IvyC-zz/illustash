@@ -31,6 +31,7 @@ from tests.native_claims_fixture import claims as native_claims
 from tests import test_native_lifecycle as lifecycle
 from tests.test_native_human_labels import snapshot
 from tests.test_read_http import free_port
+from tools.wait_limit import WAIT
 
 ROOT = Path(__file__).resolve().parents[1]
 
@@ -159,7 +160,7 @@ class RecognitionModelTest(unittest.TestCase):
         input_path.write_text(json.dumps(request), encoding='utf-8')
         output_path.unlink(missing_ok=True)
         result = subprocess.run([str(binary), str(input_path), str(output_path)],
-                                env=env or self.env, cwd=self.root, capture_output=True, timeout=120)
+                                env=env or self.env, cwd=self.root, capture_output=True, timeout=WAIT * 2)
         self.assertEqual(result.returncode, 0, result.stderr.decode(errors='replace'))
         return json.loads(output_path.read_text(encoding='utf-8'))
 
@@ -213,7 +214,7 @@ class RecognitionModelTest(unittest.TestCase):
                 seen.append(value)
             time.sleep(.01)
         with process:
-            self.assertEqual(process.wait(timeout=5), 0, process.stderr.read().decode(errors='replace'))
+            self.assertEqual(process.wait(timeout=WAIT), 0, process.stderr.read().decode(errors='replace'))
         response = json.loads((self.root / 'response.json').read_text(encoding='utf-8'))
         self.assertEqual({v['stage'] for v in seen} & {'preparing', 'recognising'}, {'preparing', 'recognising'})
         self.assertTrue(any(0 < v['processed'] < 26 for v in seen), seen)
@@ -297,7 +298,7 @@ class RecognitionModelTest(unittest.TestCase):
                 env = dict(self.env, ILLUSTASH_ORT_DYLIB=str(runtime))
                 reply = self.root / 'failed-response.json'
                 result = subprocess.run([str(self.adapter), str(self.root / 'request.json'), str(reply)],
-                                        cwd=self.root, env=env, capture_output=True, timeout=30)
+                                        cwd=self.root, env=env, capture_output=True, timeout=WAIT)
                 self.assertNotEqual(result.returncode, 0)
                 self.assertIn(runtime.name, result.stderr.decode(errors='replace'))
                 self.assertFalse(reply.exists())
@@ -311,7 +312,7 @@ class RecognitionModelTest(unittest.TestCase):
                     env = dict(self.env, ILLUSTASH_RESEARCH_OPENBLAS_DLL=str(backend))
                     reply = self.root / 'failed-response.json'
                     result = subprocess.run([str(self.adapter), str(self.root / 'request.json'), str(reply)],
-                                            cwd=self.root, env=env, capture_output=True, timeout=30)
+                                            cwd=self.root, env=env, capture_output=True, timeout=WAIT)
                     self.assertNotEqual(result.returncode, 0)
                     self.assertIn('OpenBLAS', result.stderr.decode(errors='replace'))
                     self.assertNotIn('ILLUSTASH_WORKER_PYTHON', result.stderr.decode(errors='replace'))
@@ -328,7 +329,7 @@ class RecognitionModelTest(unittest.TestCase):
         (self.root / 'request.json').write_text(json.dumps(request), encoding='utf-8')
         reply = self.root / 'failed-response.json'
         result = subprocess.run([str(self.adapter), str(self.root / 'request.json'), str(reply)],
-                                cwd=self.root, env=env, capture_output=True, timeout=60)
+                                cwd=self.root, env=env, capture_output=True, timeout=WAIT)
         self.assertNotEqual(result.returncode, 0)
         self.assertIn('WD 概率', result.stderr.decode(errors='replace'))
         self.assertFalse(reply.exists())
@@ -343,7 +344,7 @@ class RecognitionModelTest(unittest.TestCase):
         package = self.root / 'fresh.pilib'
         made = subprocess.run([str(self.binary), 'library-create', '--dest', str(package), '--folder', str(folder),
                                '--name', 'synthetic'],
-                              env=self.env, capture_output=True, timeout=30)
+                              env=self.env, capture_output=True, timeout=WAIT)
         self.assertEqual(made.returncode, 0, made.stderr.decode(errors='replace'))
         self.env['ILLUSTASH_RECOGNITION_WORKER'] = str(self.adapter)
         # 默认的 ROOT/models/runtime 必须从重新安置的安装版 exe 找到；

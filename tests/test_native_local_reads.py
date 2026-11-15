@@ -16,6 +16,7 @@ from tests import test_native_human_labels as labels, test_native_human_curation
 from tests.fixed_expectations import unclocked
 from tests.test_native_human_labels import difference
 from tools.verify_read_http import cookie, fetch
+from tools.wait_limit import WAIT
 
 
 class NativeLocalReadsTest(unittest.TestCase):
@@ -215,7 +216,7 @@ class NativeLocalReadsTest(unittest.TestCase):
 
     def test_partial_suggest_body_cannot_cross_library_switch(self):
         import http.client
-        connection=http.client.HTTPConnection('127.0.0.1',self.port,timeout=5)
+        connection=http.client.HTTPConnection('127.0.0.1',self.port,timeout=WAIT)
         body=b'{"ids":["b"]}'
         connection.putrequest('POST','/api/suggest');connection.putheader('Host',self.origin.split('://')[1])
         connection.putheader('Origin',self.origin);connection.putheader('Cookie',cookie(self.origin));connection.putheader('X-CSRF-Token',self.token)

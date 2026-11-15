@@ -23,6 +23,7 @@ from tests.fixed_expectations import unclocked
 from tests.test_read_http import SPAWN, wait_until
 from tools.verify_read_http import enter, fetch
 from tests import provenance_fixture as db
+from tools.wait_limit import WAIT
 
 
 def store_credential(support, kind, value):
@@ -113,7 +114,7 @@ class NativeProvenanceTest(unittest.TestCase):
         log=tempfile.TemporaryFile();self.addCleanup(log.close)
         process=subprocess.Popen([str(self.binary),'http','--no-names','--no-auto-sync','--library',str(path),'--port',str(self.port),'--root',str(self.resources),*extra],env={**self.env,'ILLUSTASH_NO_KEYCHAIN':'1'},stdout=log,stderr=log, **SPAWN)
         self.addCleanup(self.stop,process)
-        enter(self.origin,log,process,timeout=8)
+        enter(self.origin,log,process)
         return process,log
     def setUp(self):
         lifecycle.NativeLifecycleTest.setUp(self)
@@ -157,7 +158,7 @@ class NativeProvenanceTest(unittest.TestCase):
         seen=[]
         def settled():
             seen[:]=[self.info()];return seen[0]['state']['status'] not in ('running','stopping')
-        wait_until(settled,timeout=10)
+        wait_until(settled)
         value=seen[0]
         if status:self.assertEqual(value['state']['status'],status,value)
         return value
@@ -248,9 +249,9 @@ class NativeProvenanceTest(unittest.TestCase):
         self.assertEqual(self.request('/api/assets')['status'],200)
     def test_stop_restart_and_process_tree(self):
         self.env.update(SYNTHETIC_MODE='tree',SYNTHETIC_PID=str(self.root/'pid'));self.restart()
-        self.post({'action':'artist','artist':'synthetic'});wait_until(lambda:(self.root/'pid').exists(),timeout=5)
+        self.post({'action':'artist','artist':'synthetic'});wait_until(lambda:(self.root/'pid').exists())
         pid=int((self.root/'pid').read_text());self.post({'action':'stop'});self.finish('stopped')
-        wait_until(lambda:not worker_exists(pid),timeout=5)
+        wait_until(lambda:not worker_exists(pid))
         self.env['SYNTHETIC_MODE']='ok';self.restart();self.post({'action':'lookup','ids':['a']});self.finish('done')
     def test_failure_retry_and_delivery_recovery(self):
         self.code=403;self.post({'action':'lookup','ids':['a']});self.finish('stopped')
@@ -306,7 +307,7 @@ class NativeProvenanceTest(unittest.TestCase):
         self.assertFalse(self.sql("SELECT task_id FROM native_delivery WHERE status='pending'",cache=True))
     def test_frozen_package_does_not_replay_pending_delivery(self):
         self.post({'action':'lookup','ids':['a']});self.finish('done')
-        wait_until(lambda:self.sql('SELECT status FROM native_delivery',cache=True)==[('done',)],timeout=10)
+        wait_until(lambda:self.sql('SELECT status FROM native_delivery',cache=True)==[('done',)])
         # 运行中、未冻结的宿主会在下一次空闲轮询时重放待处理的交付（#56），所以要等宿主停下后才设置待处理状态。
         self.stop(self.process)
         with db.connect(self.lib) as c:c.execute("UPDATE native_delivery SET status='pending'")
@@ -331,14 +332,14 @@ class NativeProvenanceTest(unittest.TestCase):
         self.post({'action':'artist','artist':'synthetic'})
         self.assertEqual(self.request('/api/libraries/open',{'path':str(self.lib.path)})['status'],200)
         self.token=json.loads(self.request('/api/bootstrap')['body'])['token']
-        wait_until(lambda:self.info()['state']['status']=='stopped',timeout=4)
+        wait_until(lambda:self.info()['state']['status']=='stopped')
         self.env['SYNTHETIC_MODE']='hang-first'
         with db.connect(self.lib) as c:c.execute("INSERT OR IGNORE INTO pending_runs(kind) VALUES ('new')")
-        self.restart();wait_until(lambda:self.info()['state'].get('kind')=='new',timeout=4)
+        self.restart();wait_until(lambda:self.info()['state'].get('kind')=='new')
         previous=self.sql('SELECT max(id) FROM runs',cache=True)[0][0]
         self.assertEqual(self.request('/api/libraries/open',{'path':str(self.lib.path)})['status'],200)
         self.token=json.loads(self.request('/api/bootstrap')['body'])['token']
-        wait_until(lambda:self.sql('SELECT max(id) FROM runs',cache=True)[0][0]>previous,timeout=4)
+        wait_until(lambda:self.sql('SELECT max(id) FROM runs',cache=True)[0][0]>previous)
         self.assertEqual(self.info()['state']['kind'],'new');self.post({'action':'stop'});self.finish('stopped')
 
     def test_export_contract_native_matches_python(self):
@@ -383,13 +384,13 @@ class NativeProvenanceTest(unittest.TestCase):
         self.env['SYNTHETIC_MODE']='hang-first';self.restart()
         with db.connect(self.lib) as c:c.execute("INSERT INTO pending_runs(kind) VALUES ('new')")
         self.restart()
-        wait_until(lambda:self.info()['state'].get('kind')=='new',timeout=5)
+        wait_until(lambda:self.info()['state'].get('kind')=='new')
         self.post({'action':'start'},400)
         self.post({'action':'lookup','ids':['a']})
         # 被抢占的运行在查找一结束就恢复，所以查找的结果从它自己的运行里读。
-        wait_until(lambda:any(r['kind']=='pick' and r['status'] not in ('running','stopping') for r in self.info()['runs']),timeout=10)
+        wait_until(lambda:any(r['kind']=='pick' and r['status'] not in ('running','stopping') for r in self.info()['runs']))
         self.assertEqual([r['status'] for r in self.info()['runs'] if r['kind']=='pick'],['done'])
-        wait_until(lambda:self.info()['state'].get('kind')=='new' and self.info()['state']['status']=='running',timeout=5)
+        wait_until(lambda:self.info()['state'].get('kind')=='new' and self.info()['state']['status']=='running')
         self.post({'action':'stop'});self.finish('stopped')
         with db.connect(self.lib) as c:c.execute("INSERT OR IGNORE INTO pending_runs(kind) VALUES ('new')")
         self.restart(['--no-provenance']);time.sleep(1.2)
@@ -436,7 +437,7 @@ class NativeProvenanceTest(unittest.TestCase):
         self.stop(self.process)
         with sqlite3.connect(self.lib.db) as c:c.execute("INSERT INTO sync_runs(status,imported,finished_at) VALUES ('done',1,datetime('now'))")
         self.process,self.log=self.start(self.lib.path);self.token=json.loads(self.request('/api/bootstrap')['body'])['token']
-        wait_until(lambda:self.info()['state'].get('kind')=='new',timeout=5)
+        wait_until(lambda:self.info()['state'].get('kind')=='new')
         self.assertTrue(self.sql("SELECT value FROM native_meta WHERE key='sync_seen'",cache=True))
         self.post({'action':'stop'});self.finish('stopped')
 
@@ -471,7 +472,7 @@ class NativeProvenanceTest(unittest.TestCase):
                            "p.kill();p.wait()\n")
         wrapper.chmod(0o755);pidfile=self.root/'owner-child'
         self.env.update(ILLUSTASH_PROVENANCE_WORKER=worker_command(wrapper),SYNTHETIC_PYTHON=sys.executable,SYNTHETIC_PID=str(pidfile));self.restart()
-        self.post({'action':'artist','artist':'synthetic'});wait_until(pidfile.exists,timeout=5)
+        self.post({'action':'artist','artist':'synthetic'});wait_until(pidfile.exists)
         worker,child=map(int,pidfile.read_text().split())
         gone=[]
         def reap():
@@ -482,9 +483,9 @@ class NativeProvenanceTest(unittest.TestCase):
                     if os.name=='nt':os.kill(pid,signal.SIGTERM)
                     else:(os.killpg if group else os.kill)(pid,signal.SIGKILL)
         self.addCleanup(reap)
-        self.process.kill();self.process.wait(timeout=5)
+        self.process.kill();self.process.wait(timeout=WAIT)
         # POSIX 上 worker_exists 按进程组查，worker 是组长，孙进程同组，一并覆盖。
-        wait_until(lambda:not worker_exists(worker) and not worker_exists(child),timeout=5);gone.append(True)
+        wait_until(lambda:not worker_exists(worker) and not worker_exists(child));gone.append(True)
         self.process,self.log=self.start(self.lib.path);self.token=json.loads(self.request('/api/bootstrap')['body'])['token']
         self.assertEqual(self.info()['state']['status'],'stopped')
         self.assertEqual(self.sql("SELECT count(*) FROM term_evidence WHERE source='provenance'"),[(0,)])

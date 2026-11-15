@@ -19,3 +19,5 @@ pub mod platform_system;
 pub mod platform_time;
 pub mod source_rows;
 pub mod sqlite;
+#[cfg(test)]
+mod test_wait;

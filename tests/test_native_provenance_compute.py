@@ -14,6 +14,7 @@ import unittest
 
 from PIL import Image
 from tests.image_expectations import pixel_hash
+from tools.wait_limit import WAIT
 
 
 class IndependentProvenanceInputs(unittest.TestCase):
@@ -57,7 +58,7 @@ class NativeProvenanceComputeTest(unittest.TestCase):
         output.unlink(missing_ok=True)
         run = subprocess.run([str(self.binary), str(incoming), str(output)],
                              env=os.environ | {'PATH': ''}, capture_output=True,
-                             timeout=30, start_new_session=os.name != 'nt')
+                             timeout=WAIT, start_new_session=os.name != 'nt')
         if success:
             self.assertEqual(run.returncode, 0, run.stderr.decode())
             return json.loads(output.read_text())

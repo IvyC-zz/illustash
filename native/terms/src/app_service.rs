@@ -766,19 +766,19 @@ mod tests {
                     crate::app_tasks::TaskIdentity::new(&session.library, generation, &session.token).unwrap();
                 let task = crate::app_tasks::Task::start(identity, None, move |ctx| {
                     ready_tx.send(ctx.clone()).unwrap();
-                    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
+                    let deadline = crate::test_wait::deadline();
                     while ctx.check().is_ok() {
                         assert!(std::time::Instant::now() < deadline, "service did not cancel its task");
                         std::thread::yield_now();
                     }
                     cancel_tx.send(()).unwrap();
-                    release_rx.recv_timeout(std::time::Duration::from_secs(5)).unwrap();
+                    release_rx.recv_timeout(crate::test_wait::limit()).unwrap();
                     assert!(ctx.receive::<()>(ctx.identity(), || panic!("cancelled owned task published")).is_err());
                     Ok(())
                 });
                 session.syncer.install_fixture_task(task);
             }
-            let context = ready_rx.recv_timeout(std::time::Duration::from_secs(2)).unwrap();
+            let context = ready_rx.recv_timeout(crate::test_wait::limit()).unwrap();
             let observe = (finish != "drop").then(|| target_service.clone());
             let finishing = target_service;
             let target = first.clone();
@@ -793,7 +793,7 @@ mod tests {
                 }
                 done_tx.send(()).unwrap();
             });
-            cancel_rx.recv_timeout(std::time::Duration::from_secs(2)).unwrap();
+            cancel_rx.recv_timeout(crate::test_wait::limit()).unwrap();
             assert!(matches!(done_rx.try_recv(), Err(std::sync::mpsc::TryRecvError::Empty)));
             if let Some(observe) = observe {
                 if finish == "shutdown" {
@@ -803,7 +803,7 @@ mod tests {
                 }
             }
             release_tx.send(()).unwrap();
-            done_rx.recv_timeout(std::time::Duration::from_secs(2)).unwrap();
+            done_rx.recv_timeout(crate::test_wait::limit()).unwrap();
             thread.join().unwrap();
             assert!(context.receive::<()>(context.identity(), || panic!("joined owned task published")).is_err());
         }

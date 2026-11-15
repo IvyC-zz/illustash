@@ -12,6 +12,7 @@ import tempfile
 import unittest
 
 import numpy as np
+from tools.wait_limit import WAIT
 
 
 @unittest.skipUnless(sys.platform == 'win32', 'Windows pinned OpenBLAS backend only')
@@ -32,7 +33,7 @@ class WindowsResearchMathTest(unittest.TestCase):
             request.write_text(json.dumps(cases), encoding='utf-8')
             # 候选不能在 PATH 里找 DLL，也不能把数值计算交给 Python。
             return subprocess.run([str(self.binary), '--math', str(request)], env=env or (os.environ | {'PATH': ''}),
-                                  capture_output=True, timeout=30)
+                                  capture_output=True, timeout=WAIT)
 
     @staticmethod
     def case(a, b, same=False):

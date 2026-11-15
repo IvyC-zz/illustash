@@ -13,6 +13,7 @@ from tests import test_native_lifecycle as lifecycle
 from tests.test_native_lifecycle import NativeLifecycleTest, dump
 from tests.test_native_files import asset, key
 from tools.verify_read_http import cookie
+from tools.wait_limit import WAIT
 
 
 class NativeCacheTest(unittest.TestCase):
@@ -111,7 +112,7 @@ class NativeCacheTest(unittest.TestCase):
         target.write_bytes(payload)
         (second.thumbnails / 'new.jpg').write_bytes(b'new package cache')
         sock = socket.socket(); self.addCleanup(sock.close)
-        sock.setsockopt(socket.SOL_SOCKET, socket.SO_RCVBUF, 4096); sock.settimeout(10)
+        sock.setsockopt(socket.SOL_SOCKET, socket.SO_RCVBUF, 4096); sock.settimeout(WAIT)
         sock.connect(('127.0.0.1', self.port))
         sock.sendall((f'GET /image?id=slow HTTP/1.1\r\nHost: 127.0.0.1:{self.port}\r\nCookie: {cookie(self.origin)}\r\n'
                       'Connection: close\r\n\r\n').encode())
@@ -142,12 +143,12 @@ class NativeCacheTest(unittest.TestCase):
             (self.lib.thumbnails / f'{i:05}.jpg').write_bytes(b'synthetic')
         with ThreadPoolExecutor(max_workers=1) as pool:
             future = pool.submit(self.request, '/api/cache', {'action': 'clear'})
-            deadline = time.monotonic() + 5
+            deadline = time.monotonic() + WAIT
             while len(list(self.lib.thumbnails.iterdir())) == 8000:
                 self.assertLess(time.monotonic(), deadline)
                 time.sleep(.001)
             self.assertEqual(self.request('/api/libraries/open', {'path': str(second.path)})['status'], 200)
-            clear = future.result(timeout=10)
+            clear = future.result(timeout=WAIT)
         self.assertEqual(clear['status'], 200)
         payload = json.loads(clear['body'])
         self.assertEqual(payload['removed'], 8000)
@@ -159,7 +160,7 @@ class NativeCacheTest(unittest.TestCase):
     def test_partial_body_from_old_session_cannot_clear_new_package(self):
         second = self.package('second')
         (second.thumbnails / 'keep.jpg').write_bytes(b'new cache')
-        sock = socket.socket(); self.addCleanup(sock.close); sock.settimeout(5)
+        sock = socket.socket(); self.addCleanup(sock.close); sock.settimeout(WAIT)
         sock.connect(('127.0.0.1', self.port))
         body = b'{"action":"clear"}'
         headers = (f'POST /api/cache HTTP/1.1\r\nHost: 127.0.0.1:{self.port}\r\nOrigin: {self.origin}\r\n'

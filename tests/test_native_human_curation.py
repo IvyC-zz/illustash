@@ -17,6 +17,7 @@ from tests import test_native_human_labels as labels
 from tests.test_native_human_labels import snapshot, states
 from tools.verify_read_http import cookie, fetch
 from tests.fixed_expectations import unclocked
+from tools.wait_limit import WAIT
 
 
 class NativeHumanCurationTest(unittest.TestCase):
@@ -229,7 +230,7 @@ class NativeHumanCurationTest(unittest.TestCase):
         token = json.loads(fetch(self.origin, {'url': '/api/bootstrap'}, self.origin)['body'])['token']
         before_old, before_new = states(self.right), states(newer)
         body = json.dumps({'ids': ['a'], 'action': 'exclude'}).encode()
-        conn = http.client.HTTPConnection('127.0.0.1', self.port, timeout=5)
+        conn = http.client.HTTPConnection('127.0.0.1', self.port, timeout=WAIT)
         self.addCleanup(conn.close)
         conn.putrequest('POST', '/api/curate', skip_host=True)
         for name, value in {'Host': self.origin.split('://')[1], 'Origin': self.origin, 'Cookie': cookie(self.origin),

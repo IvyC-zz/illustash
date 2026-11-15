@@ -258,7 +258,7 @@ mod tests {
                 libc::raise(libc::SIGTERM);
             }
         }
-        let until = std::time::Instant::now() + std::time::Duration::from_secs(5);
+        let until = crate::test_wait::deadline();
         while !stopping() && std::time::Instant::now() < until {
             std::thread::sleep(std::time::Duration::from_millis(10));
         }

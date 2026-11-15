@@ -15,6 +15,7 @@ from tests import test_native_lifecycle as lifecycle
 from tests import test_native_folder as folder_tests
 from tests.test_read_http import free_port, wait_until, SPAWN
 from tools.verify_read_http import enter, fetch
+from tools.wait_limit import WAIT
 
 
 class NativeFirstInstallTest(unittest.TestCase):
@@ -48,7 +49,7 @@ class NativeFirstInstallTest(unittest.TestCase):
         dest = self.root / 'first.pilib'
         result = subprocess.run([str(self.binary), 'library-create', '--dest', str(dest),
                                  '--folder', str(self.folder)], cwd=self.home.parent,
-                                env=self.env, capture_output=True, timeout=20)
+                                env=self.env, capture_output=True, timeout=WAIT)
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertTrue((dest / 'library.json').is_file())
         with closing(sqlite3.connect(dest / 'source.sqlite')) as c:
@@ -64,7 +65,7 @@ class NativeFirstInstallTest(unittest.TestCase):
                                     '--no-index-check'], cwd=self.install, env=self.env,
                                    stdout=log, stderr=log, **SPAWN)
         self.addCleanup(self.stop, process)
-        enter(self.origin, log, process, timeout=8)
+        enter(self.origin, log, process)
         self.token = json.loads(self.request('/api/bootstrap')['body'])['token']
 
     def check_sync(self, dest):

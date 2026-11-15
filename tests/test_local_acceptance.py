@@ -9,6 +9,7 @@ import unittest
 from unittest import mock
 import os
 import sys
+from tools.wait_limit import WAIT
 
 spec = importlib.util.spec_from_file_location('local_acceptance', Path(__file__).resolve().parents[1] / 'tools/local_acceptance.py')
 acceptance = importlib.util.module_from_spec(spec)
@@ -348,7 +349,7 @@ run() {
                                  pass_fds=(read_fd,), stdout=subprocess.PIPE)
         os.close(read_fd)
         try:
-            owner.wait(timeout=10)
+            owner.wait(timeout=WAIT)
             self.assertEqual(owner.stdout.readline(), b'ready\n')
             with self.assertRaisesRegex(ValueError, '已占用'):
                 with acceptance.locked(self.state):

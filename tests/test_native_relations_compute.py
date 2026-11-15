@@ -20,6 +20,7 @@ from PIL import Image, ImageDraw
 
 from tests.image_expectations import relate, similar, assert_bits
 from tests.relate_images import picture, jpeg
+from tools.wait_limit import WAIT
 
 
 class NativeRelationImagesTest(unittest.TestCase):
@@ -46,7 +47,7 @@ class NativeRelationImagesTest(unittest.TestCase):
         request, response = self.root / 'probe.json', self.root / 'out.json'
         request.write_text(json.dumps(dict(op=op, **args)), encoding='utf-8')
         result = subprocess.run([str(self.binary), str(request), str(response)],
-                                env=os.environ | {'PATH': ''}, capture_output=True, timeout=180)
+                                env=os.environ | {'PATH': ''}, capture_output=True, timeout=WAIT * 3)
         self.assertEqual(result.returncode, 0, result.stderr.decode())
         return json.loads(response.read_text())
 
@@ -295,7 +296,7 @@ class NativeRelationImagesTest(unittest.TestCase):
                                 request,response=self.root/'invalid.json',self.root/'invalid-out.json'
                                 request.write_text(json.dumps(dict(op='load',path=path)))
                                 run=subprocess.run([str(self.binary),str(request),str(response)],
-                                    env=os.environ|{'PATH':''},capture_output=True,timeout=30)
+                                    env=os.environ|{'PATH':''},capture_output=True,timeout=WAIT)
                                 self.assertNotEqual(run.returncode,0)
                                 self.assertIn('unknown raw mode',run.stderr.decode())
                                 self.assertFalse(response.exists())
@@ -442,7 +443,7 @@ class NativeRelationImagesTest(unittest.TestCase):
                                     relate.load(path)
                                 request,response=self.root/'invalid.json',self.root/'invalid-out.json'
                                 request.write_text(json.dumps(dict(op='load',path=path)))
-                                run=subprocess.run([str(self.binary),str(request),str(response)],env=os.environ|{'PATH':''},capture_output=True,timeout=30)
+                                run=subprocess.run([str(self.binary),str(request),str(response)],env=os.environ|{'PATH':''},capture_output=True,timeout=WAIT)
                                 self.assertNotEqual(run.returncode,0);self.assertIn('unknown raw mode',run.stderr.decode());self.assertFalse(response.exists())
                             else:
                                 self.assert_image(path)
@@ -564,7 +565,7 @@ class NativeRelationImagesTest(unittest.TestCase):
             relate.load(path)
         request,response=self.root/'probe.json',self.root/'out.json'
         request.write_text(json.dumps(dict(op='load',path=path)),encoding='utf-8')
-        run=subprocess.run([str(self.binary),str(request),str(response)],env=os.environ|{'PATH':''},capture_output=True,timeout=10)
+        run=subprocess.run([str(self.binary),str(request),str(response)],env=os.environ|{'PATH':''},capture_output=True,timeout=WAIT)
         self.assertNotEqual(run.returncode,0)
         self.assertIn('image has wrong mode',run.stderr.decode())
 
@@ -904,7 +905,7 @@ class NativeSimilarSnapshotTest(unittest.TestCase):
         input_path.write_text(json.dumps(request), encoding='utf-8')
         run = subprocess.run([str(self.binary), str(input_path), str(output)],
                              env=os.environ | dict(PATH='', ILLUSTASH_RESEARCH_PROGRESS=str(self.root/'progress.json')),
-                             capture_output=True, timeout=180)
+                             capture_output=True, timeout=WAIT * 3)
         return run, output
 
     def test_exact_cache_rows_incremental_skip_retry_and_unchanged_snapshot(self):

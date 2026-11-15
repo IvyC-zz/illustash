@@ -7,6 +7,7 @@ import shutil
 import subprocess
 import tempfile
 import unittest
+from tools.wait_limit import WAIT
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -38,10 +39,10 @@ class CiWorkflowTest(unittest.TestCase):
         return subprocess.run(['bash', '--noprofile', '--norc', '-e', '-o', 'pipefail', '-c', script],
                               cwd=self.root, env={**os.environ, 'RUNNER_TEMP': str(self.root),
                                                  'GITHUB_OUTPUT': str(self.output), **environment},
-                              capture_output=True, text=True, timeout=10)
+                              capture_output=True, text=True, timeout=WAIT)
 
     def git(self, *args):
-        result = subprocess.run(['git', *args], cwd=self.root, capture_output=True, text=True, timeout=10)
+        result = subprocess.run(['git', *args], cwd=self.root, capture_output=True, text=True, timeout=WAIT)
         self.assertEqual(result.returncode, 0, result.stderr)
         return result.stdout.strip()
 

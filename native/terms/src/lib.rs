@@ -123,6 +123,10 @@ pub use illustash_core::strict_json;
 pub(crate) mod table_delta;
 mod task_state;
 mod wd_pending;
+// 测试的统一等待上限（#508），文件与集成测试共用。
+#[cfg(test)]
+#[path = "../tests/common/wait.rs"]
+pub(crate) mod test_wait;
 mod worker_protocol;
 
 pub use error::{Error, Result};

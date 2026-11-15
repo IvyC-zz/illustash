@@ -374,7 +374,7 @@ fn post(models: &'static Models, place: &Place, body: Value) -> Result<Value> {
 fn finished(models: &Models) -> Value {
     let started = Instant::now();
     while models.running.load(Ordering::SeqCst) {
-        assert!(started.elapsed() < Duration::from_secs(30), "job did not finish: {}", models.snapshot());
+        assert!(started.elapsed() < crate::test_wait::limit(), "job did not finish: {}", models.snapshot());
         std::thread::sleep(Duration::from_millis(20));
     }
     models.snapshot()
@@ -497,7 +497,7 @@ fn cancelling_keeps_the_part_and_discarding_removes_it() {
     post(models, &place, json!({"action": "download"})).unwrap();
     let started = Instant::now();
     while models.snapshot()["done"].as_u64().unwrap_or(0) == 0 {
-        assert!(started.elapsed() < Duration::from_secs(10));
+        assert!(started.elapsed() < crate::test_wait::limit());
         std::thread::sleep(Duration::from_millis(20));
     }
     assert!(post(models, &place, json!({"action": "discard"})).unwrap_err().to_string().contains("先取消"));

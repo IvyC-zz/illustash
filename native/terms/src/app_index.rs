@@ -1711,7 +1711,7 @@ mod tests {
             assert_eq!(import(&lib, &src, &job, &ctx)?, 0);
             Ok(())
         });
-        assert!(task.wait(Duration::from_secs(30)));
+        assert!(task.wait(crate::test_wait::limit()));
         assert_eq!(task.outcome(), crate::app_tasks::TaskOutcome::Done);
         drop(task);
         std::fs::remove_dir_all(root).unwrap();

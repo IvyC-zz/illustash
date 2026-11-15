@@ -20,6 +20,7 @@ from PIL import Image
 from tests import provenance_fixture as db
 from tests import test_native_provenance_compute as driver
 from tests.test_native_provenance_production import candidate_worker
+from tools.wait_limit import WAIT
 
 ROOT = Path(__file__).resolve().parents[1]
 
@@ -116,7 +117,7 @@ class NativeIqdbQueueTest(unittest.TestCase):
         path, mailbox = self.request(side, only)
         response = self.root / f'response-{side}.json'
         response.unlink(missing_ok=True)
-        run = subprocess.run([*command, str(path), str(response)], env=env, capture_output=True, timeout=120,
+        run = subprocess.run([*command, str(path), str(response)], env=env, capture_output=True, timeout=WAIT * 2,
                              start_new_session=os.name != 'nt')
         self.assertEqual(run.returncode, 0, run.stderr.decode(errors='replace'))
         result = json.loads(response.read_text())['result']
