@@ -5,12 +5,20 @@ from pathlib import Path
 from PIL import Image
 from tests import provenance_fixture as db
 from tests.provenance_expectations import verify
+from tests import numeric_reference_mode
 from tests import test_native_provenance_local as local_driver
 import unittest
 
 
 class NativeProvenanceMatchTest(unittest.TestCase):
-    setUpClass = classmethod(local_driver.NativeLocalProvenanceTest.setUpClass.__func__)
+    @classmethod
+    def setUpClass(cls):
+        try:
+            local_driver.NativeLocalProvenanceTest.setUpClass.__func__(cls)
+        except unittest.SkipTest as error:
+            numeric_reference_mode.missing_candidate(str(error))
+            raise
+
     setUp = local_driver.NativeLocalProvenanceTest.setUp
     probe = local_driver.NativeLocalProvenanceTest.probe
     fixture_local = local_driver.NativeLocalProvenanceTest.fixture_local
@@ -57,9 +65,13 @@ class NativeProvenanceMatchTest(unittest.TestCase):
                          image_artists='asset,artist_id,method,score,evidence,status',
                          lookups='target,backend,attempts,last_result').items()}
 
-    def parity(self, request, reference):
+    def parity(self, request, reference, numeric=False):
         core, source = reference.db.read_bytes(), reference.source.read_bytes()
-        expected = verify.local_run(reference,log=lambda _:None)
+        if numeric:
+            from tests.numpy_provenance_reference import local_run
+            expected = local_run(reference)
+        else:
+            expected = verify.local_run(reference,log=lambda _:None)
         actual = self.probe(request)
         self.assertEqual(actual['identity'],request['identity'])
         self.assertEqual(actual['result'],expected)
@@ -117,6 +129,7 @@ class NativeProvenanceMatchTest(unittest.TestCase):
         self.assertEqual(self.rows(Path(request['cache']))['lookups'],[])
 
     def test_stored_ratio_float32_boundary_and_flat_rejection_are_exact(self):
+        dynamic = numeric_reference_mode.enabled(self)
         import numpy as np
         request,reference=self.fixture_match()
         library=Path(request['library']);path=library/'generated.png'
@@ -133,4 +146,4 @@ class NativeProvenanceMatchTest(unittest.TestCase):
                 asset=f'ratio-{i}'
                 c.execute('INSERT INTO assets VALUES (?,?)',(asset,str(path)))
                 c.execute('INSERT INTO image_sigs VALUES (?,?,?,1)',(asset,float(value),grid))
-        self.parity(request,reference)
+        self.parity(request,reference,numeric=dynamic)

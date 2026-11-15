@@ -84,6 +84,14 @@ class IndexTransitionRoutingTest(CandidateIndexAdapter, unittest.TestCase):
 
 @unittest.skipUnless(sys.platform in ('darwin', 'win32'), 'Linux is frozen: no local computation')
 class InstalledIndexComputeTest(CandidateIndexAdapter, unittest.TestCase):
+    @classmethod
+    def setUpClass(cls):
+        try:
+            super().setUpClass()
+        except unittest.SkipTest as error:
+            compute.numeric_reference_mode.missing_candidate(str(error))
+            raise
+
     def test_fresh_empty_and_last_drop_clear_anchors_without_model_or_python(self):
         with tempfile.TemporaryDirectory(prefix='illustash-index-empty-') as tmp:
             root = Path(tmp); adapter, resources = self.install(root)
@@ -110,6 +118,8 @@ class InstalledIndexComputeTest(CandidateIndexAdapter, unittest.TestCase):
                 self.assertEqual((review/'char-anchors.txt').read_text(), '')
 
     def test_cached_clean_build_scan_exact_old_algorithm_without_python_or_models(self):
+        dynamic = compute.numeric_reference_mode.enabled(self)
+        from tests import numpy_index_reference
         with tempfile.TemporaryDirectory(prefix='illustash-index-installed-') as tmp:
             root = Path(tmp); adapter, resources = self.install(root)
             old, new = root/'old', root/'new'; old.mkdir()
@@ -123,7 +133,8 @@ class InstalledIndexComputeTest(CandidateIndexAdapter, unittest.TestCase):
                                action='apply', rows=rows, review=str(folder), reason=None)
                 (folder/'request.json').write_text(json.dumps(request))
                 if folder == old:
-                    results.append(reference.legacy(old, tags, folder/'request.json'))
+                    results.append(numpy_index_reference.cached_apply(old, tags, folder/'request.json') if dynamic
+                                   else reference.legacy(old, tags, folder/'request.json'))
                 else:
                     # 使用安装根目录里的夹具 tags，相对可执行文件找到。
                     shutil.copy2(tags, resources/'tags/tags_v3.csv')

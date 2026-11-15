@@ -12,6 +12,7 @@ import struct
 import subprocess
 import tempfile
 import unittest
+from tests import numeric_reference_mode
 import zlib
 
 import numpy as np
@@ -26,6 +27,7 @@ class NativeRelationImagesTest(unittest.TestCase):
     def setUpClass(cls):
         configured = os.environ.get('ILLUSTASH_RELATION_PROBE_BIN')
         if not configured:
+            numeric_reference_mode.missing_candidate('explicit candidate relation probe required')
             raise unittest.SkipTest('explicit candidate relation probe required')
         cls.binary = Path(configured).resolve()
         if not cls.binary.is_file():
@@ -819,13 +821,19 @@ class NativeRelationImagesTest(unittest.TestCase):
                 self.assertEqual(actual, expected)
 
     def test_locate_flat_is_rejected_and_synthetic_crop_reference_is_exact(self):
+        dynamic = numeric_reference_mode.enabled(self)
+        from tests import numpy_crop_reference
         base = picture(9, (600, 800))
         crop = base.crop((120, 200, 480, 600))
         a, b = self.save(base, 'base.png'), self.save(crop, 'crop.png')
-        expected = relate.locate(relate.load(a)[0], relate.load(b)[0])
+        oracle = numpy_crop_reference if dynamic else relate
+        expected = oracle.locate(oracle.load(a)[0], oracle.load(b)[0])
+        self.assertEqual(list(expected[1:]), [.20052083333333334, .25, .5989583333333334, .5])
         actual = self.probe('locate', a=a, b=b)
         self.assertEqual(actual, list(expected))
         flat = self.save(Image.new('RGB', (120, 160), '#888888'), 'flat.png')
+        if dynamic:
+            self.assertIsNone(oracle.locate(oracle.load(a)[0], oracle.load(flat)[0]))
         self.assertIsNone(self.probe('locate', a=a, b=flat))
 
 
