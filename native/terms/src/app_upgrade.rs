@@ -704,4 +704,115 @@ mod tests {
             assert!(seen.iter().all(|(_, done)| (0.0..=VERIFY.1).contains(done)), "{seen:?}");
         }
     }
+
+    /// #492：照着 library.sqlite 的损坏提示换回两处备份。`backups/` 里「立即备份」留下的 library- 文件直接能打开；
+    /// `library-backups/` 里升级前的备份要再升级一次，之前记下的损坏不能挡在升级提问前面；抢救留存的
+    /// source-damaged 文件不是整理记录，换回去也不会被当成图库打开。每一份备份之后的整理都丢失。
+    #[test]
+    fn the_damage_guidance_matches_the_backups_that_can_be_restored() {
+        let guidance = crate::app_integrity::LIBRARY_DAMAGED;
+        for needle in [
+            "退出 Illustash",
+            "library.sqlite-wal",
+            "library.sqlite-shm",
+            "backups 文件夹",
+            "library- 开头",
+            "source-damaged",
+            "library-backups 文件夹",
+            "再升级一次",
+            "pre-v8",
+            "之后的整理会丢失",
+            "「设置 › 数据」的「人工结论快照」",
+            "换回之前最近的一份自动快照点「恢复…」",
+            "只补这个图库还没决定的项",
+        ] {
+            assert!(guidance.contains(needle), "{needle}");
+        }
+        let f = Fixture::new(5);
+        let report = upgrade(&prepare(&f.0).unwrap(), None).unwrap();
+        let required: Vec<PathBuf> =
+            fs::read_dir(f.0.join("library-backups")).unwrap().map(|e| e.unwrap().path()).collect();
+        assert_eq!(required.len(), 1);
+        let name = required[0].file_name().unwrap().to_string_lossy().into_owned();
+        assert!(name.starts_with(&format!("terms-v5-before-v{}-", crate::SCHEMA_VERSION)), "{name}");
+        let manual = crate::app_settings::backup(&report.library).unwrap();
+        assert!(manual.file_name().unwrap().to_string_lossy().starts_with("library-"), "{manual:?}");
+        drop(report);
+        // 抢救识别结果时留在同一个文件夹里的损坏文件（命名同 app_rescue::install）。
+        let rescued = f.0.join("backups/source-damaged-20261115-120000.sqlite");
+        fs::copy(f.0.join("source.sqlite"), &rescued).unwrap();
+        // 两份备份之后才做的整理。
+        f.connection().execute("INSERT INTO implicit_rows(rowid,value) VALUES(28,'after both backups')", []).unwrap();
+
+        let db = f.0.join("library.sqlite");
+        let aside = std::cell::Cell::new(0);
+        // 损坏被发现、记下，打开时给出这段提示。
+        let broken = || {
+            damage(&db);
+            crate::app_integrity::Health::load(&f.0)
+                .damaged(crate::app_integrity::Damage::new(crate::app_integrity::Database::Library, "合成".into()))
+                .unwrap();
+            let error = crate::app_service::open_owned(&f.0, None, None).map(|_| ()).unwrap_err();
+            assert!(matches!(&error, Error::Conflict(text) if text == guidance), "{error}");
+            assert_eq!(crate::desktop_shell::damage_note(&f.0), Some(guidance));
+        };
+        // 照提示：损坏的数据库连同 WAL、SHM 移走，选中的备份复制回来改名为 library.sqlite。
+        let restore = |from: &Path| {
+            aside.set(aside.get() + 1);
+            let moved = f.0.join(format!("moved-aside-{}", aside.get()));
+            fs::create_dir(&moved).unwrap();
+            for name in ["library.sqlite", "library.sqlite-wal", "library.sqlite-shm"] {
+                if f.0.join(name).exists() {
+                    fs::rename(f.0.join(name), moved.join(name)).unwrap();
+                }
+            }
+            assert!(moved.join("library.sqlite").is_file());
+            fs::copy(from, &db).unwrap();
+        };
+        let kept = |library: &Library| {
+            let c = app_library::read_connection(&library.db()).unwrap();
+            let rows: rusqlite::Result<Vec<i64>> = c
+                .prepare("SELECT rowid FROM implicit_rows ORDER BY rowid")
+                .unwrap()
+                .query_map([], |r| r.get(0))
+                .unwrap()
+                .collect();
+            rows.unwrap()
+        };
+
+        // 手动备份：直接打开，记下的损坏随打开前的完整检查清除。
+        broken();
+        restore(&manual);
+        let (library, owner) = crate::app_service::open_owned(&f.0, None, None).unwrap();
+        assert!(crate::app_integrity::recorded_damage(&f.0).is_none());
+        assert_eq!(
+            crate::schema::version(&app_library::read_connection(&library.db()).unwrap()).unwrap(),
+            crate::SCHEMA_VERSION
+        );
+        assert_eq!(kept(&library), [27]);
+        drop((library, owner));
+
+        // 升级前的必需备份：外壳不再显示损坏提示，而是问要不要升级；升级时又留下一份备份。
+        broken();
+        restore(&required[0]);
+        let error = crate::app_service::open_owned(&f.0, None, None).map(|_| ()).unwrap_err();
+        assert!(matches!(error, Error::Schema(_)), "{error}");
+        assert!(crate::app_integrity::recorded_damage(&f.0).is_none());
+        assert_eq!(crate::desktop_shell::damage_note(&f.0), None);
+        assert!(crate::desktop_shell::upgrade_needed(&f.0).is_some());
+        let report = upgrade(&prepare(&f.0).unwrap(), None).unwrap();
+        assert_eq!((report.before, report.after), (5, crate::SCHEMA_VERSION));
+        assert_eq!(f.backups(), 2);
+        drop(report);
+        let (library, owner) = crate::app_service::open_owned(&f.0, None, None).unwrap();
+        assert_eq!(kept(&library), [27]);
+        drop((library, owner));
+
+        // 抢救留存的识别结果文件：不能当整理记录打开，也不提出升级；外壳照旧显示损坏提示，请用户换一份。
+        broken();
+        restore(&rescued);
+        assert!(crate::app_service::open_owned(&f.0, None, None).is_err());
+        assert!(crate::desktop_shell::upgrade_needed(&f.0).is_none());
+        assert_eq!(crate::desktop_shell::damage_note(&f.0), Some(guidance));
+    }
 }
