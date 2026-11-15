@@ -40,6 +40,16 @@ pub(crate) fn same_structure(a: &Entity, b: &Entity) -> bool {
     a.kind == b.kind && normalize(a) == normalize(b)
 }
 
+pub(crate) fn same_after(a: &Entity, b: &Entity) -> bool {
+    let normalize = |e: &Entity| {
+        let mut e = e.clone();
+        // 资料撤销可在不同语言/role 之间重新编号；各名字组内部的次序仍须一致。
+        e.names.sort_by(|a, b| (&a.role, &a.lang).cmp(&(&b.role, &b.lang)));
+        e
+    };
+    normalize(a) == normalize(b)
+}
+
 // 结构及判断附件作为一个连通依赖组。某个节点不能安全认回时，不能仅导入另一半的身份语义。
 pub(crate) fn connected(snapshot: &Snapshot, mut blocked: BTreeSet<String>) -> BTreeSet<String> {
     let mut adjacent = BTreeMap::<String, BTreeSet<String>>::new();
@@ -183,7 +193,8 @@ fn signature(c: &Connection, id: i64) -> Result<String> {
     let mut value = Vec::new();
     for sql in [
         "SELECT * FROM term_records WHERE id=?1",
-        "SELECT * FROM term_names WHERE term_id=?1 ORDER BY role,lang,source,value",
+        "SELECT term_id,lang,value,role,source,preferred,position FROM term_names
+            WHERE term_id=?1 ORDER BY role,lang,seq,source,value",
         "SELECT * FROM term_links WHERE term_id=?1 ORDER BY system,key",
         "SELECT * FROM term_tree WHERE term_id=?1",
         "SELECT * FROM term_identity_baseline WHERE id=(SELECT key FROM term_records WHERE id=?1)",

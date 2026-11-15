@@ -35,6 +35,17 @@ pub fn capture(c: &Connection, header: Header) -> Result<Snapshot> {
     reviews_and_skips(c, &mut records)?;
     anchors(c, &mut records)?;
     let mut terms: BTreeSet<String> = records.iter().flat_map(|r| r.terms().into_iter().map(str::to_owned)).collect();
+    for record in &records {
+        if let Record::IdentitySkip { pair, .. } = record {
+            if let Some((a, b)) = super::skips::pair(pair) {
+                let found: i64 =
+                    c.query_row("SELECT count(*) FROM terms WHERE key IN (?1,?2)", [a, b], |r| r.get(0))?;
+                if found == 2 {
+                    terms.extend([a.to_owned(), b.to_owned()]);
+                }
+            }
+        }
+    }
     // 旧结构没有逐字段来源。完整保留其现状并标 legacy_unknown，不能因缺少图片而丢掉 OC 或人工作品编辑。
     for key in c
         .prepare(
@@ -362,10 +373,25 @@ impl LegacyAlias {
         }
     }
 }
-type Aliases = BTreeMap<String, BTreeSet<(String, String, String)>>;
+type AliasNames = BTreeMap<(String, String, String), String>;
+type Aliases = BTreeMap<String, AliasNames>;
+fn record_alias(out: &mut Aliases, key: &str, lang: &str, value: &str, source: &str, provenance: &str) {
+    // Danbooru 更新器整批删建同来源别名，行号/seq 可复用，历史同字面值不足以证明当前行仍属那次合并。
+    let provenance =
+        if source == "danbooru" || provenance == "legacy_unknown" { "legacy_unknown" } else { "legacy_merge" };
+    out.entry(key.into())
+        .or_default()
+        .entry((lang.into(), value.into(), source.into()))
+        .and_modify(|old| {
+            if provenance == "legacy_unknown" {
+                *old = provenance.into();
+            }
+        })
+        .or_insert_with(|| provenance.into());
+}
 fn merge_aliases(c: &Connection) -> Result<Aliases> {
     let mut result = Aliases::new();
-    // 便携导入的别名证明由有效 action 持有；只采用封闭定义里的 legacy_merge 名称。
+    // 便携导入声明由有效 action 持有；来源不明的别名继续保持来源不明。
     for row in c
         .prepare(
             "SELECT t.key,o.definition_json FROM human_object_contributions o
@@ -377,8 +403,12 @@ fn merge_aliases(c: &Connection) -> Result<Aliases> {
         let (key, encoded) = row?;
         let definition: Entity =
             serde_json::from_str(&encoded).map_err(|_| Error::invalid("导入定义的来源记录不完整"))?;
-        for name in definition.names.into_iter().filter(|n| n.provenance == "legacy_merge" && n.role == "alias") {
-            result.entry(key.clone()).or_default().insert((name.lang, name.value, name.source));
+        for name in definition
+            .names
+            .into_iter()
+            .filter(|n| matches!(n.provenance.as_str(), "legacy_merge" | "legacy_unknown") && n.role == "alias")
+        {
+            record_alias(&mut result, &key, &name.lang, &name.value, &name.source, &name.provenance);
         }
     }
     for row in c
@@ -390,7 +420,7 @@ fn merge_aliases(c: &Connection) -> Result<Aliases> {
             if let Some(key) =
                 c.query_row("SELECT key FROM terms WHERE id=?1", [term], |r| r.get::<_, String>(0)).optional()?
             {
-                result.entry(key).or_default().insert((name.lang, name.value, name.source));
+                record_alias(&mut result, &key, &name.lang, &name.value, &name.source, &name.provenance);
             }
         }
         let Ok(Some(items)) = crate::character_commands::owns(&body) else { continue };
@@ -414,18 +444,13 @@ fn merge_aliases(c: &Connection) -> Result<Aliases> {
             }
             for alias in aliases {
                 let (lang, value, source) = alias.parts();
-                result.entry(target.into()).or_default().insert((lang.into(), value.into(), source.into()));
+                record_alias(&mut result, target, lang, value, source, "legacy_merge");
             }
         }
     }
     Ok(result)
 }
-fn entity(
-    c: &Connection,
-    key: &str,
-    policy: Policy,
-    aliases: Option<&BTreeSet<(String, String, String)>>,
-) -> Result<Entity> {
+fn entity(c: &Connection, key: &str, policy: Policy, aliases: Option<&AliasNames>) -> Result<Entity> {
     let (id, kind, origin): (i64, String, String) =
         c.query_row("SELECT id,kind,origin FROM terms WHERE key=?1", [key], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)))?;
     let tree=c.query_row("SELECT parent_id,merged_into,work_id,work_text,variant,artist,label_only,mascot,mascot_origin,original,parent_locked,review_status,review_note,seq FROM term_tree WHERE term_id=?1",[id],|r|Ok(Tree {
@@ -454,13 +479,16 @@ fn entity(
     for row in c.prepare("SELECT lang,value,role,preferred,position,source FROM term_names WHERE term_id=?1 ORDER BY seq,lang,role,source,value")?
         .query_map([id],|r|Ok(Name {lang:r.get(0)?,value:r.get(1)?,role:r.get(2)?,preferred:r.get(3)?,position:r.get(4)?,source:r.get(5)?,provenance:String::new()}))? {
         let mut name=row?;
-        if name.source=="user" {
+        let proof=aliases.and_then(|a|a.get(&(name.lang.clone(),name.value.clone(),name.source.clone()))).filter(|_|name.role=="alias");
+        if proof.is_some_and(|p|p=="legacy_unknown") {
+            name.provenance="legacy_unknown".into();names.push(name);
+        } else if name.source=="user" {
             // 导入包也能声明 source=user；只有人工入口写出的别名或首选显示名能证明人工来源。
             name.provenance=if name.role=="alias" || name.preferred {"user"} else {"legacy_unknown"}.into();
             names.push(name);
         }
-        else if aliases.is_some_and(|a|a.contains(&(name.lang.clone(),name.value.clone(),name.source.clone()))) && name.role=="alias" {
-            name.provenance="legacy_merge".into();names.push(name);
+        else if let Some(proof)=proof {
+            name.provenance=proof.clone();names.push(name);
         } else if description.is_none() && name.role=="display" {
             name.provenance="description".into();name.preferred=false;description=Some(name);
         }

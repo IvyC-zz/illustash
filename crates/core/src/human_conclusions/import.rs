@@ -2,8 +2,9 @@
 use super::{
     definitions, export,
     format::{Entity, Header, Policy, Record, Snapshot},
+    links,
     matching::{self, Match, SourceAsset, TargetAsset},
-    names, relations,
+    names, relations, skips,
     state::{self, Domain, Mark},
 };
 use crate::{error::invalid, schema, store, Error, Result};
@@ -78,6 +79,8 @@ struct History {
     created: Vec<definitions::Created>,
     relations: Vec<relations::Created>,
     names: Vec<names::Edit>,
+    links: Vec<links::Added>,
+    skip_before: Option<String>,
     graph: bool,
 }
 
@@ -185,11 +188,14 @@ fn family_conflict(
     let Some(tree) = &entity.tree else { return Ok(false) };
     if policy == Policy::Hybrid {
         // 已合并的旧断言仍保留原 key；实际归属沿现行有效断言和身份节点判断。
-        let canonical: String =
-            c.query_row("SELECT coalesce((SELECT canonical_id FROM identity_nodes WHERE id=?1),?1)", [term], |r| {
-                r.get(0)
-            })?;
-        let family_key = tree.parent.as_deref().unwrap_or(term);
+        // 本次才建立的别名尚不在目标图内，先沿已验证源投影的代表认回；后续图预检核对该投影。
+        let identity = tree.merged_into.as_deref().unwrap_or(term);
+        let canonical: String = c.query_row(
+            "SELECT coalesce((SELECT canonical_id FROM identity_nodes WHERE id=?1),?1)",
+            [identity],
+            |r| r.get(0),
+        )?;
+        let family_key = tree.parent.as_deref().unwrap_or(identity);
         let family: String = c.query_row(
             "SELECT coalesce((SELECT character_id FROM identity_nodes WHERE id=?1),?1)",
             [family_key],
@@ -197,7 +203,7 @@ fn family_conflict(
         )?;
         let root: bool = c.query_row(
             "SELECT coalesce((SELECT variant_id IS NULL FROM identity_nodes WHERE id=?1),?2)",
-            params![term, tree.parent.is_none()],
+            params![identity, tree.parent.is_none()],
             |r| r.get(0),
         )?;
         return Ok(match verdict {
@@ -472,8 +478,10 @@ pub fn apply_in(
     let (blocked, relation_conflicts) = graph_conflicts(c, snapshot, &existing, &terms, &new_definitions, check)?;
     terms.retain(|source, _| !blocked.contains(source));
     let mut name_edits = Vec::new();
+    let mut link_edits = Vec::new();
     for (source, target) in &terms {
         if !fresh.contains(source.as_str()) {
+            link_edits.extend(links::plan(c, target, source_entities[source.as_str()], &mut report.definition_fields)?);
             name_edits.extend(names::plan(
                 c,
                 target,
@@ -547,6 +555,23 @@ pub fn apply_in(
                     std::mem::swap(a, b);
                 }
             }
+            Record::IdentitySkip { pair, .. } => {
+                let Some((a, b)) = skips::pair(pair)
+                    .filter(|(a, b)| source_entities.contains_key(a) && source_entities.contains_key(b))
+                else {
+                    report.record_reason(source, "unsupported_dependency", Some("opaque_or_dangling_pair"));
+                    continue;
+                };
+                let (Some(a), Some(b)) = (terms.get(a), terms.get(b)) else {
+                    report.record(source, "blocked_dependency");
+                    continue;
+                };
+                *pair = if a < b { format!("{a}|{b}") } else { format!("{b}|{a}") };
+            }
+            Record::AnchorDecision { .. } => {
+                report.record_reason(source, "unsupported_dependency", Some("reference_version_unverified"));
+                continue;
+            }
             Record::IdentityContext { asset, term, scope, suspended, .. } => {
                 *asset = asset_key(asset);
                 *term = terms[term].clone();
@@ -609,7 +634,14 @@ pub fn apply_in(
             planned.push(target);
         }
     }
-    let needed: BTreeSet<_> = planned.iter().flat_map(|r| r.terms().into_iter().map(str::to_owned)).collect();
+    let mut needed: BTreeSet<_> = planned.iter().flat_map(|r| r.terms().into_iter().map(str::to_owned)).collect();
+    for record in &planned {
+        if let Record::IdentitySkip { pair, .. } = record {
+            if let Some((a, b)) = skips::pair(pair) {
+                needed.extend([a.to_owned(), b.to_owned()]);
+            }
+        }
+    }
     new_definitions.retain(|new| {
         let human = new.definition.tree.is_some()
             || new.definition.provenance == "user"
@@ -618,12 +650,15 @@ pub fn apply_in(
         *report.definitions.entry(if keep { "applied" } else { "unneeded_dependency" }.into()).or_default() += 1;
         keep
     });
-    if planned.is_empty() && new_definitions.is_empty() && name_edits.is_empty() {
+    if planned.is_empty() && new_definitions.is_empty() && name_edits.is_empty() && link_edits.is_empty() {
         return Ok(report);
     }
     c.execute("INSERT INTO actions(label,before_json) VALUES ('已导入人工结论','[]')", [])?;
     let action = c.last_insert_rowid();
+    let skip_before =
+        if planned.iter().any(|r| matches!(r, Record::IdentitySkip { .. })) { skips::stored(c)? } else { None };
     let name_edits = names::apply(c, name_edits)?;
+    links::apply(c, &link_edits)?;
     let mut created = definitions::create(c, action, &snapshot.header.library_id, &new_definitions)?;
     let graph = crate::character_projection::policy(c)?
         && (new_definitions.iter().any(|new| new.definition.tree.is_some())
@@ -676,6 +711,8 @@ pub fn apply_in(
         created,
         relations: created_relations,
         names: name_edits,
+        links: link_edits,
+        skip_before,
         graph,
     };
     c.execute(
@@ -772,6 +809,7 @@ fn write(c: &Connection, action: i64, snapshot: &str, record: &Record) -> Result
                 params![term, reviewed_at, action],
             )?;
         }
+        Record::IdentitySkip { pair, .. } => skips::add(c, pair)?,
         Record::IdentityContext { asset, term, scope, suspended, .. } => {
             if let Some(scope) = scope {
                 c.execute(
@@ -812,7 +850,7 @@ fn history(value: &Value) -> Result<Option<History>> {
     }
     let decoded: History = serde_json::from_value(items[0]["human_conclusions"].clone())
         .map_err(|_| Error::Conflict("人工结论撤销信封不完整".into()))?;
-    if decoded.v != 1 || (decoded.after.is_empty() && decoded.names.is_empty()) {
+    if decoded.v != 1 || (decoded.after.is_empty() && decoded.names.is_empty() && decoded.links.is_empty()) {
         return Err(Error::Conflict("人工结论撤销版本不受支持".into()));
     }
     Ok(Some(decoded))
@@ -843,7 +881,14 @@ pub fn undo_in(c: &Connection, action: i64) -> Result<Vec<String>> {
     let now = current(c)?;
     let now: BTreeMap<_, _> = now.records.iter().map(|r| (key(r), r)).collect();
     for expected in &history.after {
-        if now.get(&key(expected)).copied() != Some(expected) {
+        let actual = now.get(&key(expected)).copied();
+        let same = match (expected, actual) {
+            (Record::Entity { definition: a, .. }, Some(Record::Entity { definition: b, .. })) => {
+                definitions::same_after(a, b)
+            }
+            _ => actual == Some(expected),
+        };
+        if !same {
             return Err(Error::Conflict("导入后的人工状态已被独立修改，无法安全撤销".into()));
         }
     }
@@ -864,6 +909,7 @@ pub fn undo_in(c: &Connection, action: i64) -> Result<Vec<String>> {
             | Record::Entity { .. }
             | Record::Review { .. }
             | Record::RelationVerdict { .. }
+            | Record::IdentitySkip { .. }
             | Record::IdentityContext { .. } => None,
             Record::Curation { .. } => Some("curation"),
             Record::Deferred { .. } => Some("deferred"),
@@ -879,6 +925,16 @@ pub fn undo_in(c: &Connection, action: i64) -> Result<Vec<String>> {
     }
     // 先撤去已经精确核对的本次附属状态，再检查其它依赖；发生冲突时宿主回滚整个事务。
     names::undo(c, &history.names)?;
+    links::undo(c, &history.links)?;
+    let skipped: Vec<_> = history
+        .after
+        .iter()
+        .filter_map(|r| match r {
+            Record::IdentitySkip { pair, .. } => Some(pair.as_str()),
+            _ => None,
+        })
+        .collect();
+    skips::undo(c, &skipped, history.skip_before.as_deref())?;
     definitions::check_undo(c, action, &history.created)?;
     relations::check_undo(c, action, &history.relations)?;
     definitions::remove(c, &history.created)?;

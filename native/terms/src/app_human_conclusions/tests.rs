@@ -330,6 +330,63 @@ fn existing_names_import_by_group_and_undo_preserves_other_languages() {
 }
 
 #[test]
+fn ordinary_profile_undo_can_renumber_names_before_import_undo() {
+    let source = Fixture::new("profile-source");
+    let mut c = crate::open(&source.db).unwrap();
+    let tx = c.transaction().unwrap();
+    crate::schema::begin_writing(&tx).unwrap();
+    linked_character(&tx, "profile", None);
+    illustash_core::character_names::put_name(&tx, "profile", "zh", "user", "合成用户名字", "display", 0, 1).unwrap();
+    illustash_core::character_names::alias(&tx, "profile", "合成用户别名", "user", "zh").unwrap();
+    crate::schema::commit_writing(tx).unwrap();
+    let path = source.root.join("profile.illustash-human.jsonl");
+    capture(&source.db, &source.id, &|| Ok(())).unwrap().write(&mut File::create(&path).unwrap()).unwrap();
+    for existed in [true, false] {
+        let target = Fixture::new("profile-target");
+        let mut c = crate::open(&target.db).unwrap();
+        if existed {
+            let tx = c.transaction().unwrap();
+            crate::schema::begin_writing(&tx).unwrap();
+            linked_character(&tx, "profile", None);
+            crate::schema::commit_writing(tx).unwrap();
+        }
+        let imported = import_file(&target.db, &target.id, &path, &|| Ok(())).unwrap();
+        let key: String = if existed {
+            "profile".into()
+        } else {
+            c.query_row("SELECT target_key FROM human_entity_origins WHERE source_key='profile'", [], |r| r.get(0))
+                .unwrap()
+        };
+        let old_seq: i64 = c
+            .query_row(
+                "SELECT max(seq) FROM term_names WHERE term_id=(SELECT id FROM terms WHERE key=?1)",
+                [&key],
+                |r| r.get(0),
+            )
+            .unwrap();
+        target.term("unrelated", "synthetic_unrelated_profile");
+        illustash_core::character_names::put_name(&c, "unrelated", "zh", "bangumi", "无关新名字", "display", 0, 0)
+            .unwrap();
+        let tx = c.transaction().unwrap();
+        crate::schema::begin_writing(&tx).unwrap();
+        let profile = illustash_core::character_profile::set_profile(&tx, &json!({"entity":key,"tag":""})).unwrap();
+        crate::schema::commit_writing(tx).unwrap();
+        target.undo(profile["action"].as_i64().unwrap()).unwrap();
+        let new_seq: i64 = c
+            .query_row(
+                "SELECT min(seq) FROM term_names WHERE term_id=(SELECT id FROM terms WHERE key=?1)",
+                [&key],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert!(new_seq > old_seq);
+        target.undo(imported.action_id.unwrap()).unwrap();
+        assert_eq!(target.count("SELECT count(*) FROM terms"), if existed { 2 } else { 1 });
+        assert_eq!(target.count("SELECT count(*) FROM term_names WHERE source='user'"), 0);
+    }
+}
+
+#[test]
 fn imported_alias_on_existing_term_keeps_legacy_merge_provenance() {
     let source = Fixture::new("alias-source");
     let mut c = crate::open(&source.db).unwrap();
@@ -348,6 +405,7 @@ fn imported_alias_on_existing_term_keeps_legacy_merge_provenance() {
         0,
     )
     .unwrap();
+    illustash_core::names_commands::one(&tx,&json!({"op":"danbooru_aliases","kind":"character","tag":"synthetic_alias-source-character","values":["可被更新器重建的别名"]})).unwrap();
     crate::character_commands::command(
         &tx,
         &json!({"op":"merge","source":"alias-source-character","target":"alias-target-character"}),
@@ -379,6 +437,76 @@ fn imported_alias_on_existing_term_keeps_legacy_merge_provenance() {
     target.undo(result.action_id.unwrap()).unwrap();
     assert_eq!(target.count("SELECT count(*) FROM term_names WHERE role='alias'"), 0);
     assert_eq!(target.count("SELECT count(*) FROM terms"), 1);
+    import_file(&target.db, &target.id, &path, &|| Ok(())).unwrap();
+    let tx = c.transaction().unwrap();
+    crate::schema::begin_writing(&tx).unwrap();
+    illustash_core::names_commands::one(&tx,&json!({"op":"danbooru_aliases","kind":"character","tag":"synthetic_alias-target-character","values":["可被更新器重建的别名"]})).unwrap();
+    crate::schema::commit_writing(tx).unwrap();
+    let mut bytes = Vec::new();
+    capture(&target.db, &target.id, &|| Ok(())).unwrap().write(&mut bytes).unwrap();
+    let updated: serde_json::Value = bytes
+        .split(|b| *b == b'\n')
+        .filter(|b| !b.is_empty())
+        .map(|b| serde_json::from_slice::<serde_json::Value>(b).unwrap())
+        .find(|v| v["type"] == "entity" && v["record_key"] == "alias-target-character")
+        .unwrap();
+    assert!(updated["definition"]["names"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .any(|n| n["value"] == "可被更新器重建的别名" && n["provenance"] == "legacy_unknown"));
+}
+
+#[test]
+fn missing_public_links_and_resolvable_skips_roundtrip_without_overwriting_target_state() {
+    let source = Fixture::new("links-source");
+    let target = Fixture::new("links-target");
+    source.term("a", "synthetic_link_a");
+    source.term("b", "synthetic_link_b");
+    target.term("new-a", "synthetic_link_a");
+    target.term("new-b", "synthetic_link_b");
+    let mut c = crate::open(&source.db).unwrap();
+    c.execute("UPDATE term_links SET current=0 WHERE key='synthetic_link_a'", []).unwrap();
+    let a = crate::store::term_by_key(&c, "a").unwrap().unwrap().0;
+    crate::store::add_link(
+        &c,
+        a,
+        "pixiv",
+        "441000001",
+        "https://example.invalid/private-query-is-not-exported",
+        "user",
+    )
+    .unwrap();
+    for (a, b) in [("a", "b"), ("unknown|opaque", "unresolved")] {
+        crate::app_identity::request(
+            &mut c,
+            "/api/identity/skip",
+            &crate::http_json::parse_request(&json!({"a":a,"b":b}).to_string()).unwrap(),
+        )
+        .unwrap();
+    }
+    let path = source.root.join("links.illustash-human.jsonl");
+    capture(&source.db, &source.id, &|| Ok(())).unwrap().write(&mut File::create(&path).unwrap()).unwrap();
+    assert!(!fs::read_to_string(&path).unwrap().contains("private-query"));
+    let c = crate::open(&target.db).unwrap();
+    let original = "[ \"keep|unrelated\" ]";
+    c.execute("INSERT INTO prefs(key,value) VALUES ('identity_skipped',?1)", [original]).unwrap();
+    let report = import_file(&target.db, &target.id, &path, &|| Ok(())).unwrap();
+    assert_eq!(report.records, BTreeMap::from([("applied".into(), 1), ("unsupported_dependency".into(), 1)]));
+    assert_eq!(report.definition_fields["link_applied"], 1);
+    assert_eq!(report.definition_fields["link_conflict"], 1);
+    assert_eq!(target.count("SELECT count(*) FROM term_links WHERE key='synthetic_link_a' AND current=1"), 1);
+    assert_eq!(target.count("SELECT count(*) FROM term_links WHERE system='pixiv' AND url=''"), 1);
+    let skips: String = c.query_row("SELECT value FROM prefs WHERE key='identity_skipped'", [], |r| r.get(0)).unwrap();
+    assert_eq!(serde_json::from_str::<Vec<String>>(&skips).unwrap(), vec!["keep|unrelated", "new-a|new-b"]);
+    assert_eq!(import_file(&target.db, &target.id, &path, &|| Ok(())).unwrap().action_id, None);
+    target.undo(report.action_id.unwrap()).unwrap();
+    assert_eq!(target.count("SELECT count(*) FROM term_links"), 2);
+    assert_eq!(
+        c.query_row("SELECT value FROM prefs WHERE key='identity_skipped'", [], |r| r.get::<_, String>(0)).unwrap(),
+        original
+    );
+    assert_eq!(target.count("SELECT count(*) FROM terms"), 2);
 }
 
 fn structured_roundtrip(hybrid: bool) {
@@ -573,6 +701,53 @@ fn family_conflicts_follow_existing_hybrid_representative() {
             .collect::<rusqlite::Result<_>>()
             .unwrap();
         assert_eq!(after, before);
+    }
+}
+
+#[test]
+fn new_import_alias_cannot_change_existing_family_judgments() {
+    for source_no in [true, false] {
+        let source = Fixture::new("new-alias-source");
+        let target = Fixture::new("new-alias-target");
+        for (f, src) in [(&source, true), (&target, false)] {
+            f.asset("image", "new-alias.png", 71);
+            let mut c = crate::open(&f.db).unwrap();
+            let tx = c.transaction().unwrap();
+            crate::schema::begin_writing(&tx).unwrap();
+            hybrid(&tx);
+            linked_character(&tx, "Q", None);
+            if src {
+                linked_character(&tx, "A", None);
+            } else if source_no {
+                linked_character(&tx, "C", Some("Q"));
+            }
+            crate::character_graph::rebuild(&tx).unwrap();
+            let entity = if src {
+                "A"
+            } else if source_no {
+                "C"
+            } else {
+                "Q"
+            };
+            let no = if src { source_no } else { !source_no };
+            crate::character_commands::command(
+                &tx,
+                &json!({"op":"change","action":if no {"rejected"}else{"confirmed"},"entity":entity,"asked":["image"]}),
+            )
+            .unwrap();
+            if src {
+                illustash_core::character_identity::command(&tx,&json!({"op":"decide","a":"A","b":"Q","kind":"duplicate_of","status":"accepted","reason":"合成新别名"})).unwrap();
+            }
+            crate::schema::commit_writing(tx).unwrap();
+        }
+        let path = source.root.join("new-alias.illustash-human.jsonl");
+        capture(&source.db, &source.id, &|| Ok(())).unwrap().write(&mut File::create(&path).unwrap()).unwrap();
+        let before = target.count("SELECT count(*) FROM memberships WHERE status='confirmed'");
+        let result = import_file(&target.db, &target.id, &path, &|| Ok(())).unwrap();
+        assert_eq!(result.action_id, None);
+        assert!(result.records["blocked_dependency"] > 0);
+        assert_eq!(target.count("SELECT count(*) FROM actions WHERE undone=0"), 1);
+        assert_eq!(target.count("SELECT count(*) FROM memberships WHERE status='confirmed'"), before);
     }
 }
 

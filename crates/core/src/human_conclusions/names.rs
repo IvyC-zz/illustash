@@ -108,7 +108,11 @@ pub(crate) fn apply(c: &Connection, planned: Vec<Planned>) -> Result<Vec<Edit>> 
             role: p.role,
             before: p.before,
             after,
-            aliases: p.names.into_iter().filter(|n| n.provenance == "legacy_merge").collect(),
+            aliases: p
+                .names
+                .into_iter()
+                .filter(|n| n.role == "alias" && matches!(n.provenance.as_str(), "legacy_merge" | "legacy_unknown"))
+                .collect(),
         });
     }
     Ok(edits)
@@ -116,7 +120,13 @@ pub(crate) fn apply(c: &Connection, planned: Vec<Planned>) -> Result<Vec<Edit>> 
 
 pub(crate) fn undo(c: &Connection, edits: &[Edit]) -> Result<()> {
     for edit in edits {
-        if rows(c, edit.term, &edit.lang, &edit.role)? != edit.after {
+        let current = rows(c, edit.term, &edit.lang, &edit.role)?;
+        // 普通资料撤销会重插用户名字并重新分配 seq；字段和组内顺序才是独立改动的判断单位。
+        if current.len() != edit.after.len()
+            || current.iter().zip(&edit.after).any(|(a, b)| {
+                a.value != b.value || a.source != b.source || a.preferred != b.preferred || a.position != b.position
+            })
+        {
             return Err(Error::Conflict("导入后的名字组已有独立变化，无法安全撤销".into()));
         }
     }
