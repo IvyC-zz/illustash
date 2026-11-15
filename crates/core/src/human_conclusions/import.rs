@@ -1,6 +1,6 @@
 //! 人工快照的事务写入与独立撤销所有者；图片候选只接受宿主本次核验的完整清单。
 use super::{
-    export,
+    definitions, export,
     format::{Entity, Header, Policy, Record, Snapshot},
     matching::{self, Match, SourceAsset, TargetAsset},
     state::{self, Domain, Mark},
@@ -72,6 +72,13 @@ struct History {
     snapshot_id: String,
     // 当前阶段只补从未决定的逻辑键；before 均为无贡献，after 用于拒绝独立改动后的撤销。
     after: Vec<Record>,
+    created: Vec<definitions::Created>,
+}
+
+enum Resolution {
+    Existing(String),
+    New,
+    Blocked,
 }
 
 fn key(record: &Record) -> Vec<String> {
@@ -98,10 +105,25 @@ fn equivalent(a: &Record, b: &Record) -> Result<bool> {
     Ok(normalize(a)? == normalize(b)?)
 }
 
-fn resolve_existing(c: &Connection, same_library: bool, source: &str, definition: &Entity) -> Result<Option<String>> {
+fn resolve_existing(
+    c: &Connection,
+    source_library: &str,
+    same_library: bool,
+    source: &str,
+    definition: &Entity,
+) -> Result<Resolution> {
     let mut candidates = BTreeSet::new();
     if same_library && store::term_by_key(c, source)?.is_some() {
         candidates.insert(source.to_owned());
+    }
+    for target in c
+        .prepare(
+            "SELECT o.target_key FROM human_entity_origins o JOIN actions a ON a.id=o.owner_action_id
+        JOIN terms t ON t.key=o.target_key WHERE o.source_library=?1 AND o.source_key=?2 AND a.undone=0",
+        )?
+        .query_map([source_library, source], |r| r.get::<_, String>(0))?
+    {
+        candidates.insert(target?);
     }
     for link in &definition.links {
         if let Some(target) = c
@@ -115,9 +137,15 @@ fn resolve_existing(c: &Connection, same_library: bool, source: &str, definition
             candidates.insert(target);
         }
     }
-    let Some(target) = candidates.pop_first() else { return Ok(None) };
+    let Some(target) = candidates.pop_first() else {
+        return Ok(if definition.tree.is_none() && definition.baseline.is_none() {
+            Resolution::New
+        } else {
+            Resolution::Blocked
+        });
+    };
     if !candidates.is_empty() {
-        return Ok(None);
+        return Ok(Resolution::Blocked);
     }
     let kind: String = c.query_row("SELECT kind FROM terms WHERE key=?1", [&target], |r| r.get(0))?;
     // 结构与关系的贡献撤销尚未接入时，不把它们降格为普通平面词条写入。
@@ -126,8 +154,11 @@ fn resolve_existing(c: &Connection, same_library: bool, source: &str, definition
         [&target],
         |r| r.get(0),
     )?;
-    Ok((kind == definition.kind && definition.tree.is_none() && definition.baseline.is_none() && !structured)
-        .then_some(target))
+    Ok(if kind == definition.kind && definition.tree.is_none() && definition.baseline.is_none() && !structured {
+        Resolution::Existing(target)
+    } else {
+        Resolution::Blocked
+    })
 }
 
 fn match_reason(result: &Match) -> &'static str {
@@ -177,15 +208,26 @@ pub fn apply_in(
         *report.assets.entry(match_reason(result).into()).or_default() += 1;
     }
     let mut terms = BTreeMap::new();
+    let mut new_definitions = Vec::new();
     for record in &snapshot.records {
         if let Record::Entity { key, definition } = record {
-            let target = resolve_existing(c, same_library, key, definition)?;
-            *report
-                .definitions
-                .entry(if target.is_some() { "matched_dependency" } else { "blocked_dependency" }.into())
-                .or_default() += 1;
-            if let Some(target) = target {
-                terms.insert(key.clone(), target);
+            match resolve_existing(c, &snapshot.header.library_id, same_library, key, definition)? {
+                Resolution::Existing(target) => {
+                    *report.definitions.entry("matched_dependency".into()).or_default() += 1;
+                    terms.insert(key.clone(), target);
+                }
+                Resolution::New => {
+                    let target = store::new_key()?;
+                    terms.insert(key.clone(), target.clone());
+                    new_definitions.push(definitions::New {
+                        source_key: key.clone(),
+                        target_key: target,
+                        definition: definition.as_ref().clone(),
+                    });
+                }
+                Resolution::Blocked => {
+                    *report.definitions.entry("blocked_dependency".into()).or_default() += 1;
+                }
             }
         }
     }
@@ -247,11 +289,20 @@ pub fn apply_in(
             planned.push(target);
         }
     }
-    if planned.is_empty() {
+    let needed: BTreeSet<_> = planned.iter().flat_map(|r| r.terms().into_iter().map(str::to_owned)).collect();
+    new_definitions.retain(|new| {
+        let human = new.definition.provenance == "user"
+            || new.definition.names.iter().any(|n| matches!(n.provenance.as_str(), "user" | "legacy_merge"));
+        let keep = human || needed.contains(&new.target_key);
+        *report.definitions.entry(if keep { "applied" } else { "unneeded_dependency" }.into()).or_default() += 1;
+        keep
+    });
+    if planned.is_empty() && new_definitions.is_empty() {
         return Ok(report);
     }
     c.execute("INSERT INTO actions(label,before_json) VALUES ('已导入人工结论','[]')", [])?;
     let action = c.last_insert_rowid();
+    let created = definitions::create(c, action, &snapshot.header.library_id, &new_definitions)?;
     let mut touched = BTreeSet::new();
     for record in &planned {
         check()?;
@@ -259,9 +310,10 @@ pub fn apply_in(
         touched.extend(record.assets().into_iter().map(str::to_owned));
     }
     project(c, &touched)?;
-    let applied: BTreeSet<_> = planned.iter().map(key).collect();
+    let mut applied: BTreeSet<_> = planned.iter().map(key).collect();
+    applied.extend(created.iter().map(|object| vec!["entity".into(), object.key.clone()]));
     let after = current(c)?.records.into_iter().filter(|r| applied.contains(&key(r))).collect::<Vec<_>>();
-    if after.len() != planned.len() {
+    if after.len() != planned.len() + created.len() {
         return Err(Error::Conflict("导入后的有效记录与本次计划不一致".into()));
     }
     let history = History {
@@ -269,6 +321,7 @@ pub fn apply_in(
         source_library: snapshot.header.library_id.clone(),
         snapshot_id: snapshot.header.snapshot_id.clone(),
         after,
+        created,
     };
     c.execute(
         "UPDATE actions SET before_json=?1 WHERE id=?2",
@@ -400,7 +453,7 @@ pub fn undo_in(c: &Connection, action: i64) -> Result<Vec<String>> {
     let mut touched = BTreeSet::new();
     for record in &history.after {
         let table = match record {
-            Record::ImageVerdict { .. } => None,
+            Record::ImageVerdict { .. } | Record::Entity { .. } => None,
             Record::Curation { .. } => Some("curation"),
             Record::Deferred { .. } => Some("deferred"),
             Record::Uncertain { .. } => Some("identity_uncertain"),
@@ -413,6 +466,9 @@ pub fn undo_in(c: &Connection, action: i64) -> Result<Vec<String>> {
             touched.insert(asset.to_owned());
         }
     }
+    // 先撤去已经精确核对的本次附属状态，再检查其它依赖；发生冲突时宿主回滚整个事务。
+    definitions::check_undo(c, action, &history.created)?;
+    definitions::remove(c, &history.created)?;
     c.execute("UPDATE actions SET undone=1 WHERE id=?1", [action])?;
     state::undo(c, action)?;
     project(c, &touched)?;

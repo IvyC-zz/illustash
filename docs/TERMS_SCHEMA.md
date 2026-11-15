@@ -281,4 +281,8 @@ cargo clippy --manifest-path crates/core/Cargo.toml --all-targets -- -D warnings
 
 JSONL v1 使用 `type` / `record_key` 封闭字段和有效状态模式；尾部同时校验原始字节 SHA-256、排除快照编号与生成时间的 `state_sha256`、分类计数和资产哈希覆盖。`asset_identity_complete` 只说明资产摘要是否齐全，不承诺目标匹配或历史锚点能恢复。当前结构与原始基线分别查环；hybrid 身份关系还校验重复代表、父级及“确认不同”的冲突。源锚点缺少参考版本时原样标为空，不能编造版本。宿主完成与本次内容版本绑定的哈希后，通过 `Snapshot::with_hashes` 填充；核心投影不读取原图。
 
-宿主 `app_human_conclusions` 读取完整图片字节，按来源版本、大小和 mtime 核对读取及提交期间的变化；跨库认回仍须 SHA-256、长度、输入形态一致且候选唯一。导入由 `human_conclusions::import` 在一次写事务中补目标从未决定的逻辑键，专用 `human_conclusions/v1` 历史信封记录精确 after。重复内容无新 action；普通 `/api/undo` 先核对全部 after，再撤去这一步的贡献，独立改动导致冲突并回滚。当前入口支持已有平面词条的图片裁决及收录、跳过、未定三态；结构、新定义及其余记录明确报告未处理，不能据此宣称完整恢复。后台调度和 HTTP 文件入口在 #441 跟踪。
+宿主 `app_human_conclusions` 读取完整图片字节，按来源版本、大小和 mtime 核对读取及提交期间的变化；跨库认回仍须 SHA-256、长度、输入形态一致且候选唯一。导入由 `human_conclusions::import` 在一次写事务中补目标从未决定的逻辑键，专用 `human_conclusions/v1` 历史信封记录精确 after。重复内容无新 action；普通 `/api/undo` 先核对全部 after，再撤去这一步的贡献，独立改动导致冲突并回滚。通用核心/CLI 撤销不能完成宿主的收录投影，因此不接受这个专用信封。
+
+第 9 版把词条和关系的物理记录分别存为 `term_records`、`term_relation_records`，原名 `terms`、`term_relations` 是带写入触发器的有效视图。原有对象照常可见；仅导入新建的对象由 `human_object_contributions` 关联创建 action，撤销后从全部现行读者中失效。不可变裁决的外键仍引用物理记录。`human_entity_origins` 保留源图库/词条到目标的映射，但匹配只采用仍生效的贡献。新定义撤销移除名称、外链和投影，释放外链唯一归属；重新导入创建新 action 和新词条，旧 action 和旧裁决保持失效。后来新增机器证据或独立依赖、定义被修改，都会使整步撤销冲突并回滚。名称维护触发器挂在物理记录上；创建词条/关系后按唯一键取 ID，不依赖视图触发器外的 `last_insert_rowid()`。
+
+当前入口支持平面词条（包含导入新建定义）的图片裁决及收录、跳过、未定三态；结构和其余记录明确报告未处理，不能据此宣称完整恢复。后台调度和 HTTP 文件入口在 #441 跟踪。

@@ -60,7 +60,7 @@ pub const ATTRIBUTES: [&str; 6] = ["variant", "artist", "label_only", "mascot", 
 
 /// 读取一张表所用的查询（`terms` 表见 `ATTRIBUTES`）。
 fn select(c: &Connection, name: &str, columns: &[String]) -> String {
-    let moved: bool = name == "terms"
+    let moved: bool = matches!(name, "terms" | "term_records")
         && c.query_row("SELECT EXISTS(SELECT 1 FROM pragma_table_info('term_tree') WHERE name='variant')", [], |r| {
             r.get(0)
         })
@@ -80,7 +80,7 @@ fn select(c: &Connection, name: &str, columns: &[String]) -> String {
         })
         .collect::<Vec<_>>()
         .join(",");
-    format!("SELECT {list} FROM terms t LEFT JOIN term_tree r ON r.term_id=t.id")
+    format!("SELECT {list} FROM \"{name}\" t LEFT JOIN term_tree r ON r.term_id=t.id")
 }
 
 static CLOCK: LazyLock<Regex> =
@@ -170,6 +170,16 @@ struct Additions {
     reference_terms_version: i64,
     tables: Vec<Addition>,
     meta_keys: Vec<Addition>,
+    physical_views: Vec<PhysicalView>,
+}
+
+#[derive(serde::Deserialize)]
+#[serde(deny_unknown_fields)]
+struct PhysicalView {
+    physical: String,
+    view: String,
+    introduced_in: i64,
+    checks: Vec<String>,
 }
 
 static ADDITIONS: LazyLock<Additions> = LazyLock::new(|| {
@@ -180,6 +190,14 @@ static ADDITIONS: LazyLock<Additions> = LazyLock::new(|| {
             assert!(!entry.name.is_empty() && entry.name.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'_'));
             assert!(entry.introduced_in > additions.reference_terms_version && !entry.checks.is_empty());
             assert!(names.insert(&entry.name));
+        }
+    }
+    let mut mapped = std::collections::BTreeSet::new();
+    for entry in &additions.physical_views {
+        assert!(entry.introduced_in > additions.reference_terms_version && !entry.checks.is_empty());
+        for name in [&entry.physical, &entry.view] {
+            assert!(!name.is_empty() && name.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'_'));
+            assert!(mapped.insert(name));
         }
     }
     additions
@@ -212,6 +230,18 @@ pub fn historical_projection(got: &State, frozen: &State, recorded: i64, current
     });
     let Some(live_version) = live_version else { return Ok(got.clone()) };
     let mut out = got.clone();
+    for entry in ADDITIONS.physical_views.iter().filter(|entry| entry.introduced_in <= live_version) {
+        if frozen.contains_key(&entry.physical) {
+            return Err(format!("物理视图映射不能隐藏冻结侧已有表 {}", entry.physical));
+        }
+        match (got.get(&entry.physical), got.get(&entry.view)) {
+            (None, None) => (),
+            (Some(raw), Some(effective)) if raw == effective => {
+                out.remove(&entry.physical);
+            }
+            _ => return Err(format!("物理表 {} 与有效视图 {} 的完整行不一致", entry.physical, entry.view)),
+        }
+    }
     for table in ADDITIONS.tables.iter().filter(|entry| entry.introduced_in <= live_version) {
         if frozen.contains_key(&table.name) {
             return Err(format!("新增状态清单不能隐藏冻结侧已有表 {}", table.name));
@@ -260,7 +290,20 @@ pub fn state(c: &Connection, masks: &Masks) -> State {
         )
         .ok();
     let mut out = State::new();
-    for name in tables(c) {
+    let mut names = tables(c);
+    for entry in &ADDITIONS.physical_views {
+        if names.contains(&entry.physical)
+            && c.query_row(
+                "SELECT EXISTS(SELECT 1 FROM sqlite_master WHERE type='view' AND name=?1)",
+                [&entry.view],
+                |r| r.get::<_, bool>(0),
+            )
+            .unwrap()
+        {
+            names.push(entry.view.clone());
+        }
+    }
+    for name in names {
         if RETIRED.contains(&name.as_str()) {
             continue;
         }
@@ -655,5 +698,26 @@ mod historical_projection_tests {
             existing.insert(name.into(), live[name].clone());
             assert!(historical_projection(&live, &existing, 7, 9).is_err());
         }
+    }
+
+    #[test]
+    fn physical_view_mapping_requires_equal_typed_rows_and_keeps_raw_state() {
+        let (mut live, mut frozen) = states();
+        let terms = table(&["id", "key"], &[json!([1, "synthetic"])]);
+        live.insert("term_records".into(), terms.clone());
+        live.insert("terms".into(), terms.clone());
+        frozen.insert("terms".into(), terms);
+        assert_eq!(historical_projection(&live, &frozen, 7, 9).unwrap(), frozen);
+        for changed in [table(&["id", "key"], &[json!(["1", "synthetic"])]), Table::default()] {
+            let mut mismatch = live.clone();
+            mismatch.insert("term_records".into(), changed);
+            assert!(historical_projection(&mismatch, &frozen, 7, 9).is_err());
+        }
+        let mut hidden = live.clone();
+        hidden.get_mut("terms").unwrap().rows.clear();
+        assert!(historical_projection(&hidden, &frozen, 7, 9).is_err());
+        frozen.insert("term_records".into(), live["term_records"].clone());
+        assert!(historical_projection(&live, &frozen, 7, 9).is_err());
+        assert!(live.contains_key("term_records"));
     }
 }

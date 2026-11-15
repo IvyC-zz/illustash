@@ -478,14 +478,14 @@ def _cell(value, rename):
 
 
 def _select(c, name, columns):
-    moved = name == 'terms' and c.execute(
+    moved = name in ('terms', 'term_records') and c.execute(
         "SELECT EXISTS(SELECT 1 FROM pragma_table_info('term_tree') WHERE name='variant')").fetchone()[0]
     if not moved:
         return 'SELECT * FROM ' + quote(name)
     attrs = ('CASE WHEN r.term_id IS NULL THEN t.attrs ELSE json_object('
              + ','.join(f"'{a}',r.{a}" for a in ATTRIBUTES) + ') END')
     return ('SELECT ' + ','.join(attrs if col == 'attrs' else 't.' + quote(col) for col in columns)
-            + ' FROM terms t LEFT JOIN term_tree r ON r.term_id=t.id')
+            + ' FROM ' + quote(name) + ' t LEFT JOIN term_tree r ON r.term_id=t.id')
 
 
 def _database_state(path, rename):
@@ -493,6 +493,11 @@ def _database_state(path, rename):
         c.execute('BEGIN')
         names = [n for (n,) in c.execute("SELECT name FROM sqlite_schema WHERE type='table' "
                                          "AND name NOT LIKE 'sqlite_%' ORDER BY name")]
+        for entry in _baseline_additions()['physical_views']:
+            if entry['physical'] in names and c.execute(
+                    "SELECT EXISTS(SELECT 1 FROM sqlite_schema WHERE type='view' AND name=?)",
+                    (entry['view'],)).fetchone()[0]:
+                names.append(entry['view'])
         names_version = None
         if 'meta' in names:
             row = c.execute("SELECT value FROM meta WHERE key='names_version'").fetchone()
@@ -524,7 +529,7 @@ def baseline_state(package, rename=None):
 def _baseline_additions():
     """与 Rust 共用的精确新状态清单；只在历史参考比较中使用。"""
     additions = json.loads((Path(__file__).parent / 'baseline_additions.json').read_text())
-    assert set(additions) == {'reference_terms_version', 'tables', 'meta_keys'}
+    assert set(additions) == {'reference_terms_version', 'tables', 'meta_keys', 'physical_views'}
     assert additions['reference_terms_version'] == 7
     for entries in (additions['tables'], additions['meta_keys']):
         names = set()
@@ -533,6 +538,13 @@ def _baseline_additions():
             assert re.fullmatch(r'[A-Za-z0-9_]+', entry['name']) and entry['name'] not in names
             assert entry['introduced_in'] > 7 and entry['checks']
             names.add(entry['name'])
+    names = set()
+    for entry in additions['physical_views']:
+        assert set(entry) == {'physical', 'view', 'introduced_in', 'checks'}
+        assert entry['introduced_in'] > 7 and entry['checks']
+        for name in (entry['physical'], entry['view']):
+            assert re.fullmatch(r'[A-Za-z0-9_]+', name) and name not in names
+            names.add(name)
     return additions
 
 
@@ -548,6 +560,15 @@ def _historical_projection(state, frozen):
     additions = _baseline_additions()
     old = frozen.get('app', {})
     projected = dict(app)
+    for entry in additions['physical_views']:
+        if version >= entry['introduced_in']:
+            raw, view = entry['physical'], entry['view']
+            assert raw not in old, f'物理视图映射不能隐藏冻结侧已有表 {raw}'
+            if raw not in app and view not in app:
+                continue
+            assert raw in app and view in app and app[raw] == app[view], (
+                f'物理表 {raw} 与有效视图 {view} 的完整行不一致')
+            del projected[raw]
     for entry in additions['tables']:
         if version >= entry['introduced_in']:
             assert entry['name'] not in old, f"新增状态清单不能隐藏冻结侧已有表 {entry['name']}"

@@ -31,6 +31,7 @@ INSERT INTO meta(key,value) VALUES ('human_revision','0');
 pub(crate) fn migrate(c: &Connection) -> Result<()> {
     c.execute_batch(TABLES)?;
     backfill(c)?;
+    super::visibility::migrate(c)?;
     for table in ["human_state_marks", "human_state_mark_undo"] {
         schema::guard(c, table)?;
     }

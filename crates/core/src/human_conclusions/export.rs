@@ -358,6 +358,22 @@ impl LegacyAlias {
 type Aliases = BTreeMap<String, BTreeSet<(String, String, String)>>;
 fn merge_aliases(c: &Connection) -> Result<Aliases> {
     let mut result = Aliases::new();
+    // 便携导入的别名证明由有效 action 持有；只采用封闭定义里的 legacy_merge 名称。
+    for row in c
+        .prepare(
+            "SELECT t.key,o.definition_json FROM human_object_contributions o
+        JOIN actions a ON a.id=o.owner_action_id JOIN terms t ON t.id=o.object_id
+        WHERE o.kind='term' AND a.undone=0",
+        )?
+        .query_map([], |r| Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?)))?
+    {
+        let (key, encoded) = row?;
+        let definition: Entity =
+            serde_json::from_str(&encoded).map_err(|_| Error::invalid("导入定义的来源记录不完整"))?;
+        for name in definition.names.into_iter().filter(|n| n.provenance == "legacy_merge" && n.role == "alias") {
+            result.entry(key.clone()).or_default().insert((name.lang, name.value, name.source));
+        }
+    }
     for row in c
         .prepare("SELECT before_json FROM actions WHERE undone=0 ORDER BY id")?
         .query_map([], |r| r.get::<_, String>(0))?

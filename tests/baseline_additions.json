@@ -23,6 +23,22 @@
         "native/terms/src/app_upgrade.rs::genuine_v8_counted_operation_survives_name_collision_upgrade_and_undo",
         "crates/core/src/human_conclusions/tests.rs::unknown_operation_drops_current_inference_but_undo_retains_proven_history"
       ]
+    },
+    {
+      "name": "human_object_contributions",
+      "introduced_in": 9,
+      "checks": [
+        "native/terms/src/app_human_conclusions/tests.rs::imported_definition_disappears_from_business_reads_and_reimport_owns_new_history",
+        "native/terms/src/app_human_conclusions/tests.rs::independent_evidence_keeps_imported_definition_and_rolls_back_entire_undo"
+      ]
+    },
+    {
+      "name": "human_entity_origins",
+      "introduced_in": 9,
+      "checks": [
+        "native/terms/src/app_human_conclusions/tests.rs::imported_definition_disappears_from_business_reads_and_reimport_owns_new_history",
+        "native/terms/src/app_human_conclusions/tests.rs::independent_evidence_keeps_imported_definition_and_rolls_back_entire_undo"
+      ]
     }
   ],
   "meta_keys": [
@@ -31,6 +47,25 @@
       "introduced_in": 9,
       "checks": [
         "crates/core/src/human_conclusions/tests.rs::revision_tracks_mark_changes_and_rolls_back_with_them"
+      ]
+    }
+  ],
+  "physical_views": [
+    {
+      "physical": "term_records",
+      "view": "terms",
+      "introduced_in": 9,
+      "checks": [
+        "native/terms/src/app_human_conclusions/tests.rs::imported_definition_disappears_from_business_reads_and_reimport_owns_new_history",
+        "native/terms/src/app_human_conclusions/tests.rs::independent_evidence_keeps_imported_definition_and_rolls_back_entire_undo"
+      ]
+    },
+    {
+      "physical": "term_relation_records",
+      "view": "term_relations",
+      "introduced_in": 9,
+      "checks": [
+        "crates/core/src/human_conclusions/visibility.rs::normal_relation_creation_reuses_inactive_identity_without_reviving_old_verdict"
       ]
     }
   ]

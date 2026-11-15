@@ -123,7 +123,7 @@ pub fn create_term(conn: &Connection, kind: Kind, key: Option<&str>, origin: &st
             e => e.into(),
         },
     )?;
-    Ok(conn.last_insert_rowid())
+    Ok(conn.query_row("SELECT id FROM terms WHERE key=?1", [&key], |r| r.get(0))?)
 }
 
 pub fn term_by_key(conn: &Connection, key: &str) -> Result<Option<(TermId, Kind)>> {
@@ -192,8 +192,15 @@ pub fn relation(conn: &Connection, a: TermId, b: TermId, kind: RelationKind) -> 
     if let Some(id) = existing {
         return Ok(id);
     }
+    if let Some(id) = crate::human_conclusions::visibility::ordinary_relation(conn, a, b, kind.as_str())? {
+        return Ok(id);
+    }
     conn.execute("INSERT INTO term_relations(a,b,kind) VALUES (?1,?2,?3)", params![a, b, kind.as_str()])?;
-    Ok(conn.last_insert_rowid())
+    Ok(conn.query_row(
+        "SELECT id FROM term_relations WHERE a=?1 AND b=?2 AND kind=?3",
+        params![a, b, kind.as_str()],
+        |r| r.get(0),
+    )?)
 }
 
 // ---- 裁决与撤销 ----

@@ -19,11 +19,9 @@ impl Fixture {
             NEXT.fetch_add(1, Ordering::Relaxed)
         ));
         fs::create_dir(&root).unwrap();
-        let db = root.join("library.sqlite");
-        let mut c = crate::open(&db).unwrap();
-        crate::migrate(&mut c).unwrap();
-        c.execute_batch(include_str!("../app_create_schema.sql")).unwrap();
-        c.execute_batch("INSERT INTO meta VALUES ('terms_artists','core'),('terms_labels','core'),('terms_characters','core'),('terms_names','core'),('names_version','0'),('names_projected','0')").unwrap();
+        let library = root.join("synthetic.pilib");
+        crate::app_create::create_folder(&library, &root, Some("合成图库"), Some("other"), None).unwrap();
+        let db = library.join("library.sqlite");
         Self { root, db, id: id.into() }
     }
     fn asset(&self, key: &str, filename: &str, color: u8) -> PathBuf {
@@ -159,6 +157,89 @@ fn real_files_export_rebuild_import_and_ordinary_undo() {
     assert_eq!(reapplied.action_id, Some(2));
     assert_eq!(reapplied.records["applied"], 8);
     assert_eq!(target.count("SELECT count(*) FROM term_verdicts WHERE action_id=2"), 3);
+}
+
+#[test]
+fn imported_definition_disappears_from_business_reads_and_reimport_owns_new_history() {
+    let source = Fixture::new("source-library");
+    source.source();
+    let path = source.export();
+    let target = Fixture::new("rebuilt-library");
+    for (key, color) in [("new-a", 1), ("new-b", 2), ("new-c", 3), ("new-d", 4)] {
+        target.asset(key, &format!("moved-{color}.png"), color);
+    }
+    let report = import_file(&target.db, &target.id, &path, &|| Ok(())).unwrap();
+    assert_eq!(report.records["applied"], 8);
+    assert_eq!(report.definitions["applied"], 1);
+    let c = crate::open(&target.db).unwrap();
+    let first: i64 = c.query_row("SELECT id FROM terms", [], |r| r.get(0)).unwrap();
+    assert_eq!(import_file(&target.db, &target.id, &path, &|| Ok(())).unwrap().action_id, None);
+    target.undo(report.action_id.unwrap()).unwrap();
+    for table in ["terms", "term_relations", "term_names", "term_links", "term_projection", "term_effective_verdicts"] {
+        assert_eq!(target.count(&format!("SELECT count(*) FROM {table}")), 0, "{table}");
+    }
+    assert_eq!(target.count("SELECT count(*) FROM term_records"), 1);
+    assert_eq!(target.count("SELECT count(*) FROM term_verdicts"), 3);
+    assert_eq!(target.count("SELECT count(*) FROM pragma_foreign_key_check"), 0);
+    let empty = capture(&target.db, &target.id, &|| Ok(())).unwrap();
+    let mut encoded = Vec::new();
+    empty.write(&mut encoded).unwrap();
+    assert_eq!(String::from_utf8(encoded).unwrap().lines().count(), 2);
+    let repeated = import_file(&target.db, &target.id, &path, &|| Ok(())).unwrap();
+    assert_eq!(repeated.action_id, Some(2));
+    let second: i64 = c.query_row("SELECT id FROM terms", [], |r| r.get(0)).unwrap();
+    assert_ne!(first, second);
+    assert_eq!(target.count("SELECT count(*) FROM actions WHERE id=1 AND undone=1"), 1);
+    assert_eq!(target.count("SELECT count(*) FROM term_verdicts WHERE action_id=1"), 3);
+    assert_eq!(target.count("SELECT count(*) FROM term_effective_verdicts WHERE action_id=1"), 0);
+    assert_eq!(target.count("SELECT count(*) FROM term_links WHERE key='synthetic_artist'"), 1);
+}
+
+#[test]
+fn independent_evidence_keeps_imported_definition_and_rolls_back_entire_undo() {
+    let source = Fixture::new("source-library");
+    source.source();
+    let path = source.export();
+    let target = Fixture::new("rebuilt-library");
+    for (key, color) in [("new-a", 1), ("new-b", 2), ("new-c", 3), ("new-d", 4)] {
+        target.asset(key, &format!("moved-{color}.png"), color);
+    }
+    let report = import_file(&target.db, &target.id, &path, &|| Ok(())).unwrap();
+    let mut c = crate::open(&target.db).unwrap();
+    let tx = c.transaction().unwrap();
+    crate::schema::begin_writing(&tx).unwrap();
+    tx.execute(
+        "INSERT INTO term_evidence(asset_id,term_id,source,method,version,fingerprint)
+        SELECT a.id,t.id,'wd','synthetic','1',zeroblob(16) FROM term_assets a,terms t WHERE a.key='new-a'",
+        [],
+    )
+    .unwrap();
+    crate::schema::commit_writing(tx).unwrap();
+    let before = capture(&target.db, &target.id, &|| Ok(())).unwrap().semantic_sha256().unwrap();
+    assert!(matches!(target.undo(report.action_id.unwrap()), Err(Error::Conflict(_))));
+    assert_eq!(capture(&target.db, &target.id, &|| Ok(())).unwrap().semantic_sha256().unwrap(), before);
+    assert_eq!(target.count("SELECT count(*) FROM actions WHERE undone=0"), 1);
+    assert_eq!(target.count("SELECT count(*) FROM curation"), 1);
+    assert_eq!(target.count("SELECT count(*) FROM deferred"), 1);
+    assert_eq!(target.count("SELECT count(*) FROM term_links"), 1);
+}
+
+#[test]
+fn standalone_user_definition_imports_and_undoes_without_assets() {
+    let source = Fixture::new("source-library");
+    let c = crate::open(&source.db).unwrap();
+    let id = crate::store::create_term(&c, crate::Kind::Concept, Some("synthetic-tag"), "user").unwrap();
+    crate::store::add_name(&c, id, "zh", "合成标签", "alias", "user").unwrap();
+    let path = source.root.join("standalone.illustash-human.jsonl");
+    capture(&source.db, &source.id, &|| Ok(())).unwrap().write(&mut File::create(&path).unwrap()).unwrap();
+    let target = Fixture::new("target-library");
+    let report = import_file(&target.db, &target.id, &path, &|| Ok(())).unwrap();
+    assert!(report.records.is_empty());
+    assert_eq!(report.definitions["applied"], 1);
+    assert_eq!(target.count("SELECT count(*) FROM term_names WHERE value='合成标签' AND source='user'"), 1);
+    target.undo(report.action_id.unwrap()).unwrap();
+    assert_eq!(target.count("SELECT count(*) FROM terms"), 0);
+    assert_eq!(target.count("SELECT count(*) FROM term_records"), 1);
 }
 
 #[test]

@@ -74,13 +74,40 @@ class HistoricalAdditions(unittest.TestCase):
     def test_every_manifest_entry_names_existing_semantic_tests(self):
         root = Path(__file__).resolve().parents[1]
         additions = _baseline_additions()
-        self.assertEqual({e['name'] for e in additions['tables']}, {'human_state_marks', 'human_state_mark_undo'})
+        self.assertEqual({e['name'] for e in additions['tables']}, {
+            'human_state_marks', 'human_state_mark_undo', 'human_object_contributions', 'human_entity_origins'})
         self.assertEqual({e['name'] for e in additions['meta_keys']}, {'human_revision'})
-        for entry in additions['tables'] + additions['meta_keys']:
+        self.assertEqual({(e['physical'], e['view']) for e in additions['physical_views']}, {
+            ('term_records', 'terms'), ('term_relation_records', 'term_relations')})
+        for entry in additions['tables'] + additions['meta_keys'] + additions['physical_views']:
             self.assertEqual(entry['introduced_in'], 9)
             for check in entry['checks']:
                 path, function = check.rsplit('::', 1)
                 self.assertRegex((root / path).read_text(), rf'fn {re.escape(function)}\(')
+
+    def test_physical_view_mapping_compares_every_cell_and_rejects_hidden_history(self):
+        with sqlite3.connect(self.root / 'library.sqlite') as c:
+            c.executescript('CREATE TABLE term_records(id INTEGER PRIMARY KEY,key TEXT,attrs TEXT);'
+                           'INSERT INTO term_records VALUES(1,\'synthetic\',\'{}\');'
+                           'CREATE VIEW terms AS SELECT * FROM term_records;')
+        live = baseline_state(self.root)
+        frozen = copy.deepcopy(self.frozen)
+        frozen['app']['terms'] = live['app']['terms']
+        self.assertEqual(_historical_projection(live, frozen), frozen)
+        for cells in ('[1,"different","{}"]', '["1","synthetic","{}"]'):
+            changed = copy.deepcopy(live)
+            changed['app']['term_records']['rows'] = [cells]
+            with self.assertRaises(AssertionError):
+                _historical_projection(changed, frozen)
+        hidden = copy.deepcopy(live)
+        hidden['app']['terms']['rows'] = []
+        with self.assertRaises(AssertionError):
+            _historical_projection(hidden, frozen)
+        old = copy.deepcopy(frozen)
+        old['app']['term_records'] = live['app']['term_records']
+        with self.assertRaises(AssertionError):
+            _historical_projection(live, old)
+        self.assertIn('term_records', baseline_state(self.root)['app'])
 
 
 if __name__ == '__main__':
