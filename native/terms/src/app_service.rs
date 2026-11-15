@@ -75,6 +75,22 @@ pub(crate) fn open_owned(
                 None => e,
             });
         }
+        // 记录过损坏、现在因格式不对打不开：多半是按提示换回了升级前的旧格式备份（#492）。完整检查认定完好就清除
+        // 损坏记录，外壳随后按需要升级来处理，而不是再显示一遍损坏提示；仍然损坏就照旧记下。
+        Err(e @ Error::Schema(_)) => {
+            let library = Library::locate(path)?;
+            if crate::app_integrity::recorded_damage(library.instance_path()).is_some() {
+                let owner = claim_or_reuse(&library, current)?;
+                match crate::app_integrity::check_both(&library, progress)? {
+                    Some(damage) => {
+                        owner.health.damaged(damage.clone())?;
+                        return Err(damage.error());
+                    }
+                    None => owner.health.sound_again()?,
+                }
+            }
+            return Err(e);
+        }
         Err(e) => return Err(e),
     };
     let owner = claim_or_reuse(&library, current)?;

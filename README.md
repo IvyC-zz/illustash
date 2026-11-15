@@ -241,7 +241,7 @@ A library is a `.pilib` folder:
 | Item | What it holds | Safe to delete? |
 |---|---|---|
 | `library.json` | Name, permanent ID, sources, package format version | No |
-| `library.sqlite` | Your decisions, machine evidence, undo history, and derived tables | **No**, it is not a cache |
+| `library.sqlite` | Your decisions, machine evidence, undo history, and derived tables | **No**, it is not a cache; if it is damaged, restore a backup (below) |
 | `source.sqlite` | Snapshot of your sources and recognition results (tags, features) | Don't. Recognition can be redone, but folder pictures get their IDs on the first scan and your decisions are linked to them; if it is damaged, the in-app rescue keeps those IDs |
 | `provenance.sqlite` | Provenance lookup cache and machine results | Not included in exports |
 | `thumbnails/` | Thumbnail cache | Any time; it is rebuilt |
@@ -250,6 +250,8 @@ A library is a `.pilib` folder:
 | `backups/human-conclusions/` | Automatic snapshots of current human decisions | Retains 30 successful snapshots |
 
 The `format` field in `library.json` is the package format version, separate from each database's own schema version. A format newer than the program is refused outright rather than guessed at. Opening an older library never upgrades it silently: you confirm first, `library.sqlite` is backed up into `library-backups/` with SQLite's backup API, and the migration runs in a single transaction, leaving the library as it was if it does not finish. A library that was not closed cleanly gets a full integrity check of both databases before it opens. An exported `.pilib.zip` holds only the configuration, the two databases, and the features, with secrets such as API keys cleared, so it is safe to share.
+
+If `library.sqlite` is damaged, Illustash stops writing and explains how to restore it: quit, move `library.sqlite` with its `-wal` and `-shm` files out of the library folder, copy a backup back in as `library.sqlite`, and open the library again. Use either a `library-*.sqlite` from `backups/` (not the `source-damaged-*` files there), or a copy from `library-backups/`, which predates an upgrade, so Illustash asks to upgrade it again. Pick the most recently modified; curation done after it is lost.
 
 The host creates a human-decision snapshot after a successful library open, coalesces edits for 60 seconds, and leaves at least one hour between successful automatic files. Identical state is not duplicated; 30 files do not mean 30 days. These snapshots share the library’s storage. Manual portable export writes an independent file to Downloads; the interface is provided by the backend, with UI entry points handled separately. Restoration fills undecided items using verified exact file content, without guessing among duplicate images. Missing hashes and unsupported dependencies remain explicit in the report; portable state does not include the full undo history. See [snapshot boundaries](docs/LIBRARIES.md#人工结论快照).
 

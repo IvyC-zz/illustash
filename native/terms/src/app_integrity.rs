@@ -73,7 +73,10 @@ impl Damage {
         Error::Conflict(self.guidance().into())
     }
 }
-pub(crate) const LIBRARY_DAMAGED: &str = "这个图库的整理记录数据库（library.sqlite）已损坏，为保护数据已停止写入。请退出 Illustash，把图库文件夹里的 library.sqlite 连同旁边的 library.sqlite-wal、library.sqlite-shm 一起移到别处保存，再从 backups 文件夹里选最近的一份备份复制回来、改名为 library.sqlite，然后重新打开。最近一次备份之后的整理会丢失。";
+/// library.sqlite 只能换回备份（#492）。图库文件夹里有两处备份：`backups/` 是设置里「立即备份」留下的
+/// `library-日期-时间-….sqlite`（同一文件夹里抢救 source.sqlite 时留存的 `source-damaged-…` 不是整理记录）；
+/// `library-backups/` 是升级图库格式前自动留下的 `terms-v旧版-before-v新版-….sqlite`，换回后要再升级一次。
+pub(crate) const LIBRARY_DAMAGED: &str = "这个图库的整理记录数据库（library.sqlite）已损坏，为保护数据已停止写入。请退出 Illustash，把图库文件夹里的 library.sqlite 连同旁边的 library.sqlite-wal、library.sqlite-shm 一起移到别处保存，再从图库文件夹的备份里选一份复制回来、改名为 library.sqlite，然后重新打开。备份有两处：backups 文件夹里是在设置里「立即备份」留下的，只用名字以 library- 开头的文件（以 source-damaged 开头的是抢救识别结果时留存的损坏文件，不能用）；library-backups 文件夹里是升级图库格式前自动留下的，内容停在那次升级之前，换回后打开时会请你再升级一次。两处都有时，选修改时间最近的一份；如果 Illustash 提示这份备份需要先用 pre-v8 版本升级，就换一份。所选备份之后的整理会丢失。";
 /// source.sqlite 可以在应用内抢救（#228）：启动页、图库页的提示和图库切换器配合「抢救重建」按钮显示的文字。
 pub(crate) const SOURCE_DAMAGED: &str = "这个图库的识别结果数据库（source.sqlite）已损坏，为保护数据已停止写入；人工整理记录在 library.sqlite 里，没有受影响。可以点「抢救重建」：还读得出的识别结果和每张图的 ID 都会保留，读不出的部分重新扫描来源文件夹、重新识别；损坏的文件移到图库的 backups 文件夹里留存。抢救前请确认来源文件夹都能访问。";
 pub(crate) const NOTHING_TO_RESCUE: &str = "这个图库的识别结果数据库没有发现损坏，不需要抢救";
@@ -173,6 +176,17 @@ impl Health {
             if record.damaged.as_ref().is_some_and(|d| d.database == Database::Source) {
                 record.damaged = None;
             }
+        })
+    }
+    /// 记录损坏之后数据库被换掉了（#492，例如换回了升级前的旧格式备份），完整检查认定两个都完好：清除损坏，
+    /// 这样外壳不再显示损坏提示，而是按图库本身的状态（例如需要升级）处理。
+    pub(crate) fn sound_again(&self) -> Result<()> {
+        let time = now();
+        self.update(|record| {
+            for database in Database::BOTH {
+                record.checked.insert(database, time);
+            }
+            record.damaged = None;
         })
     }
     pub(crate) fn damaged(&self, damage: Damage) -> Result<()> {
