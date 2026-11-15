@@ -7,9 +7,9 @@
 **面向二次元插画收藏的本地图库。**
 
 [![最新版本](https://img.shields.io/github/v/release/shio-vinyl/illustash?label=release&color=4c6ef5)](https://github.com/shio-vinyl/illustash/releases/latest)
-[![CI](https://github.com/shio-vinyl/illustash/actions/workflows/ci.yml/badge.svg?branch=main&event=push)](https://github.com/shio-vinyl/illustash/actions/workflows/ci.yml)
 [![许可：GPL-3.0-or-later](https://img.shields.io/badge/license-GPL--3.0--or--later-blue.svg)](LICENSE)
 [![平台：macOS · Windows](https://img.shields.io/badge/platform-macOS%2014%2B%20(Apple%20silicon)%20%C2%B7%20Windows%20x64-lightgrey.svg)](#下载与现状)
+[![用 Rust 和 Tauri 构建](https://img.shields.io/badge/built%20with-Rust%20%C2%B7%20Tauri-dea584.svg?logo=rust&logoColor=white)](#工作原理)
 
 [**下载**](https://github.com/shio-vinyl/illustash/releases/latest) · [能做什么](#能做什么) · [隐私](#隐私与底线) · [工作原理](#工作原理) · [从源码运行](#从源码运行)
 

@@ -7,9 +7,9 @@
 **A local library for your anime illustration collection.**
 
 [![Latest release](https://img.shields.io/github/v/release/shio-vinyl/illustash?label=release&color=4c6ef5)](https://github.com/shio-vinyl/illustash/releases/latest)
-[![CI](https://github.com/shio-vinyl/illustash/actions/workflows/ci.yml/badge.svg?branch=main&event=push)](https://github.com/shio-vinyl/illustash/actions/workflows/ci.yml)
 [![License: GPL-3.0-or-later](https://img.shields.io/badge/license-GPL--3.0--or--later-blue.svg)](LICENSE)
 [![Platform: macOS · Windows](https://img.shields.io/badge/platform-macOS%2014%2B%20(Apple%20silicon)%20%C2%B7%20Windows%20x64-lightgrey.svg)](#download-and-status)
+[![Built with Rust and Tauri](https://img.shields.io/badge/built%20with-Rust%20%C2%B7%20Tauri-dea584.svg?logo=rust&logoColor=white)](#how-it-works)
 
 [**Download**](https://github.com/shio-vinyl/illustash/releases/latest) · [Features](#what-it-does) · [Privacy](#privacy-and-boundaries) · [How it works](#how-it-works) · [Build from source](#running-from-source)
 
