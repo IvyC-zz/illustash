@@ -1,5 +1,7 @@
-//! 滚动日志只接受固定来源、固定原因和进程/系统错误码。原始 stderr 不进入写入器。
+//! 滚动日志只接受固定来源、原因、错误码和已核实的源码位置。原始 stderr 不进入写入器。
 use super::{create_private_directory, lock_directory, private_options, Cause};
+use details::PanicSite;
+pub use details::{worker_invalid_request, worker_io, worker_ort, worker_runtime_abi, IoPhase, OrtPhase};
 use std::{
     fs,
     io::{self, BufRead, BufReader, Read, Write},
@@ -13,6 +15,8 @@ use std::{
     thread,
     time::{Duration, Instant},
 };
+
+mod details;
 
 const MAX_BYTES: u64 = 2 * 1024 * 1024;
 const MAX_LINE: usize = 4096;
@@ -131,6 +135,8 @@ enum Kind {
     Stderr,
     Status,
     WorkerExit(Option<&'static str>),
+    WorkerDetail(&'static str),
+    Panic(PanicSite),
 }
 
 fn record(source: Source, reason: &'static str, code: Option<i32>, kind: Kind) {
@@ -138,7 +144,7 @@ fn record(source: Source, reason: &'static str, code: Option<i32>, kind: Kind) {
         return;
     }
     let Some(writer) = WRITER.get_or_init(|| Writer::start().ok()) else { return };
-    let stderr = matches!(kind, Kind::Stderr);
+    let stderr = matches!(kind, Kind::Stderr | Kind::WorkerDetail(_) | Kind::Panic(_));
     // 给超时和退出等终态保留队列空间。任何一个 stderr 流刷屏都不能占满它。
     if stderr && writer.stderr.fetch_add(1, Ordering::Relaxed) >= STDERR_LIMIT {
         writer.stderr.fetch_sub(1, Ordering::Relaxed);
@@ -150,6 +156,8 @@ fn record(source: Source, reason: &'static str, code: Option<i32>, kind: Kind) {
     let code = code.map(|code| format!("（代码 {code}）")).unwrap_or_default();
     let detail = match kind {
         Kind::WorkerExit(Some(failure)) => format!("：{failure}"),
+        Kind::WorkerDetail(kind) => format!("：{kind}"),
+        Kind::Panic(site) => format!("（native/terms/{}:{}:{}）", site.file, site.line, site.column),
         _ => String::new(),
     };
     let line = format!("{stamp} [{}] {reason}{code}{detail}\n", source.label());
@@ -304,22 +312,29 @@ pub fn drain(source: Source, stderr: impl Read, mut on_line: impl FnMut(&[u8])) 
         let text_length = end.unwrap_or(consumed).min(MAX_LINE - line.len());
         line.extend_from_slice(&chunk[..text_length]);
         if end.is_some() || (consumed == 0 && !line.is_empty()) {
-            on_line(&line);
             let text = String::from_utf8_lossy(&line);
-            match classify_stderr(&text) {
-                Some(reason) => {
-                    if text.trim_start().starts_with(crate::app_tasks::WORKER_ERROR_PREFIX)
-                        || text.contains("panicked at")
-                    {
-                        failure = Some(reason);
-                    }
-                    let now = Instant::now();
-                    if previous.is_none_or(|(last, at)| last != reason || now.duration_since(at) >= DEDUP_WINDOW) {
-                        record(source, reason, None, Kind::Stderr);
-                        previous = Some((reason, now));
-                    }
+            if let Some(detail) = details::parse_worker_detail(text.trim_end()) {
+                record(source, detail.phase, detail.code, Kind::WorkerDetail(detail.kind));
+            } else {
+                on_line(&line);
+                if let Some(site) = details::panic_site(text.trim_end()) {
+                    record(source, "Rust 进程崩溃位置", None, Kind::Panic(site));
                 }
-                None => previous = None,
+                match classify_stderr(&text) {
+                    Some(reason) => {
+                        if text.trim_start().starts_with(crate::app_tasks::WORKER_ERROR_PREFIX)
+                            || text.contains("panicked at")
+                        {
+                            failure = Some(reason);
+                        }
+                        let now = Instant::now();
+                        if previous.is_none_or(|(last, at)| last != reason || now.duration_since(at) >= DEDUP_WINDOW) {
+                            record(source, reason, None, Kind::Stderr);
+                            previous = Some((reason, now));
+                        }
+                    }
+                    None => previous = None,
+                }
             }
             line.clear();
         }
@@ -429,7 +444,10 @@ mod tests {
         assert_eq!(contents.lines().count(), 96, "{contents}");
         for first in [100, 200, 300] {
             for code in first..first + 32 {
-                assert!(contents.contains(&format!("本地服务异常退出（代码 {code}）")));
+                assert!(
+                    contents.contains(&format!("本地服务异常退出（代码 {code}）")),
+                    "缺少合成退出码 {code}：\n{contents}"
+                );
             }
         }
     }

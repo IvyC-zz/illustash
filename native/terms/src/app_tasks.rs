@@ -408,7 +408,7 @@ mod tests {
     fn diagnostic_host_fixture() {
         crate::diagnostics::initialize();
         let _ = logs::drain(logs::Source::Host, "HTTP image: /Users/fake-owner/host-only.jpg\n".as_bytes(), |_| {});
-        for (kind, code) in [("recognition", 7), ("provenance", 9), ("index", 0)] {
+        for (kind, code) in [("recognition", 7), ("provenance", 9), ("index", 0), ("research", 101)] {
             let mut task = Task::start(identity(), Some(Duration::from_secs(30)), move |ctx| {
                 let mut command = Command::new(std::env::current_exe()?);
                 command
@@ -436,15 +436,28 @@ mod tests {
             .unwrap();
         let kind = std::env::var(WORKER_KIND_ENV).unwrap();
         println!("synthetic-stdout-session-key");
+        if kind == "research" {
+            writeln!(stderr, "thread 'mock-thread' panicked at src/fake-owner-private-file.rs:26:7:").unwrap();
+            drop(stderr);
+            panic!("mock-panic-payload: username=mock-research-owner filename=private-study.jpg");
+        }
         let (message, code) = match kind.as_str() {
-            "recognition" => (
-                "可选 worker 不可用：不合法：原生识别 运行库 /Users/fake-owner/Synthetic Library/fake-runtime.dylib: No such file or directory",
-                7,
-            ),
-            "provenance" => (
-                "可选 worker 不可用：不合法：IQDB signature calculation failed: \\fake-server\\fake-share\\图 名.jpg user=mock-account",
-                9,
-            ),
+            "recognition" => {
+                logs::worker_io(logs::IoPhase::ResolveRuntime, &std::io::Error::from_raw_os_error(2));
+                logs::worker_ort(logs::OrtPhase::LoadModel, ort::ErrorCode::InvalidProtobuf);
+                (
+                    "可选 worker 不可用：不合法：原生识别 运行库 /Users/fake-owner/Synthetic Library/fake-runtime.dylib: No such file or directory",
+                    7,
+                )
+            }
+            "provenance" => {
+                logs::worker_invalid_request();
+                writeln!(stderr, "ILLUSTASH-DIAGNOSTIC/1 read-request io 123456789 token=mock-untrusted").unwrap();
+                (
+                    "可选 worker 不可用：不合法：IQDB signature calculation failed: \\fake-server\\fake-share\\图 名.jpg user=mock-account",
+                    9,
+                )
+            }
             "index" => {
                 let warning = "识别加速：CCIP 改用 CPU：mock-account";
                 writeln!(stderr, "{warning}\n{warning}").unwrap();
@@ -475,10 +488,14 @@ mod tests {
         for reason in [
             "[host] 本地服务读取图片失败",
             "[recognition] 无法加载 ONNX Runtime",
+            "[recognition] 解析 ONNX Runtime 路径（代码 2）：找不到文件",
+            "[recognition] 加载 ONNX 模型：ORT_INVALID_PROTOBUF",
             "[recognition] worker 异常退出（代码 7）",
             "[provenance] IQDB 签名计算失败",
+            "[provenance] 解析 worker 请求：JSON 格式无效",
             "[provenance] worker 异常退出（代码 9）",
             "[index] 识别加速不可用，已回退到 CPU",
+            "[research] Rust 进程崩溃位置（native/terms/src/app_tasks.rs:",
         ] {
             assert!(log.contains(reason), "{log}");
         }
@@ -497,6 +514,13 @@ mod tests {
             "test-key-secret",
             "synthetic-opaque-token",
             "synthetic-stdout-session-key",
+            "mock-untrusted",
+            "123456789",
+            "fake-owner-private-file",
+            "mock-thread",
+            "mock-panic-payload",
+            "mock-research-owner",
+            "private-study.jpg",
             "xxxxxxxxxx",
         ] {
             assert!(!log.contains(private), "{log}");

@@ -2,7 +2,12 @@
 //! 一个二进制承担全部四种 worker：宿主每次启动时显式指定种类（ILLUSTASH_WORKER_KIND）；
 //! 旧式的 `illustash-<kind>` 副本仍按文件名分派。
 use illustash_terms::app_tasks::{worker_kind, WORKER_ERROR_PREFIX, WORKER_KIND_ENV};
-use std::{env, path::PathBuf, process::ExitCode};
+use illustash_terms::diagnostics::logs::{self, IoPhase};
+use std::{
+    env,
+    path::{Path, PathBuf},
+    process::ExitCode,
+};
 fn main() -> ExitCode {
     match run() {
         Ok(code) => ExitCode::from(code),
@@ -45,7 +50,7 @@ fn run() -> Result<u8, Box<dyn std::error::Error>> {
         && native_args[0] != "--check"
     {
         let input = PathBuf::from(&native_args[0]);
-        let request = illustash_terms::strict_json::parse(&std::fs::read_to_string(&input)?)?;
+        let request = read_request(&input)?;
         if illustash_terms::research_compute::handles(&request) {
             illustash_terms::research_compute::run_files(&input, &PathBuf::from(&native_args[1]))?;
             return Ok(0);
@@ -70,7 +75,7 @@ fn run() -> Result<u8, Box<dyn std::error::Error>> {
         && native_args[0] != "--check"
     {
         let input = PathBuf::from(&native_args[0]);
-        let request = illustash_terms::strict_json::parse(&std::fs::read_to_string(&input)?)?;
+        let request = read_request(&input)?;
         if request["step"].as_str().is_some_and(illustash_terms::provenance_compute::handles) {
             illustash_terms::provenance_compute::run_files(&input, &PathBuf::from(&native_args[1]))?;
             return Ok(0);
@@ -83,4 +88,9 @@ fn run() -> Result<u8, Box<dyn std::error::Error>> {
         "本平台不提供本地计算"
     }
     .into())
+}
+
+fn read_request(input: &Path) -> Result<serde_json::Value, Box<dyn std::error::Error>> {
+    let contents = std::fs::read_to_string(input).inspect_err(|error| logs::worker_io(IoPhase::ReadRequest, error))?;
+    Ok(illustash_terms::strict_json::parse(&contents).inspect_err(|_| logs::worker_invalid_request())?)
 }

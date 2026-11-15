@@ -495,6 +495,7 @@ mod tests {
     #[ignore = "由自检回归测试作为子进程运行"]
     fn failing_check_worker_fixture() {
         eprintln!("较早的诊断\n合成诊断：模型不匹配\n   ");
+        crate::diagnostics::logs::worker_invalid_request();
         std::process::exit(7);
     }
 
