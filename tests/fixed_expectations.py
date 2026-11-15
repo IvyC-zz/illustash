@@ -478,14 +478,16 @@ def _cell(value, rename):
 
 
 def _select(c, name, columns):
-    moved = name == 'terms' and c.execute(
+    physical = c.execute("SELECT EXISTS(SELECT 1 FROM sqlite_schema WHERE type='table' "
+                         "AND name='term_records')").fetchone()[0]
+    moved = name == 'terms' and not physical and c.execute(
         "SELECT EXISTS(SELECT 1 FROM pragma_table_info('term_tree') WHERE name='variant')").fetchone()[0]
     if not moved:
         return 'SELECT * FROM ' + quote(name)
     attrs = ('CASE WHEN r.term_id IS NULL THEN t.attrs ELSE json_object('
              + ','.join(f"'{a}',r.{a}" for a in ATTRIBUTES) + ') END')
     return ('SELECT ' + ','.join(attrs if col == 'attrs' else 't.' + quote(col) for col in columns)
-            + ' FROM terms t LEFT JOIN term_tree r ON r.term_id=t.id')
+            + ' FROM ' + quote(name) + ' t LEFT JOIN term_tree r ON r.term_id=t.id')
 
 
 def _database_state(path, rename):
@@ -493,6 +495,11 @@ def _database_state(path, rename):
         c.execute('BEGIN')
         names = [n for (n,) in c.execute("SELECT name FROM sqlite_schema WHERE type='table' "
                                          "AND name NOT LIKE 'sqlite_%' ORDER BY name")]
+        for entry in _baseline_additions()['physical_views']:
+            if entry['physical'] in names and c.execute(
+                    "SELECT EXISTS(SELECT 1 FROM sqlite_schema WHERE type='view' AND name=?)",
+                    (entry['view'],)).fetchone()[0]:
+                names.append(entry['view'])
         names_version = None
         if 'meta' in names:
             row = c.execute("SELECT value FROM meta WHERE key='names_version'").fetchone()
@@ -502,7 +509,8 @@ def _database_state(path, rename):
             if name in RETIRED:
                 continue
             columns = [r[1] for r in c.execute('PRAGMA table_info(' + quote(name) + ')')]
-            keep = [i for i, col in enumerate(columns) if (name, col) not in SKIP_COLUMNS]
+            keep = [i for i, col in enumerate(columns) if (name, col) not in SKIP_COLUMNS
+                    or ('term_records' in names and name == 'term_tree' and col in ATTRIBUTES)]
             rows = []
             for raw in c.execute(_select(c, name, columns)):
                 cells = [_cell(raw[i], rename) for i in keep]
@@ -518,6 +526,90 @@ def baseline_state(package, rename=None):
     return {name: _database_state(package / filename, rename or {}) for name, filename in
             (('app', 'library.sqlite'), ('source', 'source.sqlite'), ('provenance', 'provenance.sqlite'))
             if (package / filename).exists()}
+
+
+@lru_cache(maxsize=1)
+def _baseline_additions():
+    """与 Rust 共用的精确新状态清单；只在历史参考比较中使用。"""
+    additions = json.loads((Path(__file__).parent / 'baseline_additions.json').read_text())
+    assert set(additions) == {'reference_terms_version', 'tables', 'meta_keys', 'physical_views'}
+    assert additions['reference_terms_version'] == 7
+    for entries in (additions['tables'], additions['meta_keys']):
+        names = set()
+        for entry in entries:
+            assert set(entry) == {'name', 'introduced_in', 'checks'}
+            assert re.fullmatch(r'[A-Za-z0-9_]+', entry['name']) and entry['name'] not in names
+            assert entry['introduced_in'] > 7 and entry['checks']
+            names.add(entry['name'])
+    names = set()
+    for entry in additions['physical_views']:
+        assert set(entry) == {'physical', 'view', 'introduced_in', 'checks'}
+        assert entry['introduced_in'] > 7 and entry['checks']
+        for name in (entry['physical'], entry['view']):
+            assert re.fullmatch(r'[A-Za-z0-9_]+', name) and name not in names
+            names.add(name)
+    return additions
+
+
+def _historical_projection(state, frozen):
+    """仅从实时 app 库的 v7 历史投影中分离具名新状态，不改变 baseline_state 的完整读数。"""
+    app = state.get('app', {})
+    meta = app.get('meta', {})
+    version = next((cells[1] for row in meta.get('rows', [])
+                    if (cells := json.loads(row))[0] == 'terms_schema'), None)
+    if version is None:
+        return state
+    version = TERMS_VERSION if version == '<terms-version>' else int(version)
+    additions = _baseline_additions()
+    old = frozen.get('app', {})
+    projected = dict(app)
+    for entry in additions['physical_views']:
+        if version >= entry['introduced_in']:
+            raw, view = entry['physical'], entry['view']
+            assert raw not in old, f'物理视图映射不能隐藏冻结侧已有表 {raw}'
+            if raw not in app and view not in app:
+                continue
+            assert raw in app and view in app and app[raw] == app[view], (
+                f'物理表 {raw} 与有效视图 {view} 的完整行不一致')
+            del projected[raw]
+            if view == 'terms':
+                _historical_attributes(projected)
+    for entry in additions['tables']:
+        if version >= entry['introduced_in']:
+            assert entry['name'] not in old, f"新增状态清单不能隐藏冻结侧已有表 {entry['name']}"
+            projected.pop(entry['name'], None)
+    keys = {entry['name'] for entry in additions['meta_keys'] if version >= entry['introduced_in']}
+    for row in old.get('meta', {}).get('rows', []):
+        assert json.loads(row)[0] not in keys, '新增状态清单不能隐藏冻结侧已有 meta 键'
+    if 'meta' in projected:
+        projected['meta'] = {**meta, 'rows': [row for row in meta['rows'] if json.loads(row)[0] not in keys]}
+    return {**state, 'app': projected}
+
+
+def _historical_attributes(projected):
+    """当前原始属性保留；仅在旧参考投影里按第 8 版既定表达重建。"""
+    tree = projected.get('term_tree')
+    if not tree or 'variant' not in tree['columns']:
+        return
+    attributes = [tree['columns'].index(name) for name in ATTRIBUTES]
+    term_id = tree['columns'].index('term_id')
+    dump = lambda value: json.dumps(value, ensure_ascii=False, separators=(',', ':'))
+    objects = {}
+    for row in tree['rows']:
+        cells = json.loads(row)
+        objects[dump(cells[term_id])] = dump({name: cells[i] for name, i in zip(ATTRIBUTES, attributes)})
+    terms = projected['terms']
+    term_id, attrs = terms['columns'].index('id'), terms['columns'].index('attrs')
+    rows = []
+    for row in terms['rows']:
+        cells = json.loads(row)
+        if dump(cells[term_id]) in objects:
+            cells[attrs] = objects[dump(cells[term_id])]
+        rows.append(dump(cells))
+    projected['terms'] = {**terms, 'rows': sorted(rows)}
+    keep = [i for i in range(len(tree['columns'])) if i not in attributes]
+    projected['term_tree'] = {'columns': [tree['columns'][i] for i in keep],
+                              'rows': sorted(dump([json.loads(row)[i] for i in keep]) for row in tree['rows'])}
 
 
 @lru_cache(maxsize=None)
@@ -539,6 +631,7 @@ def _check_baseline(slot, state, only=None):
     want = _baseline_file(module).get(test, {}).get(key)
     if want is not None:
         want = {db: {t: v for t, v in tables.items() if t not in RETIRED} for db, tables in want.items()}
+        state = _historical_projection(state, want)
     if only is not None:
         pick = lambda s: {db: {t: s.get(db, {}).get(t) for t in tables} for db, tables in only.items()}
         state, want = pick(state), want if want is None else pick(want)

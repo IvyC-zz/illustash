@@ -245,9 +245,13 @@ A library is a `.pilib` folder:
 | `source.sqlite` | Snapshot of your sources and recognition results (tags, features) | Don't. Recognition can be redone, but folder pictures get their IDs on the first scan and your decisions are linked to them; if it is damaged, the in-app rescue keeps those IDs |
 | `provenance.sqlite` | Provenance lookup cache and machine results | Not included in exports |
 | `thumbnails/` | Thumbnail cache | Any time; it is rebuilt |
-| `backups/` | Automatic pre-upgrade backups and manual backups | Up to you |
+| `library-backups/` | Required pre-upgrade SQLite copies | Keep for rollback |
+| `backups/` | Manual SQLite backups and damaged-source evidence | Up to you |
+| `backups/human-conclusions/` | Automatic snapshots of current human decisions | Retains 30 successful snapshots |
 
-The `format` field in `library.json` is the package format version, separate from each database's own schema version. A format newer than the program is refused outright rather than guessed at. Opening an older library never upgrades it silently: you confirm first, `library.sqlite` is backed up into `backups/` with SQLite's backup API, and the migration runs in a single transaction, leaving the library as it was if it does not finish. A library that was not closed cleanly gets a full integrity check of both databases before it opens. An exported `.pilib.zip` holds only the configuration, the two databases, and the features, with secrets such as API keys cleared, so it is safe to share.
+The `format` field in `library.json` is the package format version, separate from each database's own schema version. A format newer than the program is refused outright rather than guessed at. Opening an older library never upgrades it silently: you confirm first, `library.sqlite` is backed up into `library-backups/` with SQLite's backup API, and the migration runs in a single transaction, leaving the library as it was if it does not finish. A library that was not closed cleanly gets a full integrity check of both databases before it opens. An exported `.pilib.zip` holds only the configuration, the two databases, and the features, with secrets such as API keys cleared, so it is safe to share.
+
+The host creates a human-decision snapshot after a successful library open, coalesces edits for 60 seconds, and leaves at least one hour between successful automatic files. Identical state is not duplicated; 30 files do not mean 30 days. These snapshots share the library’s storage. Manual portable export writes an independent file to Downloads; the interface is provided by the backend, with UI entry points handled separately. Restoration fills undecided items using verified exact file content, without guessing among duplicate images. Missing hashes and unsupported dependencies remain explicit in the report; portable state does not include the full undo history. See [snapshot boundaries](docs/LIBRARIES.md#人工结论快照).
 
 See [Libraries](docs/LIBRARIES.md#1-图库包里有什么) and [Upgrade boundary](docs/ARCHITECTURE_DIRECTION.md#已有核心库的显式升级边界).
 

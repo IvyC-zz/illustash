@@ -195,12 +195,27 @@ class NativeIndexTest(unittest.TestCase):
         self.assertEqual(list(self.shared.rglob('*.tmp')), [])
 
     def test_done_is_reported_only_after_the_job_is_cleaned_up(self):
-        # #123：完成的任务曾在删除日志和文件夹之前就报告 done；其间的一次轮询会同时看到两者。
-        # done 之后紧接着的测试专用暂停把这个时间窗拉宽，每次都能观察到。
+        # #123、#505：内部终态写下后，线程仍可能持有共享锁。拉长此窗口，两个公开入口均须保持忙碌。
         self.env['ILLUSTASH_TEST_INDEX_DONE_PAUSE_MS']='1500';self.stop(self.process);self.restart()
-        self.check();v=self.apply();self.assertEqual(v['state']['status'],'done',v)
-        self.assertFalse((self.lib.path/'index-job.json').exists())
-        self.assertEqual(list((self.lib.path/'index-jobs').iterdir()),[])
+        def complete(status):
+            lifecycle.wait_until(lambda: self.index()['state']['status'] == 'cleaning')
+            progress = json.loads(self.request('/api/index?progress=1')['body'])['state']
+            self.assertEqual(progress['status'], 'cleaning', progress)
+            self.assertNotIn('finished_at', progress)
+            busy = self.request('/api/index', {'action': 'check', 'allow_network': True})
+            self.assertEqual(busy['status'], 400, busy['body'])
+            final = self.finish()
+            self.assertEqual(final['state']['status'], status, final)
+            if status == 'done':
+                self.assertFalse((self.lib.path/'index-job.json').exists())
+                self.assertEqual(list((self.lib.path/'index-jobs').iterdir()), [])
+
+        self.index({'action': 'check', 'allow_network': True}); complete('checked')
+        # 每次看见终态，下一条 POST 立即发送，禁止用重试掩盖再入竞态。
+        self.index({'action': 'apply', 'tags': ['carol_example']}); complete('done')
+        self.index({'action': 'check', 'allow_network': True}); complete('checked')
+        self.index({'action': 'drop', 'char': 'carol_example', 'reason': 'synthetic review'}); complete('done')
+        self.index({'action': 'check', 'allow_network': True}); complete('checked')
 
     def test_source_failure_rollback_then_retry(self):
         self.check()

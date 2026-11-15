@@ -32,13 +32,13 @@ export async function api(path, options = {}) {
   const result = await response.json();
   if (response.status === 403 && said(result.error, '会话已过期，请刷新页面')) staleSession();
   if (session.stale) throw new Error(STALE);
-  // 后端的消息，用页面的语言显示；e.said 保留发来时的原文，供 said 比对。
+  // 后端的消息，用页面的语言显示；e.said 保留发来时的原文，供 said 比对；e.status 是 HTTP 状态码。
   if (!response.ok) {
     let d = null;
     try { d = JSON.parse(response.headers?.get('X-Illustash-Diagnostic') || 'null'); } catch {}
     if (d?.id) lastDiagnostic = d;
     const note = d?.id ? ' · ' + t('错误编号：{id}', {id: d.id}) + (d.stored ? '' : ' · ' + t('诊断记录未保存')) : '';
-    throw Object.assign(new Error((tb(result.error) || t('请求失败')) + note), {said: result.error, diagnostic: d});
+    throw Object.assign(new Error((tb(result.error) || t('请求失败')) + note), {said: result.error, diagnostic: d, status: response.status});
   }
   return result;
 }

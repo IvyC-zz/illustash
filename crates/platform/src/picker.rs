@@ -12,6 +12,8 @@ pub enum Kind {
     Archive,
     /// 手动下载的模型文件（#168）：可多选，ONNX、JSON 或 ZIP。
     Models,
+    /// 便携人工结论文件。
+    HumanConclusions,
 }
 impl Kind {
     fn id(&self) -> &'static str {
@@ -21,6 +23,7 @@ impl Kind {
             Self::Zip => "zip",
             Self::Archive => "archive",
             Self::Models => "models",
+            Self::HumanConclusions => "human-conclusions",
         }
     }
     /// 选择窗口的提示语，用中文写；调用方可以显示翻译后的文案（即 `choose` 的 `title`）。
@@ -31,6 +34,7 @@ impl Kind {
             Self::Zip => "选择导出的图库（.zip）",
             Self::Archive => "选择 X 数据归档（.zip）",
             Self::Models => "选择下载好的模型文件（.onnx、.json 或 .zip）",
+            Self::HumanConclusions => "选择人工结论文件（.illustash-human.jsonl）",
         }
     }
 }

@@ -60,7 +60,13 @@ pub const ATTRIBUTES: [&str; 6] = ["variant", "artist", "label_only", "mascot", 
 
 /// 读取一张表所用的查询（`terms` 表见 `ATTRIBUTES`）。
 fn select(c: &Connection, name: &str, columns: &[String]) -> String {
+    let physical: bool = c
+        .query_row("SELECT EXISTS(SELECT 1 FROM sqlite_master WHERE type='table' AND name='term_records')", [], |r| {
+            r.get(0)
+        })
+        .unwrap();
     let moved: bool = name == "terms"
+        && !physical
         && c.query_row("SELECT EXISTS(SELECT 1 FROM pragma_table_info('term_tree') WHERE name='variant')", [], |r| {
             r.get(0)
         })
@@ -80,7 +86,7 @@ fn select(c: &Connection, name: &str, columns: &[String]) -> String {
         })
         .collect::<Vec<_>>()
         .join(",");
-    format!("SELECT {list} FROM terms t LEFT JOIN term_tree r ON r.term_id=t.id")
+    format!("SELECT {list} FROM \"{name}\" t LEFT JOIN term_tree r ON r.term_id=t.id")
 }
 
 static CLOCK: LazyLock<Regex> =
@@ -156,6 +162,160 @@ pub struct Table {
 
 pub type State = BTreeMap<String, Table>;
 
+#[derive(serde::Deserialize)]
+#[serde(deny_unknown_fields)]
+struct Addition {
+    name: String,
+    introduced_in: i64,
+    checks: Vec<String>,
+}
+
+#[derive(serde::Deserialize)]
+#[serde(deny_unknown_fields)]
+struct Additions {
+    reference_terms_version: i64,
+    tables: Vec<Addition>,
+    meta_keys: Vec<Addition>,
+    physical_views: Vec<PhysicalView>,
+}
+
+#[derive(serde::Deserialize)]
+#[serde(deny_unknown_fields)]
+struct PhysicalView {
+    physical: String,
+    view: String,
+    introduced_in: i64,
+    checks: Vec<String>,
+}
+
+static ADDITIONS: LazyLock<Additions> = LazyLock::new(|| {
+    let additions: Additions = serde_json::from_str(include_str!("../../../../tests/baseline_additions.json")).unwrap();
+    for entries in [&additions.tables, &additions.meta_keys] {
+        let mut names = std::collections::BTreeSet::new();
+        for entry in entries {
+            assert!(!entry.name.is_empty() && entry.name.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'_'));
+            assert!(entry.introduced_in > additions.reference_terms_version && !entry.checks.is_empty());
+            assert!(names.insert(&entry.name));
+        }
+    }
+    let mut mapped = std::collections::BTreeSet::new();
+    for entry in &additions.physical_views {
+        assert!(entry.introduced_in > additions.reference_terms_version && !entry.checks.is_empty());
+        for name in [&entry.physical, &entry.view] {
+            assert!(!name.is_empty() && name.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'_'));
+            assert!(mapped.insert(name));
+        }
+    }
+    additions
+});
+
+fn meta_key_row(row: &str, key: &str) -> bool {
+    let cells: Vec<Value> = serde_json::from_str(row).unwrap();
+    cells.first().and_then(Value::as_str) == Some(key)
+}
+
+/// 只用于实时应用库与 v7 冻结参考的对照：精确分离新状态，原始 state/exact 与当前库比较不变。
+/// 冻结侧若已有同名状态，直接失败，不能通过这份清单藏掉旧值。
+pub fn historical_projection(got: &State, frozen: &State, recorded: i64, current: i64) -> Result<State, String> {
+    if recorded != ADDITIONS.reference_terms_version {
+        return Ok(got.clone());
+    }
+    let live_version = got.get("meta").and_then(|table| {
+        table.rows.keys().find_map(|row| {
+            let cells: Vec<Value> = serde_json::from_str(row).unwrap();
+            if cells.first().and_then(Value::as_str) != Some("terms_schema") {
+                return None;
+            }
+            let version = cells.get(1)?.as_str()?;
+            if version == "<terms-version>" {
+                Some(current)
+            } else {
+                version.parse().ok()
+            }
+        })
+    });
+    let Some(live_version) = live_version else { return Ok(got.clone()) };
+    let mut out = got.clone();
+    for entry in ADDITIONS.physical_views.iter().filter(|entry| entry.introduced_in <= live_version) {
+        if frozen.contains_key(&entry.physical) {
+            return Err(format!("物理视图映射不能隐藏冻结侧已有表 {}", entry.physical));
+        }
+        match (got.get(&entry.physical), got.get(&entry.view)) {
+            (None, None) => (),
+            (Some(raw), Some(effective)) if raw == effective => {
+                out.remove(&entry.physical);
+                if entry.view == "terms" {
+                    historical_attributes(&mut out)?;
+                }
+            }
+            _ => return Err(format!("物理表 {} 与有效视图 {} 的完整行不一致", entry.physical, entry.view)),
+        }
+    }
+    for table in ADDITIONS.tables.iter().filter(|entry| entry.introduced_in <= live_version) {
+        if frozen.contains_key(&table.name) {
+            return Err(format!("新增状态清单不能隐藏冻结侧已有表 {}", table.name));
+        }
+        out.remove(&table.name);
+    }
+    for key in ADDITIONS.meta_keys.iter().filter(|entry| entry.introduced_in <= live_version) {
+        if frozen.get("meta").is_some_and(|table| table.rows.keys().any(|row| meta_key_row(row, &key.name))) {
+            return Err(format!("新增状态清单不能隐藏冻结侧已有 meta 键 {}", key.name));
+        }
+        if let Some(meta) = out.get_mut("meta") {
+            meta.rows.retain(|row, _| !meta_key_row(row, &key.name));
+        }
+    }
+    Ok(out)
+}
+
+// 第 9 版的当前读数保留原始 attrs 和结构属性。只在旧参考投影里沿用第 8 版的历史表达。
+fn historical_attributes(out: &mut State) -> Result<(), String> {
+    let Some(tree) = out.get("term_tree") else { return Ok(()) };
+    if !tree.columns.iter().any(|c| c == "variant") {
+        return Ok(());
+    }
+    let index =
+        |name: &str| tree.columns.iter().position(|c| c == name).ok_or_else(|| format!("历史属性缺少列 {name}"));
+    let id = index("term_id")?;
+    let attributes = ATTRIBUTES.iter().map(|name| index(name)).collect::<Result<Vec<_>, _>>()?;
+    let mut objects = BTreeMap::new();
+    for row in tree.rows.keys() {
+        let cells: Vec<Value> = serde_json::from_str(row).unwrap();
+        let object = format!(
+            "{{{}}}",
+            ATTRIBUTES
+                .iter()
+                .zip(&attributes)
+                .map(|(name, &i)| format!("{}:{}", json!(name), cells[i]))
+                .collect::<Vec<_>>()
+                .join(",")
+        );
+        objects.insert(cells[id].to_string(), object);
+    }
+    let terms = out.get_mut("terms").ok_or("历史属性缺少 terms")?;
+    let id = terms.columns.iter().position(|c| c == "id").ok_or("历史属性缺少词条 ID")?;
+    let attrs = terms.columns.iter().position(|c| c == "attrs").ok_or("历史属性缺少词条 attrs")?;
+    let mut rewritten = BTreeMap::new();
+    for (row, count) in &terms.rows {
+        let mut cells: Vec<Value> = serde_json::from_str(row).unwrap();
+        if let Some(object) = objects.get(&cells[id].to_string()) {
+            cells[attrs] = json!(object);
+        }
+        *rewritten.entry(json!(cells).to_string()).or_default() += count;
+    }
+    terms.rows = rewritten;
+    let tree = out.get_mut("term_tree").expect("上面已读取结构");
+    let keep: Vec<_> = (0..tree.columns.len()).filter(|i| !attributes.contains(i)).collect();
+    tree.columns = keep.iter().map(|&i| tree.columns[i].clone()).collect();
+    let mut rewritten = BTreeMap::new();
+    for (row, count) in &tree.rows {
+        let cells: Vec<Value> = serde_json::from_str(row).unwrap();
+        *rewritten.entry(json!(keep.iter().map(|&i| &cells[i]).collect::<Vec<_>>()).to_string()).or_default() += count;
+    }
+    tree.rows = rewritten;
+    Ok(())
+}
+
 fn hex(bytes: &[u8]) -> String {
     bytes.iter().map(|b| format!("{b:02x}")).collect()
 }
@@ -187,7 +347,21 @@ pub fn state(c: &Connection, masks: &Masks) -> State {
         )
         .ok();
     let mut out = State::new();
-    for name in tables(c) {
+    let mut names = tables(c);
+    let raw = names.iter().any(|name| name == "term_records");
+    for entry in &ADDITIONS.physical_views {
+        if names.contains(&entry.physical)
+            && c.query_row(
+                "SELECT EXISTS(SELECT 1 FROM sqlite_master WHERE type='view' AND name=?1)",
+                [&entry.view],
+                |r| r.get::<_, bool>(0),
+            )
+            .unwrap()
+        {
+            names.push(entry.view.clone());
+        }
+    }
+    for name in names {
         if RETIRED.contains(&name.as_str()) {
             continue;
         }
@@ -195,8 +369,12 @@ pub fn state(c: &Connection, masks: &Masks) -> State {
             let mut s = c.prepare(&format!("PRAGMA table_info(\"{name}\")")).unwrap();
             s.query_map([], |r| r.get::<_, String>(1)).unwrap().map(Result::unwrap).collect()
         };
-        let keep: Vec<usize> =
-            (0..all.len()).filter(|&i| !SKIP_COLUMNS.contains(&(name.as_str(), all[i].as_str()))).collect();
+        let keep: Vec<usize> = (0..all.len())
+            .filter(|&i| {
+                !SKIP_COLUMNS.contains(&(name.as_str(), all[i].as_str()))
+                    || (raw && name == "term_tree" && ATTRIBUTES.contains(&all[i].as_str()))
+            })
+            .collect();
         let mut table = Table { columns: keep.iter().map(|&i| all[i].clone()).collect(), rows: BTreeMap::new() };
         let mut s = c.prepare(&select(c, &name, &all)).unwrap();
         let mut q = s.query([]).unwrap();
@@ -532,4 +710,76 @@ pub fn before_cutover(c: &Connection) -> bool {
         )
         .unwrap_or(0);
     switched != 4
+}
+
+#[cfg(test)]
+mod historical_projection_tests {
+    use super::*;
+
+    fn table(columns: &[&str], rows: &[Value]) -> Table {
+        Table {
+            columns: columns.iter().map(|s| (*s).to_owned()).collect(),
+            rows: rows.iter().map(|v| (v.to_string(), 1)).collect(),
+        }
+    }
+
+    fn states() -> (State, State) {
+        let old_meta = table(&["key", "value"], &[json!(["terms_schema", "<terms-version>"]), json!(["keep", "old"])]);
+        let frozen = State::from([
+            ("meta".into(), old_meta),
+            ("actions".into(), table(&["id", "label"], &[json!([1, "旧行为"])])),
+        ]);
+        let mut live = frozen.clone();
+        live.get_mut("meta").unwrap().rows.insert(json!(["human_revision", "1"]).to_string(), 1);
+        for name in ["human_state_marks", "human_state_mark_undo"] {
+            live.insert(name.into(), table(&["value"], &[json!(["new-state"])]));
+        }
+        (live, frozen)
+    }
+
+    #[test]
+    fn projection_keeps_exact_state_and_unlisted_or_changed_old_data() {
+        let (live, frozen) = states();
+        assert_eq!(historical_projection(&live, &frozen, 7, 9).unwrap(), frozen);
+        assert!(live.contains_key("human_state_marks"));
+        let mut unknown = live.clone();
+        unknown.insert("human_future".into(), Table::default());
+        assert_ne!(historical_projection(&unknown, &frozen, 7, 9).unwrap(), frozen);
+        let mut changed = live.clone();
+        *changed.get_mut("actions").unwrap().rows.values_mut().next().unwrap() = 2;
+        assert_ne!(historical_projection(&changed, &frozen, 7, 9).unwrap(), frozen);
+        assert_eq!(historical_projection(&live, &frozen, 8, 9).unwrap(), live);
+        assert_eq!(historical_projection(&live, &frozen, 7, 8).unwrap(), live);
+    }
+
+    #[test]
+    fn a_frozen_table_or_meta_key_cannot_be_hidden() {
+        let (live, frozen) = states();
+        for name in ["human_state_marks", "human_state_mark_undo", "meta"] {
+            let mut existing = frozen.clone();
+            existing.insert(name.into(), live[name].clone());
+            assert!(historical_projection(&live, &existing, 7, 9).is_err());
+        }
+    }
+
+    #[test]
+    fn physical_view_mapping_requires_equal_typed_rows_and_keeps_raw_state() {
+        let (mut live, mut frozen) = states();
+        let terms = table(&["id", "key"], &[json!([1, "synthetic"])]);
+        live.insert("term_records".into(), terms.clone());
+        live.insert("terms".into(), terms.clone());
+        frozen.insert("terms".into(), terms);
+        assert_eq!(historical_projection(&live, &frozen, 7, 9).unwrap(), frozen);
+        for changed in [table(&["id", "key"], &[json!(["1", "synthetic"])]), Table::default()] {
+            let mut mismatch = live.clone();
+            mismatch.insert("term_records".into(), changed);
+            assert!(historical_projection(&mismatch, &frozen, 7, 9).is_err());
+        }
+        let mut hidden = live.clone();
+        hidden.get_mut("terms").unwrap().rows.clear();
+        assert!(historical_projection(&hidden, &frozen, 7, 9).is_err());
+        frozen.insert("term_records".into(), live["term_records"].clone());
+        assert!(historical_projection(&live, &frozen, 7, 9).is_err());
+        assert!(live.contains_key("term_records"));
+    }
 }

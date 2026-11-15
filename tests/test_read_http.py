@@ -1,5 +1,6 @@
 """HTTP 测试辅助函数，以及严格比较工具自身的测试。所有状态都是用完即弃的合成数据。"""
 import http.client
+import json
 import os
 from pathlib import Path
 import sqlite3
@@ -51,6 +52,41 @@ def stop_process(process):
     for stream in (process.stdout, process.stderr):
         if stream:
             stream.close()
+
+
+def wait_human_backup(test, origin):
+    """先完成开库的首次快照及摘要补算，再采集受测操作的完整状态；不排除任何表或 WAL。"""
+    last = None
+
+    def ready():
+        nonlocal last
+        response = verify.fetch(origin, {'url': '/api/human-conclusions'}, origin)
+        test.assertEqual(response['status'], 200, response['body'])
+        last = json.loads(response['body'])['automatic']
+        test.assertIsNone(last['last_error'], last)
+        # 恢复既有快照但数据库尚未记下修订时，protected_revision 可以为空；首轮补算已结束即可取样。
+        return bool(last['snapshots']) and last['last_success'] is not None and not last['running']
+
+    try:
+        wait_until(ready)
+    except AssertionError as error:
+        raise AssertionError(f'首次人工备份未完成：{last}') from error
+    return last
+
+
+def prepare_human_backup(test, package):
+    """给尚未打开的合成切库目标建立启动基线，之后仍逐表比较全部状态。"""
+    origin = f'http://127.0.0.1:{free_port()}'
+    with tempfile.TemporaryFile() as log:
+        process = subprocess.Popen(
+            [str(test.binary), 'http', '--library', str(package), '--root', str(test.resources),
+             '--port', origin.rsplit(':', 1)[1], '--no-sync', '--no-auto-sync', '--no-names',
+             '--no-index-check', '--no-provenance'], env=test.env, stdout=log, stderr=log, **SPAWN)
+        try:
+            verify.enter(origin, log, process, timeout=5)
+            wait_human_backup(test, origin)
+        finally:
+            stop_process(process)
 
 
 class ComparatorTest(unittest.TestCase):

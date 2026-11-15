@@ -228,8 +228,9 @@ fn in_tree(event: &str) -> &'static str {
 
 pub fn version_triggers(c: &Connection) -> Result<()> {
     for table in VERSIONED {
+        let physical = crate::human_conclusions::visibility::storage(c, table)?;
         let exists: bool =
-            c.query_row("SELECT EXISTS(SELECT 1 FROM sqlite_master WHERE type='table' AND name=?)", [table], |r| {
+            c.query_row("SELECT EXISTS(SELECT 1 FROM sqlite_master WHERE type='table' AND name=?)", [physical], |r| {
                 r.get(0)
             })?;
         if !exists {
@@ -244,7 +245,7 @@ pub fn version_triggers(c: &Connection) -> Result<()> {
                 _ => String::new(),
             };
             c.execute_batch(&format!(
-                "CREATE TRIGGER IF NOT EXISTS names_version_{table}_{} AFTER {event} ON {table}{when}\n                        BEGIN UPDATE meta SET value=CAST(value AS INTEGER)+1 WHERE key='names_version'; END",
+                "CREATE TRIGGER IF NOT EXISTS names_version_{table}_{} AFTER {event} ON {physical}{when}\n                        BEGIN UPDATE meta SET value=CAST(value AS INTEGER)+1 WHERE key='names_version'; END",
                 event.to_ascii_lowercase()
             ))?;
         }
@@ -359,9 +360,10 @@ pub fn track(c: &Connection) -> Result<()> {
             if body.is_empty() {
                 continue;
             }
+            let physical = crate::human_conclusions::visibility::storage(c, table)?;
             c.execute_batch(&format!(
                 "CREATE TEMP TRIGGER IF NOT EXISTS track_names_{table}_{event}
-                AFTER {event} ON main.{table}{when} BEGIN {body} END;"
+                AFTER {event} ON main.{physical}{when} BEGIN {body} END;"
             ))?;
         }
     }
@@ -400,9 +402,10 @@ fn structure_triggers(c: &Connection) -> Result<()> {
         ("terms", "UPDATE", format!(" WHEN {KIND_CHANGED}"), keep("term_id=OLD.id")),
     ];
     for (table, event, when, body) in entity_bodies {
+        let physical = crate::human_conclusions::visibility::storage(c, table)?;
         c.execute_batch(&format!(
             "CREATE TEMP TRIGGER IF NOT EXISTS track_names_old_{table}_{event}
-            BEFORE {event} ON main.{table}{when} BEGIN {body} END;"
+            BEFORE {event} ON main.{physical}{when} BEGIN {body} END;"
         ))?;
     }
     // 一个身份的链接第一次被改动时存下它当时全部的链接，包括会被 REPLACE 顶掉的那一行的主人。

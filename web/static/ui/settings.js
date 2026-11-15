@@ -20,11 +20,13 @@ import {openTasks, taskList} from './tasks.js';
 import {charHash} from '../core/route.js';
 import {refreshMeta} from '../core/meta.js';
 import {closeInspector} from './detail.js';
-import {setFit, setNsfw} from './grid.js';
+import {setFit, setNsfw, undo} from './grid.js';
 import {drawGuide, drawNudge, replayGuide} from './guide.js';
 import {renderIntegrityLine} from './integrity.js';
 import {renderModelsCard} from './models.js';
 import {openModal} from './overlay.js';
+import {renderHumanBlock, onHumanClick, wireHuman} from './human.js';
+import {loadHuman} from '../core/human.js';
 
 // ---------- 名称：这个图库联网查询名称的授权 ----------
 // 名称的文字查询（只有 tag 和作品名）需要这个图库授权：授权之前，后端以「显示名联网尚未授权」拒绝。其他失败都是真正的
@@ -284,11 +286,19 @@ export async function renderSettings(fetchMissing = true, refresh = false) {
       ${startupSwitch('similar', t('启动时检测相似图片'), t('只比较新导入的图'))}
       <div class="fold-row">${FOLD_OPTIONS.map(([k, label, hint]) => `<label class="fold-option" title="${hint}"><input type="checkbox" data-fold="${k}" ${(state.fold || []).includes(k) ? 'checked' : ''} ${!state.fold ? 'disabled' : ''}><span>${label}</span><small>${hint}</small></label>`).join('')}</div>`,
     setNetwork: networkCard,
-    setData: () => cardHead(t('备份与存储'), t('备份的是应用数据库里的人工整理记录；数据库升级前会自动备份一次。恢复备份前先退出 app。') + ' ' + t('每次打开图库后会在后台检查识别结果数据库，整理记录数据库每 7 天检查一次；上次没有正常关闭时，打开前先检查两个库。')) + `
+    // 三样东西分开写（#502）：整库备份（library.sqlite 的完整副本）、人工结论快照（ui/human.js 画进 #humanBlock）、
+    // 图库导出（在「图库」页）。
+    setData: () => cardHead(t('备份与存储'), t('这里有两种备份。整库备份是应用数据库（人工整理记录所在的库）的完整副本，只能整份换回；人工结论快照只含人工整理的结论，可以导回这个或别的图库，只补上缺少的部分。要连识别结果和来源一起带到别处，用「设置 › 图库」里的「导出当前图库」。')) + `
+      <h3 class="set-sub">${t('整库备份')}</h3>
       <div class="setting-line"><span>${info ? t('共 {n} 份备份', {n: number(info.backup_count)}) + (info.backups?.[0] ? `<small class="line-hint">${t('最近一次 {time}', {time: esc(localStamp(info.backups[0].time))})}</small>` : '') : '…'}</span><button class="quiet small" id="backupNow" ${!info ? 'disabled' : ''}>${t('立即备份')}</button></div>
+      <p class="set-sub-note">${t('数据库升级前会自动备份一次。换回整库备份前先退出 app；备份之后的改动都会丢掉。')}</p>
+      ${info?.backups?.length ? fold('backupList', t('最近的备份'), `<table class="settings-table">${info.backups.slice(0, 5).map(b => `<tr><td class="mono">${esc(b.name)}</td><td>${bytes(b.bytes)}</td></tr>`).join('')}</table>`) : ''}
+      <h3 class="set-sub">${t('人工结论快照')}</h3>
+      <div id="humanBlock"></div>
+      <h3 class="set-sub">${t('检查与存储')}</h3>
+      <p class="set-sub-note">${t('每次打开图库后会在后台检查识别结果数据库，整理记录数据库每 7 天检查一次；上次没有正常关闭时，打开前先检查两个库。')}</p>
       <div class="setting-line" id="integrityLine"></div>
       <div class="setting-line"><span>${t('缩略图缓存')}<small class="line-hint">${info ? t('{n} 个文件，{size}；清除后浏览时会重新生成', {n: number(info.thumbnails.files), size: bytes(info.thumbnails.bytes)}) : ''}</small></span><button class="quiet small" id="clearCache" ${info?.thumbnails.files ? '' : 'disabled'}>${t('清除')}</button></div>
-      ${info?.backups?.length ? fold('backupList', t('最近的备份'), `<table class="settings-table">${info.backups.slice(0, 5).map(b => `<tr><td class="mono">${esc(b.name)}</td><td>${bytes(b.bytes)}</td></tr>`).join('')}</table>`) : ''}
       ${info ? fold('dataPaths', t('存储位置'), `<table class="settings-table">${[[t('源数据库（识别结果，可以重建）'), info.source], [t('应用数据库（人工整理，不要删）'), info.library], [t('缩略图缓存（可以放心删）'), info.thumbnails]].map(([label, d]) => `<tr><td>${label}</td><td class="mono">${esc(d.path)}</td><td>${bytes(d.bytes)}</td></tr>`).join('')}</table>`) : ''}`,
   };
   patchSettingsPage(`<nav class="settings-nav" aria-label="${t('设置')}">${SETTINGS_SECTIONS.map(([id, title]) => `<a href="#/settings/${id}" class="${id === section ? 'on' : ''}"${id === section ? ' aria-current="page"' : ''}>${title}</a>`).join('')}</nav>
@@ -311,6 +321,7 @@ export async function renderSettings(fetchMissing = true, refresh = false) {
   page.onchange = e => { const box = e.target.closest('[data-startup]'); if (box) startup({[box.dataset.startup]: box.checked}, t('已保存，下次启动时生效')); };
   if ($('backupNow')) $('backupNow').onclick = async () => { try { const r = await backupNow(); toast(t('备份完成：{name}', {name: r.path.split('/').pop()})); renderSettings(); } catch (e) { toast(e.message); } };
   renderIntegrityLine();
+  if ($('humanBlock')) { renderHumanBlock(); if (fetchMissing) loadHuman(); }
   if ($('clearCache')) $('clearCache').onclick = async () => { try { const r = await clearCache(); toast(t('已清除 {n} 个缩略图', {n: number(r.removed)})); renderSettings(); } catch (e) { toast(e.message); } };
   for (const g of page.querySelectorAll('[data-setting]')) for (const b of g.querySelectorAll('button')) b.onclick = () => {
     const key = g.dataset.setting, v = b.dataset.value;
@@ -701,6 +712,8 @@ export function wireSettings() {
     e.stopPropagation();
     openTasks({armProvenance: b.dataset.openTasks === 'provenance'});
   });
+  $('settingsPage').addEventListener('click', onHumanClick);
+  wireHuman({undo});
   $('settingsPage').addEventListener('input', onLibraryInput);
   $('settingsPage').addEventListener('click', onLibrariesClick);
   $('settingsPage').addEventListener('click', e => {

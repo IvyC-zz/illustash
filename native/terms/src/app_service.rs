@@ -133,6 +133,9 @@ pub(crate) struct Session {
     pub(crate) auto_sync: bool,
     pub(crate) research: crate::app_research::Research,
     pub(crate) onboarding: crate::app_onboarding::Onboarding,
+    /// 与会话绑定的人工结论自动保护；关闭时取消，不等待整库哈希。
+    pub(crate) human_backups: crate::app_human_conclusions::Backups,
+    pub(crate) human_exports: crate::app_human_conclusions::Exports,
     /// 打开这个图库时它为什么没能列入最近使用的图库（#176）。列入只是省得下次再选一遍，所以图库照样打开，页面提示一次。
     pub(crate) unlisted: Option<String>,
     /// 这个图库在打开时被升级过的话，升级前的备份（#193）：页面提示一次备份在哪里。
@@ -185,6 +188,8 @@ impl Session {
             auto_sync: true,
             research,
             onboarding,
+            human_backups: Default::default(),
+            human_exports: Default::default(),
             unlisted: None,
             upgraded: None,
             checker: Default::default(),
@@ -199,6 +204,9 @@ impl Session {
     }
     /// 启动到期的后台检查（`delay` 让页面先加载）。
     pub(crate) fn start_checks(&mut self, delay: std::time::Duration) {
+        if let Err(error) = self.human_backups.start(&self.library, self.generation, &self.token) {
+            eprintln!("人工备份未能启动：{error}");
+        }
         if let Some(owner) = &self.owner {
             let due = owner.health.due();
             self.checker.start(&self.library, owner.health.clone(), due, delay);
@@ -347,6 +355,8 @@ impl Application {
             auto_sync,
             research,
             onboarding,
+            human_backups: Default::default(),
+            human_exports: Default::default(),
             unlisted: None,
             upgraded: None,
             checker: Default::default(),
@@ -495,6 +505,8 @@ impl Session {
     }
     /// 发现损坏：停止所有任务，不在图库包里排队或记录任何东西。
     fn halt(&mut self) {
+        self.human_backups.stop();
+        self.human_exports.stop();
         self.provenance.stop();
         self.index.stop();
         self.onboarding.stop();

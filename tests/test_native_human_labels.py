@@ -26,7 +26,7 @@ import unittest
 from unittest.mock import patch
 
 from tests.fixed_expectations import Library, Expectations, library_digests, unclocked
-from tests.test_read_http import INTERRUPT, SPAWN, free_port, wait_until
+from tests.test_read_http import INTERRUPT, SPAWN, free_port, wait_until, wait_human_backup, prepare_human_backup
 from tests.synthetic_source import source_fixture as fixture
 from tools import verify_read_http
 from tools.verify_read_http import cookie, enter, fetch, temporary_path
@@ -251,6 +251,7 @@ class NativeHumanLabelsTest(unittest.TestCase):
                 src.backup(dst)
         for directory in ('thumbnails', 'features', 'backups'):
             (path / directory).mkdir()
+        prepare_human_backup(self, path)
         return Library(path)
 
     def stop(self, process):
@@ -271,6 +272,7 @@ class NativeHumanLabelsTest(unittest.TestCase):
             enter(self.origin, log, process, timeout=5)
         except AssertionError:
             log.seek(0); self.fail(f'native startup failed: {log.read().decode(errors="replace")}')
+        wait_human_backup(self, self.origin)
         return process
 
     def reference_response(self, label, item):

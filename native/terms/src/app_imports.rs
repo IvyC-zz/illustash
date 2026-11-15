@@ -33,12 +33,16 @@ impl Observer for Silent {}
 pub(crate) enum Kind {
     Archive,
     Recognition,
+    HumanConclusions,
+    HumanExport,
 }
 impl Kind {
     fn name(self) -> &'static str {
         match self {
             Kind::Archive => "archive",
             Kind::Recognition => "recognition",
+            Kind::HumanConclusions => "human_conclusions",
+            Kind::HumanExport => "human_export",
         }
     }
 }
@@ -50,6 +54,9 @@ pub(crate) struct Progress {
     published: AtomicBool,
 }
 impl Progress {
+    pub(crate) fn context(&self) -> &TaskContext {
+        &self.context
+    }
     pub(crate) fn cancellation(&self) -> &AtomicBool {
         self.context.cancellation()
     }
@@ -88,8 +95,9 @@ pub(crate) const QUIT_WAIT: Duration = Duration::from_secs(5);
 fn classify(error: Error) -> (u16, String) {
     match error {
         Error::Invalid(message) => (400, message),
+        Error::Limit(message) => (413, message),
         Error::Network(message) => (502, message),
-        Error::Conflict(message) => (409, message),
+        Error::Conflict(message) | Error::Schema(message) => (409, message),
         other => {
             eprintln!("导入失败：{other}");
             (500, "导入失败，请核对提交状态；可在设置的关于页复制诊断信息".into())
@@ -159,6 +167,9 @@ impl Imports {
             return Err(Error::Invalid("服务正在退出".into()));
         }
         if current.as_ref().is_some_and(|c| c.task.running()) {
+            if matches!(kind, Kind::HumanConclusions | Kind::HumanExport) {
+                return Err(Error::Conflict("已有任务正在进行，请等它结束或取消后再试".into()));
+            }
             return Err(Error::Invalid("已有导入正在进行，请等它结束或取消后再试".into()));
         }
         let generation = identity.generation;
@@ -179,6 +190,9 @@ impl Imports {
             let result = work(&progress);
             let stopped = context.cancellation().load(Ordering::SeqCst) || crate::platform_process::stopping();
             let mut state = lock_ignoring_poison(&shared);
+            if matches!(kind, Kind::HumanConclusions | Kind::HumanExport) {
+                state.set("committed", progress.published.load(Ordering::SeqCst).into());
+            }
             match result {
                 Ok(value) => {
                     // 发布成功、投影/登记尚未完成仍是需要反馈的故障；保留业务成功结果，不能诱导重复导入。

@@ -5,6 +5,7 @@ import {esc, number, platformText, shortcut} from '../core/format.js';
 import {t, tb} from '../core/i18n.js';
 import {composing} from '../core/keys.js';
 import {REASONS, nameWithWork} from '../core/labels.js';
+import {undoRefusal} from '../core/human.js';
 import {learnerState, learningSettled, metaSoon, refreshMeta} from '../core/meta.js';
 import {prefs} from '../core/prefs.js';
 import {SHORTCUTS, currentSource, keyAction, keySelection, modes, selectionSize, shownUuid, viewerTarget} from '../core/modes.js';
@@ -645,7 +646,8 @@ export async function undo() {
     learner.then(afterLearning);
   } catch (e) {
     // 历史可能已经往前走了（另一个窗口，或服务端提交之后才失败）：显示它最新的一步。
-    toast(e.message); refreshMeta().catch(err => error(readError(err)));
+    // 撤销一次人工结论导入被拒（后面有改动依赖它）时，说清楚为什么（core/human.js）。
+    toast(undoRefusal(e, edits.latest)); refreshMeta().catch(err => error(readError(err)));
   } finally { edits.busy = false; setLatest(edits.latest); }
 }
 export async function sweep() {

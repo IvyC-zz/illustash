@@ -427,6 +427,7 @@ class NativeFolderHTTPTest(unittest.TestCase):
         state = json.loads(self.request('/api/sync')['body'])
         self.assertEqual(state['state']['status'], 'off')
         self.assertEqual(self.request('/api/sync', {})['status'], 400)
+        lifecycle.wait_human_backup(self, self.origin)
         before=snapshot(other.db)
         refused=subprocess.run([str(self.binary),'library-scan','--library',str(other.path)],env=self.env,capture_output=True)
         self.assertNotEqual(refused.returncode,0)

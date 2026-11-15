@@ -236,8 +236,8 @@ class NativeRecognitionTest(unittest.TestCase):
         self.release_models()
         out=[self.import_result(p) for _ in range(2)]
         self.assertEqual([r['duplicate'] for r in out],[False,True])
+        other=self.root/'other.pilib';self.clone_closed_library(other)
         old_token=self.token
-        other=self.root/'other.pilib';shutil.copytree(self.lib.path,other)
         self.assertEqual(self.request('/api/libraries/open',{'path':str(other)})['status'],200)
         before=snapshot(other/'source.sqlite')
         self.assertEqual(self.recognition_import({'path':str(p)},token=old_token)['status'],403)
@@ -296,12 +296,14 @@ class NativeRecognitionTest(unittest.TestCase):
         self.assertEqual(state['id'], task['id'])
         return state
 
+    clone_closed_library = lifecycle.NativeLifecycleTest.clone_closed_library
+
     def test_cancel_switch_and_quit_stop_an_import_before_it_commits(self):
         # #88（以及 #26 的 Windows 缺口）：取消按钮、切换图库和退出，都会在 5 秒内、在 source 事务之前停下正在运行的
         # 识别结果导入；图库逐字节保持原样。
         p = self.incoming()
         other = self.root / 'other.pilib'
-        shutil.copytree(self.lib.path, other)
+        self.clone_closed_library(other)
         for how in ('cancel', 'switch', 'quit'):
             with self.subTest(how):
                 self.hold_models()
@@ -372,7 +374,7 @@ class NativeRecognitionTest(unittest.TestCase):
         os.mkfifo(model)
         before = snapshot(self.lib.source)
         other = self.root / 'other.pilib'
-        shutil.copytree(self.lib.path, other)
+        self.clone_closed_library(other)
         started = self.request('/api/recognition/import', {'path': str(p)})
         self.assertEqual(started['status'], 200, started)
         task = json.loads(started['body'])['task']

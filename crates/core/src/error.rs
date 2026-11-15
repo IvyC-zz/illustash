@@ -12,6 +12,8 @@ pub enum Error {
         destination: Option<std::path::PathBuf>,
     },
     Invalid(String),
+    /// 输入超过格式明确规定的资源上限；HTTP 宿主回答 413。
+    Limit(String),
     /// 上游文本来源失败时的安全本地标签；从不带提供方的响应正文或凭据。
     Network(String),
     Conflict(String),
@@ -32,6 +34,7 @@ impl fmt::Display for Error {
             }
             Error::Network(m) => write!(f, "{m}"),
             Error::Invalid(m) => write!(f, "不合法：{m}"),
+            Error::Limit(m) => write!(f, "超过上限：{m}"),
             Error::Conflict(m) => write!(f, "冲突：{m}"),
             Error::Schema(m) => write!(f, "数据库版本：{m}"),
             Error::NeedId(m) => write!(f, "需要新的 id：{m}"),
@@ -50,7 +53,7 @@ impl Error {
     /// （"不合法："、"冲突："）。
     pub fn reason(&self) -> String {
         match self {
-            Error::Invalid(m) | Error::Network(m) | Error::Conflict(m) => m.clone(),
+            Error::Invalid(m) | Error::Limit(m) | Error::Network(m) | Error::Conflict(m) => m.clone(),
             other => other.to_string(),
         }
     }

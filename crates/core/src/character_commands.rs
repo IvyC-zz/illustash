@@ -445,14 +445,20 @@ fn change(c: &Connection, args: &Value) -> Result<Value> {
     for (entity, scope) in &targets {
         for ident in scope {
             put_assertion(c, At::Action(step), ident, entity, status, "review")?;
-            c.prepare_cached("DELETE FROM identity_uncertain WHERE uuid=?")?.execute([ident])?;
+            clear_uncertain(c, ident, step)?;
         }
     }
     for ident in &ids {
         if action == "unknown" {
             c.prepare_cached("INSERT OR IGNORE INTO deferred VALUES (?)")?.execute([ident])?;
+            crate::human_conclusions::state::present(
+                c,
+                crate::human_conclusions::state::Domain::Deferred,
+                ident,
+                step,
+            )?;
         } else {
-            c.prepare_cached("DELETE FROM deferred WHERE uuid=?")?.execute([ident])?;
+            clear_deferred(c, ident, step, action == "resume")?;
         }
     }
     refresh(c, &ids)?;
@@ -538,8 +544,8 @@ fn answer(c: &Connection, args: &Value) -> Result<Value> {
         for (scope, e, status) in &writes {
             for ident in scope {
                 put_assertion(c, At::Action(action), ident, e, status, "review")?;
-                c.prepare_cached("DELETE FROM identity_uncertain WHERE uuid=?")?.execute([ident])?;
-                c.prepare_cached("DELETE FROM deferred WHERE uuid=?")?.execute([ident])?;
+                clear_uncertain(c, ident, action)?;
+                clear_deferred(c, ident, action, false)?;
                 if !touched.contains(ident) {
                     touched.push(ident.clone());
                 }
@@ -602,8 +608,8 @@ fn answer_audit(c: &Connection, args: &Value) -> Result<Value> {
         put_assertion(c, At::Action(action), i, e, st, "review")?;
     }
     for u in &touched {
-        c.prepare_cached("DELETE FROM identity_uncertain WHERE uuid=?")?.execute([u])?;
-        c.prepare_cached("DELETE FROM deferred WHERE uuid=?")?.execute([u])?;
+        clear_uncertain(c, u, action)?;
+        clear_deferred(c, u, action, false)?;
     }
     refresh(c, &touched)?;
     finish_action(c, action, "snapshot", before)?;
@@ -661,8 +667,8 @@ fn reassign(c: &Connection, args: &Value) -> Result<Value> {
             before.push(snapshot(c, ident, Some(entity))?);
             put_assertion(c, At::Action(action), ident, entity, status, "review")?;
         }
-        c.prepare_cached("DELETE FROM identity_uncertain WHERE uuid=?")?.execute([ident])?;
-        c.prepare_cached("DELETE FROM deferred WHERE uuid=?")?.execute([ident])?;
+        clear_uncertain(c, ident, action)?;
+        clear_deferred(c, ident, action, false)?;
     }
     refresh(c, &ids)?;
     finish_action(c, action, "snapshot", before)?;
@@ -716,10 +722,26 @@ fn uncertain(c: &Connection, args: &Value) -> Result<Value> {
     for u in &ids {
         c.prepare_cached("INSERT OR REPLACE INTO identity_uncertain(uuid,options_json,reason) VALUES (?,?,?)")?
             .execute(params![u, options, reason])?;
+        crate::human_conclusions::state::present(c, crate::human_conclusions::state::Domain::Uncertain, u, action)?;
     }
     refresh(c, &ids)?;
     finish_action(c, action, "snapshot", before)?;
     Ok(json!({"action": action}))
+}
+
+fn clear_uncertain(c: &Connection, key: &str, action: i64) -> Result<()> {
+    if c.prepare_cached("DELETE FROM identity_uncertain WHERE uuid=?")?.execute([key])? > 0 {
+        crate::human_conclusions::state::absent(c, crate::human_conclusions::state::Domain::Uncertain, key, action)?;
+    }
+    Ok(())
+}
+
+fn clear_deferred(c: &Connection, key: &str, action: i64, explicit: bool) -> Result<()> {
+    let changed = c.prepare_cached("DELETE FROM deferred WHERE uuid=?")?.execute([key])? > 0;
+    if changed || explicit {
+        crate::human_conclusions::state::absent(c, crate::human_conclusions::state::Domain::Deferred, key, action)?;
+    }
+    Ok(())
 }
 
 // ---- 锚点修正 ----
@@ -872,6 +894,7 @@ pub fn undo(c: &Connection, args: &Value) -> Result<Value> {
         crate::character_profile::after_undo(c, profile_links_changed)?;
     }
     c.prepare_cached("DELETE FROM reviews WHERE action_id=?")?.execute([id])?;
+    crate::human_conclusions::state::undo(c, id)?;
     Ok(json!({"action": id, "status": "undone"}))
 }
 

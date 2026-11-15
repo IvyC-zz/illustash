@@ -1429,6 +1429,22 @@ mod tests {
         let second = root.join("replacement.pilib");
         crate::app_create::create_folder(&second, &folder, None, None, None).unwrap();
         let replacement = Library::open(&second).unwrap();
+        // 切换会启动本图库自己的自动备份。先让首份快照和哈希补算落地，
+        // 再以完整数据库为基线，避免把合法后台初始化误算成旧同步任务越界写入。
+        let mut backups = crate::app_human_conclusions::Backups::default();
+        backups.start(&replacement, 1, "synthetic-backup-session").unwrap();
+        let deadline = std::time::Instant::now() + Duration::from_secs(10);
+        loop {
+            let status = backups.status();
+            if matches!(status.get("snapshots"), Some(crate::http_json::Json::Array(rows)) if !rows.is_empty())
+                && status.get("running").is_some_and(|v| v.dump() == "false")
+            {
+                break;
+            }
+            assert!(std::time::Instant::now() < deadline, "initial backup did not settle: {}", status.dump());
+            std::thread::sleep(Duration::from_millis(10));
+        }
+        backups.stop();
         let replacement_source = snapshot(&replacement.source());
         let replacement_app = snapshot(&replacement.db());
         let mut options = Options::new(root.clone());

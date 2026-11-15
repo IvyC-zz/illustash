@@ -9,6 +9,7 @@
 #![allow(clippy::unwrap_used, reason = "集成测试里 unwrap 就是断言")]
 
 mod app_service;
+mod baseline_projection;
 mod character_projection;
 mod entry;
 mod integrity;

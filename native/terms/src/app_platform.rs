@@ -16,6 +16,7 @@ pub fn choose(
         "zip" => illustash_platform::picker::Kind::Zip,
         "archive" => illustash_platform::picker::Kind::Archive,
         "models" => illustash_platform::picker::Kind::Models,
+        "human-conclusions" => illustash_platform::picker::Kind::HumanConclusions,
         _ => return Err(Error::Invalid("未知的选择类型".into())),
     };
     if multiple && !matches!(kind, "folder" | "models") {

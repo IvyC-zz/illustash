@@ -1,6 +1,6 @@
 # 词条核心 schema
 
-状态：现行参考，2026-10-20。当前词条 schema 为 **8**，应用 schema 为 **36**，包格式为 **1**；第 1 版见第 1–4 节，第 2–7 版的增量见第 7–12 节，第 8 版见第 14 节，宿主退役后的兼容职责与恢复边界见第 13 节。画师、标签、角色 / 皮肤 / 作品、名字都已收编，第 8 版起 `term_*` 是唯一权威，旧兼容表已删除（第 14 节）：[TERMS_ARTISTS.md](TERMS_ARTISTS.md)、[TERMS_LABELS.md](TERMS_LABELS.md)、[TERMS_CHARACTERS.md](TERMS_CHARACTERS.md)。下面第 1–6 节是第 1 版交付时写的，已按现状更正的地方都有注明（2026-09-29，词条第 4、5 步 S6）。
+状态：现行参考，2026-11-15。当前词条 schema 为 **9**，应用 schema 为 **36**，包格式为 **1**；第 1 版见第 1–4 节，第 2–7 版的增量见第 7–12 节，第 8 版见第 14 节，第 9 版见第 15 节，宿主退役后的兼容职责与恢复边界见第 13 节。画师、标签、角色 / 皮肤 / 作品、名字都已收编，第 8 版起 `term_*` 是唯一权威，旧兼容表已删除（第 14 节）：[TERMS_ARTISTS.md](TERMS_ARTISTS.md)、[TERMS_LABELS.md](TERMS_LABELS.md)、[TERMS_CHARACTERS.md](TERMS_CHARACTERS.md)。下面第 1–6 节是第 1 版交付时写的，已按现状更正的地方都有注明（2026-09-29，词条第 4、5 步 S6）。
 
 2026-09-28，[TERMS.md](TERMS.md) 第 4 节第 1 步的交付。代码在 `crates/core/`（Rust crate `illustash-core`，rusqlite 自持连接）；命令行和原生宿主在 `native/terms/`（`illustash-terms`）。证据包格式见 [EVIDENCE_PACKAGES.md](EVIDENCE_PACKAGES.md)。第 1 版只建了新表和规则，画师收编是第 2 步。
 
@@ -267,3 +267,36 @@ cargo clippy --manifest-path crates/core/Cargo.toml --all-targets -- -D warnings
 - 升级沿用现有入口：桌面和网页的升级界面（#193）、`http --upgrade`、`illustash-terms migrate`；升级前备份 `library-backups/terms-v<旧版>-before-v8-*.sqlite`，失败整体回滚。应用层（`app_upgrade.rs`）对没切换完的旧图库（应用 schema 36 以前、切换标记缺失或未完成、更早的 source 布局或缺索引元数据）打开和升级都直接拒绝，提示先用 `pre-v8` 版本；原来为它们准备的分阶段成对发布路径已删除。
 - 对照：新对照基准（`native/terms/tests/baseline.rs`、`contracts.rs`，规则见 `native/terms/tests/common/baseline.rs`）的每个 v7 检查点都经这次升级再重放，接口回复逐字节不变；退役的旧表（含基准录制之后才退役的四张身份关系表，它们录下的变化一并略去）不比，内容在核心表里比；新加的列（`actions` 两列、`term_names.seq`、`term_tree.seq`）在比较器里登记排除，由历史提示和读者排序的回复比较覆盖；身份的属性在比较器里照原来的形状算进 `terms.attrs` 比较（`term_tree` 上的属性列不另比）。`native/terms/tests/it/v8_upgrade.rs` 覆盖拒绝（身份、身份关系、链接或作品复核的旧表与核心不一致、没切换完）不留痕、回填，以及各张旧表的内容原样进入核心、视图改读核心表、身份关系按片段读出原来的行。
 
+
+## 15. 第 9 版：明确收回的人工状态
+
+`human_state_marks` 按 `(domain, asset_key)` 保存 `curation/reset`、`deferred/resumed`、`uncertain/cleared`，关联有效的本库 `owner_action_id`，保留来源及原操作时间。正值仍在原业务表；有正值、明确收回和从未决定是三个不同状态。普通收录／角色命令在同一写事务中维护它们，通用快照里的空值不会凭空生成收回标记。
+
+`human_state_mark_undo` 按 `(action_id, domain, asset_key)` 保存完整标记的 before/after；同一步多次写入保留最初 before 和最终 after。原所有者恢复业务行后恢复标记，有独立变更时整体回滚。两张表持有核心写保护；当前标记变动同事务更新 `meta.human_revision`，撤销账本本身不触发修订。
+
+升级仅采用 v8 已存的 `actions.label_kind` / `label_count` 和完整快照、当前状态回填。字段缺失、种类未知或状态不一致时保持未决定；不从展示文案、裁决或 reviews 重新推断 v8 元数据，也不单独核验 v8 以下历史。没有元数据的旧收录 reset、skip/resume 不补造无行标记，新版本本地命令仍按本节三态合同记录。正常 v5/v6/v7 升级入口保留。有效 before 能恢复先前已证明的标记，撤销不遗留已撤销动作的标记。升级不读原图，沿用必需备份和单事务迁移；回退使用升级前 `library-backups/` 的完整 SQLite 副本。
+
+
+人工便携快照的核心投影在 `human_conclusions::export`：调用方必须持有一致读事务。它按真实裁决排序保留 yes/no/clear、人工三态、身份上下文、复核和锚点当前决定，并携带所需定义；结构来源无法证明时标记 `legacy_unknown`。关系记录区分身份图关系与普通关系，按身份图实际使用的旧编号保留相对顺序；非人工名称只作描述，合并带来的别名要求完整、未撤销且仍有效的历史证明。证据包能自报 `source=user` 的普通显示名标为 `legacy_unknown`，不据此声称人工来源；外链仅携带 system/key 等身份字段，原始 URL 不进入快照，以免带出查询令牌。账号配置、任意 attrs、机器载荷、源文件路径及全部撤销历史不进入便携文件。
+
+快照与报告编号为不透明字符串，客户端原样保存和回传，不依赖 UUID 写法。JSONL v1 使用 `type` / `record_key` 封闭字段和有效状态模式；尾部同时校验原始字节 SHA-256、排除快照编号与生成时间的 `state_sha256`、分类计数和资产哈希覆盖。`asset_identity_complete` 只说明资产摘要是否齐全，不承诺目标匹配或历史锚点能恢复。当前结构与原始基线分别查环；hybrid 身份关系还校验重复代表、父级及“确认不同”的冲突。源锚点缺少参考版本时原样标为空，不能编造版本。宿主完成与本次内容版本绑定的哈希后，通过 `Snapshot::with_hashes` 填充；核心投影不读取原图。
+
+宿主 `app_human_conclusions` 核验完整图片摘要，复用相同来源版本、大小和 mtime 的缓存或读取完整字节，并在提交前再次核对变化；跨库认回仍须 SHA-256、长度、输入形态一致且候选唯一。导入由 `human_conclusions::import` 在一次写事务中补目标从未决定的逻辑键，专用 `human_conclusions/v1` 历史信封记录精确 after。重复内容无新 action；普通 `/api/undo` 先核对全部 after，再撤去这一步的贡献，独立改动导致冲突并回滚。通用核心/CLI 撤销不能完成宿主的收录投影，因此不接受这个专用信封。
+
+第 9 版把词条和关系的物理记录分别存为 `term_records`、`term_relation_records`，原名 `terms`、`term_relations` 是带写入触发器的有效视图。原有对象照常可见；仅导入新建的对象由 `human_object_contributions` 关联创建 action，撤销后从全部现行读者中失效。不可变裁决的外键仍引用物理记录。`human_entity_origins` 保留源图库/词条到目标的映射，但匹配只采用仍生效的贡献。新定义撤销移除名称、外链和投影，释放外链唯一归属；重新导入创建新 action 和新词条，旧 action 和旧裁决保持失效。后来新增机器证据或独立依赖、定义被修改，都会使整步撤销冲突并回滚。名称维护触发器挂在物理记录上；创建词条/关系后按唯一键取 ID，不依赖视图触发器外的 `last_insert_rowid()`。
+
+`human_relation_review_context` 按 `(verdict_id, fingerprint)` 保存导入关系曾见过的指纹及是否已审，不创建机器证据。身份图的未复核层级由当前有效决议携带的上下文与本地证据共同决定；后来新增的本地指纹不会自动变成已审。普通关系复核接管便携指纹，普通撤销继续追加现行审计决议，不能当作退回导入时的审阅状态。导入按关系连通组预检真实图投影，不改变目标已有身份和范围；目标父角色否决与源子确认、目标子确认与源父否决均阻断依赖组，hybrid 按有效断言的代表与家庭核对，保护合并后仍保留原始键的判断。已撤销导入的关系被普通入口重新启用时复用原关系编号，旧裁决继续失效。
+
+已有词条的名字按 `(词条, 语言, role)` 分组补缺，目标已有人工名字组优先；其它语言或类型独立处理。撤销核对名字字段与组内相对顺序，仅 `source=user` 的名字允许普通资料撤销重新分配 `seq`；后台可整批重建的 provider 显示名与 Danbooru 别名只留在源文件作为描述，不落为可撤销贡献：`seq` 可复用，不能证明所有权。已有词条受影响名字组报告未处理，新定义逐行报告并省略这些上下文行；其余名字仍核对字段与顺序。恢复时仍采用保存的原始顺序号；组内独立改动使撤销原子拒绝，组外新增名字保留。补入既有词条的旧合并别名在有效导入历史中保留来源证明；Danbooru 别名会由名称更新器整批重建，同字面值和顺序号均不足以证明当前行仍属旧合并，统一标为 `legacy_unknown` 并在往返中保留这一标记。名字组结果在 `definition_fields` 单列，不能和依赖词条数相加。
+
+公共链接只补尚未占用的 `(system,key)`，保留目标已有归属与 `current` 状态；Danbooru 当前链接槽被普通资料入口明确清空时也受保护，以当前清空标记或未撤销资料历史证明，不从空链接集合推断人工意图；其它公共链接可独立补缺；撤销只删除本次新增且字段未被独立修改的链接。可解析且两端均能认回的身份跳过对映射到目标键；不透明或悬空旧键报告依赖无法认回。撤销只移除本次新增的跳过对，保留之后新增的其它对。旧锚点决定没有可核实的参考版本时报告未处理，不凭参考名称恢复。
+
+结构定义按源相对顺序追加，词条 key、父级、作品及 hybrid 原始基线统一映射；目标已有结构须相容，身份策略不同或同一依赖组有冲突则整组报告未处理。导入同时同步角色人工归属、范围和暂停附件；目标已有图片判断的附件缺省也保留。`reviews` 第 9 版主键为 `(action_id,entity)`，允许一次导入保留多个人物的复核。普通默认合并遇到同 action 的两条复核时保留较新时间，撤销恢复两份原值，不移动该 action 的其它人物记录。
+
+`human_asset_hashes` 保存完整 SHA-256、长度、输入形态、来源签名、文件时间戳及观察时间。缓存只在同一来源版本、大小和 mtime 下复用；来源绑定变化、重新插入资产或观察到文件新版本时失效。删除资产可保留尚未失效的历史摘要供源快照使用，目标匹配始终要求在线核验。`meta.human_revision` 在人工 actions、撤销、裁决（含相册批次）、人工名字/链接/词条、三态标记、无 actions 的结构命令及哈希覆盖变化的原事务中递增；机器证据与学习缓存不触发。生成快照期间新增的修订仍待保护，不能归入先前读快照。
+
+`human_backup_state` 持久化自动调度状态。`human_import_reports` 和 `human_import_report_rows` 与导入及本次 `effect_id` 一起提交，`pending_effects` 只查询这个事件，无改动导入不归属事件；零人工改动也保留完整报告，导入撤销和重启不删除报告；导出报告保留本会话最近一次。资产、依赖定义、人工逻辑记录分别计数，已有定义的名字组和链接另列 `definition_fields`，对应实体明细带 `field_counts`，各口径不能相加。
+
+HTTP 沿用本机认证与会话门槛：`POST /api/human-conclusions/export {}` 启动独立导出任务，`POST /api/human-conclusions/import {"path":"本机文件"}` 与 `POST /api/human-conclusions/restore {"backup_id":"清单编号"}` 共用原导入槽；不带 path 时打开原生选择器。导入使用 `GET /api/imports` 和 `POST /api/imports/cancel`，导出使用 `GET /api/human-conclusions` 内的 `export` 和 `POST /api/human-conclusions/export/cancel {"id":"任务编号"}`。状态 GET 的 `automatic` 返回自动状态及已校验快照清单，不创建目录或触发写入。`GET /api/human-conclusions/report?id=报告编号&offset=0&limit=100` 分页返回 `report` 与 `details`，每页最多 500 条。导入摘要的 `committed` 与 `pending_effects` 分开描述数据库提交和效果落地，只有有效人工写入才有 `undo`。格式/版本错误为 400，输入超过 256 MiB、单行超过 4 MiB 或超过 200 万记录为 413，会话/任务/升级/撤销冲突为 409，IO 或 SQLite 故障为 500；异步结果保留同样 code 及提交状态。
+
+自动快照的节奏、轮换、离线边界和各备份目录分工见 [图库](LIBRARIES.md#人工结论快照)。文件先以私有权限独占创建同目录临时文件，写入、刷盘、完整回读验证后原子且不覆盖地发布，成功后才轮换；恢复重新核对清单中的快照编号与语义摘要。

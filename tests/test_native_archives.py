@@ -24,6 +24,7 @@ class NativeArchivesTest(unittest.TestCase):
     package = lifecycle.NativeLifecycleTest.package
     stop = lifecycle.NativeLifecycleTest.stop
     start = lifecycle.NativeLifecycleTest.start
+    clone_closed_library = lifecycle.NativeLifecycleTest.clone_closed_library
     request = lifecycle.NativeLifecycleTest.request
     pair = lifecycle.NativeLifecycleTest.pair
 
@@ -217,7 +218,7 @@ class NativeArchivesTest(unittest.TestCase):
         with closing(sqlite3.connect(self.lib.source)) as c:
             library.ensure_source_schema(c)
             c.execute("UPDATE assets SET source_id='s1',preset='other'"); c.commit()
-        expected_config = self.root / 'expected.pilib'; shutil.copytree(self.lib.path, expected_config)
+        expected_config = self.root / 'expected.pilib'; self.clone_closed_library(expected_config)
         expected = library.open_library(expected_config)
         result = library.set_preset(expected, 's1', 'pixiv')
         response = self.request('/api/libraries/preset', {'source':'s1', 'preset':'pixiv'})
@@ -390,7 +391,7 @@ class NativeArchivesTest(unittest.TestCase):
         # 删除新目录，不动登记表。
         archive, _ = self.large_archive()
         other = self.root / 'other.pilib'
-        shutil.copytree(self.lib.path, other)
+        self.clone_closed_library(other)
         registry = self.support / 'libraries.json'
         listing = lambda: set(library.HOME.glob('*')) if library.HOME.exists() else set()
         for how in ('cancel', 'switch', 'quit'):

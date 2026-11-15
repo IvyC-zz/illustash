@@ -280,6 +280,7 @@ fn integer_id(value: &Json) -> Option<i64> {
 fn undo(c: &mut Connection, body: &Json) -> Result<Json> {
     initialized(c)?;
     let tx = c.transaction_with_behavior(TransactionBehavior::Immediate)?;
+    crate::schema::begin_writing(&tx)?;
     let input = body.get("id");
     let bound = sqlite_id(input)?;
     let row: Option<(i64, String)> = tx
@@ -293,7 +294,11 @@ fn undo(c: &mut Connection, body: &Json) -> Result<Json> {
         let owned = crate::character_commands::owns(&parsed).map_err(core_error)?.is_some();
         let terms =
             parsed.as_array().is_some_and(|items| store::owns(items, store::Handover { artists: true, labels: true }));
-        if owned {
+        if illustash_core::human_conclusions::import::owns(&parsed)? {
+            let touched = illustash_core::human_conclusions::import::undo_in(&tx, id)?;
+            crate::app_curation::refresh_excluded(&tx, &touched)?;
+            character = true;
+        } else if owned {
             let strict = input.and_then(integer_id).ok_or_else(|| Error::Invalid("步骤 ID 不正确".into()))?;
             let (_, owned) = store::undo_in(&tx, Some(strict)).map_err(core_error)?;
             character = owned;
@@ -312,11 +317,7 @@ fn undo(c: &mut Connection, body: &Json) -> Result<Json> {
     if character {
         tx.execute("INSERT INTO backend_effects(kind) VALUES ('verdict')", []).map_err(core_error)?;
     }
-    if character {
-        crate::schema::commit_writing(tx).map_err(core_error)?;
-    } else {
-        tx.commit()?;
-    }
+    crate::schema::commit_writing(tx).map_err(core_error)?;
     http_read::register_names(c)?;
     let action = last_action(c)?;
     Ok(Json::object([("undo", action)]))
@@ -363,6 +364,7 @@ fn restore_application(c: &Connection, bound: &SqlValue, before: &Value) -> Resu
     crate::app_curation::refresh_excluded(c, &touched.into_iter().map(str::to_owned).collect::<Vec<_>>())?;
     c.execute("DELETE FROM reviews WHERE action_id=?", [id])?;
     c.execute("UPDATE actions SET undone=1 WHERE id=?", [id])?;
+    illustash_core::human_conclusions::state::undo(c, id)?;
     c.execute("INSERT INTO backend_effects(kind) VALUES ('verdict')", [])?;
     Ok(())
 }
@@ -429,6 +431,25 @@ mod tests {
             let _ = fs::remove_dir_all(&self.root);
         }
     }
+    #[test]
+    fn reset_survives_reopen_and_ordinary_undo_restores_the_previous_mark() {
+        use illustash_core::human_conclusions::state::{self, Domain, State};
+        let f = Fixture::new();
+        let read = || {
+            let c = crate::sqlite::open(&f.context.db).unwrap();
+            state::read(&c, Domain::Curation, "b").unwrap()
+        };
+        f.call("/api/curate", r#"{"ids":["b"],"action":"reset"}"#).unwrap();
+        assert!(matches!(read(), State::Absent(m) if m.owner_action_id == 1));
+        f.call("/api/curate", r#"{"ids":["b"],"action":"include"}"#).unwrap();
+        assert!(matches!(read(), State::Positive(v) if v["status"] == "included"));
+        f.call("/api/undo", r#"{"id":2}"#).unwrap();
+        assert!(matches!(read(), State::Absent(m) if m.owner_action_id == 1));
+        f.call("/api/undo", r#"{"id":1}"#).unwrap();
+        assert_eq!(read(), State::Undecided);
+        assert_eq!(f.count("SELECT count(*) FROM actions WHERE undone=0"), 0);
+    }
+
     #[test]
     fn artist_uses_existing_targets_without_expanding_or_creating_terms() {
         let f = Fixture::new();

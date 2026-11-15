@@ -26,7 +26,7 @@ from unittest.mock import patch
 
 from tests.fixed_expectations import Library, Expectations, RECORDED_TODAY, TERMS_VERSION, unclocked
 from tests.synthetic_source import source_fixture as fixture, synthetic_reference
-from tests.test_read_http import INTERRUPT, SPAWN, free_port, wait_until
+from tests.test_read_http import INTERRUPT, SPAWN, free_port, wait_until, wait_human_backup
 from tools import verify_read_http
 from tools.verify_read_http import cookie, enter, fetch
 
@@ -112,11 +112,10 @@ def startup(db):
     return {**STARTUP_DEFAULT, **(json.loads(row[0]) if row else {})}
 
 
-def files(root, running=False):
-    """按内容列出图库包里的每个文件。`running`：有宿主打开着这个包，它的后台检查随时可能更新包的检查记录
-    （#212），所以不含这个记录。"""
+def files(root):
+    """按内容列出静止夹具里的每个文件，不排除后台记录或 SQLite 协调文件。"""
     return {p.relative_to(root).as_posix(): hashlib.sha256(p.read_bytes()).hexdigest()
-            for p in root.rglob('*') if p.is_file() and not (running and p.name == '.illustash-checks.json')}
+            for p in root.rglob('*') if p.is_file()}
 
 
 class NativeLifecycleTest(unittest.TestCase):
@@ -218,7 +217,15 @@ class NativeLifecycleTest(unittest.TestCase):
         except AssertionError:
             log.seek(0)
             self.fail(f'native startup failed ({process.poll()}): {log.read().decode(errors="replace")}')
+        wait_human_backup(self, origin)
         return process, log
+
+    def clone_closed_library(self, target):
+        """停止自有宿主后复制完整包，再重新打开；活库的 WAL/SHM 不能靠文件复制取得一致快照。"""
+        self.stop(self.process)
+        shutil.copytree(self.lib.path, target)
+        self.process, self.log = self.start(self.lib.path)
+        self.token = json.loads(self.request('/api/bootstrap')['body'])['token']
 
     def request(self, url, body=None, *, base=None, token=None, headers=None):
         item = {'url': url, 'headers': headers or {}}
@@ -230,7 +237,21 @@ class NativeLifecycleTest(unittest.TestCase):
 
     def reference_response(self, url, body=None, **kwargs):
         """原参照服务器对同一请求的响应（录制）。"""
-        return without_local_limit(self.rec.value('response'))
+        response = without_local_limit(self.rec.value('response'))
+        if url in ('/api/settings', '/api/startup', '/api/cache', '/api/libraries') and response['status'] == 200:
+            # library_bytes 是当前主库加 WAL 的物理字节数；v9 首备份会写入新表，旧 schema 的冻结数字不适用。
+            # 独立 stat 得到精确整数，只替换 package.library_bytes 与 library.bytes，保留其他字节和响应头。
+            files = (self.lib.db, Path(str(self.lib.db) + '-wal'))
+            size = sum(path.stat().st_size for path in files if path.exists())
+            data = response['body']
+            patterns = [rb'("library_bytes": )\d+']
+            if url != '/api/libraries':
+                patterns.append(rb'("library": \{"path": "(?:\\.|[^"\\])*", "bytes": )\d+')
+            for pattern in patterns:
+                data, count = re.subn(pattern, lambda match: match[1] + str(size).encode(), data)
+                self.assertEqual(count, 1)
+            response = {**response, 'body': data}
+        return response
 
     def pair(self, url, body=None, **kwargs):
         left = NativeLifecycleTest.reference_response(self, url, body, **kwargs)
@@ -397,6 +418,7 @@ class NativeLifecycleTest(unittest.TestCase):
         self.assertEqual(json.loads(self.request('/api/settings')['body'])['package']['path'], str(self.lib.path))
         self.assertEqual(self.request('/api/startup', {'sync': True}, token=token)['status'], 200)
         self.assertEqual(self.request('/api/libraries/open', {'path': str(dest)}, token=token)['status'], 200)
+        wait_human_backup(self, self.origin)
         new_token = json.loads(self.request('/api/bootstrap')['body'])['token']
         self.assertNotEqual(new_token, token)
         before = dump(dest / 'library.sqlite')
@@ -590,6 +612,7 @@ class NativeLifecycleTest(unittest.TestCase):
             self.assertEqual(self.pair(url)['route'], 'core')
         blocked.rmdir()
         self.assertEqual(self.request('/api/libraries/open', {'path': str(dest)})['status'], 200)
+        wait_human_backup(self, self.origin)
         new_token = json.loads(self.request('/api/bootstrap')['body'])['token']
         self.assertNotEqual(new_token, self.token)
         before = dump(dest / 'library.sqlite')
@@ -619,6 +642,7 @@ class NativeLifecycleTest(unittest.TestCase):
         old_token = self.token
         response = self.request('/api/libraries/open', {'path': str(target.path)})
         self.assertEqual(response['status'], 200)
+        wait_human_backup(self, self.origin)
         value = json.loads(response['body'])
         self.assertEqual((value['path'], value['name']), (str(target.path), 'second'))
         new_token = json.loads(self.request('/api/bootstrap')['body'])['token']
@@ -673,6 +697,7 @@ class NativeLifecycleTest(unittest.TestCase):
         conn.endheaders(); conn.send(body[:8])
         # 旧请求还在途中，请求体不完整；第二个连接可以切换。
         self.assertEqual(self.request('/api/libraries/open', {'path': str(target.path)})['status'], 200)
+        wait_human_backup(self, self.origin)
         before = dump(target.db)
         conn.send(body[8:]); response = conn.getresponse(); response.read()
         self.assertEqual(response.status, 403)
@@ -706,6 +731,7 @@ class NativeLifecycleTest(unittest.TestCase):
         # 再次打开这个别名是有意的切换：在另一个图库包上开新会话。
         old_token = self.token
         self.assertEqual(self.request('/api/libraries/open', {'path': str(alias)})['status'], 200)
+        wait_human_backup(self, self.origin)
         self.token = json.loads(self.request('/api/bootstrap')['body'])['token']
         self.assertNotEqual(self.token, old_token)
         self.assertEqual(self.request('/api/startup', {'similar': True}, token=old_token)['status'], 403)
@@ -896,12 +922,14 @@ class NativeLifecycleTest(unittest.TestCase):
                                  '--port', str(free_port())], env=self.env, capture_output=True, timeout=5)
         self.assertNotEqual(result.returncode, 0)
         self.assertEqual(before, files(broken.path))
+        # 这里检验参数在开库前被拒绝；先停自有宿主，避免后台只读轮询改写 SHM 的协调字节。
+        self.stop(self.process)
         for args in (['--python', str(self.bin / 'python')], ['--upstream', '41002']):
-            before = files(self.lib.path, running=True)
+            before = files(self.lib.path)
             result = subprocess.run([str(self.binary), 'http', '--no-auto-sync', '--library', str(self.lib.path),
                                      '--port', str(free_port()), *args], env=self.env, capture_output=True, timeout=5)
             self.assertNotEqual(result.returncode, 0)
-            self.assertEqual(before, files(self.lib.path, running=True))
+            self.assertEqual(before, files(self.lib.path))
         self.assertFalse(self.sentinel.exists())
 
     def test_retired_forward_route_is_rejected_and_exit_releases_port(self):
@@ -930,7 +958,8 @@ class NativeLifecycleTest(unittest.TestCase):
         self.assertEqual(self.request('/api/bootstrap')['status'], 200)
 
     def test_all_retired_parameters_reject_before_side_effects(self):
-        before = files(self.lib.path, running=True)
+        self.stop(self.process)
+        before = files(self.lib.path)
         for arg in ('--python=unused', '--upstream=12345', '--route=GET:/api/assets=core',
                     '--refresh', '--source=unused', '--db=unused', '--cache=unused',
                     '--identity=hybrid', '--no-similar', '--'):
@@ -938,7 +967,7 @@ class NativeLifecycleTest(unittest.TestCase):
                                     capture_output=True, timeout=5)
             self.assertNotEqual(result.returncode, 0, arg)
             self.assertIn('已退役', result.stderr.decode(), arg)
-        self.assertEqual(before, files(self.lib.path, running=True))
+        self.assertEqual(before, files(self.lib.path))
         help_result = subprocess.run([str(self.binary), 'http', '--help'], env=self.env,
                                      capture_output=True, timeout=5)
         self.assertEqual(help_result.returncode, 0)

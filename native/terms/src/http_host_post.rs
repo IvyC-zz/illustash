@@ -30,6 +30,26 @@ pub(super) fn handle(request: Request, host: &Host, received: u64, text: &str, b
         _ => {}
     }
     let mut body = body;
+    if request.url().starts_with("/api/human-conclusions/") {
+        let allowed: &[&str] = match request.url() {
+            "/api/human-conclusions/export" => &[],
+            "/api/human-conclusions/export/cancel" => &["id"],
+            "/api/human-conclusions/import" => &["path"],
+            "/api/human-conclusions/restore" => &["backup_id"],
+            _ => return unavailable(request),
+        };
+        if !matches!(&body,Json::Object(fields) if fields.iter().all(|(k,_)|allowed.contains(&k.as_str()))) {
+            return failure(request, Error::invalid("人工结论请求字段不正确"), true);
+        }
+    }
+    if request.url() == "/api/human-conclusions/import" && body.get("path").is_none() {
+        match pick_file(host, received, &translate, "human-conclusions") {
+            Picked::Path(path) => body.set("path", path),
+            Picked::Cancelled => return cancelled(request),
+            Picked::Switched => return expired(request),
+            Picked::Failed(e) => return failure(request, e, true),
+        }
+    }
     if request.url() == "/api/accounts/x/import" && !body.get("path").is_some_and(truthy) {
         match archive(host, received, &translate) {
             Picked::Path(path) => body.set("path", path),
@@ -50,6 +70,21 @@ pub(super) fn handle(request: Request, host: &Host, received: u64, text: &str, b
         }
     }
     match request.url() {
+        "/api/human-conclusions/export" => {
+            let result = session.human_exports.start(&session.library, session.generation, &session.token);
+            drop(session);
+            return reply(request, result, true);
+        }
+        "/api/human-conclusions/export/cancel" => {
+            let result = session.human_exports.cancel(body.get("id").map(Json::text).unwrap_or(""));
+            drop(session);
+            return reply(request, result, true);
+        }
+        "/api/human-conclusions/import" | "/api/human-conclusions/restore" => {
+            let result = human_import(host, &session, &body, request.url().ends_with("/restore"));
+            drop(session);
+            return reply(request, result, true);
+        }
         "/api/cache" => return cache(request, host, session, &body),
         "/api/entities" | "/api/character/profile" | "/api/local-links" => {
             return profiles(request, host, received, session, &body)
@@ -130,7 +165,10 @@ enum Picked {
 }
 /// 用户为 X 导入选的归档文件。原生选择窗口运行时不持有会话；取消或切换之后，选中的文件绝不能交给替换后的图库包。
 fn archive(host: &Host, received: u64, translate: Translate) -> Picked {
-    let picked = match crate::app_platform::choose("archive", false, &crate::platform_process::stopping, translate) {
+    pick_file(host, received, translate, "archive")
+}
+fn pick_file(host: &Host, received: u64, translate: Translate, kind: &str) -> Picked {
+    let picked = match crate::app_platform::choose(kind, false, &crate::platform_process::stopping, translate) {
         Ok(picked) => picked,
         Err(e) => return Picked::Failed(management_error(e)),
     };
@@ -141,6 +179,26 @@ fn archive(host: &Host, received: u64, translate: Translate) -> Picked {
         Some(path) => Picked::Path(path.clone()),
         None => Picked::Cancelled,
     }
+}
+fn human_import(host: &Host, session: &Session, body: &Json, restore: bool) -> Result<Json> {
+    let (path, expected) = if restore {
+        let id = body.get("backup_id").map(Json::text).unwrap_or("");
+        let (path, hash) = session.human_backups.restore_path(&session.library.db(), id)?;
+        (path, Some((id.to_owned(), hash)))
+    } else {
+        let Some(Json::Scalar(serde_json::Value::String(path))) = body.get("path") else {
+            return Err(Error::invalid("需要本机文件 path"));
+        };
+        if path.is_empty() {
+            return Err(Error::invalid("需要本机文件 path"));
+        }
+        (expand_path(path)?, None)
+    };
+    let identity = crate::app_tasks::TaskIdentity::new(&session.library, session.generation, &session.token)?;
+    let library = session.library.clone();
+    host.imports.start(identity, crate::app_imports::Kind::HumanConclusions, "", move |progress| {
+        crate::app_human_conclusions::import_observed(&library.db(), library.id(), &path, progress, expected)
+    })
 }
 fn cache(request: Request, host: &Host, session: RwLockWriteGuard<Session>, body: &Json) {
     if !matches!(body.get("action"), Some(Json::Scalar(serde_json::Value::String(action))) if action == "clear") {
