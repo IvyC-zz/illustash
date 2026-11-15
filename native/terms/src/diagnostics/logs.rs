@@ -140,12 +140,8 @@ fn record(source: Source, reason: &'static str, code: Option<i32>, kind: Kind) {
     let Some(writer) = WRITER.get_or_init(|| Writer::start().ok()) else { return };
     let stderr = matches!(kind, Kind::Stderr);
     // 给超时和退出等终态保留队列空间。任何一个 stderr 流刷屏都不能占满它。
-    if stderr
-        && writer
-            .stderr
-            .fetch_update(Ordering::Relaxed, Ordering::Relaxed, |n| (n < STDERR_LIMIT).then_some(n + 1))
-            .is_err()
-    {
+    if stderr && writer.stderr.fetch_add(1, Ordering::Relaxed) >= STDERR_LIMIT {
+        writer.stderr.fetch_sub(1, Ordering::Relaxed);
         writer.dropped.fetch_add(1, Ordering::Relaxed);
         return;
     }

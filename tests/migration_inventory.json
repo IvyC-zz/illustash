@@ -179,7 +179,7 @@
 
  "native/terms/src/app_curation.rs":"17861f2a525eee26a32b981f819eca3929a051230bc81ac7f477ee8d1ae76122",
 
- "native/terms/src/app_desktop.rs":"33bc2eab2a131f39abe5f7fad2841af247a46f7947b625d8dceafc52def5020a",
+ "native/terms/src/app_desktop.rs":"6a2d810a15066cfa4d6ff3f41e257a4b29304c6756914da2580fce2a4184b47a",
 
  "native/terms/src/app_effects.rs":"507ff09441aab09cc8f2ca7460bbde3da5bffb8180629b3bb6f503598dbbe1b8",
 
@@ -285,7 +285,7 @@
 
  "native/terms/src/diagnostics.rs":"fa17e4be140b175221af6a50a7fff355ac1f3b148e5619986740c93c6ffa66b7",
 
- "native/terms/src/diagnostics/logs.rs":"e367e4ecc8b048db575078ebba0a6b9f9992cfceff263fbdcd18a5672d0a2ace",
+ "native/terms/src/diagnostics/logs.rs":"659500966457818744578c3ed931b4e5d33e3a312ea870b249a88382aef6e114",
 
  "native/terms/src/http.rs":"806d8b048bc9e2925765986a082d3bc542c8e669bb93fcc745be8508fcc9ec91",
 

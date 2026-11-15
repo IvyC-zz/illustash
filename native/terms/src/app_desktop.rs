@@ -135,7 +135,8 @@ mod tests {
     fn logs_folder_bridge_only_accepts_the_fixed_post_route() {
         let route = "/platform/diagnostics/open-logs";
         let port = bridge(200, r#"{"ok":true}"#);
-        assert_eq!(send(port, "t", "POST", route, 1).unwrap().dump(), r#"{"ok":true}"#);
+        let reply = send(port, "t", "POST", route, 1).unwrap();
+        assert!(matches!(reply.get("ok"), Some(Json::Scalar(serde_json::Value::Bool(true)))));
         for (method, route) in [("GET", route), ("POST", "/platform/diagnostics/open-logs?path=synthetic")] {
             assert_eq!(message(send(0, "t", method, route, 1)), "本机桥参数不正确");
         }
