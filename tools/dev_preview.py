@@ -9,7 +9,10 @@
 `--port`（或环境变量 PORT）上另开一个只做跳转的小服务：宿主就绪后才监听，`GET /` 跳到宿主打印的地址。
 宿主本身在另一个空闲端口上，就绪行和日志原样转到本脚本的 stdout。
 
-用法：python3 tools/dev_preview.py [--port 8777] [--work DIR] [--images N] [-- 宿主额外参数…]
+`--fixture walk` 改用界面走查（#453）的合成图库：带 WD 认出的角色、人工确认的角色、未识别分组、相似组、画师和 R18，
+第一次要建一两分钟，之后用缓存（tools/ui_walk/fixture.py）；每次启动从缓存复制一份，改动不留到下次。
+
+用法：python3 tools/dev_preview.py [--port 8777] [--work DIR] [--images N | --fixture walk] [-- 宿主额外参数…]
 """
 from __future__ import annotations
 
@@ -63,6 +66,20 @@ def png(path: Path, width: int, height: int, seed: int) -> None:
                      + chunk(b'IEND', b''))
 
 
+def isolated_env(work: Path) -> dict[str, str]:
+    """宿主的环境变量：HOME、App Support、共享资源都指向 work 下的子目录，凭据不进钥匙串。目录会建好。"""
+    env = dict(os.environ)
+    env.update({
+        'HOME': str(work / 'home'),
+        'ILLUSTASH_APP_SUPPORT': str(work / 'support'),
+        'ILLUSTASH_SHARED': str(work / 'shared'),
+        'ILLUSTASH_NO_KEYCHAIN': '1',
+    })
+    for name in ('home', 'support', 'shared'):
+        (work / name).mkdir(parents=True, exist_ok=True)
+    return env
+
+
 def free_port() -> int:
     with socket.socket() as s:
         s.bind(('127.0.0.1', 0))
@@ -92,6 +109,7 @@ def main() -> int:
     parser.add_argument('--port', type=int, default=8777, help='跳转服务端口（环境变量 PORT 优先）')
     parser.add_argument('--work', type=Path, help='隔离目录；指定时保留，不指定则用临时目录并在退出时删除')
     parser.add_argument('--images', type=int, default=24, help='新建图库时生成的合成图片张数')
+    parser.add_argument('--fixture', choices=['walk'], help='用界面走查的合成图库（带识别结果），见 tools/ui_walk/fixture.py')
     parser.add_argument('host_args', nargs='*', help='在 -- 之后，原样传给 illustash-terms http')
     args = parser.parse_args()
     port = int(os.environ.get('PORT') or args.port)
@@ -99,15 +117,16 @@ def main() -> int:
 
     work = args.work.resolve() if args.work else Path(tempfile.mkdtemp(prefix='illustash-preview-'))
     keep = args.work is not None
-    env = dict(os.environ)
-    env.update({
-        'HOME': str(work / 'home'),
-        'ILLUSTASH_APP_SUPPORT': str(work / 'support'),
-        'ILLUSTASH_SHARED': str(work / 'shared'),
-        'ILLUSTASH_NO_KEYCHAIN': '1',
-    })
-    for name in ('home', 'support', 'shared'):
-        (work / name).mkdir(parents=True, exist_ok=True)
+    if args.fixture:
+        sys.path.insert(0, str(ROOT))
+        from tools.ui_walk import fixture  # 只在要用时导入：它反过来要用本文件
+        walk = fixture.cached(ROOT / '.walk' / 'fixture', core)
+        if not (work / '合成图库.pilib').exists():
+            shutil.copytree(walk.root / 'pristine', work, symlinks=True, dirs_exist_ok=True)
+        research = fixture.worker()
+        if research:
+            os.environ.setdefault('ILLUSTASH_RESEARCH_WORKER', str(research))
+    env = isolated_env(work)
     library = work / '合成图库.pilib'
     host = None
     jump = None

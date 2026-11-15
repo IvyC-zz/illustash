@@ -184,7 +184,8 @@ illustash/
 | `verify_read_http.py` | 原生测试用的 HTTP 逐字节对照辅助 |
 | `build_provenance_probe.py`、`windows_acceptance.py`、`windows_research_acceptance.py` | 溯源候选构建、Windows 基础版与研究包验收 |
 | `build_db.py` | 重建旧格式分析源库；`test_native_library_upgrade` 用它造旧库 |
-| `dev_preview.py` | 浏览器走查用的隔离宿主（临时目录、合成图库），`.claude/launch.json` 的 `web-isolated` 调用它，见上文「快速开始」 |
+| `dev_preview.py` | 浏览器走查用的隔离宿主（临时目录、合成图库），`.claude/launch.json` 的 `web-isolated` 调用它，见上文「快速开始」；`--fixture walk` 改用带识别结果的走查图库 |
+| `ui_walk/` | 浏览器界面走查（#453）：合成图库夹具、跨页面流程、两次运行的比较，`python3 -m tools.ui_walk run`，见 [本地验收](LOCAL_CHECKS.md#界面走查浏览器453) |
 | `version.py` | 版本号的唯一来源是 `native/terms/application.json`（#189）：检查或改写 `tauri.conf.json`、各发布 crate 的 `Cargo.toml` 与 `Cargo.lock` |
 | `updater_release.py` | 应用内更新的发布文件（#279）：打 macOS 更新包、生成 `latest.json`，步骤见上文「发布」 |
 | `gen_rust_licenses.py` | 生成 `packaging/rust-licenses/` 的第三方 Rust crate 许可（#161），依赖或 `Cargo.lock` 变了要重跑 |

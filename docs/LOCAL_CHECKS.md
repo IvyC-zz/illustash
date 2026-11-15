@@ -197,7 +197,7 @@ PR 应明确区分“当前 head 上完整执行退出 0”和“当前候选仅
 
 ### Windows x64 CI
 
-公开库使用 `windows-latest` 和 MSVC x64。job 运行 core、platform、terms、desktop 的 clippy（参数与本机检查相同）、这四个项目及 iqdb 的 `cargo test`、terms 与 IQDB 的 release 构建和六个测试 example，再用这些 `.exe` 跑 Python 全套。14 步中的前端 JS 使用同一 workflow 的 Ubuntu 结果。Cargo 沿用仓库的静态 CRT 配置，关闭 CI 增量编译以控制磁盘占用。`TEMP` 和 `TMP` 指到系统盘的短目录，Python 日志统一使用 UTF-8。
+公开库使用 `windows-latest` 和 MSVC x64。job 运行 core、platform、relation-fft、terms、desktop 的 clippy（参数与本机检查相同）、这五个项目及 iqdb 的 `cargo test`、terms 与 IQDB 的 release 构建和六个测试 example，再用这些 `.exe` 跑 Python 全套。前端 JS 使用同一 workflow 的 Ubuntu 结果。Cargo 沿用仓库的静态 CRT 配置，关闭 CI 增量编译以控制磁盘占用。`TEMP` 和 `TMP` 指到系统盘的短目录，Python 日志统一使用 UTF-8。
 
 CI 使用标准 Python 3.12，与 macOS job 一致；常驻验收机使用嵌入式 3.13，`tests/test_run_fixed_suite.py` 的隔离入口测试覆盖其模块查找行为。CI 从 PyPI 下载并缓存固定的 x64 NumPy 2.5.3 wheel，配合固定的 Pillow 12.3.0 给 Python 对照用，再用打包脚本和 `crates/platform/src/research_openblas.json` 验证 DLL 的 SHA-256 并设置 `ILLUSTASH_RESEARCH_OPENBLAS_DLL`。3.12 与 3.13 对应的 wheel 含相同的已登记 DLL。Rust 和 wheel 的缓存只在 main 保存，PR 可还原。Windows job 的冷、热缓存耗时及压缩缓存大小待实际运行记录。
 
@@ -210,6 +210,36 @@ CI 使用标准 Python 3.12，与 macOS job 一致；常驻验收机使用嵌入
 正式 Windows job 在编译前输出 CPU、NumPy/Pillow、DLL SHA-256、NumPy 进程实际 OpenBLAS 配置/内核/线程数及 CPU 分派覆盖。身份探针在 Python 进程加载 NumPy wheel 的 DLL；这里的线程数仅为 NumPy 参考进程实测，不表示已测候选子进程的线程数，日志将候选线程数标为未测。每次实际进入的数值比较输出 `NUMERIC_REFERENCE` 记录，`windows_fixed_suite` 在 job 摘要中分别统计 NumPy 和冻结比较的通过/失败数；这份记录与 unittest 的总体成败一起阅读。其他平台的默认验收入口不设置该变量。
 
 `python -m tests.windows_fixed_suite --log windows-unittest.log` 是候选二进制和 OpenBLAS 接线后的全套入口。它列出全部 unittest 跳过，白名单逐条匹配平台限制，缺被测二进制、DLL 或升级输入均判失败。默认 discover 会排除显式点名的真实模型用例，打包资源测试使用合成文件，原生 ORT 通过运行时动态加载，故这个 job 只需要固定 OpenBLAS。自建 ONNX Runtime 的实际加载及真实模型、DirectML、CRT 依赖检查、安装／覆盖升级／卸载、GUI 和首次流程、真机性能以及 Windows ARM 仍在对应的验收机或虚拟机上做。试运行期间 Windows job 保留真实成败，分支保护的汇总暂不以它决定代码 PR 是否通过。
+
+## 界面走查（浏览器，#453）
+
+2026-11-15 起。`tools/ui_walk/` 在隔离宿主 + 合成图库上用无头 Chromium 走一组跨页面、跨浮层的使用流程，每一步记快照（焦点、打开的层、选中、光标、详情栏、大图、地址、滚动、提示条）、截图并检查控制台错误。现有的 Node 测试用假 DOM，拦不住「功能 A 对、功能 B 对，连起来不对」的问题（#386）；这套走查补的是这一层。它是 Chromium 上的初筛，不代替 WKWebView（虚拟机）和 WebView2（Windows）里的实测，输入法组字也不在里面（见 #388 的做法）。
+
+**跑一次**（在仓库根）：
+
+```sh
+python3 -m tools.ui_walk run                       # 当前检出的 web/static，中英文界面各跑一遍
+python3 -m tools.ui_walk run --ref d5bf1212        # 某个提交的 web/static（git archive），后端仍是当前构建的宿主
+python3 -m tools.ui_walk run --static 某处/web/static --flow viewer-detail --lang zh
+python3 -m tools.ui_walk compare .walk/<A> .walk/<B>   # 逐步比较两次运行
+python3 -m tools.ui_walk list                      # 流程和它们拦的 #386 条目
+```
+
+结果在 `.walk/<时间>/`（已被 git 忽略）：`report.md` 列出每条流程的检查、控制台错误和截图链接，`report.json` 是全部步骤的快照，截图在 `zh/`、`en/` 下。有检查没通过、控制台报错（含 5xx 回应）或流程没跑完时退出 1。`compare` 写 `compare.md` 和左右并排截图的 `compare.html`，有差异时退出 1；用法是新旧两份前端各跑一遍（#469 迁一页之前和之后），差异应只剩有意的改动。快照里的图一律写文件名，不写 uuid。
+
+**依赖**：Node 22（自带 WebSocket，驱动经 Chrome DevTools Protocol 发真实键鼠事件，没有 npm 依赖、不加构建步骤）、Python 3、当前检出构建的 `illustash-terms` 和 `illustash-worker`（`cargo build --bin illustash-terms --bin illustash-worker`，经 `collab_run.py bg`；没有 worker 时分组、相似页是空的，报告开头会写明），以及 chrome-headless-shell：默认取 Playwright 缓存里最新的一份（`npx playwright install chromium-headless-shell` 只下载浏览器，不往仓库加依赖），或用 `ILLUSTASH_WALK_CHROME` 指定。不用 Chrome 的 `--headless=new`：它在本机主进程会长期占满一个核，挡住别的会话的计时，页面里的定时器和 requestAnimationFrame 也会卡住。走查不经 `collab_run.py` 排队：它不编译，CPU 占用和定向测试相当。
+
+**隔离**：每条流程、每种语言开始前把合成图库恢复成刚建好的样子，各起一个宿主；宿主的 HOME、应用数据、共享资源都在 `.walk/fixture/` 下，和 `tools/dev_preview.py` 一样不碰真实图库、钥匙串和网络（关掉自动同步、来源查询和索引检查）。不点「打开其他图库」「导入」「添加文件夹」这类会在本机弹系统选择框的入口。宿主用一次性码地址开页，界面语言由浏览器的 `Accept-Language` 决定，时区固定为东八区，视口 1440×900。
+
+**合成图库**（`tools/ui_walk/fixture.py`）：约 110 张生成的图，内容只经产品自己的入口写入：`library-create`、`library-scan`，一个合成的识别结果包（WD 评级与画面标签、WD 认出的角色和「也可能是」、按方向造的 WD/CCIP 向量；模型文件和标签表是假的，宿主只核对 SHA-256），一个合成的画师证据包（机器认定和「也许是」），再起宿主让研究 worker 分组、找相似，经 HTTP 接口建角色、确认归属、跳过和排除。结果有人工确认的角色 3 个、WD 认出的 1 个、未识别分组、相似组、字节相同的副本、R18 图和画师；引导标成跳过、只问一次的提示卡记成问过。随机抽查和身份整理的题在新建图库里没有写入方，造不出来。夹具按「生成脚本 + 宿主和 worker 程序」的哈希缓存在 `.walk/fixture/<键>/`，第一次建约一两分钟，之后直接用；新旧两份前端比较时用的是同一份图库。`python3 tools/dev_preview.py --fixture walk` 用同一份图库起交互预览（代理会话起它之后用 `preview_start {url}` 打开跳转地址）。
+
+**流程**（`tools/ui_walk/flows.mjs`）按使用流程组织，不按单页：主要页面逐个打开；详情栏 → 大图翻页 → 关大图后三者指向同一张；同一张图在详情栏、大图、角色页按 C 都是「换成」，和按钮一致；未识别里多选 → 大图里设角色 → 关大图 → 撤销；按组整理整组设为 → 撤销后等学习收尾；浮层叠浮层时 Esc 只关栈顶、点外面只关外面的；搜索后 Esc；筛选、滚动、开详情栏 → 去设置 → 后退；设置里切原比例；新图库的导览接管焦点、上手清单不盖详情栏按钮。检查项只写人看得见的对错（哪张图、哪一层、焦点在哪、张数），不写实现细节，所以换一种实现后同一套检查仍然成立。新增流程照文件开头的说明加一项。
+
+**失败处理**：启动、动作、快照和控制台错误均进入报告。每条流程只跑一次，超时保留已完成步骤并失败退出，不自动刷新或重跑。原宿主连接线程池竞态（#477）已修复。
+
+同一个检出里一次只跑一个走查（共用夹具的 `live/` 目录，后来的会等前一个结束）；不同 worktree 互不影响。只支持 macOS 和 Linux。
+
+**旧版复现**（2026-11-15，本机 macOS arm64，chrome-headless-shell 148）：用 #386 那批修复之前的 `d5bf1212` 跑，走查拦下了已修的 1-1、1-3、1-4、1-5、1-6、1-8、1-9。1-2（整组设为后的撤销竞态）未复现：合成图库的学习在撤销回应前已完成；现有 group-undo 只检查最终状态，不代表已覆盖该竞态窗口。逐条验收结果见 #453 的 PR。
 
 ## macOS 实机测试（虚拟机）
 

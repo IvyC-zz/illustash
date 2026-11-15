@@ -15,3 +15,6 @@ __pycache__/
 packaging/desktop-compute/
 
 /crates/relation-fft/target/
+
+# 界面走查的结果（python3 -m tools.ui_walk run，#453）
+/.walk/
