@@ -172,7 +172,9 @@ class NativeLocalReadsTest(unittest.TestCase):
         r=fetch(self.origin,{'url':'/api/about'},self.origin)
         self.assertEqual((r['status'],r['route']),(200,'core'))
         info=json.loads(r['body'])
-        self.assertEqual((info['name'],info['version'],info['channel'],info['schema']),('Illustash','0.1.0','预览版',36))
+        # 版本号以 application.json 为准（#189），升版本号时不用改这里。
+        application=json.loads((Path(__file__).resolve().parents[1]/'native/terms/application.json').read_text(encoding='utf-8'))
+        self.assertEqual((info['name'],info['version'],info['channel'],info['schema']),('Illustash',application['version'],'预览版',36))
         self.assertIsNone(info['python']);self.assertTrue(info['runtime'].startswith('rustc '))
         self.assertRegex(info['build'],r'^[0-9a-f]{7,40}(?:-dirty)?$');self.assertIn('(',info['platform'])
         # #148：worker 会用到的识别组件，在 worker 查找的位置找到；只检查是否存在。
