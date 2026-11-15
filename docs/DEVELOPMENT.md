@@ -98,6 +98,19 @@ stderr 每行最多取前 4 KiB 在内存识别，未知非空行只记未分类
      - **检查器复盘**：带基线的检查（现在只有 `tools/check_frontend.py`）逐条规则比上一个 tag 少了多少，项数和处数都写；对照 `git show <上一个tag>:tools/frontend_baseline.json | python3 -c "import json,sys; [print(k, len(v), sum(v.values())) for k, v in json.load(sys.stdin)['rules'].items()]"` 和当前基线跑出的同样输出。连续两个次版本没缩小的规则，按 [AGENTS.md](../AGENTS.md#前端结构约定)「前端结构约定」集中清理或删规则，写明选了哪个。脚本开头列的已知盲区太多、该改写或删掉的规则也写上。数字同步更新到 #470。
      - **整体前端审查**：照 #386 的做法，跨页面看交互是否一致、结构是否冗余，找到的问题开 Issue，编号列进 PR 描述。
 3. **发布提交与本机全量**：集成会话把版本号 PR 编进一批，在候选 head 上经 `collab_run.py run -- bash tools/check_all.sh` 跑全量（占 heavy 槽，做法见 [合并队列](LOCAL_CHECKS.md#合并队列集成会话)），用户批准后合入。发布提交就是这一批合完后的 main 提交，它的 tree 与通过全量的候选 head 相同（`git rev-parse <发布提交>^{tree} <候选head>^{tree}` 两行一样）。main 在那之后又合入了不跑全量的 PR（界面级、只改文档），要带上它们就请集成会话在 main 当前提交上补跑一次全量，以它为发布提交。
+   - **Windows 完整回归**（2026-11-15 用户定，#501）：发布提交定下后，在 Windows 验收机的常驻检出里检出它，跑一次完整回归。从本机经 SSH 发起，外面包 `collab_run.py run --slot windows --`，做法见 [Windows 验收](LOCAL_CHECKS.md#windows-验收常驻检出)。内容与 `.github/workflows/windows-full.yml` 的 `full` 相同：
+     - core、platform、relation-fft、desktop、terms 的 clippy，参数与本机检查相同（`--all-targets -- -D warnings`，terms 另加 `--all-features`）；
+     - 这五个项目和 iqdb 的测试，每个都经 `python tools/quarantine.py cargo-test --manifest-path <项目>/Cargo.toml` 运行；
+     - terms、六个测试 example 和 IQDB 的 release 构建；
+     - Python 全套 `python -m tests.windows_fixed_suite --log <日志>`，环境变量照 `windows-full.yml` 的「Python 全量与跳过清单」一步：各 `ILLUSTASH_*_BIN`、`ILLUSTASH_TEST_NUMERIC_REFERENCE=numpy`，`ILLUSTASH_RESEARCH_OPENBLAS_DLL` 指向固定 NumPy 2.5.3 wheel 里经 `packaging/build.py` 核验过的 DLL。升级测试、跳过白名单和 #347 的严格数值对照都在里面。
+
+     常驻检出现有的 14 步里没有 relation-fft、隔离名单入口和数值对照的环境变量，跑这一步时要补上。结果写进这次发布的 Issue。隔离名单里的、已有 Issue 的失败不挡发布；新的失败当场判断要不要修，要修的照常走 PR，发布提交随之换成合入后的 main 提交。
+
+     **#347 的数值对照在真机上可能对不上**：NumPy 严格对照每次在同一台机器上现算参考，不依赖录制值。但另外两处比较的参考来自 GitHub runner（#347、#483）：
+     - 冻结参考比较只在环境与 `tests/numpy_reference_environment.py` 登记的身份一致时才进入，登记的是 GitHub runner 的诊断运行（AMD EPYC、SkylakeX 内核、4 线程）；
+     - 灰度单元测试（`research_compute::relations` 的 Windows 灰度测试）只登记了三种内核：Haswell、Sandybridge 的独立参考采自 GitHub run 43630158222，SkylakeX 沿用原有期望，在 GitHub runner 的 SkylakeX 内核上验证过。
+
+     验收机的 CPU、线程数或 OpenBLAS 内核与登记的不同时，冻结比较不会进入；内核不在这三种里时，灰度单元测试会报缺少独立参考而失败。这一项对不上时，改为在 GitHub 上对发布提交手动运行 `windows-full.yml`（范围 `full`）看这一项。要不要在验收机上重录参考值，需要用户批准。
    - **依赖漏洞**：在发布提交上对六个 `Cargo.lock`（`native/terms`、`desktop`、`crates/core`、`crates/platform`、`crates/relation-fft`、`crates/iqdb`）各跑一次 `cargo audit -f <lock>`。有漏洞时逐条判断是否用到受影响的功能：用到的先升级再发布（升级 PR 按普通代码级别走合并队列，发布提交随之换成合入后的 main 提交），没用到的把编号和理由写进这次发布的 Issue。unmaintained、yanked 之类的警告只记录。需要 `cargo install cargo-audit --locked`（本机已装 0.22.2）；第一次运行会从 GitHub 拉 RustSec 漏洞库。
    - **更新公钥**（#279）：发布提交里 `desktop/tauri.conf.json` 的 `plugins.updater.pubkey` 不能是空的，并且和用户保管的私钥是一对（与 `~/.tauri/illustash-updater.key.pub` 的内容相同，见下面 [更新签名密钥](#更新签名密钥)）。公钥是空的构建照样能用，只是「下载并重启」不出现，只能打开下载页；公钥不对的构建以后收不到任何自动更新。
    - **仓库 ID**（#358）：`gh api repos/shio-vinyl/illustash --jq .id` 的结果要等于发布提交里 `native/terms/src/app_updates.rs` 的 `REPOSITORY_ID`。ID 不对时应用靠按名字的回退照样查得到更新，验收看不出来，但仓库以后改名或转移就接不住了（见第 10 步）。仓库删掉重建过、或者换了仓库，都要先改这个常量和本文、[Web 界面](WEB_V2.md#界面语言2026-10-18173) 里的地址。

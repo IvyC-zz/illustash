@@ -1,16 +1,13 @@
-# macOS 完整回归（#501）：各 Rust 项目的 cargo test 和 Python 全量从 PR 检查挪到这里，每天定时跑一次，
-# 与 windows-full.yml 同一时段；也可以在 Actions 页面对指定提交手动运行。结论不挡任何合并：失败时由 Lead
-# 开 Issue 或更新已有 Issue。合入 main 的门槛仍是集成会话在候选上跑的 tools/check_all.sh。
+# macOS 完整回归（#501）：各 Rust 项目的 cargo test 和 Python 全量。2026-11-15 用户定：不在 PR、main push
+# 和定时运行上跑，只能在 Actions 页面对指定提交手动运行，因为本机全量覆盖的内容与它完全一样。
+# 合入 main 的门槛只看集成会话在候选上跑的 tools/check_all.sh。
 # 隔离名单（tests/quarantine.json）里的测试照跑，失败单列，不让 job 失败；名单到期或找不到对应测试时失败。
 # 只用仓库内合成数据；不接触真实图库、账号或网络凭据，也不用任何 secret。
 name: macOS 完整回归
 run-name: >-
-  macOS 回归 · ${{ github.event_name == 'schedule' && '定期' || '手动' }} · ${{ inputs.ref || github.ref_name }}
+  macOS 回归 · ${{ inputs.ref || github.ref_name }}
 
 on:
-  # 北京时间每天 02:17，与 windows-full.yml 相同；只在默认分支上触发。
-  schedule:
-    - cron: '17 18 * * *'
   workflow_dispatch:
     inputs:
       ref:
@@ -27,7 +24,7 @@ env:
 
 jobs:
   rust:
-    if: github.event_name == 'workflow_dispatch' || !github.event.repository.private
+    if: github.event_name == 'workflow_dispatch'
     name: Rust 测试 (macOS)
     runs-on: macos-latest
     timeout-minutes: 60
@@ -39,7 +36,7 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
         with:
-          save-if: ${{ github.event_name == 'schedule' }}
+          save-if: ${{ github.ref == 'refs/heads/main' && inputs.ref == '' }}
           workspaces: |
             native/terms
             crates/iqdb
@@ -81,7 +78,7 @@ jobs:
   # 跑在 macOS arm64：固定期望（tests/fixtures/ 下的录制值）在 Apple Silicon 上录制，
   # float32 结果在 x86 上差 1 ulp；另有错误文案、zsh 启动脚本等平台差异。Windows 另行处理。
   python:
-    if: github.event_name == 'workflow_dispatch' || !github.event.repository.private
+    if: github.event_name == 'workflow_dispatch'
     name: Python 全量 (macOS)
     runs-on: macos-latest
     timeout-minutes: 60
@@ -94,7 +91,7 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
         with:
-          save-if: ${{ github.event_name == 'schedule' }}
+          save-if: ${{ github.ref == 'refs/heads/main' && inputs.ref == '' }}
           workspaces: |
             native/terms
             crates/iqdb

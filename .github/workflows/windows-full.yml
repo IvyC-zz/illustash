@@ -1,17 +1,15 @@
 # Windows x64 完整回归与定向复跑（#501）。PR 和 push 只跑 ci.yml 里的 Windows 快检；这里保留原先的完整
-# clippy、Rust 测试、release 构建、Python 全套和 #347 的严格数值对照。每天在 main 上定期运行一次，也可以
-# 在 Actions 页面对指定提交（发布候选的标签、分支或提交哈希）手动运行。
+# clippy、Rust 测试、release 构建、Python 全套和 #347 的严格数值对照。2026-11-15 用户定：完整回归平时在
+# Windows 验收机上跑（发布前一次，见 docs/DEVELOPMENT.md「发布」）；这份只在 Actions 页面手动运行，
+# 供验收机不能用、或真机上数值参考对不上时备用，可指定提交（标签、分支或提交哈希）。
 # 定向复跑只跑一个用例组（同步边界或研究 worker），可重复几次，运行名、job 名和摘要都写明范围，不代替完整回归。
 # 只用仓库内合成数据；不接触真实图库、账号或网络凭据，也不用任何 secret。
 name: Windows 完整回归
 run-name: >-
-  Windows 回归 · ${{ github.event_name == 'schedule' && 'full（定期）' || inputs.scope || 'full' }}
+  Windows 回归 · ${{ inputs.scope || 'full' }}
   ×${{ inputs.repeat || 1 }} · ${{ inputs.ref || github.ref_name }}
 
 on:
-  # 北京时间每天 02:17；只在默认分支上触发。
-  schedule:
-    - cron: '17 18 * * *'
   workflow_dispatch:
     inputs:
       ref:
@@ -37,8 +35,7 @@ env:
 
 jobs:
   regression:
-    # 仓库私有时只跑手动触发的，与 ci.yml 一致。
-    if: github.event_name == 'workflow_dispatch' || !github.event.repository.private
+    if: github.event_name == 'workflow_dispatch'
     name: Windows x64 · ${{ inputs.scope || 'full' }}
     runs-on: windows-latest
     timeout-minutes: 60
@@ -85,8 +82,8 @@ jobs:
           components: clippy
       - uses: Swatinem/rust-cache@v2
         with:
-          # 只有 main 上的定期全量保存缓存；定向复跑和手动运行只还原。测试失败也保存依赖缓存。
-          save-if: ${{ github.event_name == 'schedule' }}
+          # 只有在 main 最新提交上手动运行时保存缓存，其余只还原。测试失败也保存依赖缓存。
+          save-if: ${{ github.ref == 'refs/heads/main' && inputs.ref == '' }}
           cache-on-failure: true
           workspaces: |
             native/terms
@@ -146,7 +143,7 @@ jobs:
           Get-Content $identityLog >> $env:GITHUB_STEP_SUMMARY
           '```' >> $env:GITHUB_STEP_SUMMARY
       - name: 保存已核验的 NumPy wheel
-        if: github.event_name == 'schedule' && steps.numpy-wheel.outputs.cache-hit != 'true'
+        if: github.ref == 'refs/heads/main' && inputs.ref == '' && steps.numpy-wheel.outputs.cache-hit != 'true'
         uses: actions/cache/save@v4
         with:
           path: ${{ runner.temp }}/numpy-wheel

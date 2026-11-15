@@ -1,7 +1,7 @@
 # PR 自动检查（#4）：目标为 main 的同库 PR 自动运行，作为额外保障；
 # 合入 main 的门槛仍是集成会话在候选上跑的 tools/check_all.sh（AGENTS.md）。
 # PR 和 push 上只做快速冒烟（#501）：格式、clippy、编译、前端 JS、原生固定契约和 Windows 快检。
-# 各 Rust 项目的 cargo test 和 Python 全量每天定时跑（macos-full.yml、windows-full.yml），不挡合并。
+# 各 Rust 项目的 cargo test 和 Python 全量由本机全量覆盖；macos-full.yml、windows-full.yml 只能手动运行。
 # 只用仓库内合成数据；不接触真实图库、账号、Photos 或网络凭据，也不用任何 secret。
 name: CI
 
@@ -118,7 +118,7 @@ jobs:
         run: python tools/check_frontend.py --strict-stale
       - name: Style guide sync
         run: python tools/check_styleguide.py
-      # cargo test 在 macos-full.yml 里每天定时跑（#501）；这里只查格式、clippy（含测试目标）和编译。
+      # cargo test 由本机全量覆盖，macos-full.yml 可手动运行（#501）；这里只查格式、clippy（含测试目标）和编译。
       - name: Core fmt/clippy/build
         run: |
           cargo fmt --manifest-path crates/core/Cargo.toml --check
@@ -212,7 +212,7 @@ jobs:
 
   # Windows x64 快检（#501）：编译被测核心、测试读宿主和桌面壳，再用少量合成图库跑原生启动、SQLite 与 HTTP
   # 契约（`QUICK_TESTS`）。完整 clippy、Rust 测试、全部 example、Python 全套和 #347 的严格数值对照在
-  # windows-full.yml，定期和对发布候选手动运行。结论单独显示，不进「全部检查」的等待链。
+  # windows-full.yml，平时在 Windows 验收机上发布前跑一次，这份手动备用。结论单独显示，不进「全部检查」的等待链。
   windows:
     needs: changes
     if: needs.changes.outputs.code == 'true' && !github.event.repository.private
