@@ -278,7 +278,8 @@ fn preflight_source(library: &Library) -> Result<()> {
 fn preflight_application(c: &Connection) -> Result<i64> {
     validate(c)?;
     let app = meta(c, "schema_version")?;
-    if app.as_deref() != Some("36") || !(5..crate::SCHEMA_VERSION).contains(&crate::schema::version(c)?) {
+    let version = crate::schema::version(c)?;
+    if app.as_deref() != Some("36") || !(5..crate::SCHEMA_VERSION).contains(&version) {
         return Err(Error::Schema("需要应用升级".into()));
     }
     for key in ["terms_artists", "terms_labels", "terms_characters", "terms_names"] {
@@ -296,16 +297,31 @@ fn preflight_application(c: &Connection) -> Result<i64> {
             return Err(Error::Schema(format!("应用初始化或索引未完成：缺少 {key}。{why}", why = PRE_V8)));
         }
     }
-    // 所有已确立的 schema 36 应用读取对象和核心 5 存储都必须已经存在。
+    // 所有版本共同使用的应用读取对象和核心存储都必须已经存在。
     // 预处理视图会展开它们的依赖，而不会改动投影或建临时表。
-    const OBJECTS: &str = "assets entities candidates general_hits assertions deferred imported asset_tags asset_rating actions image_sigs relations asked audit_sample name_cache name_settings reviews prefs family_evidence single_assets lead_assets duplicates curation sync_runs sync_added similar_groups clusters cluster_info prototypes weak_claims proto_claims learn_state auto_rules excluded family_confirmed membership_rules memberships tag_memberships variant_memberships ambiguous_claims identity_relations identity_evidence identity_decisions identity_decision_evidence identity_canonical identity_scopes identity_suspended identity_uncertain identity_anchor_decisions identity_anchor_history identity_pairs identity_nodes backend_effects term_assets terms term_names term_links term_relations term_packages term_evidence term_projection term_batches term_verdicts term_evidence_sets term_evidence_set_assets term_evidence_set_rows term_active_evidence term_identity_baseline term_tree term_legacy_ids term_key_names term_key_aliases term_name_display term_name_choice term_effective_verdicts term_relation_states term_relation_latest term_current_evidence";
+    const OBJECTS: &str = "assets candidates general_hits assertions deferred imported asset_tags asset_rating actions image_sigs relations asked audit_sample name_cache name_settings reviews prefs family_evidence single_assets lead_assets duplicates curation sync_runs sync_added similar_groups clusters cluster_info prototypes weak_claims proto_claims learn_state auto_rules excluded family_confirmed membership_rules memberships tag_memberships variant_memberships ambiguous_claims identity_canonical identity_scopes identity_suspended identity_uncertain identity_anchor_decisions identity_anchor_history identity_pairs identity_nodes backend_effects term_assets terms term_names term_links term_relations term_packages term_evidence term_projection term_batches term_verdicts term_evidence_sets term_evidence_set_assets term_evidence_set_rows term_active_evidence term_identity_baseline term_tree term_legacy_ids term_key_names term_key_aliases term_name_display term_name_choice term_effective_verdicts term_relation_states term_relation_latest term_current_evidence";
     for object in OBJECTS.split_whitespace() {
         c.prepare(&format!("SELECT * FROM {object} LIMIT 0"))
             .map_err(|e| Error::Schema(format!("应用/core 结构未完成：{object}：{e}")))?;
     }
+    // v8 已逐行核对并删除旧兼容表。只对 v5–v7 要求这些对象；v8 检查替代它们的权威列。
+    if version < 8 {
+        for object in
+            ["entities", "identity_relations", "identity_evidence", "identity_decisions", "identity_decision_evidence"]
+        {
+            c.prepare(&format!("SELECT * FROM {object} LIMIT 0"))?;
+        }
+        c.prepare("SELECT id,name,work,external_key,variant,parent_id,tag,merged_into,kind,artist,label_only,mascot,mascot_origin,work_id,original FROM entities LIMIT 0")?;
+    } else {
+        for sql in [
+            "SELECT id,key,kind FROM terms LIMIT 0",
+            "SELECT term_id,parent_id,merged_into,work_id,work_text,review_status,review_note,parent_locked,variant,artist,label_only,mascot,mascot_origin,original,seq FROM term_tree LIMIT 0",
+            "SELECT seq FROM term_names LIMIT 0",
+            "SELECT label_kind,label_count FROM actions LIMIT 0",
+        ] { c.prepare(sql)?; }
+    }
     for sql in [
         "SELECT uuid,filename,src_path,width,height,added_at,src_kind FROM assets LIMIT 0",
-        "SELECT id,name,work,external_key,variant,parent_id,tag,merged_into,kind,artist,label_only,mascot,mascot_origin,work_id,original FROM entities LIMIT 0",
         "SELECT uuid,entity,source,score FROM candidates LIMIT 0",
         "SELECT uuid,entity,sources,score FROM family_evidence LIMIT 0",
         "SELECT id,label,before_json,ts,undone FROM actions LIMIT 0",
@@ -313,7 +329,9 @@ fn preflight_application(c: &Connection) -> Result<i64> {
         "SELECT kind,key,name,name_source,zh,ja,en FROM term_name_choice LIMIT 0",
         "SELECT key,value FROM prefs LIMIT 0",
         "SELECT uuid,entity,status,origin FROM memberships LIMIT 0",
-    ] { c.prepare(sql)?; }
+    ] {
+        c.prepare(sql)?;
+    }
     for table in crate::schema::PRIVATE.iter().chain(crate::legacy_characters::GUARDED.iter()) {
         for event in ["insert", "update", "delete"] {
             let trigger = format!("{table}_writer_{event}");
@@ -327,7 +345,7 @@ fn preflight_application(c: &Connection) -> Result<i64> {
             }
         }
     }
-    crate::schema::version(c)
+    Ok(version)
 }
 
 #[cfg(test)]
@@ -360,8 +378,8 @@ mod tests {
             for table in crate::legacy_characters::GUARDED.iter() {
                 crate::schema::guard(&c, table).unwrap();
             }
-            if version == 6 {
-                crate::schema::migrate_to(&mut c, 6).unwrap();
+            if version > 5 {
+                crate::schema::migrate_to(&mut c, version).unwrap();
                 crate::schema::compact_pending(&c);
                 // 夹具的部分构建现在用公开的、备份安全的核心 API。
                 // 只删掉这个合成夹具建立时产生的备份，再测量真正的升级。
@@ -389,15 +407,15 @@ mod tests {
 
     #[test]
     fn old_layouts_upgrade_once_with_one_rowid_faithful_backup_and_unchanged_source() {
-        for version in [5, 6] {
+        for version in [5, 6, 7, 8] {
             let f = Fixture::new(version);
             assert!(Library::open(&f.0).is_err());
             let source = fs::read(f.0.join("source.sqlite")).unwrap();
             let db_before = fs::read(f.0.join("library.sqlite")).unwrap();
-            let prepared = prepare(&f.0).unwrap();
+            let prepared = needed(&f.0).expect("桌面打开失败后应提出升级");
             assert_eq!(db_before, fs::read(f.0.join("library.sqlite")).unwrap());
             assert_eq!(f.backups(), 0);
-            let report = upgrade(&prepared, None).unwrap();
+            let report = run(&prepared, None).unwrap();
             assert_eq!(
                 (report.before, report.after, report.maintenance_pending),
                 (version, crate::SCHEMA_VERSION, false)
@@ -410,6 +428,52 @@ mod tests {
             assert_eq!(source, fs::read(f.0.join("source.sqlite")).unwrap());
             assert!(prepare(&f.0).is_err());
             assert_eq!(f.backups(), 1);
+        }
+    }
+    #[test]
+    fn v8_curation_history_survives_normal_upgrade_and_application_undo() {
+        use illustash_core::human_conclusions::state::{self, Domain, State};
+        use serde_json::json;
+        let f = Fixture::new(8);
+        let c = f.connection();
+        c.execute("INSERT INTO assets(uuid) VALUES ('a')", []).unwrap();
+        // 历史应用产出方的原始形状与句式；v8 没有标记表，当前业务状态为最后一次 reset。
+        for (label, before) in [
+            ("已将 1 张交回自动规则", json!([{"uuid":"a","curation":null}])),
+            ("已收录 1 张", json!([{"uuid":"a","curation":null}])),
+            (
+                "已将 1 张交回自动规则",
+                json!([{"uuid":"a","curation":{"status":"included","origin":"review","created_at":"2026-10-01 00:00:00"}}]),
+            ),
+        ] {
+            c.execute("INSERT INTO actions(label,before_json) VALUES (?1,?2)", [label, &before.to_string()]).unwrap();
+        }
+        drop(c);
+        let report = run(&needed(&f.0).unwrap(), None).unwrap();
+        assert_eq!((report.before, report.after, f.backups()), (8, crate::SCHEMA_VERSION, 1));
+        let context = crate::http::LibraryContext {
+            db: f.0.join("library.sqlite"),
+            generation: "synthetic".into(),
+            library: Some(f.0.clone()),
+            tags: f.0.join("unused.csv"),
+            source: Some(f.0.join("source.sqlite")),
+            token: Some("synthetic".into()),
+            read_only: None,
+        };
+        let read = || state::read(&f.connection(), Domain::Curation, "a").unwrap();
+        assert!(matches!(read(), State::Absent(m) if m.owner_action_id == 3));
+        for id in [3, 2, 1] {
+            crate::app_commands::request(
+                &context,
+                "/api/undo",
+                &crate::http_json::parse_request(&json!({"id":id}).to_string()).unwrap(),
+            )
+            .unwrap();
+            match id {
+                3 => assert!(matches!(read(), State::Positive(v) if v["status"] == "included")),
+                2 => assert!(matches!(read(), State::Absent(m) if m.owner_action_id == 1)),
+                _ => assert_eq!(read(), State::Undecided),
+            }
         }
     }
     #[test]
@@ -452,9 +516,14 @@ mod tests {
     }
     #[test]
     fn invalid_policy_ownership_and_old_core_application_refuse_without_backup() {
-        for fault in ["DROP TRIGGER candidates_writer_insert", "UPDATE meta SET value='35' WHERE key='schema_version'"]
-        {
-            let f = Fixture::new(5);
+        for (version, fault) in [
+            (5, "DROP TRIGGER candidates_writer_insert"),
+            (5, "UPDATE meta SET value='35' WHERE key='schema_version'"),
+            (8, "DROP TRIGGER candidates_writer_insert"),
+            (8, "ALTER TABLE actions DROP COLUMN label_count"),
+            (8, "DROP INDEX term_names_seq; ALTER TABLE term_names DROP COLUMN seq"),
+        ] {
+            let f = Fixture::new(version);
             f.connection().execute_batch(fault).unwrap();
             let before = fs::read(f.0.join("library.sqlite")).unwrap();
             assert!(prepare(&f.0).is_err(), "{fault}");
@@ -525,7 +594,7 @@ mod tests {
     }
     #[test]
     fn the_upgrade_reports_its_stages_in_order() {
-        for version in [5, 6] {
+        for version in [5, 6, 7, 8] {
             let f = Fixture::new(version);
             let seen = Arc::new(std::sync::Mutex::new(Vec::<(String, f64)>::new()));
             let record = seen.clone();

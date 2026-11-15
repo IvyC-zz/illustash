@@ -520,6 +520,46 @@ def baseline_state(package, rename=None):
             if (package / filename).exists()}
 
 
+@lru_cache(maxsize=1)
+def _baseline_additions():
+    """与 Rust 共用的精确新状态清单；只在历史参考比较中使用。"""
+    additions = json.loads((Path(__file__).parent / 'baseline_additions.json').read_text())
+    assert set(additions) == {'reference_terms_version', 'tables', 'meta_keys'}
+    assert additions['reference_terms_version'] == 7
+    for entries in (additions['tables'], additions['meta_keys']):
+        names = set()
+        for entry in entries:
+            assert set(entry) == {'name', 'introduced_in', 'checks'}
+            assert re.fullmatch(r'[A-Za-z0-9_]+', entry['name']) and entry['name'] not in names
+            assert entry['introduced_in'] > 7 and entry['checks']
+            names.add(entry['name'])
+    return additions
+
+
+def _historical_projection(state, frozen):
+    """仅从实时 app 库的 v7 历史投影中分离具名新状态，不改变 baseline_state 的完整读数。"""
+    app = state.get('app', {})
+    meta = app.get('meta', {})
+    version = next((cells[1] for row in meta.get('rows', [])
+                    if (cells := json.loads(row))[0] == 'terms_schema'), None)
+    if version is None:
+        return state
+    version = TERMS_VERSION if version == '<terms-version>' else int(version)
+    additions = _baseline_additions()
+    old = frozen.get('app', {})
+    projected = dict(app)
+    for entry in additions['tables']:
+        if version >= entry['introduced_in']:
+            assert entry['name'] not in old, f"新增状态清单不能隐藏冻结侧已有表 {entry['name']}"
+            projected.pop(entry['name'], None)
+    keys = {entry['name'] for entry in additions['meta_keys'] if version >= entry['introduced_in']}
+    for row in old.get('meta', {}).get('rows', []):
+        assert json.loads(row)[0] not in keys, '新增状态清单不能隐藏冻结侧已有 meta 键'
+    if 'meta' in projected:
+        projected['meta'] = {**meta, 'rows': [row for row in meta['rows'] if json.loads(row)[0] not in keys]}
+    return {**state, 'app': projected}
+
+
 @lru_cache(maxsize=None)
 def _baseline_file(module):
     path = BASELINE_STATES / f'{module}.json.gz'
@@ -539,6 +579,7 @@ def _check_baseline(slot, state, only=None):
     want = _baseline_file(module).get(test, {}).get(key)
     if want is not None:
         want = {db: {t: v for t, v in tables.items() if t not in RETIRED} for db, tables in want.items()}
+        state = _historical_projection(state, want)
     if only is not None:
         pick = lambda s: {db: {t: s.get(db, {}).get(t) for t in tables} for db, tables in only.items()}
         state, want = pick(state), want if want is None else pick(want)

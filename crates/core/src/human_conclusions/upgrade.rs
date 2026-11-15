@@ -47,8 +47,100 @@ pub(crate) fn migrate(c: &Connection) -> Result<()> {
 struct Step {
     action: i64,
     at: String,
-    before_present: bool,
+    before_present: Option<bool>,
+    effect: Option<Effect>,
     explicit_absence: bool,
+}
+
+#[derive(Clone, Copy)]
+enum Effect {
+    Present,
+    Clear,
+    Preserve,
+}
+
+fn keys(v: &Value, expected: &[&str]) -> bool {
+    v.as_object().is_some_and(|o| o.len() == expected.len() && expected.iter().all(|k| o.contains_key(*k)))
+}
+
+fn asset_key(v: &Value) -> Option<&str> {
+    v.as_str().filter(|s| !s.is_empty() && s.chars().count() <= 256)
+}
+
+fn counted(label: &str, prefix: &str, suffix: &str) -> bool {
+    label
+        .strip_prefix(prefix)
+        .and_then(|s| s.strip_suffix(suffix))
+        .is_some_and(|n| !n.is_empty() && n.chars().all(|c| crate::compat_unicode::decimal(c).is_some()))
+}
+
+// 只认历史产出方写过、普通撤销能完整恢复的结构；字段存在本身不证明它保存过一个状态。
+fn curation_snapshot(v: &Value) -> bool {
+    let old = &v["curation"];
+    keys(v, &["uuid", "curation"])
+        && asset_key(&v["uuid"]).is_some()
+        && (old.is_null()
+            || (keys(old, &["status", "origin", "created_at"])
+                && matches!(old["status"].as_str(), Some("included" | "excluded"))
+                && old["origin"].is_string()
+                && old["created_at"].is_string()))
+}
+
+fn json_strings(v: &Value) -> bool {
+    v.as_str()
+        .and_then(|s| crate::strict_json::parse(s).ok())
+        .is_some_and(|v| v.as_array().is_some_and(|a| a.iter().all(Value::is_string)))
+}
+
+fn identity_snapshot(v: &Value) -> bool {
+    keys(v, &["identity_scopes", "identity_suspended", "identity_uncertain"])
+        && [("identity_scopes", 1, 0), ("identity_suspended", 2, 1), ("identity_uncertain", 3, 0)].into_iter().all(
+            |(field, width, encoded)| {
+                v[field].is_null()
+                    || v[field].as_array().is_some_and(|a| {
+                        a.len() == width && a.iter().all(Value::is_string) && json_strings(&a[encoded])
+                    })
+            },
+        )
+}
+
+fn character_snapshot(v: &Value) -> bool {
+    let assertion = &v["assertion"];
+    (keys(v, &["uuid", "entity", "assertion", "deferred"])
+        || (keys(v, &["uuid", "entity", "assertion", "deferred", "identity"]) && identity_snapshot(&v["identity"])))
+        && asset_key(&v["uuid"]).is_some()
+        && (v["entity"].is_null() || v["entity"].is_string())
+        && v["deferred"].is_boolean()
+        && (assertion.is_null()
+            || (keys(assertion, &["status", "origin"])
+                && matches!(assertion["status"].as_str(), Some("confirmed" | "rejected"))
+                && assertion["origin"].is_string()))
+}
+
+// 句式只用来区分已验证快照的操作语义，不能单独凭「已恢复」或「交回自动规则」制造结论。
+fn character_effects(label: &str) -> Option<(Effect, Effect, bool)> {
+    use crate::undo_labels::UndoLabel;
+    if counted(label, "已恢复 ", " 张") {
+        Some((Effect::Clear, Effect::Preserve, true))
+    } else if counted(label, "已跳过 ", " 张") {
+        Some((Effect::Present, Effect::Preserve, false))
+    } else if label == "已保留身份未定" {
+        Some((Effect::Preserve, Effect::Present, false))
+    } else if let Some((kind, _)) = UndoLabel::recognize(label) {
+        let effect = if kind == UndoLabel::Sweep { Effect::Preserve } else { Effect::Clear };
+        Some((effect, effect, false))
+    } else if label
+        .strip_prefix("已确认 ")
+        .and_then(|s| s.split_once(" 张是 "))
+        .is_some_and(|(n, _)| !n.is_empty() && n.chars().all(|c| crate::compat_unicode::decimal(c).is_some()))
+        || label
+            .strip_prefix("随机抽查：")
+            .is_some_and(|s| s.split('，').all(|part| counted(part, "", " 张是") || counted(part, "", " 张不是")))
+    {
+        Some((Effect::Clear, Effect::Clear, false))
+    } else {
+        None
+    }
 }
 
 fn backfill(c: &Connection) -> Result<()> {
@@ -71,55 +163,88 @@ fn backfill(c: &Connection) -> Result<()> {
         let (action, label, body, at) = row?;
         let Ok(body) = crate::strict_json::parse(&body) else { continue };
         let mut seen = BTreeSet::new();
-        let mut add = |domain, key: &str, before_present, explicit_absence| {
+        let mut add = |domain, key: &str, before_present, effect, explicit_absence| {
             if available.contains(&domain) && seen.insert((domain, key.to_owned())) {
                 histories.entry((domain, key.to_owned())).or_default().push(Step {
                     action,
                     at: at.clone(),
                     before_present,
+                    effect,
                     explicit_absence,
                 });
             }
         };
-        // 应用层只接受完整的收录载荷；不把混合或未知所有者的载荷解释为 reset。
-        if let Some(items) = body.as_array().filter(|items| {
-            !items.is_empty()
-                && items.iter().all(|v| {
-                    v.as_object().is_some_and(|o| {
-                        o.len() == 2 && o.contains_key("curation") && o.get("uuid").is_some_and(Value::is_string)
-                    })
-                })
-        }) {
+        if let Some(items) = body.as_array() {
+            let effect = if counted(&label, "已将 ", " 张交回自动规则") {
+                Some(Effect::Clear)
+            } else if counted(&label, "已收录 ", " 张") || counted(&label, "已排除 ", " 张") {
+                Some(Effect::Present)
+            } else {
+                None
+            };
+            let valid = !items.is_empty() && items.iter().all(curation_snapshot);
             for item in items {
-                if let Some(key) = item["uuid"].as_str() {
-                    add(Domain::Curation, key, !item["curation"].is_null(), true);
+                if let Some(key) = asset_key(&item["uuid"]).filter(|_| item.get("curation").is_some()) {
+                    // 不支持的收录载荷也作为边界，不能把其后的空行归到更早的已知步骤。
+                    add(
+                        Domain::Curation,
+                        key,
+                        valid.then(|| !item["curation"].is_null()),
+                        effect.filter(|_| valid),
+                        matches!(effect, Some(Effect::Clear)),
+                    );
                 }
             }
         }
         let Ok(Some(items)) = crate::character_commands::owns(&body) else { continue };
-        let resume =
-            label.strip_prefix("已恢复 ").and_then(|v| v.strip_suffix(" 张")).is_some_and(|v| v.parse::<u64>().is_ok());
+        let envelope = body[0].get("terms");
+        let valid_envelope = envelope.is_none_or(|v| keys(v, &["v", "type", "before"]) && v["type"] == "snapshot");
+        let valid = valid_envelope && !items.is_empty() && items.iter().all(character_snapshot);
+        let effects = character_effects(&label).filter(|_| valid);
         for item in items {
-            let (Some(key), Some(deferred)) = (item["uuid"].as_str(), item["deferred"].as_bool()) else { continue };
-            add(Domain::Deferred, key, deferred, resume);
+            let Some(key) = asset_key(&item["uuid"]) else { continue };
+            add(
+                Domain::Deferred,
+                key,
+                valid.then(|| item["deferred"].as_bool()).flatten(),
+                effects.map(|v| v.0),
+                effects.is_some_and(|v| v.2),
+            );
             if let Some(value) = item.get("identity").and_then(|v| v.get("identity_uncertain")) {
-                if value.is_null() || value.is_array() {
-                    add(Domain::Uncertain, key, !value.is_null(), false);
-                }
+                add(Domain::Uncertain, key, valid.then(|| !value.is_null()), effects.map(|v| v.1), false);
             }
         }
     }
     for ((domain, key), steps) in histories {
         let current_present = state::positive(c, domain, &key)?.is_some();
         let mut previous: Option<Mark> = None;
+        let mut undo = Vec::new();
         for (index, step) in steps.iter().enumerate() {
-            if step.before_present {
+            let after_present = steps.get(index + 1).map_or(Some(current_present), |next| next.before_present);
+            let (Some(before_present), Some(after_present), Some(effect)) =
+                (step.before_present, after_present, step.effect)
+            else {
+                previous = None;
+                undo.clear();
+                continue;
+            };
+            let expected = match effect {
+                Effect::Present => true,
+                Effect::Clear => false,
+                Effect::Preserve => before_present,
+            };
+            // 快照、操作语义和后续状态必须一致；不把中途发生的未知改动归给这一步。
+            if expected != after_present {
+                previous = None;
+                undo.clear();
+                continue;
+            }
+            if before_present {
                 previous = None;
             }
-            let after_present = steps.get(index + 1).map_or(current_present, |next| next.before_present);
             let after = if after_present {
                 None
-            } else if step.explicit_absence || step.before_present {
+            } else if step.explicit_absence || before_present {
                 Some(Mark {
                     owner_action_id: step.action,
                     origin: "legacy".into(),
@@ -130,12 +255,16 @@ fn backfill(c: &Connection) -> Result<()> {
                 previous.clone()
             };
             if previous != after {
-                c.execute(
-                    "INSERT INTO human_state_mark_undo(action_id,domain,asset_key,before_json,after_json) VALUES (?1,?2,?3,?4,?5)",
-                    params![step.action, domain.key(), key, json!(previous).to_string(), json!(after).to_string()],
-                )?;
+                undo.push((step.action, json!(previous).to_string(), json!(after).to_string()));
             }
             previous = after;
+        }
+        // 只为最后一段可连续还原的历史记账；未知边界之前不能留下当前标记无法匹配的撤销账本。
+        for (action, before, after) in undo {
+            c.execute(
+                "INSERT INTO human_state_mark_undo(action_id,domain,asset_key,before_json,after_json) VALUES (?1,?2,?3,?4,?5)",
+                params![action, domain.key(), key, before, after],
+            )?;
         }
         state::replace(c, domain, &key, previous.as_ref())?;
     }

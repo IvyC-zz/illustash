@@ -16,7 +16,11 @@ fn fixture(version: i64) -> Connection {
 }
 
 fn action(c: &Connection, body: &str) -> i64 {
-    c.execute("INSERT INTO actions(label,before_json) VALUES ('合成操作',?1)", [body]).unwrap();
+    named_action(c, "合成操作", body)
+}
+
+fn named_action(c: &Connection, label: &str, body: &str) -> i64 {
+    c.execute("INSERT INTO actions(label,before_json) VALUES (?1,?2)", [label, body]).unwrap();
     c.last_insert_rowid()
 }
 
@@ -129,10 +133,11 @@ fn changed_mark_rejects_undo_and_the_callers_transaction_restores_every_row() {
 #[test]
 fn v8_curation_backfill_supports_continuous_old_undo_without_forging_unknown_absence() {
     let mut c = fixture(8);
-    let first = action(&c, &json!([{"uuid":"a","curation":null}]).to_string());
-    let second = action(&c, &json!([{"uuid":"a","curation":null}]).to_string());
-    let third = action(
+    let first = named_action(&c, "已将 1 张交回自动规则", &json!([{"uuid":"a","curation":null}]).to_string());
+    let second = named_action(&c, "已收录 1 张", &json!([{"uuid":"a","curation":null}]).to_string());
+    let third = named_action(
         &c,
+        "已将 1 张交回自动规则",
         &json!([{"uuid":"a","curation":{"status":"included","origin":"review","created_at":"old"}}]).to_string(),
     );
     let unknown = action(&c, &json!([{"uuid":"unknown","entity":null,"assertion":null,"deferred":false,"identity":{"identity_uncertain":null}}]).to_string());
@@ -166,13 +171,84 @@ fn v8_curation_backfill_supports_continuous_old_undo_without_forging_unknown_abs
 #[test]
 fn v8_only_provable_deferred_and_uncertain_clears_are_backfilled() {
     let mut c = fixture(8);
-    let cleared = action(&c, &json!([{"terms":{"v":2,"type":"snapshot","before":[
-        {"uuid":"known","entity":null,"assertion":null,"deferred":true,"identity":{"identity_uncertain":["[\"a\",\"b\"]","reason","old"]}},
-        {"uuid":"empty","entity":null,"assertion":null,"deferred":false,"identity":{"identity_uncertain":null}}
+    let cleared = named_action(&c, "已将 2 张设为 合成身份", &json!([{"terms":{"v":2,"type":"snapshot","before":[
+        {"uuid":"known","entity":null,"assertion":null,"deferred":true,"identity":{"identity_scopes":null,"identity_suspended":null,"identity_uncertain":["[\"a\",\"b\"]","reason","old"]}},
+        {"uuid":"empty","entity":null,"assertion":null,"deferred":false,"identity":{"identity_scopes":null,"identity_suspended":null,"identity_uncertain":null}}
     ]}}]).to_string());
     crate::schema_rules::migrate_to(&mut c, schema::SCHEMA_VERSION).unwrap();
     for domain in [Domain::Deferred, Domain::Uncertain] {
         assert!(matches!(state::read(&c, domain, "known").unwrap(), State::Absent(m) if m.owner_action_id == cleared));
         assert_eq!(state::read(&c, domain, "empty").unwrap(), State::Undecided);
+    }
+}
+
+#[test]
+fn malformed_unknown_and_inconsistent_history_never_fabricates_absence() {
+    let mut c = fixture(8);
+    let invalid = [
+        json!(123),
+        json!({"status":"included"}),
+        json!({"status":"other","origin":"review","created_at":"old"}),
+        json!({"status":"included","origin":null,"created_at":"old"}),
+        json!({"status":"included","origin":"review","created_at":123}),
+        json!({"status":"included","origin":"review","created_at":"old","unknown":true}),
+    ];
+    for (i, before) in invalid.into_iter().enumerate() {
+        let key = format!("bad-{i}");
+        // 后来的未知载荷也阻断更早的 reset，不能隔着这个边界保留推定结论。
+        named_action(&c, "已将 1 张交回自动规则", &json!([{"uuid":key,"curation":null}]).to_string());
+        named_action(&c, "已将 1 张交回自动规则", &json!([{"uuid":key,"curation":before}]).to_string());
+    }
+    for (label, key) in [("合成未知操作", "unknown"), ("已收录 1 张", "inconsistent")] {
+        named_action(&c, label, &json!([{"uuid":key,"curation":null}]).to_string());
+    }
+    for (i, identity) in [
+        json!({"identity_uncertain": ["[]","reason","old"]}),
+        json!({"identity_scopes":null,"identity_suspended":null,"identity_uncertain":[]}),
+        json!({"identity_scopes":null,"identity_suspended":null,"identity_uncertain":["invalid","reason","old"]}),
+        json!({"identity_scopes":null,"identity_suspended":null,"identity_uncertain":["[]",123,"old"]}),
+    ]
+    .into_iter()
+    .enumerate()
+    {
+        named_action(
+            &c,
+            "已恢复 1 张",
+            &json!([{"terms":{"v":2,"type":"snapshot","before":[
+                {"uuid":format!("identity-{i}"),"entity":null,"assertion":null,"deferred":true,"identity":identity}
+            ]}}])
+            .to_string(),
+        );
+    }
+    // sweep 只写确认与复核，不取消跳过；后续空行不能归因于 sweep。
+    named_action(
+        &c,
+        "已将 合成身份 标为已检查（1 张）",
+        &json!([
+            {"uuid":"sweep","entity":"e","assertion":null,"deferred":true}
+        ])
+        .to_string(),
+    );
+    crate::schema_rules::migrate_to(&mut c, schema::SCHEMA_VERSION).unwrap();
+    for table in ["human_state_marks", "human_state_mark_undo"] {
+        assert_eq!(c.query_row(&format!("SELECT count(*) FROM {table}"), [], |r| r.get::<_, i64>(0)).unwrap(), 0);
+    }
+}
+
+#[test]
+fn genuine_legacy_resume_payload_and_v2_envelope_preserve_explicit_empty_resumes() {
+    let mut c = fixture(8);
+    let snapshot = |key| json!({"uuid":key,"entity":null,"assertion":null,"deferred":false});
+    let legacy = named_action(&c, "已恢复 1 张", &json!([snapshot("legacy")]).to_string());
+    let current = named_action(
+        &c,
+        "已恢复 1 张",
+        &json!([{"terms":{"v":2,"type":"snapshot","before":[snapshot("v2")]}}]).to_string(),
+    );
+    crate::schema_rules::migrate_to(&mut c, schema::SCHEMA_VERSION).unwrap();
+    for (key, action) in [("legacy", legacy), ("v2", current)] {
+        assert!(
+            matches!(state::read(&c, Domain::Deferred, key).unwrap(), State::Absent(m) if m.owner_action_id == action)
+        );
     }
 }
