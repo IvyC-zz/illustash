@@ -298,6 +298,89 @@ fn standalone_user_definition_imports_and_undoes_without_assets() {
     assert_eq!(target.count("SELECT count(*) FROM term_records"), 1);
 }
 
+#[test]
+fn existing_names_import_by_group_and_undo_preserves_other_languages() {
+    let source = Fixture::new("names-source");
+    source.term("source", "synthetic_names");
+    let c = crate::open(&source.db).unwrap();
+    illustash_core::character_names::put_name(&c, "source", "zh", "user", "人工首选名", "display", 0, 1).unwrap();
+    illustash_core::character_names::alias(&c, "source", "人工别名", "user", "zh").unwrap();
+    let path = source.root.join("names.illustash-human.jsonl");
+    capture(&source.db, &source.id, &|| Ok(())).unwrap().write(&mut File::create(&path).unwrap()).unwrap();
+    let target = Fixture::new("names-target");
+    target.term("target", "synthetic_names");
+    let c = crate::open(&target.db).unwrap();
+    illustash_core::character_names::put_name(&c, "target", "en", "user", "Existing name", "display", 0, 1).unwrap();
+    let result = import_file(&target.db, &target.id, &path, &|| Ok(())).unwrap();
+    assert_eq!(result.records.len(), 0);
+    assert_eq!(result.definition_fields["name_group_applied"], 2);
+    assert_eq!(target.count("SELECT count(*) FROM term_names WHERE source='user'"), 3);
+    assert_eq!(import_file(&target.db, &target.id, &path, &|| Ok(())).unwrap().action_id, None);
+    // 不属于本次组的新增语言可以保留；同组独立改动则整步原子拒绝。
+    illustash_core::character_names::put_name(&c, "target", "ja", "user", "追加名", "display", 0, 1).unwrap();
+    illustash_core::character_names::alias(&c, "target", "目标新增别名", "user", "zh").unwrap();
+    assert!(target.undo(result.action_id.unwrap()).is_err());
+    assert_eq!(target.count("SELECT count(*) FROM actions WHERE undone=1"), 0);
+    c.execute("DELETE FROM term_names WHERE value='目标新增别名'", []).unwrap();
+    target.undo(result.action_id.unwrap()).unwrap();
+    assert_eq!(target.count("SELECT count(*) FROM term_names WHERE source='user' AND lang IN ('en','ja')"), 2);
+    assert_eq!(target.count("SELECT count(*) FROM term_names WHERE source='user' AND lang='zh'"), 0);
+    assert_eq!(target.count("SELECT count(*) FROM terms"), 1);
+    assert!(import_file(&target.db, &target.id, &path, &|| Ok(())).unwrap().action_id.is_some());
+}
+
+#[test]
+fn imported_alias_on_existing_term_keeps_legacy_merge_provenance() {
+    let source = Fixture::new("alias-source");
+    let mut c = crate::open(&source.db).unwrap();
+    let tx = c.transaction().unwrap();
+    crate::schema::begin_writing(&tx).unwrap();
+    linked_character(&tx, "alias-source-character", None);
+    linked_character(&tx, "alias-target-character", None);
+    illustash_core::character_names::put_name(
+        &tx,
+        "alias-source-character",
+        "zh",
+        "bangumi",
+        "合并留下的别名",
+        "display",
+        0,
+        0,
+    )
+    .unwrap();
+    crate::character_commands::command(
+        &tx,
+        &json!({"op":"merge","source":"alias-source-character","target":"alias-target-character"}),
+    )
+    .unwrap();
+    crate::schema::commit_writing(tx).unwrap();
+    let path = source.root.join("aliases.illustash-human.jsonl");
+    capture(&source.db, &source.id, &|| Ok(())).unwrap().write(&mut File::create(&path).unwrap()).unwrap();
+    let target = Fixture::new("alias-target");
+    let mut c = crate::open(&target.db).unwrap();
+    let tx = c.transaction().unwrap();
+    crate::schema::begin_writing(&tx).unwrap();
+    linked_character(&tx, "alias-target-character", None);
+    crate::schema::commit_writing(tx).unwrap();
+    let result = import_file(&target.db, &target.id, &path, &|| Ok(())).unwrap();
+    // 普通合并同时留下中文名字和外链标签两个语言组。
+    assert_eq!(result.definition_fields["name_group_applied"], 2);
+    assert_eq!(import_file(&target.db, &target.id, &path, &|| Ok(())).unwrap().action_id, None);
+    let mut bytes = Vec::new();
+    capture(&target.db, &target.id, &|| Ok(())).unwrap().write(&mut bytes).unwrap();
+    let rows: Vec<serde_json::Value> =
+        bytes.split(|b| *b == b'\n').filter(|b| !b.is_empty()).map(|b| serde_json::from_slice(b).unwrap()).collect();
+    let entity = rows.iter().find(|v| v["type"] == "entity" && v["record_key"] == "alias-target-character").unwrap();
+    assert!(entity["definition"]["names"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .any(|n| n["value"] == "合并留下的别名" && n["provenance"] == "legacy_merge" && n["source"] == "bangumi"));
+    target.undo(result.action_id.unwrap()).unwrap();
+    assert_eq!(target.count("SELECT count(*) FROM term_names WHERE role='alias'"), 0);
+    assert_eq!(target.count("SELECT count(*) FROM terms"), 1);
+}
+
 fn structured_roundtrip(hybrid: bool) {
     let source = Fixture::new("structured-source");
     source.structured(hybrid);
@@ -416,6 +499,127 @@ fn imported_family_judgments_preserve_target_parent_rejection_and_child_confirma
         };
         assert_eq!(footer(&a), footer(&b));
     }
+}
+
+fn linked_character(c: &Connection, key: &str, parent: Option<&str>) {
+    illustash_core::character_entities::create(
+        c,
+        &illustash_core::character_entities::New {
+            id: key,
+            kind: if parent.is_some() { "skin" } else { "character" },
+            parent_id: parent,
+            variant: if parent.is_some() { "synthetic_child" } else { "" },
+            ..Default::default()
+        },
+        "user",
+    )
+    .unwrap();
+    let id = crate::store::term_by_key(c, key).unwrap().unwrap().0;
+    crate::store::add_link(c, id, "danbooru", &format!("synthetic_{key}"), "", "synthetic").unwrap();
+}
+
+#[test]
+fn family_conflicts_follow_existing_hybrid_representative() {
+    for source_parent_no in [true, false] {
+        let source = Fixture::new("canonical-source");
+        let target = Fixture::new("canonical-target");
+        for (fixture, is_target) in [(&source, false), (&target, true)] {
+            fixture.asset("image", "canonical.png", 63);
+            let mut c = crate::open(&fixture.db).unwrap();
+            let tx = c.transaction().unwrap();
+            crate::schema::begin_writing(&tx).unwrap();
+            hybrid(&tx);
+            linked_character(&tx, "Q", None);
+            if is_target {
+                linked_character(&tx, "P", None);
+            }
+            let parent_no = if is_target { !source_parent_no } else { source_parent_no };
+            let parent = if is_target { "P" } else { "Q" };
+            if !parent_no {
+                linked_character(&tx, "C", Some(parent));
+            }
+            crate::character_graph::rebuild(&tx).unwrap();
+            crate::character_commands::command(
+                &tx,
+                &json!({"op":"change","action":if parent_no {"rejected"}else{"confirmed"},
+                "entity":if parent_no {parent}else{"C"},"asked":["image"]}),
+            )
+            .unwrap();
+            if is_target {
+                illustash_core::character_identity::command(&tx,&json!({"op":"decide","a":"P","b":"Q","kind":"duplicate_of","status":"accepted","reason":"合成代表更换"})).unwrap();
+            }
+            crate::schema::commit_writing(tx).unwrap();
+        }
+        let c = crate::open(&target.db).unwrap();
+        let before: Vec<(String, String, String)> = c
+            .prepare("SELECT entity,character_id,status FROM effective_assertions ORDER BY entity")
+            .unwrap()
+            .query_map([], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)))
+            .unwrap()
+            .collect::<rusqlite::Result<_>>()
+            .unwrap();
+        assert_eq!(before[0].1, "Q");
+        let path = source.root.join("canonical.illustash-human.jsonl");
+        capture(&source.db, &source.id, &|| Ok(())).unwrap().write(&mut File::create(&path).unwrap()).unwrap();
+        let result = import_file(&target.db, &target.id, &path, &|| Ok(())).unwrap();
+        assert_eq!(result.action_id, None);
+        assert!(result.records["blocked_dependency"] > 0);
+        assert_eq!(target.count("SELECT count(*) FROM actions WHERE undone=0"), 2);
+        let after: Vec<(String, String, String)> = c
+            .prepare("SELECT entity,character_id,status FROM effective_assertions ORDER BY entity")
+            .unwrap()
+            .query_map([], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)))
+            .unwrap()
+            .collect::<rusqlite::Result<_>>()
+            .unwrap();
+        assert_eq!(after, before);
+    }
+}
+
+#[test]
+fn ordinary_identity_decision_reuses_undone_import_relation_with_existing_endpoints() {
+    let source = Fixture::new("existing-relation-source");
+    let target = Fixture::new("existing-relation-target");
+    for fixture in [&source, &target] {
+        let mut c = crate::open(&fixture.db).unwrap();
+        let tx = c.transaction().unwrap();
+        crate::schema::begin_writing(&tx).unwrap();
+        hybrid(&tx);
+        linked_character(&tx, "a", None);
+        linked_character(&tx, "b", None);
+        crate::character_graph::rebuild(&tx).unwrap();
+        crate::schema::commit_writing(tx).unwrap();
+    }
+    let mut c = crate::open(&source.db).unwrap();
+    crate::app_identity::request(
+        &mut c,
+        "/api/identity/decision",
+        &crate::http_json::parse_request(
+            &json!({"a":"a","b":"b","kind":"different_from","status":"accepted","reason":"合成关系"}).to_string(),
+        )
+        .unwrap(),
+    )
+    .unwrap();
+    let path = source.root.join("existing-relation.illustash-human.jsonl");
+    capture(&source.db, &source.id, &|| Ok(())).unwrap().write(&mut File::create(&path).unwrap()).unwrap();
+    let result = import_file(&target.db, &target.id, &path, &|| Ok(())).unwrap();
+    target.undo(result.action_id.unwrap()).unwrap();
+    assert_eq!(target.count("SELECT count(*) FROM terms"), 2);
+    assert_eq!(target.count("SELECT count(*) FROM term_relations"), 0);
+    let mut c = crate::open(&target.db).unwrap();
+    crate::app_identity::request(
+        &mut c,
+        "/api/identity/decision",
+        &crate::http_json::parse_request(
+            &json!({"a":"a","b":"b","kind":"different_from","status":"accepted","reason":"合成普通复核"}).to_string(),
+        )
+        .unwrap(),
+    )
+    .unwrap();
+    assert_eq!(target.count("SELECT count(*) FROM term_legacy_ids WHERE kind='relation'"), 1);
+    assert_eq!(target.count("SELECT count(*) FROM term_relations"), 1);
+    assert_eq!(target.count("SELECT count(*) FROM term_effective_verdicts WHERE action_id=1"), 0);
+    assert_eq!(target.count("SELECT count(*) FROM pragma_foreign_key_check"), 0);
 }
 
 #[test]

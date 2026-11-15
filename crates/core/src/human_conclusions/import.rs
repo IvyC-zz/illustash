@@ -3,7 +3,7 @@ use super::{
     definitions, export,
     format::{Entity, Header, Policy, Record, Snapshot},
     matching::{self, Match, SourceAsset, TargetAsset},
-    relations,
+    names, relations,
     state::{self, Domain, Mark},
 };
 use crate::{error::invalid, schema, store, Error, Result};
@@ -34,6 +34,8 @@ pub struct Report {
     pub records: BTreeMap<String, usize>,
     /// 依赖定义按结果分类的数量。
     pub definitions: BTreeMap<String, usize>,
+    /// 已有定义的名字组、链接等独立字段单位，不与依赖对象数相加。
+    pub definition_fields: BTreeMap<String, usize>,
     /// 源资产按匹配结果分类的数量。
     pub assets: BTreeMap<String, usize>,
     /// 有界明细；计数始终包含全部记录。
@@ -71,10 +73,11 @@ struct History {
     v: u32,
     source_library: String,
     snapshot_id: String,
-    // 当前阶段只补从未决定的逻辑键；before 均为无贡献，after 用于拒绝独立改动后的撤销。
+    // after 保护新增人工逻辑键；定义和名字组分别保存自己的精确撤销前提。
     after: Vec<Record>,
     created: Vec<definitions::Created>,
     relations: Vec<relations::Created>,
+    names: Vec<names::Edit>,
     graph: bool,
 }
 
@@ -168,6 +171,59 @@ fn match_reason(result: &Match) -> &'static str {
         Match::ContentChanged => "content_changed",
         Match::Ambiguous { .. } => "ambiguous_asset",
         Match::Unverified { .. } => "unverified_asset",
+    }
+}
+
+fn family_conflict(
+    c: &Connection,
+    asset: &str,
+    term: &str,
+    entity: &Entity,
+    verdict: &str,
+    policy: Policy,
+) -> Result<bool> {
+    let Some(tree) = &entity.tree else { return Ok(false) };
+    if policy == Policy::Hybrid {
+        // 已合并的旧断言仍保留原 key；实际归属沿现行有效断言和身份节点判断。
+        let canonical: String =
+            c.query_row("SELECT coalesce((SELECT canonical_id FROM identity_nodes WHERE id=?1),?1)", [term], |r| {
+                r.get(0)
+            })?;
+        let family_key = tree.parent.as_deref().unwrap_or(term);
+        let family: String = c.query_row(
+            "SELECT coalesce((SELECT character_id FROM identity_nodes WHERE id=?1),?1)",
+            [family_key],
+            |r| r.get(0),
+        )?;
+        let root: bool = c.query_row(
+            "SELECT coalesce((SELECT variant_id IS NULL FROM identity_nodes WHERE id=?1),?2)",
+            params![term, tree.parent.is_none()],
+            |r| r.get(0),
+        )?;
+        return Ok(match verdict {
+            "yes" => c.query_row(
+                "SELECT EXISTS(SELECT 1 FROM effective_assertions WHERE uuid=?1 AND status='rejected'
+                AND (entity=?2 OR (character_id=?3 AND variant_id IS NULL)))",
+                params![asset, canonical, family],
+                |r| r.get(0),
+            )?,
+            "no" => c.query_row(
+                "SELECT EXISTS(SELECT 1 FROM effective_assertions WHERE uuid=?1 AND status='confirmed'
+                AND (entity=?2 OR (?4 AND character_id=?3)))
+                AND NOT EXISTS(SELECT 1 FROM effective_assertions WHERE uuid=?1 AND status='rejected' AND entity=?2)",
+                params![asset, canonical, family, root],
+                |r| r.get(0),
+            )?,
+            _ => false,
+        });
+    }
+    match verdict {
+        "yes"=>Ok(c.query_row("SELECT EXISTS(SELECT 1 FROM assertions WHERE uuid=?1 AND entity=?2 AND status='rejected')",
+            params![asset,tree.parent],|r|r.get(0))?),
+        "no"=>Ok(c.query_row("SELECT EXISTS(SELECT 1 FROM assertions a JOIN term_tree t ON t.term_id=(SELECT id FROM terms WHERE key=a.entity)
+            WHERE a.uuid=?1 AND a.status='confirmed' AND t.parent_id=?2)
+            AND NOT EXISTS(SELECT 1 FROM assertions WHERE uuid=?1 AND entity=?2 AND status='rejected')",params![asset,term],|r|r.get(0))?),
+        _=>Ok(false),
     }
 }
 
@@ -400,36 +456,13 @@ pub fn apply_in(
             blocked.extend(record.terms().into_iter().map(str::to_owned));
         }
         if let Record::ImageVerdict { asset, term, decision, .. } = record {
-            if decision.verdict == "yes" {
-                if let (Some(Match::Matched { target, .. }), Some(parent)) = (
-                    assets.get(asset.as_str()).copied(),
-                    source_entities
-                        .get(term.as_str())
-                        .and_then(|e| definitions::mapped(e, &terms))
-                        .and_then(|e| e.tree?.parent),
-                ) {
-                    let rejected: bool = c.query_row(
-                        "SELECT EXISTS(SELECT 1 FROM assertions WHERE uuid=?1 AND entity=?2 AND status='rejected')",
-                        params![target, parent],
-                        |r| r.get(0),
-                    )?;
-                    if rejected {
-                        blocked.insert(term.clone());
-                    }
-                }
-            }
-            if decision.verdict == "no" {
-                if let (Some(Match::Matched { target, .. }), Some(term)) =
-                    (assets.get(asset.as_str()).copied(), terms.get(term))
-                {
-                    let masks_existing: bool = c.query_row("SELECT
-                        EXISTS(SELECT 1 FROM assertions a JOIN term_tree t ON t.term_id=(SELECT id FROM terms WHERE key=a.entity)
-                            WHERE a.uuid=?1 AND a.status='confirmed' AND t.parent_id=?2)
-                        AND NOT EXISTS(SELECT 1 FROM assertions WHERE uuid=?1 AND entity=?2 AND status='rejected')",
-                        params![target,term], |r|r.get(0))?;
-                    if masks_existing {
-                        blocked.extend(record.terms().into_iter().map(str::to_owned));
-                    }
+            if let (Some(Match::Matched { target: asset, .. }), Some(target), Some(entity)) = (
+                assets.get(asset.as_str()).copied(),
+                terms.get(term),
+                source_entities.get(term.as_str()).and_then(|e| definitions::mapped(e, &terms)),
+            ) {
+                if family_conflict(c, asset, target, &entity, &decision.verdict, existing.header.policy)? {
+                    blocked.insert(term.clone());
                 }
             }
         }
@@ -438,6 +471,18 @@ pub fn apply_in(
     terms.retain(|source, _| !blocked.contains(source));
     let (blocked, relation_conflicts) = graph_conflicts(c, snapshot, &existing, &terms, &new_definitions, check)?;
     terms.retain(|source, _| !blocked.contains(source));
+    let mut name_edits = Vec::new();
+    for (source, target) in &terms {
+        if !fresh.contains(source.as_str()) {
+            name_edits.extend(names::plan(
+                c,
+                target,
+                source_entities[source.as_str()],
+                existing_entities.get(target).copied(),
+                &mut report.definition_fields,
+            )?);
+        }
+    }
     for record in &snapshot.records {
         if let Record::Entity { key, .. } = record {
             if !terms.contains_key(key) {
@@ -573,11 +618,12 @@ pub fn apply_in(
         *report.definitions.entry(if keep { "applied" } else { "unneeded_dependency" }.into()).or_default() += 1;
         keep
     });
-    if planned.is_empty() && new_definitions.is_empty() {
+    if planned.is_empty() && new_definitions.is_empty() && name_edits.is_empty() {
         return Ok(report);
     }
     c.execute("INSERT INTO actions(label,before_json) VALUES ('已导入人工结论','[]')", [])?;
     let action = c.last_insert_rowid();
+    let name_edits = names::apply(c, name_edits)?;
     let mut created = definitions::create(c, action, &snapshot.header.library_id, &new_definitions)?;
     let graph = crate::character_projection::policy(c)?
         && (new_definitions.iter().any(|new| new.definition.tree.is_some())
@@ -629,6 +675,7 @@ pub fn apply_in(
         after,
         created,
         relations: created_relations,
+        names: name_edits,
         graph,
     };
     c.execute(
@@ -765,10 +812,14 @@ fn history(value: &Value) -> Result<Option<History>> {
     }
     let decoded: History = serde_json::from_value(items[0]["human_conclusions"].clone())
         .map_err(|_| Error::Conflict("人工结论撤销信封不完整".into()))?;
-    if decoded.v != 1 || decoded.after.is_empty() {
+    if decoded.v != 1 || (decoded.after.is_empty() && decoded.names.is_empty()) {
         return Err(Error::Conflict("人工结论撤销版本不受支持".into()));
     }
     Ok(Some(decoded))
+}
+
+pub(crate) fn name_aliases(value: &Value) -> Result<Vec<(i64, super::format::Name)>> {
+    Ok(history(value)?.map(|h| names::aliases(&h.names)).unwrap_or_default())
 }
 
 /// 识别专用历史，混合或未知版本返回错误，不落入普通应用撤销。
@@ -827,6 +878,7 @@ pub fn undo_in(c: &Connection, action: i64) -> Result<Vec<String>> {
         }
     }
     // 先撤去已经精确核对的本次附属状态，再检查其它依赖；发生冲突时宿主回滚整个事务。
+    names::undo(c, &history.names)?;
     definitions::check_undo(c, action, &history.created)?;
     relations::check_undo(c, action, &history.relations)?;
     definitions::remove(c, &history.created)?;

@@ -386,6 +386,13 @@ fn merge_aliases(c: &Connection) -> Result<Aliases> {
         .query_map([], |r| r.get::<_, String>(0))?
     {
         let Ok(body) = crate::strict_json::parse(&row?) else { continue };
+        for (term, name) in super::import::name_aliases(&body)? {
+            if let Some(key) =
+                c.query_row("SELECT key FROM terms WHERE id=?1", [term], |r| r.get::<_, String>(0)).optional()?
+            {
+                result.entry(key).or_default().insert((name.lang, name.value, name.source));
+            }
+        }
         let Ok(Some(items)) = crate::character_commands::owns(&body) else { continue };
         if items.len() != 1
             || body[0].get("terms").is_some_and(|v| v.as_object().is_none_or(|o| o.len() != 3) || v["type"] != "merge")
