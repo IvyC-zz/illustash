@@ -164,6 +164,7 @@ fn run(db: &Path, library: &str, context: &TaskContext, shared: &Arc<Mutex<State
     let mut state = State::default();
     let mut initialized = false;
     let mut fill = true;
+    // 开库后的第一轮补算已经跑过：之后补齐的摘要照旧进下一小时的快照。
     let mut refilled = false;
     loop {
         context.check()?;
@@ -233,7 +234,7 @@ fn run(db: &Path, library: &str, context: &TaskContext, shared: &Arc<Mutex<State
                     let unreadable = filled.snapshot.coverage().missing;
                     state.hash_unreadable = Some(unreadable);
                     state.refill = !refilled && state.hash_missing > 0 && unreadable == 0;
-                    refilled |= state.refill;
+                    refilled = true;
                     state.observe(revision::read(&crate::app_library::read_connection(db)?)?, now);
                     state.running = false;
                     fill = false;
