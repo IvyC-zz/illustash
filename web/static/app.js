@@ -26,15 +26,18 @@ import {wireDetail} from './ui/detail.js';
 import {wireHome} from './ui/home.js';
 import {wireReview} from './ui/review.js';
 import {guideAfterBoot, guideOnOpen, wireGuide} from './ui/guide.js';
-import {afterWrite, afterJob} from './ui/effects.js';
+import {afterWrite, afterJob, afterWdExtension} from './ui/effects.js';
 import {pollIntegrity} from './core/integrity.js';
 import {home} from './core/human.js';
 import {wireModels} from './ui/models.js';
+import {wireWdExtension} from './ui/wd_extension.js';
+import {onWdExtension} from './core/wd_extension.js';
 import {wireIntegrity} from './ui/integrity.js';
 platformHints(document.body);
 wireDom();
 onPost(afterWrite);
 onJob(afterJob);
+onWdExtension(afterWdExtension);
 wireToast(() => undo());
 // 浮层管理器的 Esc / 点外监听要排在最前（捕获阶段先于页面其余处理）；其余按页面原来注册它们的顺序。
 wireOverlays();
@@ -52,6 +55,7 @@ wireTasks();
 wireGuide();
 wireIntegrity();
 wireModels();
+wireWdExtension();
 $('undoButton').onclick = undo; $('helpButton').onclick = () => openModal($('help'), {backdropClose: true, id: 'help'});
 $('sidebarToggle').onclick = () => { if (innerWidth <= 760) $('sidebar').classList.toggle('mobile-open'); else $('sidebar').hidden = !$('sidebar').hidden; requestAnimationFrame(() => renderGrid()); };
 

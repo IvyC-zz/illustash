@@ -24,6 +24,8 @@ import {setFit, setNsfw, undo} from './grid.js';
 import {drawGuide, drawNudge, replayGuide} from './guide.js';
 import {renderIntegrityLine} from './integrity.js';
 import {renderModelsCard} from './models.js';
+import {extCardBody, extNote} from './wd_extension.js';
+import {loadWdExtension, onWdExtension} from '../core/wd_extension.js';
 import {openModal} from './overlay.js';
 import {renderHumanBlock, onHumanClick, wireHuman} from './human.js';
 import {loadHuman, home} from '../core/human.js';
@@ -67,6 +69,16 @@ export async function renderIndexCard(fresh = true) {
     if (indexArmed !== b.dataset.drop) { indexArmed = b.dataset.drop; renderIndexCard(false); setTimeout(() => { if (indexArmed === b.dataset.drop) { indexArmed = null; renderIndexCard(false); } }, 4000); return; }
     indexArmed = null; act({action: 'drop', char: b.dataset.drop, reason: '在设置中手动移除'});
   };
+}
+
+// ---------- WD 角色扩展（#550）：按图库启用，扩展包整个 App 一份。内容在 ui/wd_extension.js ----------
+export async function renderWdExtensionCard(fresh = false) {
+  const route = state.route, token = session.token, card = $('wdExtCard'), x = state.wdExtension;
+  if (!card || !onPage(state.route, 'settings')) return;
+  // 先画手上的状态（还没读到时只有标题），再读新的；读到后 onWdExtension 会再调这里。
+  if (setSettingsHTML(card, cardHead(t('WD 角色扩展'), x ? extNote(x) : '', 'library') + extCardBody(x))) wireFolds(card);
+  if (!fresh && x) return;
+  try { await loadWdExtension(); } catch (e) { if (route === state.route && token === session.token) readFailure($('wdExtCard'), e); }
 }
 
 // ---------- 显示名 ----------
@@ -139,12 +151,12 @@ function patchSettingsPage(html, section) {
 const SETTINGS_SECTIONS = [
   ['general', t('通用'), t('语言、外观、图片网格与默认排序'), ['setDisplay', 'setLanguage']],
   ['library', t('图库'), t('当前图库、来源、同步与排除'), ['setLibraries', 'setSync', 'setExclude', 'setFold']],
-  ['characters', t('角色资料'), t('新角色检查、角色名称与翻译'), ['indexCard', 'namesCard', 'modelCard']],
+  ['characters', t('角色资料'), t('新角色检查、WD 角色扩展、角色名称与翻译'), ['indexCard', 'wdExtCard', 'namesCard', 'modelCard']],
   ['artists', t('画师'), t('找回画师与绑定的账号'), ['setProvenance', 'setAccounts']],
   ['network', t('网络与隐私'), t('所有会访问网络的功能，以及它们发送什么'), ['setNetwork']],
   ['data', t('数据'), t('备份、缓存、识别模型与存储位置'), ['setData', 'setModels']],
   ['about', t('关于'), t('版本、致谢与诊断信息'), ['setAbout']]];
-const OWN_CARDS = ['setLibraries', 'setProvenance', 'setAccounts', 'indexCard', 'namesCard', 'modelCard', 'setAbout', 'setModels'];
+const OWN_CARDS = ['setLibraries', 'setProvenance', 'setAccounts', 'indexCard', 'wdExtCard', 'namesCard', 'modelCard', 'setAbout', 'setModels'];
 export const settingsSection = () => SETTINGS_SECTIONS.find(s => s[0] === state.route.section) || SETTINGS_SECTIONS[0];
 // 只给开发者的入口（测试图库、粘贴 Pixiv cookie）要带 ?dev 打开过一次页面后才显示。
 export const devMode = (() => { try { if (new URLSearchParams(location.search).has('dev')) prefs.set('dev', true); } catch {} return !!prefs.get('dev', false); })();
@@ -171,6 +183,7 @@ const CREDITS = [
   ['WD SwinV2 Tagger v3', 'SmilingWolf', t('图片标签与角色识别'), 'https://huggingface.co/SmilingWolf/wd-swinv2-tagger-v3'],
   ['CCIP', 'DeepGHS', t('角色特征比对'), 'https://huggingface.co/deepghs/ccip'],
   ['Character Index', 'DeepGHS', t('角色索引数据'), 'https://huggingface.co/datasets/deepghs/character_index'],
+  [t('WD 角色扩展'), 'SmilingWolf WD v3 · DeepGHS Character Index', t('WD 词表以外的较新角色'), 'https://github.com/shio-vinyl/illustash/blob/main/docs/THIRD_PARTY.md#模型与数据'],
   [t('imgutils 检测与分级模型'), 'DeepGHS', t('人物检测、打码检测、内容分级'), 'https://github.com/deepghs/imgutils'],
   ['Anime Censorship Tagger', 'Maltox', t('打码类型识别'), 'https://huggingface.co/Maltox/anime-censorship-tagger-mnv3-384'],
   ['Danbooru', '', t('标签与角色资料'), 'https://danbooru.donmai.us'],
@@ -236,6 +249,7 @@ function networkCard() {
       ${row('artists', t('查找画师、找 TA 的其他图'), t('Danbooru、画师主页'), t('所选图片的哈希文本；下载画师公开作品的小图，只在本机比对'), t('只在你点按钮时'))}
       ${row('characters', t('在 Danbooru 上搜角色和作品'), 'Danbooru', t('你输入的文字；自建角色的名字（核对能否对上 Danbooru）；「设为…」里 Danbooru 候选的 tag（取一张全年龄小图）'), net && !net.authorized ? names : t('只在你搜索或打开资料库时'))}
       ${acct?.saucenao?.bound ? row('artists', t('以图搜图'), 'SauceNAO', '—', t('已保存 key，还没有功能使用它')) : ''}
+      ${row('characters', t('下载 WD 角色扩展包'), 'GitHub', t('一次普通的 HTTPS 下载，取回扩展包；不发送图库里的任何信息'), t('只在你点「下载」时'))}
       ${state.models?.on_demand ? row('data', t('下载识别模型'), esc(state.models.sources.join(t('、'))), t('一次普通的 HTTPS 下载，取回模型文件；不发送图库里的任何信息'), t('只在你点「下载」时')) : ''}
       ${row('about', t('检查更新'), 'GitHub', t('一次普通的 HTTPS 请求，读取公开的版本列表；不发送图库里的任何信息'), state.updates?.auto ? t('启动时和之后每天自动') : t('只在你点「检查更新」时'))}
       ${state.updates?.install
@@ -313,6 +327,7 @@ export async function renderSettings(fetchMissing = true, refresh = false) {
   if ($('setAccounts') || section === 'network') { if (!state.accounts || !$('setAccounts')?.innerHTML) loadAccounts(); else renderAccountsCard(); }
   if (state.index?.works) renderIndexCard(false);
   if (state.names) renderNamesCard(false);
+  if ($('wdExtCard')) renderWdExtensionCard(fetchMissing);
   wireFolds(page);
   for (const box of page.querySelectorAll('[data-fold]')) box.onchange = async () => {
     const kinds = [...page.querySelectorAll('[data-fold]:checked')].map(b => b.dataset.fold);
@@ -718,6 +733,7 @@ export function wireSettings() {
     e.stopPropagation();
     openTasks({armProvenance: b.dataset.openTasks === 'provenance'});
   });
+  onWdExtension(() => renderWdExtensionCard());
   $('settingsPage').addEventListener('click', onHumanClick);
   wireHuman({undo});
   $('settingsPage').addEventListener('input', onLibraryInput);

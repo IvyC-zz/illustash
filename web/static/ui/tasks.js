@@ -16,6 +16,8 @@ import {openIndexAdd} from './catalog.js';
 import {modelsLine, modelsBar, modelsActions} from './models.js';
 import {home} from '../core/human.js';
 import {loadModels, onModels} from '../core/models.js';
+import {extTask} from './wd_extension.js';
+import {loadWdExtension, onWdExtension} from '../core/wd_extension.js';
 // 「开始」先显示有哪些内容会离开本机；授权只覆盖这一次运行。
 let provenanceArmed = false;
 // 打开面板；带 armProvenance 时停在一次找回画师运行的授权上。
@@ -72,6 +74,9 @@ export function taskList() {
   const m = state.models;
   if (m?.on_demand && (m.status !== 'ready' || m.job?.status === 'running')) list.push({key: 'models', name: t('识别模型'), busy: m.job?.kind === 'import' ? t('导入识别模型中') : t('下载识别模型中'),
     active: m.job?.status === 'running', warn: m.job?.status === 'failed', line: modelsLine(m), body: modelsBar(m), action: modelsActions(m, true)});
+  // WD 角色扩展（#550）：下载、启用、撤回共用一项，运行中和结束后都列出来。
+  const wdx = extTask();
+  if (wdx) list.push(wdx);
   if (['running', 'done', 'error'].includes(ex.status)) list.push({key: 'export', name: t('导出图库'), busy: t('导出图库中'), active: ex.status === 'running', warn: ex.status === 'error',
     line: ex.status === 'running' ? t('正在导出…') : ex.status === 'done' ? t('已导出 {mb} MB', {mb: (ex.bytes / 1048576).toFixed(0)}) : t('导出失败：{error}', {error: tb(ex.error || '')}), body: '', action: ''});
   // 导入（图库归档、识别结果、人工结论共用一个槽；#386 的 2-37）：和导出一样，运行中、结束后都在这里有一行，运行时可以取消。
@@ -80,7 +85,7 @@ export function taskList() {
     name: im.kind === 'recognition' ? t('导入识别结果') : im.kind === 'human_conclusions' ? t('导入人工结论') : t('导入图库'), busy: t('导入中'),
     active: importActive(), warn: im.status === 'error', line: importLine(im), body: '',
     action: im.status === 'running' ? `<button class="quiet small" data-task="import-cancel">${t('取消导入')}</button>` : ''});
-  const diagnoses = {sync: s, index: ix, names: nm, similar: sim, provenance: ps, models: m?.job, export: ex, import: im};
+  const diagnoses = {sync: s, index: ix, names: nm, similar: sim, provenance: ps, models: m?.job, export: ex, import: im, wdExtension: wdx};
   for (const task of list) {
     const note = diagnosticLine(diagnoses[task.key]?.diagnostic);
     if (note && task.warn) task.line += ' · ' + note;
@@ -125,7 +130,7 @@ export function renderTasks() {
   // 任务运行期间会轮询：只在有变化时重画，这样点击绝不会因为按钮被替换而丢失。
   // 焦点在面板里时，重画后放回同一个按钮（按 data-task／data-prov 找），找不到就放在面板上，不掉到页面上（#422）。
   const had = pop.contains(document.activeElement) ? document.activeElement : null;
-  const key = had && ['task', 'prov'].map(k => had.dataset?.[k] ? `[data-${k}="${had.dataset[k]}"]` : '').find(Boolean);
+  const key = had && ['task', 'prov', 'wdx'].map(k => had.dataset?.[k] ? `[data-${k}="${had.dataset[k]}"]` : '').find(Boolean);
   if (!redraw(pop, html)) return;
   wireFolds(pop);
   if (had && !pop.contains(document.activeElement)) (key && pop.querySelector(key) || pop).focus({preventScroll: true});
@@ -135,6 +140,8 @@ export async function taskTick() {
   const jobs = [pollSync(), pollIndex(), pollNames(), loadProvenance()];
   // 模型下载时有自己的轮询；这里发现在另一个窗口里启动的下载。
   if (taskPanel.open || !state.models) jobs.push(loadModels());
+  // WD 角色扩展同样：运行中有自己的轮询，这里发现别处开始的下载或任务。
+  if (taskPanel.open || !state.wdExtension) jobs.push(loadWdExtension());
   // 相似任务的状态随 /api/settings 一起来，它还要测量缓存：只在有人看时才读。
   if (taskPanel.open && Date.now() - taskPanel.settingsAt > (SIMILAR_ACTIVE.includes(state.settings?.tasks?.similar?.status) ? 2500 : 15000)) { taskPanel.settingsAt = Date.now(); jobs.push(shared('/api/settings').then(s => { setSettings(s); }).catch(e => error(readError(e)))); }
   // 面板开着时发现在别的窗口里启动的导入；运行中的导入有自己的轮询。
@@ -159,6 +166,7 @@ export function toggleTasks(open = !taskPanel.open, reason) {
 export function wireTasks() {
   // 模型下载（#168）有自己的轮询：按钮和面板跟着每次读取变。
   onModels(() => renderTasks());
+  onWdExtension(() => renderTasks());
   onJob(async (job, change) => {
     if (job === 'sync' && change.ended && state.sync.status === 'done' && state.sync.imported) toast(syncDoneText(state.sync));
     if (job === 'index' && change.ended && indexEndText(state.index.state)) toast(indexEndText(state.index.state));

@@ -23,15 +23,22 @@ export function closeInspector() { detailGen++; if (state.viewer < 0) kept.hold 
 function identityChips(d, compact = false) {
   // C 换掉的是主角色（primaryOf），所以只有它的 ⇄ 写着 C；A 是追加（#399）。
   const primary = primaryOf(d);
-  const chips = d.memberships.map(m => `<div class="identity"><span class="dot ${m.status}" title="${m.status === 'machine' ? t('机器识别') : m.origin === 'album' ? t('相簿') : t('人工确认')} · ${esc(evidence(m.evidence))}"></span><a class="identity-name" href="${charHash(m.id)}" title="${esc(nameWithWork(m))}">${esc(m.name)}</a><span class="identity-actions"><button class="icon small" data-swap="${esc(m.id)}" title="${m === primary ? t('换成…（C）') : t('换成…')}">⇄</button><button class="icon small" data-not="${esc(m.id)}" title="${t('不是 TA（⌫）')}">×</button></span>
+  const chips = d.memberships.map(m => `<div class="identity${m.status === 'machine' && fromExt(m.evidence) ? ' ext' : ''}"><span class="dot ${m.status}" title="${m.status === 'machine' ? t('机器识别') : m.origin === 'album' ? t('相簿') : t('人工确认')} · ${esc(evidence(m.evidence))}"></span><a class="identity-name" href="${charHash(m.id)}" title="${esc(nameWithWork(m))}">${esc(m.name)}</a>${m.status === 'machine' ? extMark(m.evidence) : ''}<span class="identity-actions"><button class="icon small" data-swap="${esc(m.id)}" title="${m === primary ? t('换成…（C）') : t('换成…')}">⇄</button><button class="icon small" data-not="${esc(m.id)}" title="${t('不是 TA（⌫）')}">×</button></span>
     ${compact ? '' : `<div class="variant-row">${(m.variants || []).map(v => `<span class="variant-chip">${esc(v.name)}<button data-unvariant="${esc(v.id)}" title="${t('去掉造型')}">×</button></span>`).join('')}${(state.charMap.get(m.id)?.variants || []).some(v => !(m.variants || []).some(x => x.id === v.id)) ? `<button class="variant-add" data-addvariant="${esc(m.id)}">＋ ${t('造型')}</button>` : ''}</div>`}</div>`).join('');
-  const alts = (d.alternatives || []).slice(0, 9).map((a, i) => `<button class="alt${a.weak ? ' weak' : ''}" data-alt="${i}" title="${esc(nameWithWork(a))} · ${a.weak ? t('弱线索（中档相似，不算归属）') + ' · ' : ''}${t('{evidence}。点击：换成这个；⌥ 点击：也是', {evidence: esc(evidence(a.evidence))})}"><kbd>${i + 1}</kbd>${esc(a.name)}</button>`).join('');
+  const alts = (d.alternatives || []).slice(0, 9).map((a, i) => `<button class="alt${a.weak ? ' weak' : ''}${fromExt(a.evidence) ? ' ext' : ''}" data-alt="${i}" title="${esc(nameWithWork(a))} · ${a.weak ? t('弱线索（中档相似，不算归属）') + ' · ' : ''}${t('{evidence}。点击：换成这个；⌥ 点击：也是', {evidence: esc(evidence(a.evidence))})}"><kbd>${i + 1}</kbd>${esc(a.name)}${extMark(a.evidence)}</button>`).join('');
   return `<div class="identities">${chips || `<p class="none-yet">${d.unknown ? t('已跳过，还没有角色') : t('还没有角色')}</p>`}<button class="add-identity" data-also="1" title="${d.memberships.length ? t('追加角色，原有的保留（A）') : t('设为角色（C）')}">＋ ${d.memberships.length ? t('也是…') : t('设为角色…')} <kbd>${d.memberships.length ? 'A' : 'C'}</kbd></button></div>` +
     (alts ? `<div class="alts"><h3>${t('也可能是')}</h3><div class="alt-row">${alts}</div></div>` : '');
 }
-// PROTO = 从用户自己的裁决学到的原型（native/terms/src/research_compute/learn.rs）。
-const SOURCE_NAMES = {CCIP: t('外部索引'), PROTO: t('你的标注')};
-const evidence = e => !e ? '' : [e.wd != null ? `WD ${e.wd.toFixed(2)}` : '', e.ccip != null ? `${e.sources?.includes('PROTO') && !e.sources.includes('CCIP') ? SOURCE_NAMES.PROTO : SOURCE_NAMES.CCIP} ${e.ccip.toFixed(3)}` : '', !('wd' in e) && e.sources?.length ? e.sources.map(s => SOURCE_NAMES[s] || s).join(' + ') : ''].filter(Boolean).join(' · ');
+// PROTO = 从用户自己的裁决学到的原型（native/terms/src/research_compute/learn.rs）。WD_EXT = WD 角色扩展的线性头（#550，
+// native/terms/src/app_wd_extension.rs），后面跟它的分数（max_score），和「WD 0.91」并列。
+const SOURCE_NAMES = {CCIP: t('外部索引'), PROTO: t('你的标注'), WD_EXT: t('WD 扩展')};
+const sourceName = (s, e) => s !== 'WD_EXT' ? SOURCE_NAMES[s] || s : SOURCE_NAMES.WD_EXT + (e.max_score != null ? ` ${Number(e.max_score).toFixed(2)}` : '');
+// 归属行和「也可能是」里的项（alternatives 带 wd、ccip 两个键，归属行不带）：WD、外部索引或你的标注的分数，WD 扩展的分数。
+const evidence = e => !e ? '' : [e.wd != null ? `WD ${e.wd.toFixed(2)}` : '', e.ccip != null ? `${e.sources?.includes('PROTO') && !e.sources.includes('CCIP') ? SOURCE_NAMES.PROTO : SOURCE_NAMES.CCIP} ${e.ccip.toFixed(3)}` : '',
+  !('wd' in e) && e.sources?.length ? e.sources.map(s => sourceName(s, e)).join(' + ') : '', 'wd' in e && e.sources?.includes('WD_EXT') ? sourceName('WD_EXT', e) : ''].filter(Boolean).join(' · ');
+// 只由 WD 角色扩展给出的项：名字后面常显小字「扩展」（修饰类 .identity.ext、.alt.ext，#550 待决定 4）。
+export const fromExt = e => !!e?.sources?.length && e.sources.every(s => s === 'WD_EXT');
+const extMark = e => fromExt(e) ? `<small>${t('扩展')}</small>` : '';
 export const INSP_ICONS = {
   prev: '<svg viewBox="0 0 20 20" aria-hidden="true"><path d="m12 4.5-5.5 5.5 5.5 5.5"/></svg>',
   next: '<svg viewBox="0 0 20 20" aria-hidden="true"><path d="m8 4.5 5.5 5.5L8 15.5"/></svg>',

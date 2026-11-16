@@ -1,9 +1,9 @@
 // 由 tools/styleguide/census.py 从 web/static/app.css 生成，不要手改。
 window.CENSUS = {
  "source": "web/static/app.css",
- "sha256": "706ee2150334c75908a8c02452db62a7087821a8c013e3009d05f8b3e5db23f3",
- "lines": 1380,
- "rules": 1220,
+ "sha256": "2fa93c391a6438c6e1ec442af06a0ac98c4d1ba92761b1b94cb673bc720f1eb8",
+ "lines": 1384,
+ "rules": 1223,
  "themeVars": {
   "light": {
    "--canvas": "#f4f4f6",
@@ -166,7 +166,7 @@ window.CENSUS = {
    "--space-10": 77,
    "--space-2": 41,
    "--space-6": 105,
-   "--fs-10": 12,
+   "--fs-10": 14,
    "--radius-round": 14,
    "--h-32": 11,
    "--fs-16": 2,
@@ -441,7 +441,7 @@ window.CENSUS = {
    {
     "name": "--fs-10",
     "value": "10px",
-    "uses": 12
+    "uses": 14
    },
    {
     "name": "--fs-11",
@@ -1074,7 +1074,7 @@ window.CENSUS = {
  "rgbaCalls": 88,
  "fontSize": {
   "kinds": 22,
-  "uses": 281,
+  "uses": 283,
   "table": [
    {
     "value": "0",
@@ -1093,7 +1093,7 @@ window.CENSUS = {
    },
    {
     "value": "var(--fs-10)",
-    "uses": 12,
+    "uses": 14,
     "examples": [
      ".sidebar-bottom",
      ".chips span",
