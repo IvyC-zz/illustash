@@ -442,8 +442,9 @@ test('C 换成、A 追加：图库的选择栏（#399）', async () => {
   keydown('c'); await settle();
   assert.equal(pickerSays(), '↵ 把 2 张从 C1 换成 C2⇧↵ 多选');
   closePicker();
+  // A 是追加，面板底部也写追加（#423）
   keydown('a'); await settle();
-  assert.equal(pickerSays(), '↵ 把 2 张设为 C2⇧↵ 多选');
+  assert.equal(pickerSays(), '↵ 给 2 张加上 C2⇧↵ 多选');
   closePicker();
   // 共同的角色不止一个：先问换掉哪个
   reset({route: {page: 'library'}, items: many, total: many.length, sel: pick('d', 'e')});
