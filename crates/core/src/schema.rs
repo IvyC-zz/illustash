@@ -1783,6 +1783,25 @@ mod tests {
     }
 
     #[test]
+    fn v9_to_v10_rolls_back_batches_if_rebuilding_kind_triggers_fails() {
+        let mut c = Connection::open_in_memory().unwrap();
+        crate::configure(&c).unwrap();
+        migrate_to(&mut c, 9).unwrap();
+        // 模拟升级到重建类型触发器时失败，前面的批次表已被重建。
+        c.execute_batch(
+            "INSERT INTO term_evidence_sets(producer,source,method,scope) VALUES ('t','wd','wd_character','all');
+             DROP TRIGGER terms_kind_update;",
+        )
+        .unwrap();
+        let objects = "SELECT name,sql FROM sqlite_schema ORDER BY name";
+        let before = rows(&c, objects);
+        assert!(migrate_to(&mut c, 10).is_err());
+        assert_eq!(version(&c).unwrap(), 9);
+        assert_eq!(rows(&c, objects), before);
+        assert_eq!(rows(&c, "SELECT * FROM term_evidence_sets").len(), 1);
+    }
+
+    #[test]
     fn evidence_sets_take_only_replaceable_sources_and_their_own_rows() {
         let c = fresh();
         for (source, method) in REPLACEABLE {
