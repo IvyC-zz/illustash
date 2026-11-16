@@ -110,7 +110,7 @@
 | 第二个工作树，缓存已热 | 506 秒 | 117 / 153（76%） |
 | 第三个工作树，不开 sccache（`ILLUSTASH_SCCACHE=0`） | 863 秒 | — |
 
-第二个工作树比不开 sccache 快约四成，空缓存时多花约 6%，缓存共 144 MiB。没命中的是 illustash 自己的 crate 和带 build script 的依赖（实测 `crates/core` 时是 `illustash_core`、`proc_macro2`、`serde`、`serde_core`、`serde_json`、`libsqlite3_sys`、`rusqlite`）。sccache 0.19 把 `CARGO_MANIFEST_DIR`、`OUT_DIR` 这类带工作树绝对路径的环境变量算进缓存键，换一个工作树就对不上；关掉 incremental（`CARGO_INCREMENTAL=0`）、再设 `SCCACHE_BASEDIRS` 指向各工作树根目录，未命中的仍是这 7 个，所以 wrapper 维持上面的接法，不为自家 crate 关 incremental。自家 crate 要省编译，只能靠把定向检查挪到验收机（见上文「检查放哪台机器」）。
+第二个工作树比不开 sccache 快约四成，空缓存时多花约 6%，缓存共 144 MiB。没命中的是 illustash 自己的 crate 和带 build script 的依赖（实测 `crates/core` 时，第二个工作树统计里 6 个未命中，服务日志里报未命中的是 `illustash_core`、`proc_macro2`、`serde`、`serde_core`、`serde_json`、`libsqlite3_sys`、`rusqlite`）。sccache 0.19 把 `CARGO_MANIFEST_DIR`、`OUT_DIR` 这类带工作树绝对路径的环境变量算进缓存键，换一个工作树就对不上；关掉 incremental（`CARGO_INCREMENTAL=0`）、再设 `SCCACHE_BASEDIRS` 指向各工作树根目录，未命中数一样，所以 wrapper 维持上面的接法，不为自家 crate 关 incremental。自家 crate 要省编译，只能靠把定向检查挪到验收机（见上文「检查放哪台机器」）。
 
 ## 修改测试的导航
 
