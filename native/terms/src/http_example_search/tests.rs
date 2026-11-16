@@ -303,4 +303,24 @@ fn sample_rank_runs_after_composed_source_exclusion_and_date_filters() {
     crate::app_commands::request(&f.context, "/api/tag", &write).unwrap();
     let params = "has=%5B%22source%3Apixiv%22%5D&not=%5B%22utag%3Areviewed%22%5D&from=2026-01-01&to=2026-12-31";
     assert_eq!(f.ids(&["EX"], params), ["B"]);
+    let (count, status) = f.read("/api/assets/count", &["EX"], params);
+    assert_eq!((count.dump(), status), (r#"{"total": 1}"#.into(), 200));
+    let (page, status) = f.read("/api/assets", &["EX"], params);
+    let page: serde_json::Value = serde_json::from_str(&page.dump()).unwrap();
+    assert_eq!(status, 200);
+    assert_eq!(page["total"], 1);
+    assert_eq!(page["items"][0]["uuid"], "B");
+    let write = parse_request(
+        r#"{"tag":"similar-result","filter":{"like":"["EX"]","has":"["source:pixiv"]","not":"["utag:reviewed"]","from":"2026-01-01","to":"2026-12-31"}}"#,
+    )
+    .unwrap();
+    crate::app_commands::request(&f.context, "/api/tag", &write).unwrap();
+    let actual = db
+        .prepare("SELECT uuid FROM asset_tags WHERE tag='similar-result' ORDER BY uuid")
+        .unwrap()
+        .query_map([], |r| r.get::<_, String>(0))
+        .unwrap()
+        .collect::<rusqlite::Result<Vec<_>>>()
+        .unwrap();
+    assert_eq!(actual, ["B"]);
 }
