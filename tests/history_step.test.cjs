@@ -20,6 +20,14 @@ test('后退只在本页的地址之间走：退到这次打开的第一条就�
   try {
     open('#/home'); open('#/library'); open('#/settings');
     assert.deepEqual(entries.map(e => e.state?.illustash ?? null), [null, 0, 1, 2]);
+    // 标题旁的「‹」按 canGoBack 显示；后退到的那条，noteHistory 说它是已有的记录（#526：按序号恢复滚动位置）
+    const {canGoBack, historyEntry} = web.core();
+    assert.deepEqual([canGoBack(), historyEntry()], [true, 2]);
+    let traversed = null; const note = history.go;
+    history.go = d => { at += d; location.hash = entries[at].url; traversed = noteHistory(); };
+    stepHistory(-1); history.go = note;
+    assert.deepEqual([traversed, historyEntry(), location.hash], [true, 1, '#/library']);
+    stepHistory(1);
     stepHistory(-1); assert.equal(location.hash, '#/library');
     stepHistory(-1); assert.equal(location.hash, '#/home');
     stepHistory(-1); assert.equal(at, 1, '不退出这个页面');

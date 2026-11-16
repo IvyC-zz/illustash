@@ -6,7 +6,7 @@ import {REASONS, nameWithWork} from '../core/labels.js';
 import {fetchChar} from '../core/meta.js';
 import {detailAfterViewer, shownUuid} from '../core/modes.js';
 import {pageOf, poolIs, viewOf} from '../core/pages.js';
-import {charHash, cleanup, go} from '../core/route.js';
+import {charHash, cleanup, filterRoute, go, hashFor} from '../core/route.js';
 import {api} from '../core/session.js';
 import {state} from '../core/state.js';
 import {$, readFailure, workSmall} from './dom.js';
@@ -75,7 +75,7 @@ export async function inspect(ident, quiet = false) {
         : `<section class="inspector-section cc-card"><div class="cc-name muted">${d.unknown ? t('已跳过') : t('还没认出是谁')}</div>${pendingNote}</section>`}
       <section class="inspector-section"><h3 class="section-title">${t('角色')}</h3>${identityChips(d)}${(d.tag_identities || []).length ? `<div class="tag-ids"><span>${t('标签')}</span>${d.tag_identities.map(x => `<a class="variant-chip" href="${charHash(x.id)}" title="${t('只当标签、不算角色的身份；点开可以改回角色')}">${esc(x.name)}</a>`).join('')}</div>` : ''}</section>
       ${artistSection(d, ident)}
-      <section class="inspector-section"><h3 class="section-title">${t('我的标签')}</h3><div class="user-tags">${(d.user_tags || []).map(tag => `<span class="variant-chip"><a href="#/?utag=${encodeURIComponent(tag)}"># ${esc(tag)}</a><button data-untag="${esc(tag)}" title="${t('去掉标签')}">×</button></span>`).join('')}<button class="variant-add" id="addTag">＋ ${t('标签')} <kbd>G</kbd></button></div></section>
+      <section class="inspector-section"><h3 class="section-title">${t('我的标签')}</h3><div class="user-tags">${(d.user_tags || []).map(tag => `<span class="variant-chip"><a href="${hashFor(filterRoute({utag: tag}))}" data-utag-filter="${esc(tag)}"># ${esc(tag)}</a><button data-untag="${esc(tag)}" title="${t('去掉标签')}">×</button></span>`).join('')}<button class="variant-add" id="addTag">＋ ${t('标签')} <kbd>G</kbd></button></div></section>
       ${d.duplicates?.length ? `<section class="inspector-section"><h3 class="section-title">${t('重复副本 · 共 {n} 份', {n: d.duplicates.length + 1})}</h3><div class="dup-list">${d.duplicates.map(x => `<button class="dup-copy" data-copy="${esc(x.uuid)}" title="${t('查看这份副本')}"><img src="/image?id=${encodeURIComponent(x.uuid)}&size=thumb" alt="" loading="lazy"><span><b>${x.pos}/${x.size}</b> ${esc((x.added_at || '').slice(0, 10))}<br><small>${x.names.length ? x.names.map(esc).join(' · ') : t('未识别')}</small></span></button>`).join('')}</div></section>` : ''}
       ${viewOpts.meta ? `<section class="inspector-section"><dl class="facts"><div><dt>${t('尺寸')}</dt><dd class="mono">${number(d.width)} × ${number(d.height)}</dd></div><div><dt>${t('加入')}</dt><dd class="mono">${esc((d.added_at || '').slice(0, 16).replace('T', ' '))}</dd></div><div><dt>${t('文件')}</dt><dd title="${esc(d.filename)}">${esc(d.filename)}</dd></div><div><dt>${t('文件形态')}</dt><dd>${d.src_kind === 'deriv' ? t('本地副本') : t('原图')}</dd></div></dl></section>
       <details class="inspector-section"><summary>${t('画面标签')}</summary><div class="tags">${d.tags.map(x => `<button class="tag" data-tag="${esc(x.value)}" title="${t('按此标签筛选图库 · WD {conf}', {conf: x.conf.toFixed(2)})}">${esc(x.value.replaceAll('_', ' '))}</button>`).join('') || `<p>${t('暂无')}</p>`}</div></details>` : ''}
@@ -87,7 +87,10 @@ export async function inspect(ident, quiet = false) {
     $('closeInspector').onclick = closeInspector;
     $('expand').onclick = $('previewButton').onclick = () => openViewer(indexOf(ident));
     for (const b of $('inspector').querySelectorAll('[data-nav]')) b.onclick = () => step(Number(b.dataset.nav));
-    for (const b of $('inspector').querySelectorAll('[data-tag]')) b.onclick = () => go({page: 'library', tag: b.dataset.tag});
+    // 从详情栏点标签和从工具栏选一样：在图库页上叠加到现有的筛选上，在别的页面去图库只看它（#386 的 2-30）。
+    // 链接在点的那一刻按当前的筛选算，详情栏开着时筛选可能已经变了。
+    for (const b of $('inspector').querySelectorAll('[data-tag]')) b.onclick = () => go(filterRoute({tag: b.dataset.tag}));
+    for (const a of $('inspector').querySelectorAll('[data-utag-filter]')) a.onclick = e => { e.preventDefault(); go(filterRoute({utag: a.dataset.utagFilter})); };
     for (const b of $('inspector').querySelectorAll('[data-copy]')) b.onclick = () => inspect(b.dataset.copy);
     for (const b of $('inspector').querySelectorAll('[data-curate]')) b.onclick = () => mutate('/api/curate', {ids: [ident], action: b.dataset.curate}, b.dataset.curate === 'exclude' || poolIs(state.route, 'excluded', 'pending'));
     $('skipOne')?.addEventListener('click', () => singleAction('skip'));
