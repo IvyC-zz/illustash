@@ -15,6 +15,16 @@ pub fn available() -> bool {
 }
 /// 现有的带认证本机回环桥接。不走代理，不跟随重定向，不允许任意主机或方法。
 pub fn request(method: &str, route: &str, timeout: u64) -> Result<Json> {
+    request_with(method, route, None, timeout)
+}
+/// 用图动作的文件路由（#450）：POST，正文是 JSON。路径只放在正文里，不进地址，免得出现在日志和诊断里。
+pub(crate) fn post_files(route: &str, body: &serde_json::Value, timeout: u64) -> Result<Json> {
+    request_with("POST", route, Some(&body.to_string()), timeout)
+}
+/// 本机桥上用图动作的路由（desktop/src/bridge.rs）。只收宿主按资产 ID 查出来的路径。
+pub(crate) const FILE_ROUTES: [&str; 4] =
+    ["/platform/files/open", "/platform/files/reveal", "/platform/files/drag", "/platform/files/folder"];
+fn request_with(method: &str, route: &str, body: Option<&str>, timeout: u64) -> Result<Json> {
     if !available() {
         return Err(Error::invalid("桌面平台服务不可用"));
     }
@@ -26,21 +36,31 @@ pub fn request(method: &str, route: &str, timeout: u64) -> Result<Json> {
         .filter(|p| *p > 0)
         .ok_or_else(|| Error::invalid("本机桥地址不正确"))?;
     let token = std::env::var("ILLUSTASH_DESKTOP_TOKEN").expect("app_desktop internal invariant");
-    send(port, &token, method, route, timeout)
+    send_with(port, &token, method, route, body, timeout)
 }
+#[cfg(test)]
 fn send(port: u16, token: &str, method: &str, route: &str, timeout: u64) -> Result<Json> {
+    send_with(port, token, method, route, None, timeout)
+}
+fn send_with(port: u16, token: &str, method: &str, route: &str, body: Option<&str>, timeout: u64) -> Result<Json> {
+    let files = FILE_ROUTES.contains(&route);
     if token.contains(['\r', '\n'])
         || !["GET", "POST"].contains(&method)
         || !(route.starts_with("/pixiv/")
             || route.starts_with("/platform/choose?")
             || (method == "POST" && route == "/platform/diagnostics/open-logs")
+            || (method == "POST" && files && body.is_some())
             || route.starts_with("/platform/update/"))
+        || (body.is_some() && !files)
     {
         return Err(Error::invalid("本机桥参数不正确"));
     }
     let agent = ureq::AgentBuilder::new().redirects(0).timeout(Duration::from_secs(timeout)).build();
-    let result =
-        agent.request(method, &format!("http://127.0.0.1:{port}{route}")).set("X-Illustash-Token", token).call();
+    let call = agent.request(method, &format!("http://127.0.0.1:{port}{route}")).set("X-Illustash-Token", token);
+    let result = match body {
+        Some(body) => call.set("Content-Type", "application/json").send_string(body),
+        None => call.call(),
+    };
     let response = result.map_err(|e| Error::invalid(format!("{UNANSWERED}：{}", failure(e, timeout))))?;
     let mut bytes = Vec::new();
     response
@@ -139,6 +159,21 @@ mod tests {
         assert!(matches!(reply.get("ok"), Some(Json::Scalar(serde_json::Value::Bool(true)))));
         for (method, route) in [("GET", route), ("POST", "/platform/diagnostics/open-logs?path=synthetic")] {
             assert_eq!(message(send(0, "t", method, route, 1)), "本机桥参数不正确");
+        }
+    }
+
+    #[test]
+    fn file_routes_only_take_a_post_body() {
+        let port = bridge(200, r#"{"ok":true}"#);
+        assert!(send_with(port, "t", "POST", "/platform/files/reveal", Some(r#"{"path":"/x.jpg"}"#), 1).is_ok());
+        for (method, route, body) in [
+            ("POST", "/platform/files/reveal", None),
+            ("GET", "/platform/files/open", Some("{}")),
+            ("POST", "/platform/files/open?path=/x.jpg", Some("{}")),
+            ("POST", "/platform/files/run", Some("{}")),
+            ("POST", "/pixiv/login", Some("{}")),
+        ] {
+            assert_eq!(message(send_with(0, "t", method, route, body, 1)), "本机桥参数不正确");
         }
     }
 }

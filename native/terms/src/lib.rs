@@ -10,6 +10,8 @@
 
 pub mod app_accounts;
 mod app_archives;
+mod app_asset_export;
+mod app_asset_files;
 mod app_characters;
 mod app_commands;
 pub mod app_create;
@@ -100,6 +102,7 @@ pub use illustash_core::package;
 use illustash_core::schema as schema_rules;
 use illustash_platform::platform_backup;
 use illustash_platform::platform_credentials;
+use illustash_platform::platform_files;
 use illustash_platform::platform_filesystem;
 use illustash_platform::platform_folder;
 use illustash_platform::platform_photos;

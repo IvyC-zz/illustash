@@ -23,6 +23,15 @@ libc = "0.2"
 # 词条核心链进外壳：外壳兼当 illustash-terms 命令行（main.rs），版本与外壳一致，不另带边车程序。
 illustash-terms = { path = "../native/terms" }
 
+# 把图拖到别的应用（#450，drag.rs）：用 Tauri 已经带进来的同一版本，只多开几个 feature，不引入新的 crate。
+[target.'cfg(target_os = "macos")'.dependencies]
+objc2 = "0.6"
+objc2-foundation = { version = "0.3", default-features = false, features = ["std", "NSArray", "NSGeometry", "NSString", "NSURL"] }
+objc2-app-kit = { version = "0.3", default-features = false, features = ["std", "NSApplication", "NSDragging", "NSDraggingItem", "NSDraggingSession", "NSEvent", "NSGraphicsContext", "NSImage", "NSPasteboard", "NSResponder", "NSView", "NSWindow", "NSWorkspace"] }
+
+[target.'cfg(windows)'.dependencies]
+windows = { version = "0.62", features = ["Win32_Foundation", "Win32_System_Com", "Win32_System_Ole", "Win32_System_SystemServices", "Win32_UI_Shell", "Win32_UI_Shell_Common"] }
+
 [profile.release]
 strip = true
 

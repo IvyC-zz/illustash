@@ -2926,5 +2926,62 @@
   "选中两张以上可以判断它们的关系。": "Select two or more to decide how they relate.",
   "像截图，但有人物。": "They look like screenshots but have people.",
   "后退（{key}）": "Back ({key})",
-  "后退、前进（只在这个图库的页面之间；鼠标侧键、标题左边的 ‹ 也可以）": "Back and forward (within this library’s pages; the mouse side buttons and the ‹ left of the title work too)"
+  "后退、前进（只在这个图库的页面之间；鼠标侧键、标题左边的 ‹ 也可以）": "Back and forward (within this library’s pages; the mouse side buttons and the ‹ left of the title work too)",
+  "在访达中显示": "Show in Finder",
+  "在资源管理器中显示": "Show in File Explorer",
+  "用默认应用打开原图": "Open the original in its default app",
+  "一次最多拖出 {n} 张": "You can drag up to {n} pictures at a time",
+  "{done} / {total} 张": "{done} / {total} pictures",
+  "{n} 个已存在": {
+    "one": "{n} already there",
+    "other": "{n} already there"
+  },
+  "{n} 张读不到原文件": {
+    "one": "{n} original not readable",
+    "other": "{n} originals not readable"
+  },
+  "{n} 张是照片的派生图": {
+    "one": "{n} is a Photos derivative",
+    "other": "{n} are Photos derivatives"
+  },
+  "已取消，导出了 {n} 个文件": {
+    "one": "Cancelled after exporting {n} file",
+    "other": "Cancelled after exporting {n} files"
+  },
+  "已导出 {n} 个文件": {
+    "one": "Exported {n} file",
+    "other": "Exported {n} files"
+  },
+  "不分": "None",
+  "按角色": "By character",
+  "按画师": "By artist",
+  "导出 {n} 张": {
+    "one": "Export {n} picture",
+    "other": "Export {n} pictures"
+  },
+  "把原图复制到选的文件夹，不覆盖已有的文件。": "Copies the originals into the folder you choose. Existing files are not overwritten.",
+  "子文件夹": "Subfolders",
+  "选择文件夹…": "Choose Folder…",
+  "开始导出 {n} 张，进度在「任务」里": {
+    "one": "Exporting {n} picture; progress is in Tasks",
+    "other": "Exporting {n} pictures; progress is in Tasks"
+  },
+  "导出图片": "Export pictures",
+  "导出图片中": "Exporting pictures",
+  "正在导出，完成后再开始下一次": "An export is running; start the next one when it finishes",
+  "把原图复制到一个文件夹": "Copy the originals into a folder",
+  "导出…": "Export…",
+  "选择导出到的文件夹": "Choose a folder to export to",
+  "文件不在了": "The file is no longer there",
+  "无法打开这个文件": "Couldn’t open this file",
+  "无法显示这个文件": "Couldn’t show this file",
+  "无法打开这个文件夹": "Couldn’t open this folder",
+  "照片里的图不能在访达中显示，可以导出一份": "Pictures from Photos can’t be shown in Finder; export a copy instead",
+  "原文件不在了：来源文件夹里的文件可能被移动或删除": "The original is no longer there: the file in the source folder may have been moved or deleted",
+  "拖出需要在 Illustash App 里": "Dragging out works in the Illustash app",
+  "一次拖出的张数不正确": "Too many pictures to drag at once",
+  "没有导出过": "Nothing has been exported yet",
+  "导出到的文件夹不在了": "The export folder is no longer there",
+  "无法建立文件夹：{e}": "Couldn’t create the folder: {e}",
+  "写入导出文件夹失败：{e}": "Couldn’t write to the export folder: {e}"
 }
