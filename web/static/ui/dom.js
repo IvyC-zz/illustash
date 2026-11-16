@@ -6,8 +6,20 @@ import {prefs} from '../core/prefs.js';
 import {session, STALE, onStale, readError} from '../core/session.js';
 import {onLatest} from '../core/edits.js';
 import {workLabel} from '../core/labels.js';
+import {AREAS, pageOf} from '../core/pages.js';
+import {state} from '../core/state.js';
 import {createLayer} from './overlay.js';
 export const $ = id => document.getElementById(id);
+// 主区切换：显示 area（core/pages.js 登记的主区，默认是当前页的），隐藏其余几个。网格的空状态跟着网格：换到别的主区时
+// 收起，回到网格时由 reload 按读到的结果显示。
+export function showArea(area = pageOf(state.route).area) {
+  for (const a of AREAS) $(a).hidden = a !== area;
+  if (area !== 'grid') $('empty').hidden = true;
+}
+// 名称联网查询还没授权时，搜索结果的说明后面接的「允许查询…」。点击由 ui/settings.js 的 [data-names-allow] 处理。
+export const namesAllowButton = `<button type="button" class="link-button" data-names-allow>${t('允许查询…')}</button>`;
+// 网格空了时空状态下面的一个去处（core/pages.js 的 emptyNext）。
+export const emptyLink = (href, label) => `<a class="quiet link" href="${href}">${label}</a>`;
 // ---------- 页面说明「?」（#527） ----------
 // 页面标题旁的「?」：这一页是什么、怎么操作，点开（键盘聚焦后 Enter／Space）才显示，标题下面只留数量、状态和
 // 必须一眼看到的警告。说明是非模态浮层，Esc、点外关闭由浮层管理器处理，关了焦点回到按钮。标题重画时元素换掉，

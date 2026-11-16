@@ -3,10 +3,10 @@
 const {test, before, afterEach} = require('node:test');
 const assert = require('node:assert/strict');
 const web = require('./web.cjs');
-let human, ui, effects;
+let human, ui, effects, format;
 before(async () => {
   await web.ready();
-  [human, ui, effects] = await Promise.all([web.load('core/human.js'), web.load('ui/human.js'), web.load('ui/effects.js')]);
+  [human, ui, effects, format] = await Promise.all([web.load('core/human.js'), web.load('ui/human.js'), web.load('ui/effects.js'), web.load('core/format.js')]);
 });
 const realTimeout = globalThis.setTimeout;
 let cleanup = () => {};
@@ -250,5 +250,5 @@ test('the home folder is shortened on macOS and Windows, and nothing else is (#5
     ['C:\\Users\\合成\\Downloads\\x.jsonl', '~\\Downloads\\x.jsonl'], ['d:/users/合成/x', '~/x'], ['C:\\Users\\合成', '~'],
     ['/Users', '/Users'], ['/Volumes/盘/Users/合成/x', '/Volumes/盘/Users/合成/x'], ['C:\\Data\\Users\\合成', 'C:\\Data\\Users\\合成'],
     ['C:\\UsersX\\合成', 'C:\\UsersX\\合成'], ['', ''], [null, '']];
-  for (const [path, shown] of cases) assert.equal(human.home(path), shown, path);
+  for (const [path, shown] of cases) assert.equal(format.home(path), shown, path);
 });

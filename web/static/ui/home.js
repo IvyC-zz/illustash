@@ -1,6 +1,6 @@
 // 首页（桌面布局，#199）：按加入日期分组的最新图片、同步条，以及「认一认」卡片。
 import {edits} from '../core/edits.js';
-import {dateText, esc, number} from '../core/format.js';
+import {dayLabel, esc, number} from '../core/format.js';
 import {I18N, t} from '../core/i18n.js';
 import {nameWithWork} from '../core/labels.js';
 import {implement, onPage} from '../core/pages.js';
@@ -8,18 +8,15 @@ import {charHash, hashFor} from '../core/route.js';
 import {api, post, readError} from '../core/session.js';
 import {state} from '../core/state.js';
 import {INSP_ICONS, indexOf, inspect, openViewer, wirePeek} from './detail.js';
-import {$, toast, workSmall} from './dom.js';
+import {$, showArea, toast, workSmall} from './dom.js';
 import {mutate, showList, viewOpts} from './grid.js';
 
 // ---------- 首页：按加入日期分组的最新图片 ----------
-export const dayLabel = day => { const [y, m, d] = day.split('-').map(Number); const date = new Date(y, m - 1, d), now = new Date();
-  const diff = Math.round((new Date(now.getFullYear(), now.getMonth(), now.getDate()) - date) / 864e5);
-  return diff === 0 ? t('今天') : diff === 1 ? t('昨天') : dateText(y, m, d, y !== now.getFullYear()); };
 const weekday = day => { const [y, m, d] = day.split('-').map(Number); return new Intl.DateTimeFormat(I18N.locale, {weekday: 'short'}).format(new Date(y, m - 1, d)); };
 // 首页的状态：它的各天、下一个要读的、「认一认」卡片的状态，以及盯着列表末尾的东西。
 export const home = {days: [], next: '', gen: 0, loading: false, ask: null, askSkip: [], askOff: new Set(), observer: null, resize: null, width: 0};
-export async function renderHome(keep = false) {
-  $('grid').hidden = true; $('empty').hidden = true; $('charIndex').hidden = true; $('settingsPage').hidden = true; $('groupsPage').hidden = true; $('homePage').hidden = false;
+async function renderHome(keep = false) {
+  showArea();
   $('selectionBar').hidden = true; $('resultCount').textContent = ''; $('hint').textContent = t('点图片看详情 · 点角色名只看 TA');
   home.loading = false; home.observer?.disconnect(); dayLoading.clear();
   const gen = ++home.gen, scroll = keep ? $('viewport').scrollTop : 0;
@@ -89,7 +86,7 @@ function homeSizes() {
   const i = viewOpts.homeSize in [0, 1, 2] ? viewOpts.homeSize : 1;
   return {target: [150, 190, 240][i], heroW: [200, 240, 280][i]};
 }
-export function homeDay(g, width) {
+function homeDay(g, width) {
   const {target, heroW} = homeSizes();
   const hero = viewOpts.hero && g.items.length >= 4 && width > heroW * 2.4 ? g.items.find(x => x.uuid === g.hero) || g.items[0] : null;
   const rest = hero ? g.items.filter(x => x !== hero) : g.items;
@@ -141,7 +138,7 @@ export async function moreOfDay(day) {
     showList(home.days.flatMap(x => x.items));
   } catch (e) { if (gen === home.gen && onPage(state.route, 'home')) toast(e.message); } finally { if (gen === home.gen) dayLoading.delete(day); }
 }
-export function drawHome() {
+function drawHome() {
   if (!onPage(state.route, 'home')) return;
   const page = $('homePage'); home.width = page.clientWidth;
   if (!home.days.length) { page.innerHTML = `<p class="empty">${t('没有符合当前 R18 设置的图片。')}</p>`; showList([]); return; }

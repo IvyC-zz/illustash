@@ -78,7 +78,7 @@ test('focus hands the focus to the named control', () => {
 });
 test('isBackdropClick is true only for the dialog itself outside its box', () => {
   const d = {getBoundingClientRect: () => ({left: 10, right: 100, top: 10, bottom: 100})};
-  assert.equal(dialog.isBackdropClick(d, {target: d, ...outside}), true);
-  assert.equal(dialog.isBackdropClick(d, {target: d, ...inside}), false);
-  assert.equal(dialog.isBackdropClick(d, {target: {}, ...outside}), false);
+  assert.equal(overlay.isBackdropClick(d, {target: d, ...outside}), true);
+  assert.equal(overlay.isBackdropClick(d, {target: d, ...inside}), false);
+  assert.equal(overlay.isBackdropClick(d, {target: {}, ...outside}), false);
 });

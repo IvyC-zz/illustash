@@ -12,11 +12,10 @@ import {pollIndex, indexAction} from '../core/jobs.js';
 import {remoteNames, remoteNote} from '../core/settings.js';
 import {catalog, forgetActivity, recentOf, loadActivity as readActivity, searchCharacters, loadTagged, loadWorkTree, loadLocalLinks, castWorks, PSEUDO_NOTES, BUCKETS, castRows,
   WORK_NAMES, workName, loadIndex, searchWorks, shelfRows, saveWatch, watchTarget, saveWork} from '../core/catalog.js';
-import {$, toast, toastMore, error, readFailure, wireFolds, reconcileSections, searchIcon} from './dom.js';
+import {$, toast, toastMore, error, readFailure, wireFolds, namesAllowButton, reconcileSections, searchIcon, showArea} from './dom.js';
 import {chooseWork, openDialog} from './dialog.js';
 import {createLayer, openModal} from './overlay.js';
 import {combo, openPicker, toggleMascot} from './palette.js';
-import {namesAllowButton} from './settings.js';
 import {charHash, charRoute, go} from '../core/route.js';
 import {fetchChar, refreshMeta} from '../core/meta.js';
 import {closeInspector} from './detail.js';
@@ -25,8 +24,8 @@ import {renderHeading} from './shell.js';
 // ---------- 角色：书架（作品标签页、海报、分档）和列表 ----------
 // 「角色」页显示什么：书架还是列表、哪个作品标签页、搜索结果、列表的排序和档位。
 export const cast = {mode: prefs.get('castMode', 'shelf'), tab: 'all', list: null, sort: 'count', dir: -1, bucket: 'all', pop: false, popQ: ''};
-export async function renderIndex() {
-  $('grid').hidden = true; $('empty').hidden = true; $('settingsPage').hidden = true; $('groupsPage').hidden = true; $('charIndex').hidden = false; closeInspector(); $('selectionBar').hidden = true;
+async function renderIndex() {
+  showArea(); closeInspector(); $('selectionBar').hidden = true;
   $('resultCount').textContent = '';
   if (state.route.section === 'works') { renderShelf(); return; }
   drawn.clear();
@@ -45,7 +44,7 @@ export async function renderIndex() {
 export async function refreshLocalLinks() {
   if (await loadLocalLinks() && onPage(state.route, 'characters')) renderHeading();
 }
-export async function loadActivity() {
+async function loadActivity() {
   let fresh; try { fresh = await readActivity(); } catch (e) { error(readError(e)); return; }
   if (fresh && onPage(state.route, 'characters')) drawCast();
 }

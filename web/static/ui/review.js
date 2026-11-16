@@ -11,23 +11,23 @@ import {charHash, go, hashFor} from '../core/route.js';
 import {api, post, readError} from '../core/session.js';
 import {state} from '../core/state.js';
 import {closeInspector, peekAt, wirePeek} from './detail.js';
-import {$, error, readFailure, reconcileSections, toast} from './dom.js';
+import {$, emptyLink, error, readFailure, reconcileSections, showArea, toast} from './dom.js';
 import {mutate} from './grid.js';
 import {markOc, openPicker, targets} from './palette.js';
 import {navCount, renderHeading} from './shell.js';
 
 // ---------- 未匹配图片的相似分组 ----------
 // 'look'：中心接近；'trait'：离得更远，但有相同的独特 WD 特征（较弱的线索）。
-export const nearText = g => g.near_kind === 'trait' ? t('外观相似：第 {n} 组', {n: g.near}) : t('可能和第 {n} 组是同一人', {n: g.near});
+const nearText = g => g.near_kind === 'trait' ? t('外观相似：第 {n} 组', {n: g.near}) : t('可能和第 {n} 组是同一人', {n: g.near});
 // 未识别，按组整理：CCIP 即使叫不出名字（45%），也能可靠地把同一个人的图放在一起（99%）。
 // 大多数代表图意见一致的组整组问「是 TA 吗？」；其余的组给出「设为…」/「原创角色」/「跳过」。
 // 点一张图，把它排除在这组的回答之外。回答过的组原地离开页面（不会因重新加载而跳动）。
 export const groups = {list: [], shown: 40, off: new Map(), revision: 0};
 // 各组的先后：一键就能确认的组排在前面（大的在前），然后是还要起名字的组。组页空了时的「下一组」也按它走。
-export const groupOrder = clusters => [...clusters].sort((a, b) => !!b.lead - !!a.lead || b.size - a.size || a.cid - b.cid);
+const groupOrder = clusters => [...clusters].sort((a, b) => !!b.lead - !!a.lead || b.size - a.size || a.cid - b.cid);
 export async function renderGroups(keep = false) {
   if (!onPage(state.route, 'groups')) return;
-  $('grid').hidden = true; $('empty').hidden = true; $('charIndex').hidden = true; $('settingsPage').hidden = true; $('groupsPage').hidden = false;
+  showArea();
   closeInspector(); $('selectionBar').hidden = true; $('resultCount').textContent = ''; $('hint').textContent = t('点一下图片：不算在这组里 · 长按或 Space 看大图 · 组头的按钮对整组生效，都可以撤销');
   const scroll = $('viewport').scrollTop, revision = ++groups.revision, nsfw = state.nsfw;
   let result; try { result = await api('/api/clusters?nsfw=' + state.nsfw); } catch (e) { if (onPage(state.route, 'groups') && revision === groups.revision && nsfw === state.nsfw) readFailure($('groupsPage'), e); return; }
@@ -65,7 +65,7 @@ let similarTimer = 0;
 export async function renderSimilar() {
   if (!onPage(state.route, 'similar')) return;
   clearTimeout(similarTimer);
-  $('grid').hidden = true; $('empty').hidden = true; $('charIndex').hidden = true; $('settingsPage').hidden = true; $('groupsPage').hidden = false;
+  showArea();
   closeInspector(); $('selectionBar').hidden = true; $('resultCount').textContent = ''; $('hint').textContent = t('点一组进去看');
   const kind = state.route.kind || '';
   let result; try { result = await api('/api/similar?' + new URLSearchParams({kind, nsfw: state.nsfw})); } catch (e) { if (onPage(state.route, 'similar') && kind === (state.route.kind || '')) readFailure($('groupsPage'), e); return; }
@@ -122,9 +122,9 @@ function identityCard(x, i) {
 }
 // how：'more' 在后面再接一页；'keep' 判断或撤销之后，按现在显示的对数从头重读、留在原来的滚动位置，判过的那对原地
 // 移走、撤销的那对回到原处，点过「再显示一些」的人不被带回前 12 对（#386 的 2-36）；不给就是从头显示前 12 对。
-export async function renderIdentity(how = '') {
+async function renderIdentity(how = '') {
   if (!onPage(state.route, 'identity')) return;
-  $('grid').hidden = true; $('empty').hidden = true; $('charIndex').hidden = true; $('settingsPage').hidden = true; $('groupsPage').hidden = false;
+  showArea();
   closeInspector(); $('selectionBar').hidden = true; $('hint').textContent = t('点角色名看全部图 · 高亮的是外部资料建议的做法');
   const keep = how === 'keep', scroll = $('viewport').scrollTop, limit = keep ? Math.max(IDENTITY_PAGE, identity.items.length) : IDENTITY_PAGE;
   const offset = how === 'more' ? identity.items.length : 0;
@@ -169,9 +169,9 @@ async function decideIdentity(i, act) {
 const AUDIT_METHODS = {pixel_hash: [t('像素哈希'), t('和 Danbooru 上的帖子是同一个文件，画师取自帖子的画师标签')],
   gallery_match: [t('本地比对'), t('和 TA 公开作品的小图逐张比对一致')], ocr: [t('签名识别'), t('图上的签名或水印')]};
 const auditMethod = a => a.methods?.includes('pixel_hash') ? 'pixel_hash' : a.methods?.[0] || '';
-export async function renderArtistAudit() {
+async function renderArtistAudit() {
   if (!onPage(state.route, 'artist-audit')) return;
-  $('grid').hidden = true; $('empty').hidden = true; $('charIndex').hidden = true; $('settingsPage').hidden = true; $('groupsPage').hidden = false;
+  showArea();
   closeInspector(); $('selectionBar').hidden = true; $('resultCount').textContent = '';
   $('hint').textContent = t('点原帖或画师主页对照 · 看不出来就先留着 · 都可以撤销');
   const n = Number(prefs.get('artistAuditN', 50)) || 50, scroll = $('viewport').scrollTop;
@@ -269,4 +269,23 @@ implement({
   identity: {render: () => renderIdentity(), refresh: why => { if (why === 'undo') renderIdentity('keep'); else if (why === 'nsfw') renderIdentity(); }},
   // 画师抽查不按 R18 筛选（固定的一批随机图）：切换 R18 只重画标题里的提醒（#386 的 2-35）。
   'artist-audit': {render: () => renderArtistAudit(), refresh: why => { if (why === 'undo') renderArtistAudit(); else if (why === 'nsfw') renderHeading(); }},
+  // 一组图的页面（#/g/<id>，网格页）要先读分组：标题里相近的一组和这组的特征，以及空了时「下一组」的先后。
+  group: {prepare: async route => {
+    let result; try { result = await api('/api/clusters?nsfw=' + state.nsfw); } catch (e) { if (state.route === route) error(readError(e)); return false; }
+    if (state.route !== route) return false;  // 分组加载期间已经导航走了：这个回应不属于任何页面
+    const g = result.clusters.find(x => String(x.cid) === route.id);
+    state.groupNear = g?.near ? nearText(g) : null; state.groupNearId = g?.near || null; state.groupTraits = g?.traits || [];
+    state.groupOrder = groupOrder(result.clusters).map(x => String(x.cid));
+  },
+  // 一组整理完了（#386 的 2-12）：去下一组，或回到按组整理。
+  emptyNext: r => (state.groupOrder.some(id => id !== r.id) ? `<button class="quiet" data-empty="next-group">${t('下一组')} →</button>` : '') + emptyLink('#/groups', t('回到按组整理')),
+  emptyAct: act => { if (act === 'next-group') nextGroup(); }},
 });
+// 「下一组」：重读分组，取原来排在这组后面、还在的第一组；后面都没了就取最前面那组；一组都没了回到按组整理。
+async function nextGroup() {
+  const at = state.route.id, order = state.groupOrder, from = order.indexOf(at);
+  let result; try { result = await api('/api/clusters?nsfw=' + state.nsfw); } catch (e) { error(readError(e)); return; }
+  const left = new Set(result.clusters.map(x => String(x.cid))); left.delete(at);
+  const pick = order.slice(from + 1).find(id => left.has(id)) || groupOrder(result.clusters).map(x => String(x.cid)).find(id => id !== at);
+  location.hash = pick ? '#/g/' + encodeURIComponent(pick) : '#/groups';
+}

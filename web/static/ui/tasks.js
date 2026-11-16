@@ -2,7 +2,7 @@
 // core/jobs.js。
 import {diagnosticLine} from '../core/diagnostics.js';
 import {t, tb} from '../core/i18n.js';
-import {esc, number, stamp, localTime} from '../core/format.js';
+import {esc, home, megabytes, number, stamp, localTime} from '../core/format.js';
 import {state} from '../core/state.js';
 import {api, post, shared, readError} from '../core/session.js';
 import {SYNC_ACTIVE, INDEX_ACTIVE, NAMES_ACTIVE, SIMILAR_ACTIVE, PROV_ACTIVE, RUN_STATUS, onJob, syncLine, syncBar, syncDoneText, indexLine, indexEndText, resumeIndex, discardIndex,
@@ -14,7 +14,6 @@ import {confirmAction} from './dialog.js';
 import {createLayer} from './overlay.js';
 import {openIndexAdd} from './catalog.js';
 import {modelsLine, modelsBar, modelsActions} from './models.js';
-import {home} from '../core/human.js';
 import {loadModels, onModels} from '../core/models.js';
 // 「开始」先显示有哪些内容会离开本机；授权只覆盖这一次运行。
 let provenanceArmed = false;
@@ -32,7 +31,7 @@ export function syncDamaged(d) {
     `<p class="muted-note">${t('这些文件读得到，但不是能打开的图片：已经加入图库，图上显示「无法打开」，不参与识别。修好或换成正常的图片后，下次同步会重新识别。')}</p>${rows}${more}`);
 }
 // 由 worker 的数字画的进度条（docs/BACKEND_TASKS.md）：这一步的条目数，以及相对本次运行上限的流量。
-export function provenanceBars(s) {
+function provenanceBars(s) {
   const p = s.progress; if (!p || !p.total) return '';
   const bar = (label, done, total, detail) => `<div class="prov-bar-row"><span class="prov-bar-label">${label}</span><span class="prov-bar" role="progressbar" aria-valuemin="0" aria-valuemax="${total}" aria-valuenow="${done}"><span style="width:${Math.min(100, done / total * 100).toFixed(1)}%"></span></span><span class="prov-bar-num">${detail}</span></div>`;
   // 这一步有两层时显示两层（本地比对：全部画师，然后是当前画师的作品），然后是流量。
@@ -73,7 +72,7 @@ export function taskList() {
   if (m?.on_demand && (m.status !== 'ready' || m.job?.status === 'running')) list.push({key: 'models', name: t('识别模型'), busy: m.job?.kind === 'import' ? t('导入识别模型中') : t('下载识别模型中'),
     active: m.job?.status === 'running', warn: m.job?.status === 'failed', line: modelsLine(m), body: modelsBar(m), action: modelsActions(m, true)});
   if (['running', 'done', 'error'].includes(ex.status)) list.push({key: 'export', name: t('导出图库'), busy: t('导出图库中'), active: ex.status === 'running', warn: ex.status === 'error',
-    line: ex.status === 'running' ? t('正在导出…') : ex.status === 'done' ? t('已导出 {mb} MB', {mb: (ex.bytes / 1048576).toFixed(0)}) : t('导出失败：{error}', {error: tb(ex.error || '')}), body: '', action: ''});
+    line: ex.status === 'running' ? t('正在导出…') : ex.status === 'done' ? t('已导出 {mb} MB', {mb: megabytes(ex.bytes)}) : t('导出失败：{error}', {error: tb(ex.error || '')}), body: '', action: ''});
   // 导入（图库归档、识别结果、人工结论共用一个槽；#386 的 2-37）：和导出一样，运行中、结束后都在这里有一行，运行时可以取消。
   const im = state.importTask;
   if (['running', 'stopping', 'done', 'error', 'cancelled'].includes(im?.status)) list.push({key: 'import',
@@ -105,6 +104,7 @@ function taskAsks() {
 // 自动运行的开关在设置的哪几节（#386 的 2-37）：同步和相似图片在「图库」，检查新角色和角色名称在「角色资料」，
 // 找回画师在「画师」。
 const footLink = (section, label) => `<a class="link" href="#/settings/${section}">${label}</a>`;
+// renderTasks 和 taskPanel 也 导出给样式清单页调用（tools/styleguide/live.js，#352）：改名或改参数时，tools/check_styleguide.py 会报出来。
 export function renderTasks() {
   const list = taskList(), active = list.filter(t => t.active), warn = list.some(t => t.warn), asks = taskAsks();
   const button = $('taskButton'), badge = $('taskBadge');

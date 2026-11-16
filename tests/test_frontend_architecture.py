@@ -173,7 +173,9 @@ class FrontendArchitectureTest(unittest.TestCase):
                  "document.documentElement.addEventListener('keydown', e => {});",
                  "document.addEventListener('pointerdown', e => {});",
                  "document.addEventListener('mousedown', e => {});",
-                 "document.addEventListener('keyup', e => {});"]
+                 "document.addEventListener('keyup', e => {});",
+                 "document.addEventListener('change', e => {});",   # #431 ③-12
+                 "document.onchange = () => {};"]
         for text in cases:
             with self.subTest(text=text), Tree() as tree:
                 tree.append('ui/artists.js', '\n' + text + '\n')

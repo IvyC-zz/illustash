@@ -2,14 +2,12 @@
 import {esc, number} from '../core/format.js';
 import {t, tb} from '../core/i18n.js';
 import {hashFor} from '../core/route.js';
-import {api, readError, session} from '../core/session.js';
+import {api, session} from '../core/session.js';
 import {state} from '../core/state.js';
 import {confirmAction} from './dialog.js';
-import {error, toast} from './dom.js';
-import {renderHeading} from './shell.js';
+import {toast} from './dom.js';
 
 // ---------- 画师（provenance/，这里只读）：只在找到时显示，从不显示成空栏 ----------
-const artistNames = {};
 // ---------- 按需查找画师（docs/PROVENANCE.md 第 9 节）：点击即授权这一次查找 ----------
 const LOOKUP_NOTE = t('查找画师会把所选图片的像素哈希和 IQDB 签名（一串文本，不是图片）发给 Danbooru，按结果显示画师和原帖。\n「找 TA 的其他图」会下载这位画师公开作品的小缩略图，只在本机比对；缩略图比完就删，只留比对用的签名。\n\n以后点这两个按钮不再提示。继续吗？');
 let lookupTimer = null;
@@ -39,14 +37,7 @@ async function artistLookup(body, label, after) {
 }
 export const findArtists = (ids, after) => artistLookup({action: 'lookup', ids}, ids.length > 1 ? t('正在查找 {n} 张图的画师…', {n: number(ids.length)}) : t('正在查找画师…'), after);
 export const findArtistWorks = (artist, name, after) => artistLookup({action: 'artist', artist}, t('正在找 {name} 的其他图…', {name: name || t('这位画师')}), after);
-export function artistName(id) {
-  if (!(id in artistNames)) {
-    artistNames[id] = '…';
-    api('/api/artist?' + new URLSearchParams({id})).then(r => { artistNames[id] = r.name || t('未知画师'); if (state.route.artist === id) renderHeading(); }).catch(e => error(readError(e)));
-  }
-  return artistNames[id];
-}
-export function artistSection(d, ident) {
+export function artistSection(d) {
   const find = `<div class="artist-empty"><span class="muted-note">${d.maybe?.length ? t('还没确定画师') : t('还不知道画师')}</span><button class="quiet" data-artist-find title="${t('用像素哈希和 IQDB 查这张图的画师，几秒钟（只发哈希文本，不发图片）')}">${t('查找画师')}</button></div>`;
   if (!d.artists?.length && !d.posts?.length && !d.maybe?.length) return `<section class="inspector-section"><h3 class="section-title">${t('画师')}</h3>${find}</section>`;
   const link = (url, label, title = '') => `<a class="link" href="${esc(url)}" target="_blank" rel="noreferrer noopener"${title ? ` title="${esc(title)}"` : ''}>${esc(label)}</a>`;

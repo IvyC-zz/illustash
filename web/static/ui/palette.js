@@ -14,11 +14,10 @@ import {api, post, readError} from '../core/session.js';
 import {currentLibraryId, remoteNames, remoteNote} from '../core/settings.js';
 import {state} from '../core/state.js';
 import {refreshLocalLinks} from './catalog.js';
-import {$, toast} from './dom.js';
+import {$, namesAllowButton, toast} from './dom.js';
 import {openDialog} from './dialog.js';
 import {createLayer, openModal} from './overlay.js';
 import {mutate, reload} from './grid.js';
-import {namesAllowButton} from './settings.js';
 import {renderHeading} from './shell.js';
 
 // 命令面板搜索的防抖。
@@ -146,6 +145,7 @@ function renderStaged() {
   box.hidden = !p?.staged.length;
   box.innerHTML = (p?.staged || []).map((e, i) => `<button class="staged-chip" data-unstage="${i}" title="${t('移除')}">${esc(e.create ? t('新建「{name}」', {name: e.name}) : e.name)} ×</button>`).join('');
 }
+// 导出给样式清单页调用（tools/styleguide/live.js，#352）：改名或改参数时，tools/check_styleguide.py 会报出来。
 export function stage(e) {
   const p = palette, k = stageKey(e), at = p.staged.findIndex(x => stageKey(x) === k);
   if (at >= 0) p.staged.splice(at, 1); else p.staged.push(e);

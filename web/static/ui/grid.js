@@ -14,7 +14,7 @@ import {browsing, cleanup, defaultSort, hashFor, stepHistory} from '../core/rout
 import {api, post, readError} from '../core/session.js';
 import {state} from '../core/state.js';
 import {offerWatch} from './catalog.js';
-import {$, error, toast} from './dom.js';
+import {$, error, showArea, toast} from './dom.js';
 import {renderChrome, renderHeading} from './shell.js';
 import {findArtists} from './artists.js';
 import {answerAsk, closeInspector, closeViewer, ensureVisible, indexOf, inspect, openViewer, peek, pickAlternative, showViewer, singleAction, step, zoomView} from './detail.js';
@@ -78,7 +78,7 @@ export async function reload(reset = false, place = null) {
   if (pageOf(state.route).panel) return;
   const epoch = state.readEpoch, route = state.route;
   const gen = ++state.generation; abortList?.abort(); abortList = new AbortController(); state.pending.clear();
-  $('charIndex').hidden = true; $('settingsPage').hidden = true; $('groupsPage').hidden = true; $('grid').hidden = false; error('');
+  showArea('grid'); error('');
   if (reset) { $('viewport').scrollTop = 0; $('resultCount').textContent = t('正在读取…'); state.totalReady = false; }
   layout();
   try {
@@ -407,11 +407,11 @@ function setSelected(id, on) {
   if (state.sel.all) on ? state.sel.exclude.delete(id) : state.sel.exclude.add(id);
   else on ? state.sel.ids.add(id) : state.sel.ids.delete(id);
 }
-export function clearSelection() { state.sel = {all: false, ids: new Set(), exclude: new Set()}; state.anchor = -1; state.armed = null; renderSelection(); }
+function clearSelection() { state.sel = {all: false, ids: new Set(), exclude: new Set()}; state.anchor = -1; state.armed = null; renderSelection(); }
 export function selectAll() { if (!state.total) return; state.sel = {all: true, ids: new Set(), exclude: new Set()}; state.selecting = true; renderSelection(); }
 export function toggleSelecting() { state.selecting = !state.selecting; if (!state.selecting) clearSelection(); renderSelection(); }
 // 取消选择并退出选择模式（Esc、选择栏的 ×、写入之后、切换 R18）。
-export function quitSelecting() { state.selecting = false; clearSelection(); }
+function quitSelecting() { state.selecting = false; clearSelection(); }
 // 换页时复位网格这一侧的状态：退出选择模式、清空选择、光标归位、张数等新读取（ui/shell.js applyRoute 调用）。
 export function resetForRoute() { quitSelecting(); state.cursor = -1; state.totalReady = false; }
 // 键盘光标移到第 i 张（详情栏和大图翻页时跟着走）。
@@ -679,9 +679,9 @@ export async function mutate(path, body, leaving, {advance = false} = {}) {
   finally { edits.busy = false; document.body.classList.remove('busy'); setLatest(edits.latest); }
 }
 function collapse(gone) {
-  const kept = []; let removed = 0;
-  for (let i = 0; i < state.total; i++) { const x = state.items[i]; if (x && gone.has(x.uuid)) { removed++; continue; } kept[i - removed] = x; }
-  kept.length = state.total - removed; state.items = kept; state.total = kept.length; state.dataVersion++;
+  const left = []; let removed = 0;
+  for (let i = 0; i < state.total; i++) { const x = state.items[i]; if (x && gone.has(x.uuid)) { removed++; continue; } left[i - removed] = x; }
+  left.length = state.total - removed; state.items = left; state.total = left.length; state.dataVersion++;
   // 光标停在离开的最后一张上时，收回到新的最后一张，接着按键还有对象（#386 的 2-6）。
   if (state.cursor >= state.total) state.cursor = state.total - 1;
   renderGrid(true); updateCount();
