@@ -183,6 +183,8 @@ struct Place {
     on_demand: bool,
     /// 会话正在识别或更新角色索引：模型正在使用中。
     in_use: bool,
+    /// 参考包的整个 ZIP 都是清单中的文件。
+    raw_archive: bool,
 }
 impl Place {
     fn app(resources: &Path) -> Result<Self> {
@@ -201,6 +203,7 @@ impl Place {
             proxy: None,
             on_demand: on_demand(),
             in_use: false,
+            raw_archive: false,
         })
     }
     fn mirror(&self) -> String {
@@ -787,12 +790,19 @@ fn import(models: &Models, place: &Place, paths: &[PathBuf]) -> std::result::Res
         |name: String, size: u64, reader: &mut dyn Read, meter: &mut Meter| -> std::result::Result<(), Stop> {
             let result = match wanted(size) {
                 None => "unknown",
-                Some(entry) if usable(&place.root, entry) || usable(&partial, entry) => "already",
+                Some(entry) if !place.raw_archive && (usable(&place.root, entry) || usable(&partial, entry)) => {
+                    "already"
+                }
                 Some(entry) => {
+                    let installed = place.raw_archive
+                        && crate::recognition_compute::models::hash(&place.root.join(&entry.path), &|| Ok(()))
+                            .is_ok_and(|sha| sha == entry.sha256);
                     models.set(|job| job["file"] = entry.path.clone().into());
                     let ok = copy_checked(reader, &partial, entry, meter)?;
                     meter.finish(entry.size);
-                    if ok {
+                    if ok && installed {
+                        "already"
+                    } else if ok {
                         "accepted"
                     } else {
                         "mismatch"
@@ -806,7 +816,7 @@ fn import(models: &Models, place: &Place, paths: &[PathBuf]) -> std::result::Res
         let name = path.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
         let unreadable = |e: std::io::Error| Stop::Failed(format!("读不到所选文件 {name}：{error}", error = e));
         let metadata = fs::metadata(path).map_err(unreadable)?;
-        let zip = path.extension().is_some_and(|x| x.eq_ignore_ascii_case("zip"));
+        let zip = !place.raw_archive && path.extension().is_some_and(|x| x.eq_ignore_ascii_case("zip"));
         if zip {
             let file = fs::File::open(path).map_err(unreadable)?;
             let mut archive = zip::ZipArchive::new(file)
@@ -881,6 +891,55 @@ fn info_at(models: &Models, place: &Place) -> Json {
 pub(crate) fn info(resources: &Path) -> Result<Json> {
     let place = Place::app(resources)?;
     Ok(with_acceleration(resources, &place, info_at(&APP, &place)))
+}
+
+static CCIP_LONGTAIL: Models = Models::new();
+
+fn longtail_place(resources: &Path) -> Result<Place> {
+    use crate::app_ccip_longtail::{self, PACKAGE_BYTES, PACKAGE_NAME, PACKAGE_SHA256, PACKAGE_VERSION};
+    static MANIFEST: OnceLock<Manifest> = OnceLock::new();
+    let manifest = MANIFEST.get_or_init(|| Manifest {
+        format: 1,
+        pack: PACKAGE_VERSION.into(),
+        manual: "https://github.com/shio-vinyl/illustash/blob/main/docs/INSTALL.md#可选的-ccip-长尾角色参考包".into(),
+        mirror: String::new(),
+        modelscope: String::new(),
+        files: vec![Entry {
+            path: PACKAGE_NAME.into(),
+            size: PACKAGE_BYTES,
+            sha256: PACKAGE_SHA256.into(),
+            source: Source::Project {
+                url: "https://github.com/shio-vinyl/illustash/releases/download/ccip-longtail-v1/A-longtail-p75.zip"
+                    .into(),
+            },
+            optional: false,
+        }],
+        wd_coreml: None,
+    });
+    let shared = crate::app_resources::shared_path(resources)?;
+    Ok(Place {
+        root: app_ccip_longtail::package_path(&shared).parent().expect("参考包有存放目录").into(),
+        manifest,
+        preferences: PathBuf::new(),
+        modelscope: String::new(),
+        proxy: None,
+        on_demand: true,
+        in_use: false,
+        raw_archive: true,
+    })
+}
+
+pub(crate) fn longtail_package(resources: &Path) -> Result<Json> {
+    Ok(info_at(&CCIP_LONGTAIL, &longtail_place(resources)?))
+}
+
+pub(crate) fn longtail_package_post(resources: &Path, body: &Json, in_use: bool) -> Result<()> {
+    let mut place = longtail_place(resources)?;
+    if body.get("action").map(Json::text) == Some("delete") && in_use {
+        return Err(Error::Conflict("正在检查角色，请等任务结束后再删除参考包".into()));
+    }
+    place.proxy = proxy();
+    post_at(&CCIP_LONGTAIL, place, body).map(|_| ())
 }
 
 /// 「使用 GPU 加速识别」（#270）在模型卡片上：这个构建有没有加速器、开关（POST /api/preferences），

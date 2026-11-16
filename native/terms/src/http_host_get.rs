@@ -25,6 +25,77 @@ pub(super) fn reply_if_current(request: Request, host: &Host, received: u64, res
 pub(super) fn waited(query: Result<Receiver<Result<Json>>>) -> Result<Json> {
     query.and_then(|rx| rx.recv().map_err(|_| Error::Invalid("研究任务已结束".into()))?)
 }
+
+pub(super) fn ccip_status(host: &Host, session: &Session, started: Option<Json>) -> Result<Json> {
+    use serde_json::{json, Value};
+    let model = crate::app_models::longtail_package(&host.root)?;
+    let local = crate::app_ccip_longtail::status(&session.library, &host.root)?;
+    let model: Value = serde_json::from_str(&model.dump()).map_err(|e| Error::invalid(e.to_string()))?;
+    let task = started
+        .or_else(|| crate::app_ccip_longtail::auto_task(&session.library).map(Json::from))
+        .or_else(|| host.imports.ccip_state(&session.library));
+    let task = task.map(|mut task| {
+        if task.get("phase").is_none() {
+            let phase = if task.get("kind").map(Json::text) == Some("withdraw")
+                || task.get("stage").map(Json::text) == Some("committing")
+            {
+                "write"
+            } else {
+                "scan"
+            };
+            task.set("phase", phase.into());
+        }
+        if task.get("status").map(Json::text) == Some("error") {
+            task.set("status", "failed".into());
+        }
+        if task.get("status").map(Json::text) == Some("stopping") {
+            task.set("status", "running".into());
+            task.set("message", "正在取消参考包检查".into());
+        }
+        let message = task.get("error").or_else(|| task.get("reason")).cloned();
+        if let Some(message) = message {
+            task.set("message", message);
+        }
+        for key in ["done", "total", "message", "result", "diagnostic"] {
+            if task.get(key).is_none() {
+                task.set(key, Json::from(Value::Null));
+            }
+        }
+        task
+    });
+    let task = task
+        .map(|task| serde_json::from_str::<Value>(&task.dump()))
+        .transpose()
+        .map_err(|e| Error::invalid(e.to_string()))?;
+    let blocked = if session.library.frozen() || session.damage().is_some() {
+        Some("frozen")
+    } else if session.syncer.running() || session.index.writing() {
+        Some("syncing")
+    } else if host.imports.busy() {
+        Some("busy")
+    } else if local["vectors"] == 0 {
+        Some("no_vectors")
+    } else {
+        None
+    };
+    Ok(json!({
+        "package": {
+            "version": model["pack"], "heads": local["roles"], "license": "见来源与许可",
+            "file": {"path": model["files"][0]["path"], "size": model["files"][0]["size"], "sha256": model["files"][0]["sha256"]},
+            "status": if model["status"] == "ready" { "ready" } else if model["partial"] == true { "partial" } else { "missing" },
+            "have": model["have"], "partial": model["partial"], "location": model["location"],
+            "sources": model["sources"], "manual": model["manual"],
+        },
+        "download": model["job"],
+        "library": {
+            "enabled": local["enabled"].is_string(), "package_sha256": local["enabled"],
+            "enabled_at": local["enabled_at"], "checked_at": local["checked_at"],
+            "scored": local["scored"], "vectors": local["vectors"], "images": local["candidates"],
+            "assigned": local["assigned"], "needs_scan": local["needs_scan"], "blocked": blocked, "error": local["error"],
+        },
+        "task": task,
+    }).into())
+}
 impl Host {
     /// 图库的设置，连同本宿主强制关闭的项目。
     pub(super) fn library_settings(&self, library: &Library) -> Result<Json> {
@@ -171,9 +242,7 @@ fn read(request: &Request, host: &Host, session: &Session, path: &str) -> Result
         // 全应用范围（#191）：检查更新的选项和上次结果，不属于图库。
         "/api/updates" => crate::app_updates::info().map(|p| Some((p, 200))),
         // 全应用范围（#168）：识别模型是否就位，以及正在进行的下载或导入。
-        "/api/ccip-longtail" => {
-            crate::app_ccip_longtail::status(&session.library, &host.root).map(|value| Some((value.into(), 200)))
-        }
+        "/api/ccip-longtail" => ccip_status(host, session, None).map(|value| Some((value, 200))),
         "/api/models" => crate::app_models::info(&host.root).map(|p| Some((p, 200))),
         "/api/onboarding" => {
             let works = crate::http_read::query(request.url()).get("works").is_some_and(|v| v == "1");

@@ -828,20 +828,20 @@ fn resume_scored(
                         Err(error) => Err(Error::Invalid(error.reason())),
                     }
                 } else {
-                    crate::app_ccip_longtail::score_delivery(library, root, &app, &src, &ids, &check)
+                    crate::app_ccip_longtail::score_delivery(root, &app, &src, &ids, &check)
                 };
                 check()?;
                 let app_tx = app.transaction_with_behavior(TransactionBehavior::Immediate)?;
                 crate::schema::begin_writing(&app_tx)?;
-                if !ids.is_empty() {
-                    import_changes(&app_tx, &src, library, &ids)?;
-                    crate::app_ccip_longtail::publish_delivery(&app_tx, &ids, longtail)?;
-                }
+                import_changes(&app_tx, &src, library, &ids)?;
+                let longtail_observation =
+                    crate::app_ccip_longtail::publish_delivery(&app_tx, &digest, &ids, longtail)?;
                 app_tx.execute("INSERT INTO backend_effects(kind) VALUES ('imported')", [])?;
                 let event = app_tx.last_insert_rowid().to_string();
                 app_tx.execute("INSERT INTO meta VALUES (?,?)", params![marker, event])?;
                 crate::app_sync::check(cancel)?;
                 crate::schema::commit_writing(app_tx)?;
+                crate::app_ccip_longtail::note_auto_task(library, longtail_observation);
                 event
             };
             let status: String =
