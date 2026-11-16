@@ -25,17 +25,19 @@ pub struct Hit {
 
 type Active = BTreeMap<i64, (String, BTreeSet<i64>)>;
 
-fn current(c: &Connection) -> Result<Active> {
+fn current(c: &Connection, scope: Option<&[String]>) -> Result<Active> {
     let mut found = Active::new();
     let mut stmt = c.prepare_cached(
         "SELECT a.id,a.key,r.evidence_id FROM term_active_evidence x
          JOIN term_assets a ON a.id=x.asset_id AND a.namespace='library'
          JOIN term_evidence_set_rows r ON r.set_id=x.set_id
          JOIN term_evidence e ON e.id=r.evidence_id AND e.asset_id=x.asset_id
-         WHERE x.source=?1 AND x.method=?2",
+         WHERE x.source=?1 AND x.method=?2
+           AND (?3 IS NULL OR a.key IN (SELECT value FROM json_each(?3)))",
     )?;
-    let rows =
-        stmt.query_map([SOURCE, METHOD], |r| Ok((r.get::<_, i64>(0)?, r.get::<_, String>(1)?, r.get::<_, i64>(2)?)))?;
+    let rows = stmt.query_map(params![SOURCE, METHOD, scope.map(|ids| json!(ids).to_string())], |r| {
+        Ok((r.get::<_, i64>(0)?, r.get::<_, String>(1)?, r.get::<_, i64>(2)?))
+    })?;
     for row in rows {
         let (id, uuid, evidence) = row?;
         found.entry(id).or_insert_with(|| (uuid, BTreeSet::new())).1.insert(evidence);
@@ -64,11 +66,24 @@ fn replace(c: &Connection, producer: &str, old: &Active, new: &Active) -> Result
 
 /// 以给定冻结包的命中更新整个图库的扩展候选。调用方持有核心写事务。
 pub fn apply(c: &Connection, package: &str, hits: &[Hit]) -> Result<usize> {
-    let before = current(c)?;
+    apply_inner(c, package, None, hits)
+}
+
+/// 只替换给定图片的扩展候选，范围外的命中会被拒绝。调用方持有核心写事务。
+pub fn apply_scoped(c: &Connection, package: &str, scope: &[String], hits: &[Hit]) -> Result<usize> {
+    apply_inner(c, package, Some(scope), hits)
+}
+
+fn apply_inner(c: &Connection, package: &str, scope: Option<&[String]>, hits: &[Hit]) -> Result<usize> {
+    let before = current(c, scope)?;
+    let scope = scope.map(|ids| ids.iter().collect::<BTreeSet<_>>());
     let mut after = Active::new();
     let mut terms = HashMap::new();
     let mut registered = false;
     for hit in hits {
+        if scope.as_ref().is_some_and(|ids| !ids.contains(&hit.uuid)) {
+            return Err(Error::invalid("WD 扩展候选超出扫描范围"));
+        }
         if !hit.probability.is_finite() || !(0.0..=1.0).contains(&hit.probability) {
             return Err(Error::invalid("WD 扩展候选分数不合法"));
         }
@@ -133,7 +148,7 @@ pub fn apply(c: &Connection, package: &str, hits: &[Hit]) -> Result<usize> {
 
 /// 撤回整个扩展来源。调用方持有核心写事务；保留历史证据和仍可被人工引用的角色词条。
 pub fn withdraw(c: &Connection) -> Result<usize> {
-    replace(c, "extension:withdraw", &current(c)?, &Active::new())
+    replace(c, "extension:withdraw", &current(c, None)?, &Active::new())
 }
 
 /// 图片被移除或 WD 底座结果作废时，撤回这些图的扩展候选。调用方持有核心写事务。
@@ -141,9 +156,7 @@ pub fn invalidate(c: &Connection, uuids: &[String]) -> Result<()> {
     if uuids.is_empty() {
         return Ok(());
     }
-    let affected: BTreeSet<_> = uuids.iter().collect();
-    let mut old = current(c)?;
-    old.retain(|_, (uuid, _)| affected.contains(uuid));
+    let old = current(c, Some(uuids))?;
     replace(c, "extension:stale_wd", &old, &Active::new())?;
     Ok(())
 }

@@ -82,23 +82,27 @@ Hugging Face 的地址固定在上游的某个提交上，上游以后改动也�
 
 ### 可选的 WD 角色扩展包
 
-扩展默认关闭。`wd-extension-v1.zip` 是在 [GitHub Releases](https://github.com/shio-vinyl/illustash/releases) 单独分发的模型包，含 228 个高阈值角色头。使用支持 `wd-extension` 子命令的构建（0.2.0 尚未包含此命令），先在桌面应用中完成图库升级，再退出应用。从 ZIP 中解出 `b-534.bin`，其大小为 940,701 字节，SHA-256 为 `9da0365457e479eff189150926289c6cf8325cd9bb98c0bd2504c26d7dcae471`。
+扩展默认关闭。打开「设置 › 角色资料 › WD 角色扩展」，下载扩展包后点「启用」。离线安装时，从 [模型 Release](https://github.com/shio-vinyl/illustash/releases/tag/wd-extension-v1) 下载 `wd-extension-v1.zip`，用「从文件导入」选择 ZIP 或解出的模型文件。扩展包有 228 个角色头，文件的大小和 SHA-256 见[第三方组件与许可](THIRD_PARTY.md#模型与数据)。
+
+启用时会检查现有的 WD 向量。之后同步交付新的 WD 识别结果时，会在后台检查这批图片。删除扩展包会保留各图库现有的扩展候选，并暂停后续自动检查。「重新检查」可手动重扫整库。「撤回」移除本图库的扩展候选和由它补上的机器归属，保留人工结论。撤回后可以重新启用。
+
+也可以离线使用命令行。先在桌面应用里完成图库升级并退出，再从 ZIP 中解出模型文件。
 
 macOS 在终端用下面的命令启用扩展。把路径换成自己的图库和解出的文件。应用装在其他目录时，相应修改程序路径。
 
 ```sh
 cli="/Applications/Illustash.app/Contents/Resources/compute/bin/illustash-terms"
-"$cli" wd-extension --library "/path/to/图库.pilib" --package "/path/to/b-534.bin"
+"$cli" wd-extension --library "/path/to/图库.pilib" --package "/path/to/wd-extension-v1.bin"
 ```
 
 Windows 在 PowerShell 中使用安装目录内的控制台程序。
 
 ```powershell
 $cli = '<安装目录>\compute\bin\illustash-terms.exe'
-& $cli wd-extension --library 'C:\path\to\图库.pilib' --package 'C:\path\to\b-534.bin'
+& $cli wd-extension --library 'C:\path\to\图库.pilib' --package 'C:\path\to\wd-extension-v1.bin'
 ```
 
-启用命令离线重扫该图库已经保存的 WD 特征，新增候选只会给没有既有主归属和人工确认的图片补上归属。以后有新识别结果或重算 WD 特征时，按需重跑启用命令。要撤回全部扩展候选及其机器归属，用同一条命令，将末尾的 `--package` 和文件路径替换为 `--withdraw`。撤回无需保留扩展文件。操作后重新打开图库查看结果。许可见 [第三方组件与许可](THIRD_PARTY.md#模型与数据)。
+要通过命令行撤回扩展，将末尾的 `--package` 和文件路径换成 `--withdraw`。命令行指定的文件只供本次启用使用。要让桌面应用自动检查新图，仍需在设置中下载或导入共享扩展包。
 
 ## Windows
 

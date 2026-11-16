@@ -109,6 +109,13 @@
 
 `unknown` 仅保留暂记未知标志，不删除现有身份。未识别池 = 没有任何当前归属，且未暂记未知。全部查询、搜索、筛选写操作共用同一套归属规则。
 
+**设置 › 角色资料 › WD 角色扩展**（#550）的开关和重扫记录按图库保存。扩展包在共享目录的 `extensions/wd-extension-v1` 下，使用与识别模型相同的续传和 SHA-256 校验，只有点击下载才请求 GitHub。下载及导入走独立任务槽；移除文件后，已有候选保留，自动检查等包重新就位后继续。
+
+- `GET /api/wd-extension` 返回 `package`、共享的 `download`、图库的 `library` 和 `task`。图库的 `vectors`、`images`、`assigned` 为现算数；`library.blocked` 为 `null`、`frozen`、`no_vectors`、`syncing` 或 `busy`。
+- `POST /api/wd-extension/package` 的 `action` 为 `download`、`import`（可选 `paths`，缺省打开原生选择器）、`cancel`、`discard` 或 `delete`。选择器取消返回 `{cancelled:true}`，其余成功应答返回完整状态。
+- `POST /api/wd-extension/enable` 和 `/withdraw` 各接收空对象并返回完整状态。同步完成后按当次交付范围启动 `kind=auto` 的后台检查。检查在 `scan` 阶段通过 `POST /api/wd-extension/cancel` 传 `id` 取消，进入 `write` 后完成事务。完成报告用 `result.changed` 表示候选有变的图片数。
+- 详情栏「也可能是」把 `WD_EXT` 候选放在原有强线索和弱线索之间。同一角色已有强线索时保留原来的候选项。人工确认和否定照常保留，撤回操作通过设置完成。
+
 ### 可疑优先
 
 按以下元组升序排列，最后以 UUID 稳定打破平局：

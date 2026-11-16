@@ -43,6 +43,11 @@ struct Host {
     origin: String,
     entry: Entry,
 }
+impl Host {
+    fn wd_status(&self, session: &Session) -> Result<serde_json::Value> {
+        crate::app_wd_extension::status(&self.root, &session.library, &session.wd_extension, self.wd_busy(session))
+    }
+}
 impl std::ops::Deref for Host {
     type Target = Application;
     fn deref(&self) -> &Application {

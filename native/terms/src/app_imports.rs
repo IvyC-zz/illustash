@@ -244,6 +244,10 @@ impl Imports {
         *current = Some(Current { task, state, reason, kind, generation });
         Ok(answer)
     }
+    pub(crate) fn running(&self) -> bool {
+        lock_ignoring_poison(&self.current).as_ref().is_some_and(|c| c.task.running())
+    }
+
     /// 这个会话的识别导入已被接受或正在运行：同步和索引写入要等它。
     pub(crate) fn recognition_running(&self, generation: u64) -> bool {
         lock_ignoring_poison(&self.current)

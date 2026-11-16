@@ -143,6 +143,7 @@ pub(crate) struct Session {
     pub(crate) token: String,
     pub(crate) generation: u64,
     pub(crate) syncer: crate::app_sync::Syncer,
+    pub(crate) wd_extension: crate::app_wd_extension::Tasks,
     pub(crate) names: crate::app_names::Updater,
     pub(crate) provenance: crate::app_provenance::Runner,
     pub(crate) index: crate::app_index::Updater,
@@ -198,6 +199,7 @@ impl Session {
             generation,
             token,
             syncer: crate::app_sync::Syncer::default(),
+            wd_extension: Default::default(),
             names,
             provenance,
             index,
@@ -471,7 +473,10 @@ impl Application {
         }
         let library = session.library.clone();
         session.provenance.recover();
-        let busy = session.syncer.running();
+        if let Err(error) = self.start_wd_auto(&mut session) {
+            eprintln!("WD 扩展自动检查未能启动：{error}");
+        }
+        let busy = session.syncer.running() || session.wd_extension.running();
         session.index.recover(&library, busy);
         session.names.recover(&library);
         if let Err(error) = session.research.recover(&library, busy) {
@@ -481,6 +486,37 @@ impl Application {
             eprintln!("native verdict事件恢复失败：{error}");
         }
     }
+    pub(crate) fn wd_busy(&self, session: &Session) -> Option<&'static str> {
+        if session.syncer.running() || self.imports.recognition_running(session.generation) {
+            Some("syncing")
+        } else if session.index.writing()
+            || self.imports.running()
+            || self.exports.running()
+            || session.human_exports.running()
+        {
+            Some("busy")
+        } else {
+            None
+        }
+    }
+
+    fn start_wd_auto(&self, session: &mut Session) -> Result<()> {
+        if session.wd_extension.running() || self.wd_busy(session).is_some() {
+            return Ok(());
+        }
+        let ids = session.syncer.take_wd_deliveries();
+        if ids.is_empty() {
+            return Ok(());
+        }
+        let Some(path) = crate::app_models::extension_file(&self.root)? else { return Ok(()) };
+        if !crate::app_wd_extension::auto_enabled(&session.library)? {
+            return Ok(());
+        }
+        let identity = crate::app_tasks::TaskIdentity::new(&session.library, session.generation, &session.token)?;
+        session.wd_extension.start_for(&session.library, identity, crate::app_wd_extension::Action::Auto(path, ids))?;
+        Ok(())
+    }
+
     /// 停止当前会话的任务和导出并等待它们结束；正在进行的导入有一段有限的等待时间，用来删除它解开的文件。
     pub fn shutdown(&self) {
         let mut session = self.session.write().expect("application session lock poisoned");
@@ -529,6 +565,7 @@ impl Session {
         self.research.stop();
         self.names.stop();
         self.syncer.stop();
+        self.wd_extension.stop();
     }
 }
 
