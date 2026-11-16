@@ -55,7 +55,6 @@
    "ui/models.js": 3,
    "ui/palette.js": 21,
    "ui/review.js": 16,
-   "ui/settings.js": 50,
    "ui/shell.js": 20,
    "ui/tasks.js": 17
   },

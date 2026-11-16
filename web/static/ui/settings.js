@@ -46,24 +46,40 @@ let indexArmed = null;
 export async function renderIndexCard(fresh = true) {
   const route = state.route, token = session.token;
   if (!settingsCard('indexCard')) return;
-  if (fresh || !state.index) { try { const value = await shared('/api/index'); if (route !== state.route || token !== session.token) return; setIndex(value); } catch (e) { if (route === state.route && token === session.token) readFailure($('indexCard'), e); return; } }
+  if (fresh || !state.index) {
+    try {
+      const value = await shared('/api/index');
+      if (route !== state.route || token !== session.token) return;
+      setIndex(value);
+    } catch (e) { if (route === state.route && token === session.token) readFailure($('indexCard'), e); return; }
+  }
   const card = $('indexCard'), x = state.index; if (!x || !card) return;
   const s = x.state, active = INDEX_ACTIVE.includes(s.status), watched = x.watch.works.length;
   // 关注哪些作品在「资料库 · 作品」里逐个作品决定；这里只管检查怎么运行。
-  if (!setSettingsHTML(card, cardHead(t('检查新角色'), `${t('定期在 Danbooru 上查关注的作品有没有本地还不认识的角色，只发送作品名。')}<span class="hint-more" title="${t('添加角色时每个角色下载约 20 张公开参考图（约 {mb} MB），在本机算好特征后重新扫描图库。', {mb: x.mb_per_character})}">${t('了解详情')}</span>`, 'library') + `
+  if (!setSettingsHTML(card, cardHead(t('检查新角色'), `${t('定期在 Danbooru 上查关注的作品有没有本地还不认识的角色，只发送作品名。')}`
+    + `<span class="hint-more" title="${t('添加角色时每个角色下载约 20 张公开参考图（约 {mb} MB），在本机算好特征后重新扫描图库。', {mb: x.mb_per_character})}">${t('了解详情')}</span>`, 'library') + `
     ${taskLink(indexLine(s, x.check), active ? 'busy' : s.status === 'error' ? 'warn' : s.status === 'off' ? 'off' : '')}
-    <a class="setting-line set-link" href="#/characters/works"><span>${t('关注的作品')}<small class="line-hint">${t('在资料库的「作品」里逐部开关')}</small></span><span>${watched ? t('{n} 部', {n: number(watched)}) : t('还没有')} ›</span></a>
-    <div class="setting-line"><span>${t('只提示图片较多的角色')}<small class="line-hint">${t('Danbooru 上图片少于这个数的角色不提示')}</small></span><span class="num-field"><input id="watchMin" type="number" min="20" max="5000" step="10" value="${x.watch.min_posts}"> ${t('张')}</span></div>
+    <a class="setting-line set-link" href="#/characters/works"><span>${t('关注的作品')}<small class="line-hint">${t('在资料库的「作品」里逐部开关')}</small></span>`
+      + `<span>${watched ? t('{n} 部', {n: number(watched)}) : t('还没有')} ›</span></a>
+    <div class="setting-line"><span>${t('只提示图片较多的角色')}<small class="line-hint">${t('Danbooru 上图片少于这个数的角色不提示')}</small></span>`
+      + `<span class="num-field"><input id="watchMin" type="number" min="20" max="5000" step="10" value="${x.watch.min_posts}"> ${t('张')}</span></div>
     <p class="set-foot">${t('每次检查前确认联网，只允许本次运行。')}</p>
-    ${x.history.length ? fold('indexHistory', t('最近添加的角色（{n} 个）', {n: number(x.history.reduce((n, h) => n + h.characters.length, 0))}), `<table class="settings-table">${x.history.flatMap(h => h.characters.map(c => `<tr><td>${esc(stamp(h.at))}</td>
+    ${x.history.length ? fold('indexHistory', t('最近添加的角色（{n} 个）', {n: number(x.history.reduce((n, h) => n + h.characters.length, 0))}),
+        `<table class="settings-table">${x.history.flatMap(h => h.characters.map(c => `<tr><td>${esc(stamp(h.at))}</td>
       <td>${c.entity && c.status === 'added' ? `<a class="link" href="${charHash(c.entity.id)}">${esc(c.entity.name)}</a>` : esc(c.tag || c.short_tag)}</td>
       <td>${c.status === 'added' ? t('匹配 {n} 张', {n: number(c.entity?.count ?? c.claims)}) : c.status === 'dropped' ? t('已移除') : t('未添加：{reason}', {reason: esc(tb(c.reason || ''))})}</td>
-      <td>${c.status === 'added' && c.entity ? `<button class="quiet small${indexArmed === c.short_tag ? ' armed' : ''}" data-drop="${esc(c.short_tag)}" ${active ? 'disabled' : ''} title="${t('从索引中移除这个角色：重新扫描后它匹配的图恢复原状，以后检查不再提示')}">${indexArmed === c.short_tag ? t('再点一次确认移除') : t('移除')}</button>` : ''}</td></tr>`)).join('')}</table>`) : ''}`, x.works)) return;
+      <td>${c.status === 'added' && c.entity ? `<button class="quiet small${indexArmed === c.short_tag ? ' armed' : ''}" data-drop="${esc(c.short_tag)}" ${active ? 'disabled' : ''} `
+        + `title="${t('从索引中移除这个角色：重新扫描后它匹配的图恢复原状，以后检查不再提示')}">`
+        + `${indexArmed === c.short_tag ? t('再点一次确认移除') : t('移除')}</button>` : ''}</td></tr>`)).join('')}</table>`) : ''}`, x.works)) return;
   wireFolds(card);
   const act = async body => { try { await indexAction(body); renderIndexCard(false); pollIndex(); } catch (e) { toast(e.message); } };
   $('watchMin').onchange = () => act({action: 'watch', works: x.watch.works, min_posts: Number($('watchMin').value)});
   for (const b of card.querySelectorAll('[data-drop]')) b.onclick = () => {
-    if (indexArmed !== b.dataset.drop) { indexArmed = b.dataset.drop; renderIndexCard(false); setTimeout(() => { if (indexArmed === b.dataset.drop) { indexArmed = null; renderIndexCard(false); } }, 4000); return; }
+    if (indexArmed !== b.dataset.drop) {
+      indexArmed = b.dataset.drop; renderIndexCard(false);
+      setTimeout(() => { if (indexArmed === b.dataset.drop) { indexArmed = null; renderIndexCard(false); } }, 4000);
+      return;
+    }
     indexArmed = null; act({action: 'drop', char: b.dataset.drop, reason: '在设置中手动移除'});
   };
 }
@@ -73,7 +89,13 @@ export async function renderIndexCard(fresh = true) {
 export async function renderNamesCard(fresh = true) {
   const route = state.route, token = session.token;
   if (!settingsCard('namesCard')) return;
-  if (fresh || !state.names) { try { const value = await shared('/api/names'); if (route !== state.route || token !== session.token) return; setNames(value); } catch (e) { if (route === state.route && token === session.token) readFailure($('namesCard'), e); return; } }
+  if (fresh || !state.names) {
+    try {
+      const value = await shared('/api/names');
+      if (route !== state.route || token !== session.token) return;
+      setNames(value);
+    } catch (e) { if (route === state.route && token === session.token) readFailure($('namesCard'), e); return; }
+  }
   // 等待期间页面可能已经重新渲染：总是对现在屏幕上的那张卡片操作。
   const card = $('namesCard'), x = state.names; if (!card) return; if (!x) { card.hidden = true; return; }
   card.hidden = false;
@@ -83,7 +105,9 @@ export async function renderNamesCard(fresh = true) {
   card.innerHTML = cardHead(t('角色名称'), t('从 Bangumi 取角色的中文名，只发送 tag 和作品名。没有中文名时显示日文名，再没有就显示英文名；原始 tag 在悬停提示里。'), 'library') + `
     ${taskLink(namesLine(s) + (s.error ? t('：{reason}', {reason: tb(s.error)}) : ''), active ? 'busy' : s.status === 'error' ? 'warn' : ['off', 'unauthorized'].includes(s.status) ? 'off' : '')}
     ${startupSwitch('names', t('启动时获取'), t('只查新增的角色'))}
-    ${x.counts ? fold('namesStats', t('覆盖率') + (active ? t('（完成后更新）') : '') + (cc ? t('：{p}% 的角色有中文名', {p: Math.round(cc.zh / Math.max(1, cc.total) * 100)}) : ''), `<table class="settings-table"><tr><th></th><th>${t('共')}</th><th>${t('中文名')}</th><th>${t('日文名')}</th><th>${t('英文名')}</th></tr>${row(t('角色'), x.counts.characters)}${row(t('作品'), x.counts.works)}${row(t('造型'), x.counts.skins)}</table>`) : ''}`;
+    ${x.counts ? fold('namesStats', t('覆盖率') + (active ? t('（完成后更新）') : '') + (cc ? t('：{p}% 的角色有中文名', {p: Math.round(cc.zh / Math.max(1, cc.total) * 100)}) : ''),
+        `<table class="settings-table"><tr><th></th><th>${t('共')}</th><th>${t('中文名')}</th><th>${t('日文名')}</th><th>${t('英文名')}</th></tr>`
+        + `${row(t('角色'), x.counts.characters)}${row(t('作品'), x.counts.works)}${row(t('造型'), x.counts.skins)}</table>`) : ''}`;
   wireFolds(card);
   renderModelCard();
   if (fresh && active) pollNamesSoon();
@@ -96,10 +120,13 @@ export function renderModelCard() {
     <div class="form-grid">
       <label for="modelBase">${t('接口地址')}</label><input id="modelBase" value="${esc(m.base || '')}" placeholder="https://api.deepseek.com" spellcheck="false" autocomplete="off">
       <label for="modelName">${t('模型')}</label><input id="modelName" value="${esc(m.model || '')}" placeholder="deepseek-chat" spellcheck="false" autocomplete="off">
-      <label for="modelKey">API key</label><input id="modelKey" type="password" placeholder="${m.configured ? t('已配置（尾号 {hint}），留空则不修改', {hint: esc(m.hint || '')}) : t('未配置')}" spellcheck="false" autocomplete="off">
+      <label for="modelKey">API key</label>`
+        + `<input id="modelKey" type="password" placeholder="${m.configured ? t('已配置（尾号 {hint}），留空则不修改', {hint: esc(m.hint || '')}) : t('未配置')}" spellcheck="false" autocomplete="off">
     </div>
     <div class="sync-now form-actions"><span class="muted-note">${m.configured ? t('已配置') : t('未配置，不会使用')}</span><div class="spacer"></div>
-      ${m.configured ? `<button class="quiet small" id="modelClear">${t('清除 key')}</button><button class="quiet small" id="modelTest">${t('测试连接')}</button>` : ''}<button class="primary" id="modelSave">${t('保存')}</button></div>`)) return;
+      ${m.configured ?
+          `<button class="quiet small" id="modelClear">${t('清除 key')}</button><button class="quiet small" id="modelTest">${t('测试连接')}</button>`
+          : ''}<button class="primary" id="modelSave">${t('保存')}</button></div>`)) return;
   const save = async (body, done) => { try { await saveModelApi(body); toast(typeof done === 'function' ? done() : done); renderSettings(); } catch (e) { toast(e.message); } };
   $('modelSave').onclick = () => {
     const body = {base: $('modelBase').value.trim() || 'https://api.deepseek.com', model: $('modelName').value.trim() || 'deepseek-chat'};
@@ -170,10 +197,13 @@ const segmented = (options, current, {group = '', item = 'data-value'} = {}) => 
 // 启动时的开关；本次启动仍以 --no-* 参数为准。
 function startupSwitch(key, name, hint) {
   const info = state.settings; if (!info?.startup) return '';
-  return `<label class="switch-line"><span><b>${name}</b><small>${hint} · ${t('下次启动时生效')}</small>${(info.forced_off || []).includes(key) ? `<em>${t('这次启动已用命令行参数关闭')}</em>` : ''}</span><input type="checkbox" class="switch" data-startup="${key}" ${info.startup[key] ? 'checked' : ''}></label>`;
+  return `<label class="switch-line"><span><b>${name}</b><small>${hint} · ${t('下次启动时生效')}</small>`
+    + `${(info.forced_off || []).includes(key) ? `<em>${t('这次启动已用命令行参数关闭')}</em>` : ''}</span>`
+    + `<input type="checkbox" class="switch" data-startup="${key}" ${info.startup[key] ? 'checked' : ''}></label>`;
 }
 // 控件在任务面板里的状态行。
-const taskLink = (line, dot = '') => `<div class="setting-line set-status"><span><span class="local-dot${dot ? ' ' + dot : ''}"></span>${esc(line)}</span><button class="quiet small" data-open-tasks>${t('在任务面板查看')}</button></div>`;
+const taskLink = (line, dot = '') => `<div class="setting-line set-status"><span><span class="local-dot${dot ? ' ' + dot : ''}"></span>${esc(line)}</span>`
+  + `<button class="quiet small" data-open-tasks>${t('在任务面板查看')}</button></div>`;
 const CREDITS = [
   ['WD SwinV2 Tagger v3', 'SmilingWolf', t('图片标签与角色识别'), 'https://huggingface.co/SmilingWolf/wd-swinv2-tagger-v3'],
   ['CCIP', 'DeepGHS', t('角色特征比对'), 'https://huggingface.co/deepghs/ccip'],
@@ -185,7 +215,10 @@ const CREDITS = [
   ['Pillow · NumPy · ONNX Runtime', '', t('图像处理与模型推理'), 'https://onnxruntime.ai']];
 async function renderAbout() {
   const route = state.route, token = session.token;
-  if (!state.about) { try { await loadAbout(); if (route !== state.route || token !== session.token) return; } catch (e) { if (route === state.route && token === session.token) readFailure($('setAbout'), e); return; } }
+  if (!state.about) {
+    try { await loadAbout(); if (route !== state.route || token !== session.token) return; }
+    catch (e) { if (route === state.route && token === session.token) readFailure($('setAbout'), e); return; }
+  }
   const card = $('setAbout'), a = state.about; if (!card || !a) return;
   let report;
   try { report = await diagnosticReport(); } catch { report = {available: false, records: []}; }
@@ -193,7 +226,8 @@ async function renderAbout() {
   const version = `${a.version}${a.channel ? ' ' + tb(a.channel) : ''}`;
   const diag = [[t('应用'), a.name], [t('版本'), version], [t('构建'), a.build || '—'], [t('数据库架构'), a.schema], [a.runtime ? t('运行时') : 'Python', a.runtime || a.python], [t('系统'), a.platform],
     ...Object.entries(a.libraries || {}).map(([k, v]) => [tb(k), tb(v) || t('未安装')])];
-  card.innerHTML = `<div class="about-head"><img src="/favicon.svg" alt="" width="44" height="44"><div><h2 class="about-name">${esc(a.name)}</h2><p class="muted-note">${t('版本 {v}', {v: esc(version)})}${a.build ? ' · ' + t('构建 {build}', {build: esc(a.build)}) : ''}</p></div></div>
+  card.innerHTML = `<div class="about-head"><img src="/favicon.svg" alt="" width="44" height="44"><div><h2 class="about-name">${esc(a.name)}</h2>`
+    + `<p class="muted-note">${t('版本 {v}', {v: esc(version)})}${a.build ? ' · ' + t('构建 {build}', {build: esc(a.build)}) : ''}</p></div></div>
     <p class="settings-note">${t('在本机识别、整理收藏的插画和里面的角色。图片和识别数据都只在这台电脑上。')}</p>
     <div class="setting-line" id="aboutUpdates">${updatesLine()}</div>
     <div class="about-actions">
@@ -203,7 +237,12 @@ async function renderAbout() {
       ${a.can_open_logs ? `<button class="quiet" id="aboutOpenLogs">${t('打开日志所在文件夹')}</button>` : ''}
       <button class="quiet" id="aboutExport">${t('导出诊断信息')}</button>
     </div>
-    ${fold('credits', t('致谢与第三方组件'), `<table class="settings-table credits">${CREDITS.map(([n, by, use, url]) => `<tr><td><a class="link" href="${url}" target="_blank" rel="noreferrer noopener">${esc(n)}</a>${by ? `<small>${esc(by)}</small>` : ''}</td><td>${esc(use)}</td></tr>`).join('')}</table><p class="settings-note net-foot">${t('识别用的 CCIP 模型（随安装包附带，或第一次使用时下载）依据 {license} 许可提供给你，使用和再分发均受该许可第 5 条约束：不得用于其附件 A 列出的用途，再分发时须把这些限制写进分发协议并附上许可。许可原文和各模型的来源见应用资源目录里的 resources/licenses/models/。其余组件的许可条款以其项目主页为准。', {license: '<a class="link" href="https://bigscience.huggingface.co/blog/bigscience-openrail-m" target="_blank" rel="noreferrer noopener">BigScience Open RAIL-M</a>'})}</p>`)}
+    ${fold('credits', t('致谢与第三方组件'),
+        `<table class="settings-table credits">${CREDITS.map(([n, by, use, url]) =>
+          `<tr><td><a class="link" href="${url}" target="_blank" rel="noreferrer noopener">${esc(n)}</a>${by ? `<small>${esc(by)}</small>` : ''}</td><td>${esc(use)}</td></tr>`).join('')}</table>`
+        + `<p class="settings-note net-foot">${t(
+          '识别用的 CCIP 模型（随安装包附带，或第一次使用时下载）依据 {license} 许可提供给你，使用和再分发均受该许可第 5 条约束：不得用于其附件 A 列出的用途，再分发时须把这些限制写进分发协议并附上许可。许可原文和各模型的来源见应用资源目录里的 resources/licenses/models/。其余组件的许可条款以其项目主页为准。',
+          {license: '<a class="link" href="https://bigscience.huggingface.co/blog/bigscience-openrail-m" target="_blank" rel="noreferrer noopener">BigScience Open RAIL-M</a>'})}</p>`)}
     ${fold('diagnostics', t('诊断信息'), `<p class="settings-note">${t('运行错误仅保存在本机，最多 128 条、保留 14 天；不会自动上传，不含图片、文件名、路径或账号凭据。')}</p>
       <p class="settings-note">${report.available ? t('最近的错误记录') : t('诊断记录暂不可读')}</p>
       ${(report.records || []).slice(0, 8).map(r => `<p class="muted-note">${esc(new Date(r.at * 1000).toLocaleString())} · ${esc(diagnosticLine(r))}</p>`).join('')}
@@ -248,7 +287,9 @@ function networkCard() {
       ${state.updates?.install
         ? row('about', t('下载更新'), 'GitHub', t('下载新版本的安装包和签名，校验后安装；不发送图库里的任何信息'), t('只在你点「下载并重启」时')) : ''}
     </table>
-    ${state.updates ? `<label class="switch-line"><span><b>${t('自动检查更新')}</b><small>${t('启动时和之后每天查一次 GitHub 上有没有新版本，有新版本时提示你，不会自己下载或安装')} · ${SCOPE.shared[0]}</small></span><input type="checkbox" class="switch" data-updates-auto ${state.updates.auto ? 'checked' : ''}></label>` : ''}
+    ${state.updates ?
+        `<label class="switch-line"><span><b>${t('自动检查更新')}</b><small>${t('启动时和之后每天查一次 GitHub 上有没有新版本，有新版本时提示你，不会自己下载或安装')} · ${SCOPE.shared[0]}</small></span>`
+        + `<input type="checkbox" class="switch" data-updates-auto ${state.updates.auto ? 'checked' : ''}></label>` : ''}
     ${net ? `<div class="setting-line"><span><b>${t('名称联网查询')}</b><small>${t('角色名称和 Danbooru 搜索共用这一项授权，只发送文字')} · ${names}</small></span>
       ${net.granted_at ? `<button class="quiet small" data-names-network="0">${t('撤销')}</button>` : `<button class="quiet small" data-names-network="1">${t('允许…')}</button>`}</div>` : ''}
     <p class="set-foot">${t('同步、图片识别、相似图片检测、学习与分组都只在本机进行。X 的关注通过导入官方数据归档获得，不联网。')}
@@ -282,35 +323,53 @@ export async function renderSettings(fetchMissing = true, refresh = false) {
     // 全应用共用（preferences.json），所以桌面外壳和每个图库、每个浏览器都共用它（#173）。可选项是 web/static/locales
     // 里的表（#182），每个用它自己的语言命名。
     setLanguage: () => cardHead(t('语言'), '', 'shared') + `
-      <div class="setting-line"><span>${t('界面语言')}<small class="line-hint">${t('切换后页面会重新载入')}</small></span>${segment('language', [['system', t('跟随系统')], ...I18N.languages.map(([code, name]) => [code, esc(name)])], I18N.preference)}</div>`,
+      <div class="setting-line"><span>${t('界面语言')}<small class="line-hint">${t('切换后页面会重新载入')}</small></span>`
+        + `${segment('language', [['system', t('跟随系统')], ...I18N.languages.map(([code, name]) => [code, esc(name)])], I18N.preference)}</div>`,
     setSync: () => cardHead(t('同步'), t('只读读取来源里的图片，新增的导入并在本机识别；来源里删掉的图会从图库移除，人工整理记录保留。同步不联网。'), 'library') + `
-      ${taskLink(s.status === 'off' ? t('这次启动没有开同步') : syncLine(s), SYNC_ACTIVE.includes(s.status) ? 'busy' : ['error', 'needs_recognition'].includes(s.status) ? 'warn' : s.status === 'off' ? 'off' : '')}
+      ${taskLink(s.status === 'off' ? t('这次启动没有开同步') : syncLine(s),
+          SYNC_ACTIVE.includes(s.status) ? 'busy' : ['error', 'needs_recognition'].includes(s.status) ? 'warn' : s.status === 'off' ? 'off' : '')}
       ${startupSwitch('sync', t('启动时同步'), t('检查来源里新增和删除的图'))}
-      ${photos && apps.length ? fold('sourcesApps', t('iCloud 照片按存图的 App 统计（{n} 个 App）', {n: number(apps.length)}), `<p class="muted-note">${t('iCloud 照片里只导入 X 和 Pixiv 存下的图。')}</p><table class="settings-table"><tr><th>App</th><th>${t('照片里')}</th><th>${t('已导入')}</th></tr>${apps.map(appRow).join('')}</table>`) : ''}`,
+      ${photos && apps.length ? fold('sourcesApps', t('iCloud 照片按存图的 App 统计（{n} 个 App）', {n: number(apps.length)}),
+          `<p class="muted-note">${t('iCloud 照片里只导入 X 和 Pixiv 存下的图。')}</p>`
+          + `<table class="settings-table"><tr><th>App</th><th>${t('照片里')}</th><th>${t('已导入')}</th></tr>${apps.map(appRow).join('')}</table>`) : ''}`,
     setExclude: () => cardHead(t('排除规则'), photos ? t('照片、截图、文字图这类不是插画的图不算进图库。只是做标记，不改动照片图库；你的判断优先于自动规则。') : t('照片、截图、文字图这类不是插画的图不算进图库。只是做标记，不改动来源文件；你的判断优先于自动规则。'), 'library') + `
-      <div class="rule-row">${Object.entries(REASONS).map(([k, label]) => `<a class="rule" href="#/excluded?reason=${k}"><b>${number(reasons[k] || 0)}</b><span>${label}</span></a>`).join('')}<a class="rule" href="#/pending"><b>${number(state.pendingCount)}</b><span>${t('待确认')}</span></a></div>`,
-    setFold: () => cardHead(t('重复与相似'), `${t('勾选的关系会合并显示：图库里只留分辨率最高的一张，整组在「重复」页查看。')}<span class="hint-more" title="${t('改动组里任一张会同步到整组。组里角色不一致时不合并，留在「重复」页等你处理。字节完全相同的副本总是合并。')}">${t('了解详情')}</span>`, 'library') + `
+      <div class="rule-row">${Object.entries(REASONS).map(([k, label]) =>
+          `<a class="rule" href="#/excluded?reason=${k}"><b>${number(reasons[k] || 0)}</b><span>${label}</span></a>`).join('')}<a class="rule" href="#/pending">`
+          + `<b>${number(state.pendingCount)}</b><span>${t('待确认')}</span></a></div>`,
+    setFold: () => cardHead(t('重复与相似'), `${t('勾选的关系会合并显示：图库里只留分辨率最高的一张，整组在「重复」页查看。')}`
+      + `<span class="hint-more" title="${t('改动组里任一张会同步到整组。组里角色不一致时不合并，留在「重复」页等你处理。字节完全相同的副本总是合并。')}">${t('了解详情')}</span>`, 'library') + `
       ${startupSwitch('similar', t('启动时检测相似图片'), t('只比较新导入的图'))}
-      <div class="fold-row">${FOLD_OPTIONS.map(([k, label, hint]) => `<label class="fold-option" title="${hint}"><input type="checkbox" data-fold="${k}" ${(state.fold || []).includes(k) ? 'checked' : ''} ${!state.fold ? 'disabled' : ''}><span>${label}</span><small>${hint}</small></label>`).join('')}</div>`,
+      <div class="fold-row">${FOLD_OPTIONS.map(([k, label, hint]) =>
+          `<label class="fold-option" title="${hint}"><input type="checkbox" data-fold="${k}" ${(state.fold || []).includes(k) ? 'checked' : ''} ${!state.fold ? 'disabled' : ''}>`
+            + `<span>${label}</span><small>${hint}</small></label>`).join('')}</div>`,
     setNetwork: networkCard,
     // 三样东西分开写（#502）：整库备份（library.sqlite 的完整副本）、人工结论快照（ui/human.js 画进 #humanBlock）、
     // 图库导出（在「图库」页）。
     setData: () => cardHead(t('备份与存储'), t('这里有两种备份。整库备份是应用数据库（人工整理记录所在的库）的完整副本，只能整份换回；人工结论快照只含人工整理的结论，可以导回这个或别的图库，只补上缺少的部分。要连识别结果和来源一起带到别处，用「设置 › 图库」里的「导出当前图库」。')) + `
       <h3 class="set-sub">${t('整库备份')}</h3>
-      <div class="setting-line"><span>${info ? t('共 {n} 份备份', {n: number(info.backup_count)}) + (info.backups?.[0] ? `<small class="line-hint">${t('最近一次 {time}', {time: esc(localStamp(info.backups[0].time))})}</small>` : '') : '…'}</span><button class="quiet small" id="backupNow" ${!info ? 'disabled' : ''}>${t('立即备份')}</button></div>
+      <div class="setting-line"><span>${info ? t('共 {n} 份备份', {n: number(info.backup_count)}) +
+          (info.backups?.[0] ? `<small class="line-hint">${t('最近一次 {time}', {time: esc(localStamp(info.backups[0].time))})}</small>` : '')
+          : '…'}</span><button class="quiet small" id="backupNow" ${!info ? 'disabled' : ''}>${t('立即备份')}</button></div>
       <p class="set-sub-note">${t('上面的份数只算「立即备份」留下的，在图库文件夹的 backups 里。升级图库格式前还会自动另存一份，放在 library-backups 里，内容停在那次升级之前，换回后打开时会再升级一次。换回整库备份前先退出 app；备份之后的改动都会丢掉。')}</p>
       ${info ? fold('backupFolders', t('备份放在哪里'), `<table class="settings-table">${backupFolder(t('立即备份'), info.package.path, 'backups')}
         ${backupFolder(t('升级前的备份'), info.package.path, 'library-backups')}</table>`) : ''}
-      ${info?.backups?.length ? fold('backupList', t('最近的备份'), `<table class="settings-table">${info.backups.slice(0, 5).map(b => `<tr><td class="mono">${esc(b.name)}</td><td>${bytes(b.bytes)}</td></tr>`).join('')}</table>`) : ''}
+      ${info?.backups?.length ? fold('backupList', t('最近的备份'),
+          `<table class="settings-table">${info.backups.slice(0, 5).map(b => `<tr><td class="mono">${esc(b.name)}</td><td>${bytes(b.bytes)}</td></tr>`).join('')}</table>`) : ''}
       <h3 class="set-sub">${t('人工结论快照')}</h3>
       <div id="humanBlock"></div>
       <h3 class="set-sub">${t('检查与存储')}</h3>
       <p class="set-sub-note">${t('每次打开图库后会在后台检查识别结果数据库，整理记录数据库每 7 天检查一次；上次没有正常关闭时，打开前先检查两个库。')}</p>
       <div class="setting-line" id="integrityLine"></div>
-      <div class="setting-line"><span>${t('缩略图缓存')}<small class="line-hint">${info ? t('{n} 个文件，{size}；清除后浏览时会重新生成', {n: number(info.thumbnails.files), size: bytes(info.thumbnails.bytes)}) : ''}</small></span><button class="quiet small" id="clearCache" ${info?.thumbnails.files ? '' : 'disabled'}>${t('清除')}</button></div>
-      ${info ? fold('dataPaths', t('存储位置'), `<table class="settings-table">${[[t('源数据库（识别结果，可以重建）'), info.source], [t('应用数据库（人工整理，不要删）'), info.library], [t('缩略图缓存（可以放心删）'), info.thumbnails]].map(([label, d]) => `<tr><td>${label}</td><td class="mono" title="${esc(d.path)}">${esc(home(d.path))}</td><td>${bytes(d.bytes)}</td></tr>`).join('')}</table>`) : ''}`,
+      <div class="setting-line"><span>${t('缩略图缓存')}<small class="line-hint">${info ?
+          t('{n} 个文件，{size}；清除后浏览时会重新生成', {n: number(info.thumbnails.files), size: bytes(info.thumbnails.bytes)})
+          : ''}</small></span><button class="quiet small" id="clearCache" ${info?.thumbnails.files ? '' : 'disabled'}>${t('清除')}</button></div>
+      ${info ? fold('dataPaths', t('存储位置'),
+          `<table class="settings-table">${[[t('源数据库（识别结果，可以重建）'), info.source], [t('应用数据库（人工整理，不要删）'), info.library],
+            [t('缩略图缓存（可以放心删）'), info.thumbnails]].map(([label, d]) =>
+            `<tr><td>${label}</td><td class="mono" title="${esc(d.path)}">${esc(home(d.path))}</td><td>${bytes(d.bytes)}</td></tr>`).join('')}</table>`) : ''}`,
   };
-  patchSettingsPage(`<nav class="settings-nav" aria-label="${t('设置')}">${SETTINGS_SECTIONS.map(([id, title]) => `<a href="#/settings/${id}" class="${id === section ? 'on' : ''}"${id === section ? ' aria-current="page"' : ''}>${title}</a>`).join('')}</nav>
+  patchSettingsPage(`<nav class="settings-nav" aria-label="${t('设置')}">${SETTINGS_SECTIONS.map(([id, title]) =>
+      `<a href="#/settings/${id}" class="${id === section ? 'on' : ''}"${id === section ? ' aria-current="page"' : ''}>${title}</a>`).join('')}</nav>
     <div class="settings-main" data-section="${section}">${cards.map(id => `<section class="settings-card" id="${id}">${body[id] ? body[id]() : ''}</section>`).join('')}</div>`, section);
   const page = $('settingsPage');
   renderAbout();
@@ -328,10 +387,14 @@ export async function renderSettings(fetchMissing = true, refresh = false) {
   };
   const startup = async (body, done) => { try { await saveStartup(body); toast(done); } catch (e) { toast(e.message); } renderSettings(); };
   page.onchange = e => { const box = e.target.closest('[data-startup]'); if (box) startup({[box.dataset.startup]: box.checked}, t('已保存，下次启动时生效')); };
-  if ($('backupNow')) $('backupNow').onclick = async () => { try { const r = await backupNow(); toast(t('备份完成：{name}', {name: r.path.split('/').pop()})); renderSettings(); } catch (e) { toast(e.message); } };
+  if ($('backupNow')) $('backupNow').onclick = async () => {
+    try { const r = await backupNow(); toast(t('备份完成：{name}', {name: r.path.split('/').pop()})); renderSettings(); } catch (e) { toast(e.message); }
+  };
   renderIntegrityLine();
   if ($('humanBlock')) { renderHumanBlock(); if (fetchMissing) loadHuman(); }
-  if ($('clearCache')) $('clearCache').onclick = async () => { try { const r = await clearCache(); toast(t('已清除 {n} 个缩略图', {n: number(r.removed)})); renderSettings(); } catch (e) { toast(e.message); } };
+  if ($('clearCache')) $('clearCache').onclick = async () => {
+    try { const r = await clearCache(); toast(t('已清除 {n} 个缩略图', {n: number(r.removed)})); renderSettings(); } catch (e) { toast(e.message); }
+  };
   for (const g of page.querySelectorAll('[data-setting]')) for (const b of g.querySelectorAll('button')) b.onclick = () => {
     const key = g.dataset.setting, v = b.dataset.value;
     if (key === 'language') { setLanguage(v); return; }
@@ -372,17 +435,26 @@ export function renderLibrariesCard() {
   const originOf = s => list.some(o => o[0] === s.preset) ? s.preset : 'other';
   const folders = !cur ? [] : cur.sources.filter(s => s.kind === 'folder').sort((a, b) => list.findIndex(o => o[0] === originOf(a)) - list.findIndex(o => o[0] === originOf(b)));
   const folderRow = s => `<div class="setting-line lib-folder"><span class="lib-path" title="${esc(s.path)}"><bdi>${esc(home(s.path))}</bdi></span>
-      <span class="lib-src">${editable ? segmented(list, s.preset, {item: `data-lib-preset="${esc(s.id)}" data-preset`}) : `<span class="muted-note">${esc(list.find(o => o[0] === originOf(s))[1])}</span>`}${remove(s)}</span></div>`;
+      <span class="lib-src">${editable ? segmented(list, s.preset, {item: `data-lib-preset="${esc(s.id)}" data-preset`})
+          : `<span class="muted-note">${esc(list.find(o => o[0] === originOf(s))[1])}</span>`}${remove(s)}</span></div>`;
   const photos = cur?.sources.find(s => s.kind === 'photos');
   const sources = !cur ? '' : `<h3 class="set-sub">${t('来源')}</h3>
-    ${folders.map(folderRow).join('')}${photos ? `<div class="setting-line lib-folder"><span><b>${t('iCloud 照片')}</b><small>${t('本机「照片」图库，按存图的 App 区分 X 和 Pixiv')}</small></span><span class="lib-src">${remove(photos)}</span></div>` : ''}
+    ${folders.map(folderRow).join('')}${photos ?
+        `<div class="setting-line lib-folder"><span><b>${t('iCloud 照片')}</b><small>${t('本机「照片」图库，按存图的 App 区分 X 和 Pixiv')}</small></span>`
+        + `<span class="lib-src">${remove(photos)}</span></div>` : ''}
     ${folders.length || photos ? '' : `<p class="muted-note set-empty">${t('还没有来源')}</p>`}
-    ${editable ? `<div class="set-actions"><span class="set-actions-label">${t('添加文件夹：')}</span>${list.map(([id, label]) => `<button class="quiet small" data-lib-add-source="${id}" title="${t('图片来自 {origin} 的文件夹，子文件夹会一起读取', {origin: esc(label)})}">${esc(label)}</button>`).join('')}${!photos && isMac ? `<button class="quiet small" data-lib-add-photos>${t('添加 iCloud 照片')}</button>` : ''}</div>` : ''}`;
+    ${editable ? `<div class="set-actions"><span class="set-actions-label">${t('添加文件夹：')}</span>`
+      + `${list.map(([id, label]) =>
+        `<button class="quiet small" data-lib-add-source="${id}"`
+          + ` title="${t('图片来自 {origin} 的文件夹，子文件夹会一起读取', {origin: esc(label)})}">${esc(label)}</button>`).join('')}${!photos && isMac ?
+        `<button class="quiet small" data-lib-add-photos>${t('添加 iCloud 照片')}</button>` : ''}</div>` : ''}`;
   // 测试图库是由开发者工具（tools/test_libraries.py，#186 已删除）生成的，所以它的标记只在开发模式下显示。
   const dev = devMode && data.libraries.some(l => l.test);
   const others = data.libraries.filter(l => l.path !== data.current);
-  const row = l => `<div class="setting-line"><span><b>${esc(l.name)}${dev && l.test ? ` <span class="set-scope">${esc(l.test)}</span>` : ''}</b><small class="lib-path-hint">${esc(home(l.path))}</small></span>
-    <span class="lib-src"><button class="quiet small" data-open-library="${esc(l.path)}" data-name="${esc(l.name)}">${t('打开')}</button><button class="quiet small" data-forget-library="${esc(l.path)}" title="${t('只从列表里移除，不删除图库')}">${t('移出列表')}</button></span></div>`;
+  const row = l => `<div class="setting-line"><span><b>${esc(l.name)}${dev && l.test ? ` <span class="set-scope">${esc(l.test)}</span>` : ''}</b>`
+    + `<small class="lib-path-hint">${esc(home(l.path))}</small></span>
+    <span class="lib-src"><button class="quiet small" data-open-library="${esc(l.path)}" data-name="${esc(l.name)}">${t('打开')}</button>`
+      + `<button class="quiet small" data-forget-library="${esc(l.path)}" title="${t('只从列表里移除，不删除图库')}">${t('移出列表')}</button></span></div>`;
   const ex = data.export || {};
   const exportLine = ex.status === 'running' ? `<p class="muted-note">${t('正在导出到 {path}…', {path: esc(home(ex.path))})}</p>`
     : ex.status === 'done' ? `<p class="muted-note">${t('已导出：{path}（{mb} MB）。', {path: esc(home(ex.path)), mb: megabytes(ex.bytes)})}${EXPORT_LEAVES_OUT}</p>`
@@ -391,20 +463,27 @@ export function renderLibrariesCard() {
   const form = !f.open ? '' : `<div class="lib-form">
       <p class="muted-note">${t('按图片来自哪里分别添加文件夹，每类可以有多个。子文件夹会一起读取；图片保留在原位置，不复制。选 X 或 Pixiv 的文件夹才能用以图搜图、画师回查。')}</p>
       <div class="lib-columns">${list.map(([id, label]) => `<div class="lib-col"><h3>${esc(label)}</h3>
-        ${(f.folders[id] || []).map((p, i) => `<div class="lib-picked"><span class="lib-path" title="${esc(p)}"><bdi>${esc(home(p))}</bdi></span><button class="quiet" data-lib-drop="${id}" data-index="${i}" title="${t('不添加这个文件夹')}">×</button></div>`).join('')}
+        ${(f.folders[id] || []).map((p, i) =>
+            `<div class="lib-picked"><span class="lib-path" title="${esc(p)}"><bdi>${esc(home(p))}</bdi></span>`
+            + `<button class="quiet" data-lib-drop="${id}" data-index="${i}" title="${t('不添加这个文件夹')}">×</button></div>`).join('')}
         <button class="quiet" data-lib-pick="${id}">${t('添加文件夹…')}</button></div>`).join('')}</div>
       ${isMac ? `<label class="lib-photos"><input type="checkbox" id="libPhotos" ${f.photos ? 'checked' : ''}> ${t('同时读取 iCloud 照片（本机「照片」图库，按存图的 App 区分 X 和 Pixiv）')}</label>` : ''}
-      <div class="setting-line"><span>${t('名字')}<small class="line-hint">${t('保存在 {path}', {path: esc(home(data.home))})}</small></span><input class="lib-input" id="libName" placeholder="${t('新图库')}" value="${esc(f.name)}"></div>
-      ${f.created ? `<div class="lib-created"><p>${t('{done}，保存在 {path}，但没能加入最近图库列表：{reason}', {done: `<b>${t('图库已经建好')}</b>`, path: `<bdi>${esc(home(f.created.path))}</bdi>`, reason: esc(tb(f.created.error))})}</p>
+      <div class="setting-line"><span>${t('名字')}<small class="line-hint">${t('保存在 {path}', {path: esc(home(data.home))})}</small></span>`
+        + `<input class="lib-input" id="libName" placeholder="${t('新图库')}" value="${esc(f.name)}"></div>
+      ${f.created ? `<div class="lib-created"><p>${t('{done}，保存在 {path}，但没能加入最近图库列表：{reason}',
+          {done: `<b>${t('图库已经建好')}</b>`, path: `<bdi>${esc(home(f.created.path))}</bdi>`, reason: esc(tb(f.created.error))})}</p>
         <p class="muted-note">${t('打开它会再试一次加入列表；再点创建会另建一个带编号的图库。')}</p>
-        <p><button class="primary" data-open-library="${esc(f.created.path)}" data-name="${esc(f.created.name)}">${t('打开这个图库')}</button> <button class="quiet" data-lib-again>${t('仍然新建一个')}</button></p></div>`
+        <p><button class="primary" data-open-library="${esc(f.created.path)}" data-name="${esc(f.created.name)}">${t('打开这个图库')}</button> `
+          + `<button class="quiet" data-lib-again>${t('仍然新建一个')}</button></p></div>`
         : `<p><button class="primary" data-lib-create>${t('创建并打开')}</button> <button class="quiet" data-lib-cancel>${t('取消')}</button></p>`}</div>`;
   setSettingsHTML(card, `${cardHead(t('图库'), t('每个图库各自保存识别结果和人工整理记录，图片本身留在原处、不复制。切换图库时后台会重启，几秒后自动刷新。'))}
     ${cur ? `<div class="setting-line"><span><b>${esc(cur.name)}</b><small class="lib-path-hint">${esc(home(cur.path))}</small></span><span class="tag-on">${t('当前图库')}</span></div>
     ${sources}` : `<p class="muted-note">${t('当前是旧的数据布局（不是图库包）。')}</p>`}
     <h3 class="set-sub">${t('图库管理')}</h3>
     ${others.length ? `<p class="set-sub-note">${t('这台电脑上的其他图库')}</p>${others.map(row).join('')}` : ''}
-    <div class="set-actions"><button class="quiet small" data-lib-new>${t('新建图库')}</button><button class="quiet small" data-lib-choose="library">${t('打开其他图库…')}</button><button class="quiet small" data-lib-choose="zip" ${importActive() ? 'disabled' : ''}>${t('导入…')}</button>${cur ? `<button class="quiet small" data-lib-export ${ex.status === 'running' ? 'disabled' : ''}>${t('导出当前图库')}</button>` : ''}</div>
+    <div class="set-actions"><button class="quiet small" data-lib-new>${t('新建图库')}</button><button class="quiet small" data-lib-choose="library">${t('打开其他图库…')}</button>`
+      + `<button class="quiet small" data-lib-choose="zip" ${importActive() ? 'disabled' : ''}>${t('导入…')}</button>`
+      + `${cur ? `<button class="quiet small" data-lib-export ${ex.status === 'running' ? 'disabled' : ''}>${t('导出当前图库')}</button>` : ''}</div>
     ${form}${exportLine}${importBlock(state.importTask)}
     <p class="set-foot">${t('导出的 zip 包含识别结果、人工整理记录和来源配置，不含模型连接设置或联网授权，可以换电脑或发给别人。导入后需重新设置模型接口，并自行确认名称查询的联网授权；旧版导出包也会清除这些设置。个人备份请保留完整图库目录。')}${ex.status === 'done' ? '' : EXPORT_LEAVES_OUT}</p>`);
 }
@@ -445,7 +524,8 @@ export async function openLibrary(path, name, agreed = null) {
       if (await confirmAction(err.message, t('「{name}」需要升级', {name}), t('升级并打开'))) return openLibrary(path, name, 'upgrade');
       return;
     }
-    if (!agreed && said(err.said, '这个图库的识别结果数据库（source.sqlite）已损坏，为保护数据已停止写入；人工整理记录在 library.sqlite 里，没有受影响。可以点「抢救重建」：还读得出的识别结果和每张图的 ID 都会保留，读不出的部分重新扫描来源文件夹、重新识别；损坏的文件移到图库的 backups 文件夹里留存。抢救前请确认来源文件夹都能访问。')) {
+    if (!agreed && said(err.said,
+        '这个图库的识别结果数据库（source.sqlite）已损坏，为保护数据已停止写入；人工整理记录在 library.sqlite 里，没有受影响。可以点「抢救重建」：还读得出的识别结果和每张图的 ID 都会保留，读不出的部分重新扫描来源文件夹、重新识别；损坏的文件移到图库的 backups 文件夹里留存。抢救前请确认来源文件夹都能访问。')) {
       if (await confirmAction(err.message, t('「{name}」的识别结果数据库已损坏', {name}), t('抢救重建'))) {
         toast(t('正在抢救「{name}」的识别结果数据库，可能要几分钟…', {name}));
         return openLibrary(path, name, 'rescue');
@@ -471,24 +551,36 @@ function renderAccountsCard() {
     ${pixivAccount(a)}
     <h3 class="acct-h">X${scope('library')}</h3>
     <p class="muted-note">${t('用 X 的官方数据归档导入关注列表：X 设置 → 你的账号 → 下载你的数据，收到邮件后下载 zip 导入。只读取其中的关注（数字账号 ID），私信、推文都不会打开。')}</p>
-    <div class="setting-line"><span>${x.imported ? `${t('已导入 {n} 个关注', {n: number(x.imported)})}<small class="line-hint">${t('已对应到画师 {resolved} 位 · 待查 {pending} 个', {resolved: number(x.resolved || 0), pending: number(x.pending || 0)})}${x.imported_at ? ' · ' + t('导入于 {time}', {time: esc(String(x.imported_at).slice(0, 16))}) : ''}</small>` : t('尚未导入')}</span>
+    <div class="setting-line"><span>${x.imported ? `${t('已导入 {n} 个关注', {n: number(x.imported)})}`
+        + `<small class="line-hint">${t('已对应到画师 {resolved} 位 · 待查 {pending} 个', {resolved: number(x.resolved || 0), pending: number(x.pending || 0)})}${x.imported_at ?
+          ' · ' + t('导入于 {time}', {time: esc(String(x.imported_at).slice(0, 16))}) : ''}</small>` : t('尚未导入')}</span>
       <span class="lib-pick"><input class="lib-input" id="acctXPath" placeholder="${t('或粘贴 zip / 解压后文件夹的路径')}"><button class="quiet" data-acct-x>${t('导入归档…')}</button></span></div>
     ${s.bound ? `<h3 class="acct-h">${t('SauceNAO（以图搜图）')}${scope('shared')}</h3>
-    <div class="setting-line"><span>${t('已保存 API key')}<small class="line-hint">${t('以图搜图还没有上线，现在不会使用')}</small></span><span><button class="quiet" data-acct-unbind="saucenao">${t('移除')}</button></span></div>` : ''}`;
+    <div class="setting-line"><span>${t('已保存 API key')}<small class="line-hint">${t('以图搜图还没有上线，现在不会使用')}</small></span>`
+      + `<span><button class="quiet" data-acct-unbind="saucenao">${t('移除')}</button></span></div>` : ''}`;
 }
 // Pixiv：在桌面 App 里，用户在它的 Pixiv 窗口里自己登录（docs/PROVENANCE.md 第 8 节）；粘贴 PHPSESSID 作为普通网页版的
 // 开发入口保留。
 function pixivAccount(a) {
   const p = a.pixiv, desk = a.desktop, inApp = p.via === 'app';
-  const paste = label => `<div class="setting-line"><span>PHPSESSID<small class="line-hint">${t('开发用入口')}</small></span><span class="lib-pick"><input class="lib-input" id="acctPixiv" type="password" autocomplete="off" placeholder="12345678_…"><button class="quiet" data-acct-bind="pixiv">${label}</button></span></div>`;
+  const paste = label => `<div class="setting-line"><span>PHPSESSID<small class="line-hint">${t('开发用入口')}</small></span>`
+    + `<span class="lib-pick"><input class="lib-input" id="acctPixiv" type="password" autocomplete="off" placeholder="12345678_…">`
+    + `<button class="quiet" data-acct-bind="pixiv">${label}</button></span></div>`;
   // 开发模式之外，普通网页版只指向桌面 App 的登录窗口。
-  const pasteHint = devMode ? `<p class="muted-note">${t('网页版（开发用）：在浏览器里登录 pixiv.net，打开开发者工具（{keys}）→ Application（Safari 为「存储空间」）→ Cookie → pixiv.net，复制 {cookie} 的值粘贴到这里。', {keys: isMac ? '⌥⌘I' : 'Ctrl+Shift+I', cookie: '<code>PHPSESSID</code>'})}</p>` : `<p class="muted-note">${t('请从 Illustash 桌面 app 打开设置，在它的 Pixiv 窗口里登录。')}</p>`;
+  const pasteHint = devMode ?
+      `<p class="muted-note">${t('网页版（开发用）：在浏览器里登录 pixiv.net，打开开发者工具（{keys}）→ Application（Safari 为「存储空间」）→ Cookie → pixiv.net，复制 {cookie} 的值粘贴到这里。',
+        {keys: isMac ? '⌥⌘I' : 'Ctrl+Shift+I', cookie: '<code>PHPSESSID</code>'})}</p>`
+      : `<p class="muted-note">${t('请从 Illustash 桌面 app 打开设置，在它的 Pixiv 窗口里登录。')}</p>`;
   const login = label => state.pixivWaiting ? `<span class="muted-note">${t('正在等你在 Pixiv 窗口里登录…')}</span>` : `<button class="quiet" data-acct-login>${label}</button>`;
   if (!p.bound) {
     return desk ? `<p class="muted-note">${t('打开 Pixiv 官方登录页，由你亲手登录（出现人机验证请自己完成）；登录状态只留在 app 的 Pixiv 窗口里。登录后才能看到 R18 作品。Pixiv 没有给第三方开放接口，这里用的是网页自己的接口，低频只读。Illustash 不是 pixiv 开发或分发的应用。')}</p>
       <div class="setting-line"><span>${t('尚未登录')}</span><span>${login(t('登录 Pixiv…'))}</span></div>` : pasteHint + (devMode ? paste(t('绑定')) : '');
   }
-  const line = `<div class="setting-line"><span>${p.expired ? `<span class="acct-expired">${t('登录已过期')}</span>` : t('已绑定')}<small class="line-hint">${esc(p.name || '')}${p.user_id ? ` · ID ${esc(p.user_id)}` : ''}${p.following != null && !p.expired ? ' · ' + t('关注 {n} 位', {n: number(p.following)}) : ''}${p.checked_at ? ' · ' + t('检查于 {time}', {time: esc(p.checked_at)}) : ''}</small></span><span>${desk && !p.expired ? login(inApp ? t('打开 Pixiv 窗口') : t('改用窗口登录…')) : ''}<button class="quiet" data-acct-check="pixiv">${t('重新检查')}</button><button class="quiet" data-acct-unbind="pixiv">${t('解绑')}</button></span></div>`;
+  const line = `<div class="setting-line"><span>${p.expired ? `<span class="acct-expired">${t('登录已过期')}</span>` : t('已绑定')}<small class="line-hint">`
+    + `${esc(p.name || '')}${p.user_id ? ` · ID ${esc(p.user_id)}` : ''}${p.following != null && !p.expired ? ' · ' + t('关注 {n} 位', {n: number(p.following)}) : ''}${p.checked_at ?
+      ' · ' + t('检查于 {time}', {time: esc(p.checked_at)}) : ''}</small></span>`
+      + `<span>${desk && !p.expired ? login(inApp ? t('打开 Pixiv 窗口') : t('改用窗口登录…')) : ''}<button class="quiet" data-acct-check="pixiv">${t('重新检查')}</button>`
+      + `<button class="quiet" data-acct-unbind="pixiv">${t('解绑')}</button></span></div>`;
   if (!p.expired) return line;
   const why = t('找回画师会暂停查 Pixiv，免得在没登录的状态下漏掉 R18 作品。');
   if (desk) return line + `<p class="muted-note">${t('Pixiv 不再接受这个登录（退出过，或者过期了）。')}${why}${t('在 Pixiv 窗口里重新登录一次就能恢复。')}${p.window_logged_in ? t('窗口里已经重新登录了，点「重新检查」确认。') : ''}</p>
@@ -508,12 +600,24 @@ export function renderProvenanceCard() {
   if (!p) { redraw(card, readingCard(t('找回画师'))); return; }
   if (!p.available) { redraw(card, `${cardHead(t('找回画师'))}<p class="muted-note">${t('只有图库包能找回画师。')}</p>`); return; }
   const s = p.state || {}, working = PROV_ACTIVE.includes(s.status), cov = p.coverage;
-  const covLine = (label, key) => cov?.pictures?.[key] ? `<div class="prov-stat"><b>${pct(cov.with_artist?.[key] || 0, cov.pictures[key])}</b><span>${label}<small>${t('{done}/{total} 张', {done: number(cov.with_artist?.[key] || 0), total: number(cov.pictures[key])})}</small></span></div>` : '';
+  const covLine = (label, key) => cov?.pictures?.[key] ?
+      `<div class="prov-stat"><b>${pct(cov.with_artist?.[key] || 0, cov.pictures[key])}</b>`
+      + `<span>${label}<small>${t('{done}/{total} 张', {done: number(cov.with_artist?.[key] || 0), total: number(cov.pictures[key])})}</small></span></div>` : '';
   const total = cov ? Object.values(cov.pictures || {}).reduce((a, b) => a + b, 0) : 0;
   const html = cardHead(t('找回画师'), t('逐张查图的画师：用像素哈希和 IQDB 签名（只发哈希文本，不发图片）在 Danbooru 查原帖，并比对你关注的画师。结果在详情面板的「画师」里，可以点「不是 TA」纠正。')) + `
-    ${cov ? `<div class="prov-stats">${covLine(t('X 的图有画师'), 'x')}${covLine(t('Pixiv 的图有画师'), 'pixiv')}${covLine(t('其他来源有画师'), 'other')}<div class="prov-stat"><b>${pct(cov.with_original_post || 0, total)}</b><span>${t('能对到原帖')}<small>${t('{n} 张', {n: number(cov.with_original_post || 0)})}</small></span></div></div>` : ''}
-    <div class="setting-line set-status"><span><span class="local-dot${working ? ' busy' : s.status === 'failed' ? ' warn' : ''}"></span>${working ? t('正在查找…') : s.status === 'failed' && s.reason ? t('上次出错：{reason}', {reason: esc(tb(s.reason))}) : p.runs?.[0] ? t('上次 {time} · 新找到 {n}', {time: esc(localTime(p.runs[0].started_at)), n: number(p.runs[0].found || 0)}) : t('还没有查过')}</span>${working ? `<button class="quiet small" data-open-tasks>${t('在任务面板查看')}</button>` : `<button class="quiet small" data-open-tasks="provenance">${t('找回全库画师…')}</button>`}</div>
-    <label class="switch-line"><span><b>${t('同步后自动查新图')}${scope('library')}</b><small>${p.auto_network ? t('新加入的图做签名识别、查像素哈希、比对新找到的画师；每次最多 {mb} MB', {mb: number(p.budgets?.new || 50)}) : t('新加入的图只在本机做签名识别；要联网查，在任务面板里每次授权')}${p.frozen ? ' · ' + t('测试图库不同步，这个开关不起作用') : ''}</small></span><input type="checkbox" class="switch" id="provAuto" ${p.auto ? 'checked' : ''}></label>
+    ${cov ?
+        `<div class="prov-stats">${covLine(t('X 的图有画师'), 'x')}${covLine(t('Pixiv 的图有画师'), 'pixiv')}`
+        + `${covLine(t('其他来源有画师'), 'other')}`
+        + `<div class="prov-stat"><b>${pct(cov.with_original_post || 0, total)}</b><span>${t('能对到原帖')}<small>${t('{n} 张', {n: number(cov.with_original_post || 0)})}</small></span></div></div>` : ''}
+    <div class="setting-line set-status"><span><span class="local-dot${working ? ' busy' : s.status === 'failed' ? ' warn' : ''}"></span>`
+      + `${working ? t('正在查找…') : s.status === 'failed' && s.reason ? t('上次出错：{reason}', {reason: esc(tb(s.reason))})
+          : p.runs?.[0] ? t('上次 {time} · 新找到 {n}', {time: esc(localTime(p.runs[0].started_at)), n: number(p.runs[0].found || 0)}) : t('还没有查过')}</span>`
+      + `${working ? `<button class="quiet small" data-open-tasks>${t('在任务面板查看')}</button>`
+          : `<button class="quiet small" data-open-tasks="provenance">${t('找回全库画师…')}</button>`}</div>
+    <label class="switch-line"><span><b>${t('同步后自动查新图')}${scope('library')}</b>`
+      + `<small>${p.auto_network ? t('新加入的图做签名识别、查像素哈希、比对新找到的画师；每次最多 {mb} MB', {mb: number(p.budgets?.new || 50)})
+          : t('新加入的图只在本机做签名识别；要联网查，在任务面板里每次授权')}${p.frozen ? ' · ' + t('测试图库不同步，这个开关不起作用') : ''}</small></span>`
+      + `<input type="checkbox" class="switch" id="provAuto" ${p.auto ? 'checked' : ''}></label>
     ${cov ? `<a class="setting-line set-link" href="#/artist-audit"><span>${t('画师抽查')}<small class="line-hint">${t('随机抽 50 张，逐张判断找到的画师对不对')}</small></span><span>›</span></a>` : ''}
     ${state.accounts && !state.accounts.pixiv?.bound ? `<p class="settings-note net-foot">${t('登录 Pixiv 后才能比对 R18 作品（见下方「账号」）。')}</p>` : ''}`;
   // 运行期间会轮询：只在有变化时重画，这样点击绝不会因为按钮被替换而丢失。
