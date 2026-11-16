@@ -339,7 +339,9 @@
 
  "native/terms/src/diagnostics/logs/details.rs":"49daaeae10eaaf1275776734b97432d01d14b14855d0cfdcc2ed87a1b97b07d9",
 
- "native/terms/src/example_cache.rs":"6f35aea5b6d06ce3418a66f9f5ed4c7031a6affaaefeee3a8e9f43aae3e20416",
+ "native/terms/src/example_cache.rs":"9c8bb3014aea3f999cdd74815bd46b0f6d5a9273714e9225cb81ce662c141862",
+
+ "native/terms/src/example_disk.rs":"246b858bba42f2baa61956835a07d29cfa62bdc33703f67b79c7b90c8089236a",
 
  "native/terms/src/example_features.rs":"ca914a19f4c397fe3a2958d09799d30b26bd601f58617eb05d331839a426d5be",
 
@@ -385,7 +387,7 @@
 
  "native/terms/src/index_generation.rs":"940c236d35bee6001cc2225701d64d0be2964a2575a653a897449650535ad2fa",
 
- "native/terms/src/lib.rs":"63681023af0cea51e1251325f80e7b8f85c80d8a793ee4d02caa17c4fe212f9e",
+ "native/terms/src/lib.rs":"c0f97e5eb721d13939f7007591f96a7c5f99e41f6886c982aac7c0f8421e6e7e",
 
  "native/terms/src/platform_process.rs":"62046a3cf19fa77c1f3105770d4937a6cd780b24e9219a84106c4014aaf1f500",
 

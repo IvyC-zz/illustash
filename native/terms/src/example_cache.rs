@@ -1,5 +1,6 @@
 //! 会话内的例图特征快照。切换图库释放整个缓存；长期不用时按空间释放矩阵。
 use crate::{
+    example_disk,
     example_features::{self, Space},
     example_scores::Matrix,
     Result,
@@ -73,9 +74,27 @@ impl Cache {
             return Ok(cached.matrix.clone());
         }
         *slot = None;
-        let tx = c.transaction()?;
-        let matrix = Arc::new(example_features::load(&tx, base, space)?);
-        tx.commit()?;
+        let disk = if space == Space::Tags {
+            example_disk::path(base).zip(example_disk::source_stamp(source).ok())
+        } else {
+            None
+        };
+        let stored = disk.as_ref().and_then(|(path, stamp)| example_disk::read(path, *stamp));
+        let stamp_still_matches = |stamp| example_disk::source_stamp(source).is_ok_and(|now| now == stamp);
+        let (matrix, rebuild) = match stored {
+            Some(matrix)
+                if data_version(c)? == version
+                    && disk.as_ref().is_some_and(|(_, stamp)| stamp_still_matches(*stamp)) =>
+            {
+                (Arc::new(matrix), false)
+            }
+            _ => {
+                let tx = c.transaction()?;
+                let matrix = Arc::new(example_features::load(&tx, base, space)?);
+                tx.commit()?;
+                (matrix, true)
+            }
+        };
         // 源库更新可能在取版本之后、固定快照之前发生，这时本次仍可用读到的事务快照，
         // 但不把它标作已知版本缓存。基础文件在途变化时连本次结果也无法确认。
         if base_stamp(base, space)? != files {
@@ -83,6 +102,14 @@ impl Cache {
         }
         if data_version(c)? != version {
             return Ok(matrix);
+        }
+        if let Some((path, stamp)) =
+            disk.filter(|(_, stamp)| rebuild && !matrix.is_empty() && stamp_still_matches(*stamp))
+        {
+            // 这是可删除的派生文件。写失败时仍可用本次读到的源库快照。
+            if let Err(error) = example_disk::write(&path, stamp, &matrix) {
+                eprintln!("未能写入 WD 例图缓存：{error}");
+            }
         }
         *slot = Some(Cached { data_version: version, files, matrix: matrix.clone(), expires: Instant::now() + IDLE });
         if !state.reaping {

@@ -77,6 +77,7 @@ pub(crate) use illustash_core::compat_unicode;
 pub mod desktop_shell;
 pub mod diagnostics;
 mod example_cache;
+mod example_disk;
 pub mod example_features;
 pub mod example_scores;
 pub(crate) use illustash_core::error;

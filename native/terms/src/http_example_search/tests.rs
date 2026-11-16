@@ -210,6 +210,38 @@ fn example_search_observes_wd_and_ccip_updates_and_base_file_changes() {
 }
 
 #[test]
+fn example_search_rebuilds_stale_or_damaged_wd_disk_cache() {
+    let f = Fixture::new();
+    let db = f.db();
+    let source = f.source();
+    source.pragma_update(None, "journal_mode", "WAL").unwrap();
+    for (id, label) in [("A", "red"), ("B", "red"), ("C", "blue")] {
+        Fixture::asset(&db, &source, id, id, "2026-01-01", &[(label, 0.9)]);
+    }
+    let cache = f.context.examples.as_ref().unwrap();
+    let base = f.context.library.as_ref().unwrap().join("features");
+    let file = crate::example_disk::path(&base).unwrap();
+    assert_eq!(f.ids(&["A"], ""), ["B", "C"]);
+    let initial = fs::read(&file).unwrap();
+    cache.clear();
+    assert_eq!(f.ids(&["A"], ""), ["B", "C"]);
+
+    cache.clear();
+    source.execute("UPDATE labels SET value='blue' WHERE uuid='A'", []).unwrap();
+    // 保持相同的行数和 rowid，通过另一个只读连接识别 WAL 的已提交更新。
+    assert_eq!(f.ids(&["A"], ""), ["C", "B"]);
+    let updated = fs::read(&file).unwrap();
+    assert_ne!(initial, updated);
+
+    cache.clear();
+    let mut damaged = updated.clone();
+    *damaged.last_mut().unwrap() ^= 0x01;
+    fs::write(&file, damaged).unwrap();
+    assert_eq!(f.ids(&["A"], ""), ["C", "B"]);
+    assert_eq!(fs::read(&file).unwrap(), updated);
+}
+
+#[test]
 fn example_search_shared_scorers_support_centroid_max_and_balanced_linear_logits() {
     let f = Fixture::new();
     let db = f.db();

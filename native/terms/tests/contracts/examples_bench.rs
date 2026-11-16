@@ -106,9 +106,17 @@ fn benchmark_example_search_http() {
         ("wd_five_examples", format!("/api/assets?like={five}")),
         ("ccip_first", format!("/api/assets?like={one}&like_by=ccip")),
     ];
+    // 先量第一次从源库建缓存，再用三个独立宿主量从已有派生文件加载。
+    let (host, origin, token) = launch_inner(&root, &package, "benchmark", false, binary, true);
+    let start = Instant::now();
+    search(&origin, &token, &paths[0].1);
+    println!("FIRST_BUILD wd_ms {:.3}", start.elapsed().as_secs_f64() * 1000.0);
+    stop(host);
+    let cache = package.join("cache/wd-tags-idf-v1.bin");
+    let written = fs::metadata(&cache).unwrap().modified().unwrap();
     let mut samples: BTreeMap<&str, Vec<f64>> = BTreeMap::new();
     for trial in 1..=3 {
-        let (mut host, origin, token) = launch_inner(&root, &package, "benchmark", false, binary, true);
+        let (host, origin, token) = launch_inner(&root, &package, "benchmark", false, binary, true);
         let pid = host.child.id();
         let run = |uri: &str| search(&origin, &token, uri);
         for (prefix, uri) in [("wd", &paths[0].1), ("ccip", &paths[6].1)] {
@@ -132,21 +140,26 @@ fn benchmark_example_search_http() {
             }
             samples.entry(name).or_default().push(start.elapsed().as_secs_f64() * 1000.0 / 50.0);
         }
-        // 和桌面外壳一样通过 EOF 关闭，让下一轮正常打开同一份合成图库。
-        drop(host.child.stdin.take());
-        let deadline = wait::deadline();
-        loop {
-            if let Some(status) = host.child.try_wait().unwrap() {
-                host.reaped = true;
-                assert!(status.success());
-                break;
-            }
-            assert!(Instant::now() < deadline, "宿主未在等待上限内退出");
-            thread::sleep(Duration::from_millis(25));
-        }
+        stop(host);
+        assert_eq!(fs::metadata(&cache).unwrap().modified().unwrap(), written, "派生缓存被重建");
     }
     for (name, mut trials) in samples {
         trials.sort_by(f64::total_cmp);
         println!("BENCH {name} {:.3}", trials[1]);
+    }
+}
+
+fn stop(mut host: Host) {
+    // 和桌面外壳一样通过 EOF 关闭，让下一轮正常打开同一份合成图库。
+    drop(host.child.stdin.take());
+    let deadline = wait::deadline();
+    loop {
+        if let Some(status) = host.child.try_wait().unwrap() {
+            host.reaped = true;
+            assert!(status.success());
+            break;
+        }
+        assert!(Instant::now() < deadline, "宿主未在等待上限内退出");
+        thread::sleep(Duration::from_millis(25));
     }
 }
