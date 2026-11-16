@@ -1,7 +1,7 @@
 // 由 tools/styleguide/census.py 从 web/static/app.css 生成，不要手改。
 window.CENSUS = {
  "source": "web/static/app.css",
- "sha256": "4cb475c1a06174647dcc34f2bce7e95e65866cfa074e3278b6b1c28b5e728b12",
+ "sha256": "d04002d889b1d423d08ee8291bc8efb7ce694a3624b3b7d078802c93789b72d3",
  "lines": 1504,
  "rules": 1347,
  "themeVars": {
@@ -2003,7 +2003,7 @@ window.CENSUS = {
     "value": "height: 17px",
     "uses": 2,
     "examples": [
-     ".top-actions .icon svg,#sidebarToggle svg",
+     ".top-actions .icon svg,#sidebarToggle svg,#backButton svg",
      ".strip-nav svg"
     ]
    },

@@ -1,7 +1,7 @@
 // 图片网格（桌面布局，#199）：分页加载图片、虚拟网格和它的缩放、选择、选择栏的操作、键盘快捷键、视图选项和 R18
 // 筛选。
 import {edits, setLatest, undoLatest, undoneText} from '../core/edits.js';
-import {esc, number, platformText, shortcut} from '../core/format.js';
+import {esc, isMac, number, platformText, shortcut} from '../core/format.js';
 import {t, tb} from '../core/i18n.js';
 import {composing} from '../core/keys.js';
 import {REASONS, nameWithWork} from '../core/labels.js';
@@ -10,7 +10,7 @@ import {learnerState, learningSettled, metaSoon, refreshMeta} from '../core/meta
 import {prefs} from '../core/prefs.js';
 import {SHORTCUTS, currentSource, keyAction, keySelection, modes, selectionSize, shownUuid, viewerTarget} from '../core/modes.js';
 import {keyScope, pageOf, viewOf} from '../core/pages.js';
-import {browsing, cleanup, defaultSort, hashFor} from '../core/route.js';
+import {browsing, cleanup, defaultSort, hashFor, stepHistory} from '../core/route.js';
 import {api, post, readError} from '../core/session.js';
 import {state} from '../core/state.js';
 import {offerWatch} from './catalog.js';
@@ -836,6 +836,10 @@ export function wireGrid() {
     const mod = e.metaKey || e.ctrlKey, key = e.key.toLowerCase(), m = modes();
     const view = viewOf(state.route), scope = keyScope(view), grid = scope === 'grid';
     if (mod && key === 'k') { e.preventDefault(); jumpToCharacter(); return; }
+    // 后退、前进（#526）：Windows 上 Alt+← →，macOS 上 ⌘[ ⌘]（桌面 App 里由菜单接，网页形态在这里接），输入框里也生效。
+    // 浏览器自己的后退会退出图库页面，这里改走 stepHistory，只在这个图库的页面之间走。
+    const back = isMac ? e.metaKey && !e.altKey && (e.key === '[' || e.key === ']') : e.altKey && !mod && (e.key === 'ArrowLeft' || e.key === 'ArrowRight');
+    if (back) { e.preventDefault(); stepHistory(e.key === '[' || e.key === 'ArrowLeft' ? -1 : 1); return; }
     // ⌘＋／⌘－：大图打开时缩放大图；否则只在有网格的页面改网格列数，别的页面什么也不做（也不交给浏览器缩放）。
     if (mod && (key === '=' || key === '+' || key === '-')) {
       e.preventDefault(); const bigger = key !== '-';

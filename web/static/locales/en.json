@@ -2921,5 +2921,7 @@
   "按涉及的图片数排序。": "Sorted by the number of pictures involved.",
   "高亮的按钮是外部资料建议的做法。": "The highlighted button is what external sources suggest.",
   "选中两张以上可以判断它们的关系。": "Select two or more to decide how they relate.",
-  "像截图，但有人物。": "They look like screenshots but have people."
+  "像截图，但有人物。": "They look like screenshots but have people.",
+  "后退（{key}）": "Back ({key})",
+  "后退、前进（只在这个图库的页面之间；鼠标侧键、标题左边的 ‹ 也可以）": "Back and forward (within this library’s pages; the mouse side buttons and the ‹ left of the title work too)"
 }
