@@ -193,6 +193,12 @@ test('结束时的提示', () => {
   assert.equal(c.finishedText(done('withdraw', 5), after(ENABLED), after({})), '已撤回 WD 角色扩展');
   const failed = ext({package: READY, task: {id: 't', kind: 'enable', status: 'failed', message: '识别交付没有完成'}});
   assert.equal(c.finishedText(failed.task, before, failed), '启用没有完成，图库没有改动：识别交付没有完成');
+  // 同步后对新识别的图自动检查（kind 为 auto）：没有改动不提示，有改动或失败时提示。
+  assert.equal(c.finishedText(done('auto', 0), after(ENABLED), after(ENABLED)), '');
+  assert.equal(c.finishedText(done('auto', 2), after(ENABLED), after(ENABLED)), 'WD 角色扩展已更新：7 张图有扩展候选');
+  const autoFailed = ext({package: READY, library: ENABLED, task: {id: 'a', kind: 'auto', status: 'failed', message: '磁盘已满'}});
+  assert.equal(c.finishedText(autoFailed.task, after(ENABLED), autoFailed), '检查新识别的图没有完成，图库没有改动：磁盘已满');
+  assert.equal(c.extLine(ext({package: READY, library: ENABLED, task: {id: 'a', kind: 'auto', status: 'running', phase: 'scan', done: 1, total: 4}})), '正在检查 1 / 4 张');
   assert.equal(c.downloadText({kind: 'download', status: 'done'}, ext({package: READY})), '扩展包已就位');
   assert.equal(c.downloadText({kind: 'import', status: 'done'}, ext()), '', '导入没凑齐时不提示，结果列在卡片里');
 });

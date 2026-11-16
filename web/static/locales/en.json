@@ -3006,5 +3006,6 @@
   "下载 WD 角色扩展包": "Download WD character extension package",
   "一次普通的 HTTPS 下载，取回扩展包；不发送图库里的任何信息": "A plain HTTPS download of the extension package; nothing from your library is sent",
   "WD 扩展": "WD ext",
-  "扩展": "ext"
+  "扩展": "ext",
+  "检查新识别的图没有完成，图库没有改动：{reason}": "Checking newly recognized pictures did not finish; the library is unchanged: {reason}"
 }

@@ -47,6 +47,7 @@ export function extLine(x = state.wdExtension) {
   }
   if (task?.status === 'failed') {
     const reason = tb(task.message || '');
+    if (task.kind === 'auto') return t('检查新识别的图没有完成，图库没有改动：{reason}', {reason});
     return task.kind === 'withdraw' ? t('撤回没有完成，图库没有改动：{reason}', {reason}) : t('启用没有完成，图库没有改动：{reason}', {reason});
   }
   if (task?.status === 'cancelled') return t('已取消，图库没有改动');
@@ -145,12 +146,15 @@ export function extTask(x = state.wdExtension) {
     line: extLine(x), body: extBar(x), action: extActions(x, true), diagnostic: failed?.diagnostic};
 }
 
-// 结束时的提示。`before` 是任务运行时最后一次读到的状态：那时已经启用的，这一次是重新检查。
+// 结束时的提示。`before` 是任务运行时最后一次读到的状态：那时已经启用的，这一次是重新检查。同步后对新识别的图自动
+// 检查（kind 为 auto，#550 待决定 1）只在有改动或失败时提示。
 export function finishedText(task, before, x = state.wdExtension) {
+  const updated = () => t('WD 角色扩展已更新：{n} 张图有扩展候选', {n: number(lib(x).images || 0)});
+  if (task.kind === 'auto' && task.status !== 'failed') return task.status === 'done' && task.result?.changed ? updated() : '';
   if (task.status === 'failed' || task.status === 'cancelled') return extLine(x);
   if (task.kind === 'withdraw') return t('已撤回 WD 角色扩展');
   const images = lib(x).images || 0;
-  if (lib(before).enabled) return !task.result?.changed ? t('没有变化') : t('WD 角色扩展已更新：{n} 张图有扩展候选', {n: number(images)});
+  if (lib(before).enabled) return !task.result?.changed ? t('没有变化') : updated();
   return images ? t('WD 角色扩展已启用：{n} 张图有扩展候选', {n: number(images)}) : t('WD 角色扩展已启用，没有找到扩展候选');
 }
 export function downloadText(d, x = state.wdExtension) {
