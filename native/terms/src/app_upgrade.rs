@@ -89,13 +89,16 @@ pub(crate) fn run(
     progress: Option<Progress>,
 ) -> std::result::Result<UpgradeReport, UpgradeFailure> {
     let report = upgrade(prepared, progress)?;
-    eprintln!(
-        "图库升级已提交：terms {} → {}；升级前备份：{}{}",
-        report.before,
-        report.after,
-        report.backup.display(),
-        if report.maintenance_pending { "；空间维护待重试" } else { "" }
-    );
+    // 桌面用就绪协议和图库会话报告成功，stderr 留给空间回收等真实告警。
+    if !crate::desktop_shell::is_host_child() {
+        eprintln!(
+            "图库升级已提交：terms {} → {}；升级前备份：{}{}",
+            report.before,
+            report.after,
+            report.backup.display(),
+            if report.maintenance_pending { "；空间维护待重试" } else { "" }
+        );
+    }
     Ok(report)
 }
 

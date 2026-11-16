@@ -185,7 +185,7 @@
 
  "desktop/src/pixiv.rs":"511b8003b2068c801f336d96a6c130a6796ed1866d1102e64678760d3a906c65",
 
- "desktop/src/server.rs":"4ba6ebfe8a0ff505027d469c9363bb32bc4f2d370882cce5da267ad676b455ff",
+ "desktop/src/server.rs":"73b3e7ae88c0c50dcdab6d510dda251a530e2bf7360da71841a185d3b94ee0fe",
 
  "desktop/src/updater.rs":"eb5c53f5025e9db4e1179988de11d276d9395da2841d79da2c6278fd77929fb9",
 
@@ -223,7 +223,7 @@
 
  "native/terms/src/app_folder.rs":"cd148b0a312065b97da3cbea8dc782a596eb0d8e842a1dfcf2d45f259fea6216",
 
- "native/terms/src/app_http.rs":"1f3446f0fbaaee14a6f9bf178466746ccf1c6fa085f64c4f8511dc6825771e3f",
+ "native/terms/src/app_http.rs":"11fb2c96a96022f32a25fd3bfc297926fa3aa24e15a7f024e19c4c7dc4481e59",
 
  "native/terms/src/app_human_conclusions.rs":"37bd5770a1bce2e3686a3a478b0925ddcfa11eaa81bf1f85023c57ed6cc8126b",
 
@@ -321,7 +321,7 @@
 
  "native/terms/src/app_updates.rs":"e7b51e4afd108af07dbf92e76d44251709635984f8387d3e702922190b9834ba",
 
- "native/terms/src/app_upgrade.rs":"de6b529fbb01865fb9adeb78ae45ca4b5a541b14129b9472f58f10ac693ce6cf",
+ "native/terms/src/app_upgrade.rs":"40d4615ccdc3ca18e69f90b47afa0eb2a7c005613d23b6aeae0704b83bbdfea6",
 
  "native/terms/src/app_wd_extension.rs":"24bf9472036064c71171f526cdd53270eab45bccf67bac022d2d4f876efa4ade",
 
@@ -331,7 +331,7 @@
 
  "native/terms/src/cli.rs":"0144b13ff36286cec17db94d19f3fd260a94949559601d3cbdc1563d6330e671",
 
- "native/terms/src/desktop_shell.rs":"381733278909d3290199f212c138d02197f1a259c9fda2a58819609b986f27a2",
+ "native/terms/src/desktop_shell.rs":"ca45e16a710be1bfef8ff4c269852fd69869a829fc22dec1c679155763953ca6",
 
  "native/terms/src/diagnostics.rs":"0791b6496bfa790dbc11635b57fc79e1ce1cec8f6fd6ad4db9c119b8a05b8f34",
 
