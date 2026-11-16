@@ -281,6 +281,60 @@ fn independent_evidence_keeps_imported_definition_and_rolls_back_entire_undo() {
 }
 
 #[test]
+fn withdrawn_wd_extension_keeps_history_and_allows_import_undo() {
+    use illustash_core::{character_entities, wd_extension};
+
+    let source = Fixture::new("source-library");
+    let tag = "synthetic_character";
+    let mut c = crate::open(&source.db).unwrap();
+    let tx = c.transaction().unwrap();
+    crate::schema::begin_writing(&tx).unwrap();
+    character_entities::create(
+        &tx,
+        &character_entities::New { id: "source-character", kind: "character", ..Default::default() },
+        "user",
+    )
+    .unwrap();
+    let source_term = crate::store::term_by_key(&tx, "source-character").unwrap().unwrap().0;
+    crate::store::add_link(&tx, source_term, "danbooru", tag, "", "user").unwrap();
+    crate::schema::commit_writing(tx).unwrap();
+    let path = source.root.join("synthetic.illustash-human.jsonl");
+    capture(&source.db, &source.id, &|| Ok(())).unwrap().write(&mut File::create(&path).unwrap()).unwrap();
+
+    let target = Fixture::new("target-library");
+    target.asset("image", "synthetic.png", 1);
+    let imported = import_file(&target.db, &target.id, &path, &|| Ok(())).unwrap();
+    let action = imported.action_id.unwrap();
+    let first = target.count("SELECT id FROM terms");
+    let mut c = crate::open(&target.db).unwrap();
+    let tx = c.transaction().unwrap();
+    crate::schema::begin_writing(&tx).unwrap();
+    let hit = wd_extension::Hit { uuid: "image".into(), tag: tag.into(), probability: 0.95 };
+    assert_eq!(wd_extension::apply(&tx, "synthetic", &[hit]).unwrap(), 1);
+    crate::schema::commit_writing(tx).unwrap();
+    assert_eq!(target.count("SELECT term_id FROM term_current_evidence"), first);
+    assert!(matches!(target.undo(action), Err(Error::Conflict(_))));
+    assert_eq!(target.count("SELECT id FROM terms"), first);
+
+    let tx = c.transaction().unwrap();
+    crate::schema::begin_writing(&tx).unwrap();
+    assert_eq!(wd_extension::withdraw(&tx).unwrap(), 1);
+    crate::schema::commit_writing(tx).unwrap();
+    target.undo(action).unwrap();
+    for table in ["terms", "term_links", "term_current_evidence", "candidates", "memberships"] {
+        assert_eq!(target.count(&format!("SELECT count(*) FROM {table}")), 0, "{table}");
+    }
+    assert_eq!(target.count("SELECT term_id FROM term_evidence JOIN term_records t ON t.id=term_id"), first);
+    assert_eq!(target.count("SELECT count(*) FROM pragma_foreign_key_check"), 0);
+
+    let reimported = import_file(&target.db, &target.id, &path, &|| Ok(())).unwrap();
+    assert!(reimported.action_id.is_some());
+    assert_ne!(target.count("SELECT id FROM terms"), first);
+    assert_eq!(target.count("SELECT count(*) FROM term_current_evidence"), 0);
+    assert_eq!(target.count("SELECT term_id FROM term_evidence"), first);
+}
+
+#[test]
 fn standalone_user_definition_imports_and_undoes_without_assets() {
     let source = Fixture::new("source-library");
     let c = crate::open(&source.db).unwrap();
