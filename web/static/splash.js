@@ -395,8 +395,13 @@ const SPLASH_READY = t('准备好了');
     progress(done) { real = clamp(done); },
     // 图标做好后才解析，这样外壳绝不会把折叠截断
     settled() { return new Promise(done => { waiting.push(done); settle(); }); },
-    // 不再翻卡（外壳改为显示错误）
-    halt() { if (haltAt === null) haltAt = t; }
+    // 不再翻卡（外壳改为显示错误、升级询问或欢迎页）。图标还没成形时直接跳到成形的样子（#521）：折叠期间图标按整列
+    // 居中，列里多出的提示文字会把它推到文字上；提示一出现就停在最终位置，文字和图标不重叠。
+    halt() {
+      if (haltAt !== null) return;
+      if (t < MADE) t = MADE;
+      haltAt = t; render(t);
+    }
   };
   render(t);
   requestAnimationFrame(tick);
