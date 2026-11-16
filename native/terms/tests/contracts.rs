@@ -378,11 +378,200 @@ fn interrupted_task_recovery_contract() {
     replay("task_recovery");
 }
 
-/// 把响应解析成 JSON（基准测试要从响应里读值）。
-#[cfg(unix)]
+/// 把响应解析成 JSON，供按字段断言和计时使用。
 fn request_json(origin: &str, url: &str, body: Option<&Value>, token: &str) -> (u16, Value, Map<String, Value>) {
     let (status, raw, headers) = request(origin, url, body, token);
     (status, serde_json::from_str(&raw).unwrap_or(Value::Null), headers)
+}
+
+#[test]
+fn artist_directory_contract() {
+    let category = "artist-directory";
+    let (_scratch, root, package) = materialize(&load("http_api"), category);
+    let binary = Path::new(env!("CARGO_BIN_EXE_illustash-terms"));
+    let (_host, origin, token) = launch(&root, &package, category, true, binary);
+    let c = Connection::open(package.join("library.sqlite")).unwrap();
+    c.execute_batch(
+        "INSERT INTO terms(key,kind,origin) VALUES
+             ('dir-a','artist','test'),('dir-b','artist','test'),('dir-c','artist','test'),('dir-d','artist','test'),
+             ('dir-explicit','rating','test');
+         INSERT INTO term_names(term_id,value,role,source,preferred)
+             SELECT id,'Straße','display','test',1 FROM terms WHERE key='dir-a';
+         INSERT INTO term_names(term_id,value,role,source)
+             SELECT id,'Unpreferred','display','test' FROM terms WHERE key='dir-a';
+         INSERT INTO term_links(system,key,term_id,source)
+             SELECT 'x','Maple_Artist',id,'test' FROM terms WHERE key='dir-a'
+             UNION ALL SELECT 'pixiv','987654',id,'test' FROM terms WHERE key='dir-a'
+             UNION ALL SELECT 'danbooru','Aoi_Illustrator',id,'test' FROM terms WHERE key='dir-b'
+             UNION ALL SELECT 'wd_rating','explicit',id,'test' FROM terms WHERE key='dir-explicit';
+         INSERT INTO assets(uuid,filename,width,height,added_at) VALUES
+             ('dir-safe-a','a.png',10,10,'2026-10-01'),('dir-safe-z','z.png',10,10,'2026-10-01'),
+             ('dir-adult','r.png',10,10,'2026-10-02'),('dir-hidden','h.png',10,10,'2026-10-03'),
+             ('dir-excluded','e.png',10,10,'2026-10-04'),('dir-maybe','m.png',10,10,'2026-10-05'),
+             ('dir-rejected','n.png',10,10,'2026-10-06'),('dir-removed','x.png',10,10,'2026-10-07');
+         INSERT INTO duplicates(uuid,grp,size,pos,grp_added,rep,hidden)
+             VALUES ('dir-hidden','dir-dup',2,2,'2026-10-03',0,1);
+         INSERT INTO excluded(uuid,reason,origin) VALUES ('dir-excluded','manual','test');
+         INSERT INTO term_assets(namespace,key,removed_at)
+             SELECT 'library',uuid,CASE WHEN uuid='dir-removed' THEN '2026-10-08' END
+             FROM assets WHERE uuid LIKE 'dir-%';
+         INSERT INTO term_projection(asset_id,term_id,state)
+             SELECT a.id,t.id,CASE a.key WHEN 'dir-maybe' THEN 'maybe'
+                                         WHEN 'dir-rejected' THEN 'rejected'
+                                         WHEN 'dir-safe-a' THEN 'confirmed' ELSE 'machine' END
+             FROM term_assets a JOIN terms t ON t.key='dir-a' WHERE a.key LIKE 'dir-%';
+         INSERT INTO term_projection(asset_id,term_id,state)
+             SELECT a.id,t.id,'machine' FROM term_assets a JOIN terms t
+                 ON (t.key='dir-b' AND a.key IN ('dir-safe-a','dir-adult'))
+                 OR (t.key IN ('dir-c','dir-explicit') AND a.key='dir-adult');
+         INSERT INTO term_projection(asset_id,term_id,state)
+             SELECT a.id,t.id,'maybe' FROM term_assets a JOIN terms t ON t.key='dir-d' WHERE a.key='dir-maybe';",
+    )
+    .unwrap();
+
+    let get = |url: &str| {
+        let (status, payload, _) = request_json(&origin, url, None, &token);
+        assert_eq!(status, 200, "{url}: {payload}");
+        payload
+    };
+    let page_ids = |page: &Value| {
+        page["items"].as_array().unwrap().iter().map(|x| x["id"].as_str().unwrap().to_owned()).collect::<Vec<_>>()
+    };
+    for (nsfw, counts, cover, last) in [
+        ("", &[3, 2, 1][..], "dir-adult", "2026-10-02"),
+        ("hide", &[2, 1], "dir-safe-a", "2026-10-01"),
+        ("only", &[1, 1, 1], "dir-adult", "2026-10-02"),
+    ] {
+        let page = get(&format!("/api/artist-directory?nsfw={nsfw}"));
+        assert_eq!(page["total"], counts.len());
+        let items = page["items"].as_array().unwrap();
+        assert_eq!(items.len(), counts.len());
+        for (item, (id, expected)) in items.iter().zip(["dir-a", "dir-b", "dir-c"].into_iter().zip(counts)) {
+            let filter = get(&format!("/api/assets/count?artist={id}&nsfw={nsfw}"));
+            assert_eq!(item["id"], id);
+            assert_eq!(item["count"], *expected, "{id} {nsfw}");
+            assert_eq!(item["count"], filter["total"], "{id} {nsfw}");
+        }
+        for id in ["dir-a", "dir-b", "dir-c", "dir-d"].into_iter().skip(counts.len()) {
+            assert_eq!(get(&format!("/api/assets/count?artist={id}&nsfw={nsfw}"))["total"], 0);
+        }
+        assert_eq!(items[0]["cover"], cover);
+        assert_eq!(items[0]["last"], last);
+        assert_eq!(items[0]["name"], get("/api/artist?id=dir-a")["name"]);
+        let detail = get(&format!("/api/detail?id={cover}"));
+        let artist = detail["artists"].as_array().unwrap().iter().find(|x| x["id"] == "dir-a").unwrap();
+        assert_eq!(items[0]["homes"], artist["homes"]);
+        assert_eq!(items[0]["homes"].as_array().unwrap().len(), 2);
+    }
+    for (order, expected) in [
+        ("count", ["dir-a", "dir-b", "dir-c"]),
+        ("recent", ["dir-a", "dir-b", "dir-c"]),
+        ("name", ["dir-b", "dir-a", "dir-c"]),
+    ] {
+        assert_eq!(page_ids(&get(&format!("/api/artist-directory?order={order}"))), expected);
+        for (offset, expected) in expected.iter().enumerate() {
+            let page = get(&format!("/api/artist-directory?order={order}&offset={offset}&limit=1"));
+            assert_eq!(page_ids(&page), [*expected]);
+            assert_eq!(page["total"], 3);
+            assert_eq!(page["offset"], offset);
+        }
+        assert_eq!(
+            get(&format!("/api/artist-directory?order={order}&offset=3&limit=1")),
+            json!({"items":[], "total":3, "offset":3})
+        );
+    }
+    for (query, expected) in [
+        ("STRASSE", &["dir-a"][..]),
+        ("maple_", &["dir-a"]),
+        ("987654", &["dir-a"]),
+        ("AOI_ILL", &["dir-b"]),
+        ("aoi%20ill", &["dir-b"]),
+        ("unpreferred", &[]),
+        ("%25", &[]),
+    ] {
+        assert_eq!(page_ids(&get(&format!("/api/artist-directory?q={query}"))), expected);
+    }
+    for query in ["order=bad", "nsfw=bad", "limit=0", "limit=201", "offset=-1", "offset=no"] {
+        assert_eq!(request_json(&origin, &format!("/api/artist-directory?{query}"), None, &token).0, 400);
+    }
+}
+
+/// #448 专用合成数据。独立运行本用例三次，每次报告 50 个 HTTP 请求的平均耗时。
+#[test]
+#[ignore = "release HTTP benchmark; run with collab_run.py timing"]
+fn benchmark_artist_directory() {
+    assert!(!cfg!(debug_assertions), "benchmark must be compiled --release");
+    let category = "artist-directory-benchmark";
+    let (_scratch, root, package) = materialize(&load("http_api"), category);
+    let binary = Path::new(env!("CARGO_BIN_EXE_illustash-terms"));
+    let (_host, origin, token) = launch(&root, &package, category, true, binary);
+    let c = Connection::open(package.join("library.sqlite")).unwrap();
+    c.execute_batch(
+        "BEGIN;
+         CREATE TEMP TABLE seq(i INTEGER PRIMARY KEY);
+         WITH RECURSIVE ints(i) AS (VALUES(0) UNION ALL SELECT i+1 FROM ints WHERE i<49999)
+             INSERT INTO seq SELECT i FROM ints;
+         INSERT INTO assets(uuid,width,height,added_at,filename)
+             SELECT printf('directory-%05d',i),120,150,date('2023-01-01',printf('+%d days',i%1095)),
+                    printf('directory-%05d.png',i)
+             FROM seq;
+         INSERT INTO term_assets(namespace,key) SELECT 'library',printf('directory-%05d',i) FROM seq;
+         CREATE TEMP TABLE synthetic AS
+             SELECT i,a.id,(i*7919)%50000 FROM seq JOIN term_assets a ON a.namespace='library' AND a.key=printf('directory-%05d',i);
+         INSERT INTO terms(key,kind,origin)
+             SELECT printf('directory-artist-%04d',i),'artist','synthetic' FROM seq WHERE i<4000;
+         INSERT INTO term_names(term_id,value,role,source)
+             SELECT id,CASE WHEN id%5=0 THEN 'Maple ' ELSE 'Aoi ' END || key,'display','synthetic'
+             FROM terms WHERE key LIKE 'directory-artist-%';
+         INSERT INTO term_links(system,key,term_id,source)
+             SELECT 'pixiv',printf('%d',810000000+id),id,'synthetic' FROM terms WHERE key LIKE 'directory-artist-%';
+         INSERT INTO term_projection(asset_id,term_id,state)
+             SELECT s.id,t.id,CASE WHEN permuted%9=0 THEN 'confirmed' ELSE 'machine' END
+             FROM synthetic s JOIN terms t ON t.key=printf('directory-artist-%04d',
+                  CASE WHEN permuted>=4000 AND permuted%3=0 THEN permuted%79 ELSE permuted%4000 END)
+             WHERE permuted<12000;
+         INSERT INTO terms(key,kind,origin) VALUES ('directory-explicit','rating','synthetic');
+         INSERT INTO term_links(system,key,term_id,source)
+             SELECT 'wd_rating','explicit',id,'synthetic' FROM terms WHERE key='directory-explicit';
+         INSERT INTO term_projection(asset_id,term_id,state)
+             SELECT s.id,t.id,'machine' FROM synthetic s JOIN terms t ON t.key='directory-explicit'
+             WHERE (i*31337)%50000 < 20000;
+         INSERT INTO duplicates(uuid,grp,size,pos,grp_added,rep,hidden)
+             SELECT printf('directory-%05d',i),printf('d-%04d',i/2),2,i%2+1,'2025-01-01',1-i%2,i%2
+             FROM seq WHERE i<2500;
+         INSERT INTO terms(key,kind,origin)
+             SELECT printf('directory-topic-%04d',i),'topic','synthetic' FROM seq WHERE i<3000;
+         INSERT INTO term_projection(asset_id,term_id,state)
+             SELECT s.id,t.id,'machine'
+             FROM synthetic s JOIN seq n ON n.i<30
+             JOIN terms t ON t.key=printf('directory-topic-%04d',(s.permuted+n.i*97)%3000);
+         COMMIT;",
+    )
+    .unwrap();
+    let page = request_json(&origin, "/api/artist-directory", None, &token);
+    assert_eq!(page.0, 200, "{}", page.1);
+    let total = page.1["total"].as_u64().unwrap();
+    assert!(total > 3800);
+    let last_page = format!("/api/artist-directory?offset={}", (total - 1) / 60 * 60);
+    for (name, url) in [
+        ("count", "/api/artist-directory"),
+        ("recent", "/api/artist-directory?order=recent"),
+        ("name", "/api/artist-directory?order=name"),
+        ("search", "/api/artist-directory?q=maple"),
+        ("hide", "/api/artist-directory?nsfw=hide"),
+        ("last_page", &last_page),
+    ] {
+        for _ in 0..5 {
+            let (status, body, _) = request_json(&origin, url, None, &token);
+            assert_eq!(status, 200, "{url}: {body}");
+            assert!(!body["items"].as_array().unwrap().is_empty());
+        }
+        let start = Instant::now();
+        for _ in 0..50 {
+            assert_eq!(request_json(&origin, url, None, &token).0, 200);
+        }
+        println!("BENCH {name} {:.3}", start.elapsed().as_secs_f64() * 1000.0 / 50.0);
+    }
 }
 
 // 每次调用这个可执行文件做一次独立试验。shell 运行脚本对每个显式指定的 release 宿主恰好做三次试验，报告中位数。
