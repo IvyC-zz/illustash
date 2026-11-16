@@ -174,7 +174,7 @@ mod platform {
 
 #[cfg(windows)]
 mod platform {
-    use tauri::{AppHandle, Manager};
+    use tauri::AppHandle;
     use windows::core::HSTRING;
     use windows::Data::Xml::Dom::XmlDocument;
     use windows::Foundation::TypedEventHandler;
