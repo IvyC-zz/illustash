@@ -176,6 +176,8 @@ fn export(request: Request, host: &Host, received: u64, body: &Json, translate: 
     if let Json::Object(fields) = &mut selection {
         fields.retain(|(k, _)| k == "ids" || k == "filter" || k == "exclude");
     }
+    // 导出只复制、不改图库：超过 500 张也不用再确认一次。
+    selection.set("confirm", true.into());
     if host.session.read().expect("http_host_post session lock poisoned").asset_exports.running() {
         return failure(request, Error::invalid("正在导出，完成后再开始下一次"), true);
     }
@@ -198,7 +200,8 @@ fn export(request: Request, host: &Host, received: u64, body: &Json, translate: 
         )?;
         c.busy_timeout(std::time::Duration::from_secs(10))?;
         crate::http_read::register_names(&c)?;
-        crate::app_commands::selected(&c, &context, &selection)
+        // 只导出选中的这几张，不带上它们的重复副本。
+        crate::app_commands::selected_scope(&c, &context, &selection, false)
     })();
     let result = ids.and_then(|ids| session.asset_exports.start(&session.library, session.generation, ids, group, destination));
     drop(session);
