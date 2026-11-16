@@ -46,8 +46,9 @@ test('a GPU fallback reason, one picture and a never-checked update read as Engl
   const line = accelerationLine({acceleration: {available: true, backend: 'coreml', on: true, last: {wd: {requested: 'coreml', used: 'cpu', reason, at: 1}}}});
   assert.match(line, /<em>Last time the GPU could not be used, so the CPU was used instead: The WD acceleration file is missing or damaged; download or import it again under Recognition models in Settings<\/em>/);
   assert.doesNotMatch(line, /\p{Script=Han}/u);
-  assert.equal(t('{n} 张 · 只是标记，不改动原图', {n: '1'}), '1 picture · only marked, the original file is not touched');
-  assert.equal(t('{n} 张 · 只是标记，不改动原图', {n: '2'}), '2 pictures · only marked, the original files are not touched');
+  // 「已排除」页的副标题原来是「{n} 张 · 只是标记…」，#426 把张数挪到页签上、副标题只剩说明；单复数照样按 {n}。
+  assert.equal(t('{n} 张', {n: '1'}), '1 picture');
+  assert.equal(t('{n} 张', {n: '2'}), '2 pictures');
   assert.equal(t('共 {n} 份备份', {n: '1'}), '1 backup');
   const {updatesLine} = await web.load('ui/settings.js');
   state.updates = {checked_at: null, newer: false, auto: false};

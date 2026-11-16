@@ -14,3 +14,14 @@ test('a Chinese page writes dates its own way', () => {
   assert.equal(esc(null), '');
   assert.equal(work('fate_(series)'), 'fate (series)');
 });
+
+// 后端的 UTC 时间戳按本地时区的日期显示（#386 的 2-15）：东八区凌晨点的「标为已检查」不写成前一天。
+test('a UTC timestamp shows as the local date', () => {
+  const {localDate, dateText} = web.core();
+  const local = new Date('2026-11-13T18:30:00Z');
+  assert.equal(localDate('2026-11-13 18:30:00'), dateText(local.getFullYear(), local.getMonth() + 1, local.getDate()));
+  assert.equal(localDate('2026-11-13T18:30:00Z'), localDate('2026-11-13 18:30:00'));
+  assert.equal(localDate('2026-11-14T02:30:00+08:00'), localDate('2026-11-13 18:30:00'));
+  assert.equal(localDate('2026-11-01'), '11 月 1 日');
+  assert.equal(localDate(''), '');
+});
