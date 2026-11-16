@@ -105,7 +105,7 @@ Identical and re-saved pictures fold automatically by default; subtle variants, 
 > [!NOTE]
 > Illustash is a personal project built primarily for the author's own needs and is still in early development.
 
-Illustash 0.1.0 has been officially released. Download it from [GitHub Releases](https://github.com/shio-vinyl/illustash/releases): a zip for Apple silicon Macs and an x64 installer for Windows. The installers are not notarized by Apple or code-signed for Windows, so the system blocks them the first time you open them; allow them once as described in [Troubleshooting installation and launch](docs/INSTALL.md) (in Chinese). When a new version comes out, you can check for updates and use “Download and restart” inside the app.
+Illustash has been officially released since 0.1.0. Download the latest version from [GitHub Releases](https://github.com/shio-vinyl/illustash/releases): a zip for Apple silicon Macs and an x64 installer for Windows. The installers are not notarized by Apple or code-signed for Windows, so the system blocks them the first time you open them; allow them once as described in [Troubleshooting installation and launch](docs/INSTALL.md) (in Chinese). When a new version comes out, you can check for updates and use “Download and restart” inside the app.
 
 | Platform | Status | Download |
 |---|---|---|

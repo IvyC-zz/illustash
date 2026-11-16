@@ -105,7 +105,7 @@
 > [!NOTE]
 > Illustash 是一个主要满足作者自己需求的个人项目，目前仍处于早期开发阶段。
 
-Illustash 0.1.0 已正式发布，安装包在 [GitHub Releases](https://github.com/shio-vinyl/illustash/releases) 下载：macOS 版是 Apple 芯片的 zip，Windows 版是 x64 安装程序。安装包没有经过 Apple 公证或 Windows 代码签名，第一次打开时系统会拦截，按 [装不上、打不开怎么办](docs/INSTALL.md) 放行一次即可。以后有新版本时，可以在应用里检查更新并「下载并重启」。
+Illustash 从 0.1.0 起正式发布，最新版本的安装包在 [GitHub Releases](https://github.com/shio-vinyl/illustash/releases) 下载：macOS 版是 Apple 芯片的 zip，Windows 版是 x64 安装程序。安装包没有经过 Apple 公证或 Windows 代码签名，第一次打开时系统会拦截，按 [装不上、打不开怎么办](docs/INSTALL.md) 放行一次即可。以后有新版本时，可以在应用里检查更新并「下载并重启」。
 
 | 平台 | 状态 | 安装包 |
 |---|---|---|
