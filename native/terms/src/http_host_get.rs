@@ -26,14 +26,27 @@ pub(super) fn waited(query: Result<Receiver<Result<Json>>>) -> Result<Json> {
     query.and_then(|rx| rx.recv().map_err(|_| Error::Invalid("研究任务已结束".into()))?)
 }
 
+fn ccip_task_and_library(
+    snapshot_task: impl FnOnce() -> Option<Json>,
+    read_library: impl FnOnce() -> Result<serde_json::Value>,
+) -> Result<(Option<Json>, serde_json::Value)> {
+    // 任务在 SQLite 提交后才发布终态。先取任务快照，避免把终态和提交前的图库状态一起发给页面。
+    let task = snapshot_task();
+    Ok((task, read_library()?))
+}
+
 pub(super) fn ccip_status(host: &Host, session: &Session, started: Option<Json>) -> Result<Json> {
     use serde_json::{json, Value};
     let model = crate::app_models::longtail_package(&host.root)?;
-    let local = crate::app_ccip_longtail::status(&session.library, &host.root)?;
+    let (task, local) = ccip_task_and_library(
+        || {
+            started
+                .or_else(|| crate::app_ccip_longtail::auto_task(&session.library).map(Json::from))
+                .or_else(|| host.imports.ccip_state(&session.library))
+        },
+        || crate::app_ccip_longtail::status(&session.library, &host.root),
+    )?;
     let model: Value = serde_json::from_str(&model.dump()).map_err(|e| Error::invalid(e.to_string()))?;
-    let task = started
-        .or_else(|| crate::app_ccip_longtail::auto_task(&session.library).map(Json::from))
-        .or_else(|| host.imports.ccip_state(&session.library));
     let task = task.map(|mut task| {
         if task.get("phase").is_none() {
             let phase = if task.get("kind").map(Json::text) == Some("withdraw")
@@ -96,6 +109,44 @@ pub(super) fn ccip_status(host: &Host, session: &Session, started: Option<Json>)
         "task": task,
     }).into())
 }
+
+#[cfg(test)]
+mod tests {
+    use super::{ccip_task_and_library, Json};
+    use serde_json::json;
+    use std::cell::Cell;
+
+    #[test]
+    fn ccip_terminal_task_never_pairs_with_precommit_library_state() {
+        for (kind, before, after) in [("enable", 0, 2), ("rescan", 2, 3), ("withdraw", 3, 0), ("auto", 2, 3)] {
+            let committed = Cell::new(false);
+            let snapshot_task = || {
+                if committed.get() {
+                    Some(Json::object([("status", "done".into())]))
+                } else if kind == "auto" {
+                    None
+                } else {
+                    Some(Json::object([("status", "running".into())]))
+                }
+            };
+            let (task, library) = ccip_task_and_library(snapshot_task, || {
+                let images = before;
+                // 模拟图库读到旧值后，worker 随即提交并发布终态。
+                committed.set(true);
+                Ok(json!({"images": images}))
+            })
+            .unwrap();
+            let pending = if kind == "auto" { None } else { Some("running") };
+            assert_eq!(task.as_ref().and_then(|t| t.get("status")).map(Json::text), pending, "{kind}");
+            assert_eq!(library["images"], before, "{kind}");
+
+            let (task, library) = ccip_task_and_library(snapshot_task, || Ok(json!({"images": after}))).unwrap();
+            assert_eq!(task.as_ref().and_then(|t| t.get("status")).map(Json::text), Some("done"), "{kind}");
+            assert_eq!(library["images"], after, "{kind}");
+        }
+    }
+}
+
 impl Host {
     /// 图库的设置，连同本宿主强制关闭的项目。
     pub(super) fn library_settings(&self, library: &Library) -> Result<Json> {
