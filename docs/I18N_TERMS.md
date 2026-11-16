@@ -12,7 +12,7 @@
 | 角色 | character | |
 | 原创角色 | original character | 画师自己的角色；「原创角色（未细分）」Original character (unsplit) |
 | 自建角色 | characters you created | 用户自己添加、还没关联 Danbooru 的角色 |
-| 造型 | variant | 角色下的变体：服装、异格、变身等，数据里是角色的 `variants`。2026-11-14 用户定（#423）界面上统一叫造型，不再分皮肤、子标签、形态；「文件形态」File form 说的不是角色，不在此列 |
+| 造型 | form | 角色下的变体：服装、异格、变身等，数据里是角色的 `variants`。2026-11-14 用户定（#423）界面上统一叫造型，不再分皮肤、子标签、形态。英文不用 variant（相似图片的「差分」是 Variant）和 look（长得像、外观是 look）；「文件形态」File form 说的是文件，不是角色 |
 | 标签 | tag | 我的标签 My tags；只当标签 Tag only |
 | 画师 | artist | |
 | 张（量词）、图片、图 | picture | 不用 image；「{n} 张」写成复数 `{n} picture` / `{n} pictures` |

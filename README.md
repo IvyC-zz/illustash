@@ -29,7 +29,7 @@ Once you connect your picture sources and finish local recognition, Illustash bu
 
 ### Highlights
 
-- **[A ready-made catalog](#picture-sources-and-character-catalog)**: local models sort pictures into series → character → variant, and group pictures appear under every character in them.
+- **[A ready-made catalog](#picture-sources-and-character-catalog)**: local models sort pictures into series → character → form, and group pictures appear under every character in them.
 - **[Your decisions take precedence](#manual-corrections-and-local-learning)**: fix a character with a click and undo at any time; re-running recognition never overwrites what you edited.
 - **[Artists and original posts, found again](#finding-artists-and-original-posts)**: pixel hashes, image signatures, and your following lists, without uploading your originals or thumbnails.
 - **[Duplicates and variants, folded](#excluding-non-illustrations-grouping-duplicates-and-r18-filtering)**: re-saves, crops, censored versions, and subtle variants are compared and grouped locally.
@@ -41,7 +41,7 @@ Once you connect your picture sources and finish local recognition, Illustash bu
 
 **System Photos and local folders:** Connects to macOS Photos (read-only, importing pictures saved from X and Pixiv) and local folders without moving or copying your originals. Picture sources are organized into tabs by saved origin (“Pixiv”, “X”, “Other”): macOS Photos distinguishes them automatically by the app that saved each picture, while folders are assigned an origin when added.
 
-**Hierarchical series and character catalog:** Uses local models to identify characters in each picture and builds a “Catalog” structured as Series (with optional parent series) → Character → Variant (outfit, alternate version, transformation and so on); turning on “Online name lookups” can fill in Chinese names as well. Searching by Chinese, Japanese, or English names, aliases, or raw tags finds the matching character. Group pictures appear under every character in them, and different outfits or looks stay grouped under the same character. The screenshot at the top of this page shows the Catalog.
+**Hierarchical series and character catalog:** Uses local models to identify characters in each picture and builds a “Catalog” structured as Series (with optional parent series) → Character → Form (outfit, alternate version, transformation and so on); turning on “Online name lookups” can fill in Chinese names as well. Searching by Chinese, Japanese, or English names, aliases, or raw tags finds the matching character. Group pictures appear under every character in them, and different outfits or looks stay grouped under the same character. The screenshot at the top of this page shows the Catalog.
 
 **Creating new series and characters:** Series, characters, or original characters not yet in the catalog can be created directly without waiting for a character index update. Once you confirm 5 pictures for a character, Illustash uses their visual features to link other pictures of that character; for characters whose names you do not know yet, look-alike pictures can be grouped under “Unidentified” first and renamed or merged into a character later.
 
