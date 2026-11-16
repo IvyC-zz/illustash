@@ -25,8 +25,16 @@ export function hashFor(r) {
   if (r.q) q.set('q', r.q); if (r.dup) q.set('dup', r.dup); if (r.reason) q.set('reason', r.reason); if (r.kind) q.set('kind', r.kind); if (r.maybe) q.set('maybe', r.maybe); if (r.tag) q.set('tag', r.tag); if (r.utag) q.set('utag', r.utag); if (r.sort && r.sort !== defaultSort(r)) q.set('sort', r.sort);
   return path + (q.toString() ? '?' + q : '');
 }
-export const defaultSort = r => r.char ? prefs.get('sortCharacter', 'suspicious') : viewOf(r).lead ? prefs.get('sortUnmatched', prefs.get('sortLibrary', 'newest')) : prefs.get('sortLibrary', 'newest');
+// 排序记在哪个偏好里（#386 的 2-26）：每一类页面一个键，下拉改了就写进去，离开再回来还是它。图库和角色页的键就是
+// 设置 › 通用里那两项默认排序，所以在页面上改和在设置里改是同一回事；未识别一类共用一个键，其余各页各一个。键由
+// core/pages.js 的 sortPref 登记。
+// 没改过排序的页面跟着设置里的图库默认排序。
+export const sortKey = r => viewOf(r).sortPref || 'sort.' + pageOf(r).name;
+export const defaultSort = r => r.char ? prefs.get('sortCharacter', 'suspicious') : prefs.get(sortKey(r), prefs.get('sortLibrary', 'newest'));
 export function go(route) { location.hash = hashFor(route); }
+// 加一个图库筛选（标签、我的标签）要去的地址：在有图库工具栏的页面（图库、角色页）上叠加到现有的筛选上，在别的
+// 页面去图库只按它筛选（#386 的 2-30）。工具栏和详情栏都用它。
+export const filterRoute = patch => ({...(pageOf(state.route).toolbar === 'library' ? state.route : {page: 'library'}), ...patch});
 // 角色是图库的一个筛选，不是单独的页面。
 export const charRoute = (id, variant = '') => ({page: 'library', char: id, variant});
 export const charHash = (id, variant = '') => hashFor(charRoute(id, variant));
@@ -39,14 +47,20 @@ export function replaceRoute(patch) { Object.assign(state.route, patch); history
 // history.state 里记着它是这个页面打开后的第几条（0 是第一条），退到 0 就不再退；前进到头浏览器自己就不动。
 let entry = 0, noted = false;
 // 每次地址变了都调用一次（ui/shell.js applyRoute）：新建的那条还没有序号，记成上一条的下一个；后退、前进到的那条
-// 已经有。url 是要就地改写成的地址（旧地址换成新的），不给就是现在的地址。
+// 已经有。url 是要就地改写成的地址（旧地址换成新的），不给就是现在的地址。返回 true 表示回到的是一条已有的记录
+// （后退、前进或刷新），false 是新的一条。
 export function noteHistory(url) {
   const seq = history.state?.illustash;
-  if (Number.isInteger(seq) && !url) { entry = seq; noted = true; return; }
-  if (!Number.isInteger(seq)) entry = noted ? entry + 1 : 0; else entry = seq;
+  if (Number.isInteger(seq) && !url) { entry = seq; noted = true; return true; }
+  const known = Number.isInteger(seq);
+  if (!known) entry = noted ? entry + 1 : 0; else entry = seq;
   noted = true;
   history.replaceState({...history.state, illustash: entry}, '', url ?? location.hash);
+  return known;
 }
+// 现在在第几条（0 是页面打开后的第一条）；还能不能后退。标题旁的「‹」按它显示（#526）。
+export const historyEntry = () => entry;
+export const canGoBack = () => entry > 0;
 // 后退时先把序号减掉：连按两下时第二下可能早于第一下的 hashchange，不能按还没更新的序号再退一次。前进不预先加：
 // 已经在最后一条时浏览器不动，预先加了就会让下一次后退越过第一条。
 export function stepHistory(dir) {

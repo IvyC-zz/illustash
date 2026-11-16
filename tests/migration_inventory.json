@@ -187,7 +187,7 @@
 
  "desktop/src/server.rs":"4ba6ebfe8a0ff505027d469c9363bb32bc4f2d370882cce5da267ad676b455ff",
 
- "desktop/src/updater.rs":"628b8b135561841b3e507574981c7107d6989feff784397690d025a5195fd99f",
+ "desktop/src/updater.rs":"eb5c53f5025e9db4e1179988de11d276d9395da2841d79da2c6278fd77929fb9",
 
  "desktop/src/welcome.rs":"2ddf57612f854e273fa6fbdf9f15d5b0f2b47e453c290045343b3f26feeed3bb",
 
@@ -666,6 +666,7 @@
  "native/terms/src/app_human_conclusions/backups.rs":{"database-write":["INSERT INTO:human_backup_state|UPDATE:set"]},
  "native/terms/src/app_human_conclusions/hashes.rs":{"database-write":["INSERT INTO:human_asset_hashes",9,323]},
  "native/terms/src/app_human_conclusions/reports.rs":{"database-write":[[0,2],"INSERT INTO:human_import_reports","INSERT INTO:human_import_report_rows"]},
+ "desktop/src/updater.rs":{"entrypoint":["process-start"]},
  "crates/core/src/wd_extension.rs":{"database-write":{"dynamic-or-wrapper":1,"INSERT INTO:memberships":1}},
  "native/terms/src/app_wd_extension.rs":{"database-write":{"dynamic-or-wrapper":3}}
 },
@@ -693,7 +694,7 @@
  {"patterns":["crates/core/src/compat_text.rs","crates/platform/src/source_rows.rs"],"policy":"application","current_runtime":"rust-shared-text-and-row-decoding","storage_domain":"no-db-write"},
  {"patterns":["crates/platform/src/platform_folder.rs","crates/platform/src/platform_photos.rs"],"policy":"assets","current_runtime":"rust-platform-read-only","storage_domain":"source-read-only"},
  {"patterns":["crates/platform/src/platform_backup.rs"],"policy":"lifecycle","current_runtime":"rust-platform-mandatory-backup","storage_domain":"app-backup"},
- {"patterns":["desktop/src/main.rs","desktop/src/server.rs"],"current_runtime":"rust-desktop-native-host","policy":"lifecycle","storage_domain":"no-db"},
+ {"patterns":["desktop/src/main.rs","desktop/src/server.rs","desktop/src/updater.rs"],"current_runtime":"rust-desktop-native-host","policy":"lifecycle","storage_domain":"no-db"},
  {"patterns":["desktop/build.rs","desktop/src/bridge.rs","desktop/src/pixiv.rs"],"current_runtime":"rust-desktop-native-login-bridge","policy":"coordination","storage_domain":"no-db"},
  {"patterns":["native/terms/src/app_accounts.rs","native/terms/src/app_migration_sql/provenance.sql"],"current_runtime":"rust-native","policy":"coordination","storage_domain":"accounts-and-research"},
  {"patterns":["native/terms/src/app_index.rs"],"policy":"stable-index","current_runtime":"rust-native-index-check-patch-import-recovery","storage_domain":"source-and-application"},
