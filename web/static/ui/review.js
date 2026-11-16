@@ -51,7 +51,7 @@ export function drawGroups() {
 function groupSection(g) {
   const off = groups.off.get(g.cid) || new Set(), n = g.members.length - off.size, max = 16;
   // 「是 X 吗？」的组同样能整组标为原创角色或跳过（#386 的 2-41）；原创角色新建一个独立的，和组页的「整组标为原创角色」一样（2-29）。
-  const ocSkip = `<button class="quiet" data-gact="oc" title="${t('整组都是同一个原创角色：新建一个原创角色，把这组图都设为它')}">${t('原创角色')}</button><button class="quiet" data-gact="skip">${t('跳过')}</button>`;
+  const ocSkip = `<button class="quiet" data-gact="oc" title="${t('新建一个原创角色，把这组图都设为它')}">${t('原创角色')}</button><button class="quiet" data-gact="skip">${t('跳过')}</button>`;
   const head = g.lead
     ? `<span class="gsec-q">${t('是 {name} 吗？', {name: `<a href="${charHash(g.lead.id)}">${esc(g.lead.name)}</a>`})}<small>${t('{n} 张的线索都指向 TA', {n: number(g.lead.count)})}</small></span>
        <button class="primary" data-gact="yes"${n ? '' : ' disabled'}>${off.size ? t('其余 {n} 张是', {n: number(n)}) : t('都是')} ✓</button><button class="secondary" data-gact="no">${t('都不是')} ✗</button><button class="quiet" data-gact="assign">${t('是别人…')}</button>${ocSkip}`
