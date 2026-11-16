@@ -7,6 +7,6 @@ INSERT INTO family_evidence
             FROM (SELECT v.uuid,coalesce(e.parent_id,et.key) AS entity,group_concat(DISTINCT v.source ORDER BY v.source) AS sources,
                    max(v.score) AS score,count(DISTINCT v.source) AS source_count,min(v.source<>'WD') AS ccip_only,
                    max(CASE WHEN v.source='WD' THEN v.score END) AS wd,max(CASE WHEN v.source<>'WD' THEN v.score END) AS ccip
-                  FROM (SELECT uuid,entity,source,score FROM candidates UNION ALL SELECT uuid,entity,'PROTO',score FROM proto_claims) v JOIN terms et ON et.key=v.entity JOIN term_tree e ON e.term_id=et.id JOIN assets a ON a.uuid=v.uuid
+                  FROM (SELECT uuid,entity,source,score FROM candidates WHERE source<>'WD_EXT' UNION ALL SELECT uuid,entity,'PROTO',score FROM proto_claims) v JOIN terms et ON et.key=v.entity JOIN term_tree e ON e.term_id=et.id JOIN assets a ON a.uuid=v.uuid
                   
                   GROUP BY coalesce(e.parent_id,et.key),v.uuid)

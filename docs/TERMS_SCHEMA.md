@@ -1,6 +1,6 @@
 # 词条核心 schema
 
-状态：现行参考，2026-11-15。当前词条 schema 为 **9**，应用 schema 为 **36**，包格式为 **1**；第 1 版见第 1–4 节，第 2–7 版的增量见第 7–12 节，第 8 版见第 14 节，第 9 版见第 15 节，宿主退役后的兼容职责与恢复边界见第 13 节。画师、标签、角色 / 皮肤 / 作品、名字都已收编，第 8 版起 `term_*` 是唯一权威，旧兼容表已删除（第 14 节）：[TERMS_ARTISTS.md](TERMS_ARTISTS.md)、[TERMS_LABELS.md](TERMS_LABELS.md)、[TERMS_CHARACTERS.md](TERMS_CHARACTERS.md)。下面第 1–6 节是第 1 版交付时写的，已按现状更正的地方都有注明（2026-09-29，词条第 4、5 步 S6）。
+状态：现行参考，2026-11-16。当前词条 schema 为 **10**，应用 schema 为 **36**，包格式为 **1**；第 1 版见第 1–4 节，第 2–7 版的增量见第 7–12 节，第 8 版见第 14 节，第 9 版见第 15 节，第 10 版见第 16 节，宿主退役后的兼容职责与恢复边界见第 13 节。画师、标签、角色 / 皮肤 / 作品、名字都已收编，第 8 版起 `term_*` 是唯一权威，旧兼容表已删除（第 14 节）：[TERMS_ARTISTS.md](TERMS_ARTISTS.md)、[TERMS_LABELS.md](TERMS_LABELS.md)、[TERMS_CHARACTERS.md](TERMS_CHARACTERS.md)。下面第 1–6 节是第 1 版交付时写的，已按现状更正的地方都有注明（2026-09-29，词条第 4、5 步 S6）。
 
 2026-09-28，[TERMS.md](TERMS.md) 第 4 节第 1 步的交付。代码在 `crates/core/`（Rust crate `illustash-core`，rusqlite 自持连接）；命令行和原生宿主在 `native/terms/`（`illustash-terms`）。证据包格式见 [EVIDENCE_PACKAGES.md](EVIDENCE_PACKAGES.md)。第 1 版只建了新表和规则，画师收编是第 2 步。
 
@@ -300,3 +300,17 @@ cargo clippy --manifest-path crates/core/Cargo.toml --all-targets -- -D warnings
 HTTP 沿用本机认证与会话门槛：`POST /api/human-conclusions/export {}` 启动独立导出任务，`POST /api/human-conclusions/import {"path":"本机文件"}` 与 `POST /api/human-conclusions/restore {"backup_id":"清单编号"}` 共用原导入槽；不带 path 时打开原生选择器。导入使用 `GET /api/imports` 和 `POST /api/imports/cancel`，导出使用 `GET /api/human-conclusions` 内的 `export` 和 `POST /api/human-conclusions/export/cancel {"id":"任务编号"}`。状态 GET 的 `automatic` 返回自动状态及已校验快照清单，不创建目录或触发写入。`GET /api/human-conclusions/report?id=报告编号&offset=0&limit=100` 分页返回 `report` 与 `details`，每页最多 500 条。导入摘要的 `committed` 与 `pending_effects` 分开描述数据库提交和效果落地，只有有效人工写入才有 `undo`。格式/版本错误为 400，输入超过 256 MiB、单行超过 4 MiB 或超过 200 万记录为 413，会话/任务/升级/撤销冲突为 409，IO 或 SQLite 故障为 500；异步结果保留同样 code 及提交状态。
 
 自动快照的节奏、轮换、离线边界和各备份目录分工见 [图库](LIBRARIES.md#人工结论快照)。文件先以私有权限独占创建同目录临时文件，写入、刷盘、完整回读验证后原子且不覆盖地发布，成功后才轮换；恢复重新核对清单中的快照编号与语义摘要。
+
+## 16. 第 10 版（0.3）
+
+第 10 版的迁移随 0.3 的 PR 累积，在 0.3 发布前定稿。#549 的 WD 角色扩展是第一部分。#447 的收藏类型触发器、#445 的画廊表和 #157 的 `example` 证据来源都追加到同一个 `v10` 函数。0.3 只执行一次定稿后的第 10 版升级，开发中的中间形态不单独迁移。
+
+### WD 角色扩展候选（#549）
+
+扩展加入可替换证据来源 `wd_extension.linear_head`，重建证据批次父表、子表和有效视图，原批次 ID、历史证据和有效集保持原值。原 WD 与 CCIP 的刷新照原来源发布，扩展以单独批次生效。扩展证据的版本带包 SHA-256 和本次命中的标签、分数指纹，量纲为 `wd_extension_probability`，候选表显示为 `WD_EXT`。
+
+扩展默认关闭。`wd-extension` 由用户手动重扫 1,024 维存量 WD 向量，启用和撤回命令见[安装说明](INSTALL.md#可选的-wd-角色扩展包)。第 1 版固定 228 个头及阈值 0.8008725047111511，按 SHA-256 核验整包。有识别交付账本的向量需要已完成投影且匹配原始模型与词表的 SHA-256。早期无逐图账本的存量沿用已保存的 WD 向量。来源快照保持到应用提交，候选和归属同事务写入。新识别结果、内容归档失效或资产移除会撤去对应图片的扩展候选。以后新增或重算的向量由显式重扫纳入。
+
+扩展候选对现有 WD、CCIP、原型和人工归属的分数、排序与皮肤投影没有贡献。已有规则未给出归属且没有人工确认时，才从符合人工否决及身份限制的扩展候选中取分数最高的一项，加入机器归属。`--withdraw` 追加空批次，使扩展证据及其候选和归属同事务失效。历史证据和可被人工复用的角色定义仍留在图库。相同内容的重复接入和已撤回时的重复撤回均不写新批次。
+
+仍生效的扩展证据阻止撤销人工快照新建的角色定义。扩展证据失效后只保留对物理定义的历史引用，人工快照可按原有的其他依赖与独立改动检查撤销该定义。

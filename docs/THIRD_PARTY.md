@@ -1,6 +1,6 @@
 # 第三方组件与许可
 
-状态：现行参考，2026-10-19。本项目代码以 GPL-3.0-or-later 发布（见仓库根目录 `LICENSE`），另附一项 GPLv3 第 7 条附加许可（见下文[附加许可](#附加许可gplv3-第-7-条)）；本文列出随代码或安装包分发的第三方组件、应用第一次使用时下载的模型，以及它们的许可。模型与数据不受本项目代码许可约束，按各自许可使用。Illustash 名称与图标不随代码授权。
+状态：现行参考，2026-11-16。本项目代码以 GPL-3.0-or-later 发布（见仓库根目录 `LICENSE`），另附一项 GPLv3 第 7 条附加许可（见下文[附加许可](#附加许可gplv3-第-7-条)）；本文列出随代码、安装包或模型包分发的第三方组件、应用第一次使用时下载的模型，以及它们的许可。模型与数据不受本项目代码许可约束，按各自许可使用。Illustash 名称与图标不随代码授权。
 
 ## 附加许可（GPLv3 第 7 条）
 
@@ -63,6 +63,10 @@ python3 tools/gen_rust_licenses.py
 **下载来源**（2026-10-19，#168）：应用依次尝试两个来源：Hugging Face 上游仓库固定提交（WD `4ec31f2`、CCIP `eb2acdd`）的地址，经可配置的镜像（默认 hf-mirror.com）；ModelScope 上同名仓库 `deepghs/wd14_tagger_with_embeddings`、`deepghs/ccip_onnx` 的副本。ModelScope 的两个仓库不是 DeepGHS 官方维护的（平台账号搬运，最后更新于 2024-12 / 2025-02），2026-10-16 核对时文件与上游逐字节相同。应用只认清单里的 SHA-256，所以来源不影响拿到的文件。原始 WD/CCIP 模型由用户从上述来源取得；许可原文仍随每个计算包附上（见下一段），关于页照常写明 CCIP 的使用限制。
 
 2026-11-12 用户批准（#375）：macOS 的 WD Core ML 执行变体由本项目 GitHub 模型 Release 分发，按 Apache-2.0 附许可原文、原始来源及变换说明。它基于上述固定 WD 模型，固定 batch 为 1，降低六维形状、删除等价广播、分解 ReduceL2 并预转置常量矩阵；不量化、不训练，不改原始模型文件。构建入口 `tools/build_wd_coreml.py`，固定版本与 SHA-256 见 `native/terms/models.json`，随包声明见 `packaging/model-licenses/NOTICE.txt`。原始模型仍是 CPU 回退和结果身份的唯一依据。
+
+WD 角色扩展 v1（#534）从 Illustash 0.3 起支持，通过项目的 GitHub 模型 Release `wd-extension-v1` 单独分发 `wd-extension-v1.zip` 和 `SHA256SUMS.txt`。ZIP 内的固定模型文件 `b-534.bin` 为 940,701 字节，SHA-256 为 `9da0365457e479eff189150926289c6cf8325cd9bb98c0bd2504c26d7dcae471`，含 228 个分类头和固定阈值 `0.8008725047111511`。模型文件不随代码或安装包分发。复封入口见 [构建脚本](../tools/build_wd_extension.py)，启用与撤回见 [安装说明](INSTALL.md#可选的-wd-角色扩展包)。
+
+扩展文件按 Apache-2.0 分发。分类头用公开 Danbooru 样本在冻结的 WD 向量上独立拟合，底座为 SmilingWolf 的 WD SwinV2 Tagger v3 经 DeepGHS 重导出的向量模型（固定提交 `4ec31f2aeabf66353f3ee3ccd20d2f07e716851b`）。DeepGHS Character Index（MIT，固定提交 `5ee6075ff09f82c27e23f33044b9f9cabaf1e8c3`）用于筛选原索引未覆盖的角色。扩展模型文件包含词表、参数、阈值与底座指纹。ZIP 附 Apache-2.0 原文、两份 WD 模型卡、Character Index 的归属和 MIT 许可、`NOTICE.txt` 与 `provenance.json`。原始图片的版权归各原作者。[实验输入和评测口径](https://github.com/shio-vinyl/illustash/issues/534#issuecomment-6907588551)
 
 **随包的许可原文**（2026-10-16，#8；2026-10-19 起不论带不带模型，#168）：原文提交在 `packaging/model-licenses/`，是打包的唯一来源。`sources.json` 登记每个文件的上游地址和 SHA-256。每个计算包（`--research`）都把这个目录整份按原字节放进 `resources/licenses/models/`；文件缺失、多出、内容与登记不符，打包都会报错，不会产出半成品。Windows 和 macOS 安装包的暂存步骤也把这些文件列为必需组件。
 

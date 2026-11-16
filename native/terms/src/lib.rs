@@ -46,6 +46,7 @@ mod app_sync;
 pub mod app_tasks;
 pub mod app_updates;
 mod app_upgrade;
+mod app_wd_extension;
 mod image_samples;
 pub mod index_compute;
 pub mod provenance_compute;

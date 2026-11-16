@@ -161,6 +161,11 @@ fn entity(c: &Connection, ids: &Ids, system: &str, key: &str, name: &str, work: 
     Ok(ident)
 }
 
+pub(crate) fn extension_entity(c: &Connection, tag: &str) -> Result<String> {
+    let work = crate::character_profile::qualifier(tag);
+    entity(c, &Ids(&Value::Null), "danbooru", tag, tag, work)
+}
+
 // ---- 索引同步：`_characters`（含 `_hierarchy`、`_tags`、别名、`_default_tags`） ----
 
 type Chars = HashMap<String, String>;
@@ -575,6 +580,7 @@ fn import(c: &Connection, args: &Value) -> Result<Value> {
     let rows = args["rows"].as_array().cloned().unwrap_or_default();
     let added: Vec<String> = rows.iter().filter_map(|r| r[0].as_str().map(str::to_owned)).collect();
     let removed = strings(&args["removed"]);
+    crate::wd_extension::invalidate(c, &removed)?;
     let both: Vec<String> = added.iter().chain(&removed).cloned().collect();
     touch(c, &both)?;
     for table in
