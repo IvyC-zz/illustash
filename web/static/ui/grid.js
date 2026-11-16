@@ -92,7 +92,8 @@ export async function reload(reset = false, place = null) {
     if (place) restorePlace(place);
     renderGrid(); updateCount(); renderSelection();
     $('empty').hidden = !!state.total;
-    $('empty').innerHTML = viewOf(state.route).empty?.(state.route) || '';
+    const view = viewOf(state.route), text = view.empty?.(state.route, {nsfw: state.nsfw}) || '', next = text && view.emptyNext?.(state.route);
+    $('empty').innerHTML = next ? `<div>${text}<div>${next}</div></div>` : text;
     renderHeading();
     if (state.route.char) refreshMaybe(gen);
   } catch (e) { if (e.name !== 'AbortError' && gen === state.generation && route === state.route) { error(e.message); $('resultCount').textContent = t('读取失败'); } }
@@ -501,7 +502,8 @@ export function renderSelection() {
   buttons += `<button class="quiet" data-act="tag">${t('标签')} <kbd>G</kbd></button>`;
   buttons += `<button class="quiet" data-act="findartist" title="${t('用像素哈希和 IQDB 查这些图的画师（只发哈希文本，不发图片；一次最多 500 张）')}">${t('查找画师')}</button>`;
   if (!state.sel.all && n >= 2 && n <= 12) buttons += `<button class="quiet" data-act="relate" title="${t('两两比较：同一张图、裁剪、差分、局部编辑，还是不同的图（只在本机计算）')}">${t('判断关系')}</button>`;
-  bar.innerHTML = count + buttons + (big ? `<span class="bar-note">${t('超过 500 张需再点一次确认')}</span>` : '');
+  const note = kind === 'audit' ? t('一次最多回答 500 张，这次答前 500 张') : t('超过 500 张需再点一次确认');
+  bar.innerHTML = count + buttons + (big ? `<span class="bar-note">${note}</span>` : '');
   $('clearSel').onclick = quitSelecting;
   for (const b of bar.querySelectorAll('[data-act]')) b.onclick = () => runBarAction(b.dataset.act);
 }
@@ -539,7 +541,8 @@ function needsArm(key) {
 }
 async function answerAudit(yes) {
   const sel = state.sel;
-  const ids = sel.all ? (await api('/api/ids?' + new URLSearchParams({...filters(), limit: 500}))).filter(u => !sel.exclude.has(u)) : [...sel.ids];
+  // 后端一次最多收 500 张的回答：多选了的只答前 500 张，选择栏上事先写明（#386 的 2-41）。
+  const ids = (sel.all ? (await api('/api/ids?' + new URLSearchParams({...filters(), limit: 500}))).filter(u => !sel.exclude.has(u)) : [...sel.ids]).slice(0, 500);
   if (ids.length) mutate('/api/audit/answer', {ids, ...(yes ? {yes: ids} : {no: ids})}, false, {advance: true});
 }
 function runBarAction(act) {

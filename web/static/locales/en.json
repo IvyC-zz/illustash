@@ -746,7 +746,6 @@
   "是别人…": "Someone else…",
   "还不知道是谁": "Not known yet",
   "设为…": "Assign…",
-  "画师自己的原创角色": "The artist's own original character",
   "点一下：算回这组": "Click: back in this group",
   "点一下：不算在这组里": "Click: leave out of this group",
   "逐张看": "One by one",
@@ -2908,5 +2907,12 @@
   "导入识别结果": "Recognition results import",
   "导入人工结论": "Your conclusions import",
   "导入中": "Importing",
-  "退出选择模式（Esc）": "Leave selection mode (Esc)"
+  "退出选择模式（Esc）": "Leave selection mode (Esc)",
+  "下一组": "Next group",
+  "回到按组整理": "Back to sorting by group",
+  "回到已排除": "Back to excluded",
+  "这一组已经没有图片了。": "This group has no pictures left.",
+  "「只看 R18」开着，没有符合条件的 R18 图片。": "“R18 only” is on, and no R18 pictures match.",
+  "一次最多回答 500 张，这次答前 500 张": "Up to 500 answers at a time; this answers the first 500",
+  "这页不按 R18 筛选：R18 的图也在里面": "This page ignores the R18 filter: R18 pictures are included"
 }

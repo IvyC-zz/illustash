@@ -39,7 +39,8 @@ const libraryBase = {
     if (r.day) f.day = r.day; if (r.work) f.work = r.work; if (r.artist) f.artist = r.artist; if (r.q) f.q = r.q; if (r.tag) f.tag = r.tag; if (r.utag) f.utag = r.utag;
     return f;
   },
-  empty: () => t('没有符合条件的图片。试试别的搜索或标签。'),
+  // 「只看 R18」时没有图，多半是这个筛选造成的：写明，旁边给「显示全部」（#386 的 2-16）。
+  empty: (r, {nsfw} = {}) => nsfw === 'only' ? t('「只看 R18」开着，没有符合条件的 R18 图片。') : t('没有符合条件的图片。试试别的搜索或标签。'),
   hint: () => t('点击查看 · 拖动或 {key} 点击多选 · Space 看大图', {key: isMac ? '⌘' : 'Ctrl'}),
   bar: 'default',
 };
@@ -66,7 +67,7 @@ const list = [
     hint: () => t('同色角标为同一组 · 修改会同步到整组 · 角色不一致的组对齐后自动折叠')},
   {name: 'similar', area: 'groupsPage', panel: true, click: 'own', nav: 'duplicates', tabs: 'duplicates', tab: 'similar', toolbar: 'tabs'},
   {name: 'sgroup', prefix: 's', area: 'grid', panel: false, click: 'cleanup', nav: 'duplicates', tabs: 'duplicates', tab: 'similar',
-    toolbar: 'grid', sorts: NEWEST, pool: 'similar', params: r => ({cluster: r.id}), bar: 'default',
+    toolbar: 'grid', sorts: NEWEST, pool: 'similar', params: r => ({cluster: r.id}), bar: 'default', empty: () => t('这一组已经没有图片了。'),
     hint: () => t('点击或拖动选择 · Space 看大图')},
   {name: 'excluded', area: 'grid', panel: false, click: 'cleanup', nav: 'excluded', tabs: 'excluded', tab: 'all',
     toolbar: 'grid', sorts: NEWEST, pool: 'excluded', bar: 'excluded', card: {reason: true},
@@ -84,7 +85,7 @@ const RETIRED = {recent: 'home'};
 
 // 角色页：不是 route.page，而是 library 加 char 参数。点击即选择；排序多「可疑优先」；旧地址 #/c/<id>/<皮肤> 改写成它。
 const character = {name: 'character', virtual: true, legacyPrefix: 'c', ...libraryBase, click: 'cleanup', sorts: ['suspicious', ...NEWEST], sortPref: 'sortCharacter',
-  empty: r => narrowed(r) ? PAGES.library.empty(r) : t('这个角色已经没有图片了。'),
+  empty: (r, ctx = {}) => narrowed(r) || ctx.nsfw === 'only' ? PAGES.library.empty(r, ctx) : t('这个角色已经没有图片了。'),
   hint: () => t('点击或拖动选择 · Space 看大图 · ⌫ 不是 TA · C 换成')};
 
 export const PAGES = Object.fromEntries(list.map(p => [p.name, p]));
@@ -108,6 +109,7 @@ export const poolIs = (route, ...pools) => pools.includes(pageOf(route).pool);
 //   prepare(route)       进入本页前要先读的数据；返回 false 表示已经导航走了
 //   heading(r, ctx)      [标题, 副标题, 右侧链接 HTML]；角色页另用 drawHeading
 //   onMeta(info)         计数等元数据到达后重画什么；没有的页面重画工具栏
+//   emptyNext(r)         网格空了时空状态下面的去处（链接或 data-empty 按钮的 HTML，#386 的 2-12）；没有的页面只有一句话
 //   refresh(why)         数据变了之后重画面板页：'edit' 改动之后、'undo' 撤销之后、'learned' 确认或撤销后后台学习
 //                        收尾之后（#400）、'sync' 同步到新图之后、'nsfw' 切换 R18 之后、'view' 视图选项之后、
 //                        'ask' 「偶尔问一句」开关之后
