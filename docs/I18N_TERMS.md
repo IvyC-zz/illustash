@@ -73,7 +73,7 @@
 
 ## 语气
 
-2026-11-16 用户定（#528），中英文都适用：界面文案写成标签和事实，说清这一页有什么、这个按钮做什么、现在是什么状态。不当解说员：不替系统讲原理，没人问不安抚，不把几句说明串成一行，不旁白用户在做的事。
+2026-11-16 用户定（#528），中英文都适用：照常见桌面和网页软件的界面文案写，平实、简短，用正常语气，不客套。文案写成标签和事实，说清这一页有什么、这个按钮做什么、现在是什么状态。不当解说员：不替系统讲原理，没人问不安抚，不把几句说明串成一行，不旁白用户在做的事。
 
 ### 要去掉的说法
 
@@ -113,14 +113,14 @@
    | 待确认 {n} 张 · 像截图但有人物，排除或保留<br>{n} to confirm · look like screenshots but have people; exclude or keep | 待确认 {n} 张：像截图，但有人物<br>{n} to confirm: look like screenshots but have people |
    | 整组都是同一个原创角色：新建一个原创角色，把这组图都设为它<br>The whole group is one original character: create one and assign the group to it | 新建一个原创角色，把这组图都设为它<br>Create an original character and assign this group to it |
 
-5. **客套、道谢和表情。** 做完了就写做完了。
+5. **客套、道谢、寒暄和表情。** 一概不写：谢谢、恭喜、辛苦了、表情符号、感叹号都不用。做完了就写做完了。
 
    | 改前 | 改后 |
    |---|---|
    | 抽查做完了，谢谢！结果会用来衡量认人准不准。<br>Spot check done, thanks! The results measure how accurate recognition is. | 抽查做完了。<br>Spot check done. |
    | 全部认出来了 🎉<br>Everything is identified 🎉 | 没有未识别的图。<br>No unidentified pictures. |
 
-英文照同样的规矩：不写 *don’t worry*、*simply*、*just*、*Note that*，不用 *we* 指代应用，不写 *the app will automatically…* 这类讲解。
+英文照同样的规矩：不写 *don’t worry*、*simply*、*just*、*Note that*，不写 *thanks*、*great*、*all set*、*oops* 这类客套和感叹，不用感叹号，不用 *we* 指代应用，不写 *the app will automatically…* 这类讲解。
 
 ### 可以保留的说明
 
@@ -134,4 +134,4 @@
 
 ### 自查
 
-写完逐句问：删掉这句，用户会做错什么或找不到什么吗？不会就删。句子里出现「系统」「自动」「只是」「只在」「可撤销」「放心」「谢谢」或一行里有两个以上的「·」时，再看一眼。
+写完逐句问：删掉这句，用户会做错什么或找不到什么吗？不会就删。句子里出现「系统」「自动」「只是」「只在」「可撤销」「放心」「谢谢」、感叹号、表情符号，或一行里有两个以上的「·」时，再看一眼。
