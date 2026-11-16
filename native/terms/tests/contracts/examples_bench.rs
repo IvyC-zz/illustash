@@ -58,9 +58,25 @@ fn generate(root: &Path) -> PathBuf {
     package
 }
 
+#[cfg(unix)]
 fn rss(pid: u32) -> f64 {
     let out = Command::new("ps").args(["-o", "rss=", "-p", &pid.to_string()]).output().unwrap();
-    String::from_utf8(out.stdout).unwrap().trim().parse::<f64>().unwrap() / 1024.0
+    working_set(out) / 1024.0
+}
+
+#[cfg(windows)]
+fn rss(pid: u32) -> f64 {
+    let expression = format!("(Get-Process -Id {pid}).WorkingSet64");
+    let out = Command::new("powershell.exe")
+        .args(["-NoProfile", "-NonInteractive", "-Command", &expression])
+        .output()
+        .unwrap();
+    working_set(out) / 1_048_576.0
+}
+
+fn working_set(output: std::process::Output) -> f64 {
+    assert!(output.status.success(), "无法读取宿主常驻内存");
+    String::from_utf8(output.stdout).unwrap().trim().parse().unwrap()
 }
 
 fn search(origin: &str, token: &str, uri: &str) {
@@ -70,7 +86,7 @@ fn search(origin: &str, token: &str, uri: &str) {
 }
 
 #[test]
-#[ignore = "只在 collab_run.py timing 下运行 release 宿主合成图库计时"]
+#[ignore = "只在空闲验收机上运行 release 宿主合成图库计时"]
 fn benchmark_example_search_http() {
     assert!(!cfg!(debug_assertions), "bench requires a release binary");
     let binary = Path::new(env!("CARGO_BIN_EXE_illustash-terms"));
@@ -90,7 +106,7 @@ fn benchmark_example_search_http() {
     ];
     let mut samples: BTreeMap<&str, Vec<f64>> = BTreeMap::new();
     for trial in 1..=3 {
-        let (mut host, origin, token) = launch(&root, &package, "benchmark", false, binary);
+        let (mut host, origin, token) = launch_inner(&root, &package, "benchmark", false, binary, true);
         let pid = host.child.id();
         let run = |uri: &str| search(&origin, &token, uri);
         for (prefix, uri) in [("wd", &paths[0].1), ("ccip", &paths[6].1)] {
@@ -114,12 +130,18 @@ fn benchmark_example_search_http() {
             }
             samples.entry(name).or_default().push(start.elapsed().as_secs_f64() * 1000.0 / 50.0);
         }
-        // SAFETY: 子进程尚未回收，PID 不会被复用。
-        unsafe {
-            libc::kill(pid as i32, libc::SIGTERM);
+        // 和桌面外壳一样通过 EOF 关闭，让下一轮正常打开同一份合成图库。
+        drop(host.child.stdin.take());
+        let deadline = wait::deadline();
+        loop {
+            if let Some(status) = host.child.try_wait().unwrap() {
+                host.reaped = true;
+                assert!(status.success());
+                break;
+            }
+            assert!(Instant::now() < deadline, "宿主未在等待上限内退出");
+            thread::sleep(Duration::from_millis(25));
         }
-        assert!(host.child.wait().unwrap().success());
-        host.reaped = true;
     }
     for (name, mut trials) in samples {
         trials.sort_by(f64::total_cmp);

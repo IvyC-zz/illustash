@@ -194,6 +194,17 @@ fn materialize(fixture: &Value, category: &str) -> (Sandbox, PathBuf, PathBuf) {
 }
 
 fn launch(root: &Path, package: &Path, category: &str, upgrade: bool, binary: &Path) -> (Host, String, String) {
+    launch_inner(root, package, category, upgrade, binary, false)
+}
+
+fn launch_inner(
+    root: &Path,
+    package: &Path,
+    category: &str,
+    upgrade: bool,
+    binary: &Path,
+    desktop_pipe: bool,
+) -> (Host, String, String) {
     let listener = TcpListener::bind(("127.0.0.1", 0)).unwrap();
     let port = listener.local_addr().unwrap().port();
     drop(listener);
@@ -226,7 +237,13 @@ fn launch(root: &Path, package: &Path, category: &str, upgrade: bool, binary: &P
     if upgrade {
         command.arg("--upgrade");
     }
+    if desktop_pipe {
+        command.env("ILLUSTASH_DESKTOP_STDIN", "1").stdin(Stdio::piped());
+    }
     let mut host = Host { child: command.spawn().unwrap(), reaped: false };
+    if let Some(stdin) = host.child.stdin.as_mut() {
+        std::io::Write::write_all(stdin, &[1]).unwrap();
+    }
     let (ready, lines) = std::sync::mpsc::channel();
     let stdout = host.child.stdout.take().unwrap();
     thread::spawn(move || {
@@ -379,7 +396,6 @@ fn interrupted_task_recovery_contract() {
 }
 
 /// 把响应解析成 JSON（基准测试要从响应里读值）。
-#[cfg(unix)]
 fn request_json(origin: &str, url: &str, body: Option<&Value>, token: &str) -> (u16, Value, Map<String, Value>) {
     let (status, raw, headers) = request(origin, url, body, token);
     (status, serde_json::from_str(&raw).unwrap_or(Value::Null), headers)
@@ -505,6 +521,5 @@ fn benchmark_release_host() {
     assert!(!root.join("python-launched").exists());
 }
 
-#[cfg(unix)]
 #[path = "contracts/examples_bench.rs"]
 mod examples_bench;
