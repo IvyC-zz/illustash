@@ -144,6 +144,7 @@ pub(crate) struct Session {
     pub(crate) generation: u64,
     pub(crate) syncer: crate::app_sync::Syncer,
     pub(crate) wd_extension: crate::app_wd_extension::Tasks,
+    wd_history: std::collections::HashMap<PathBuf, serde_json::Value>,
     pub(crate) names: crate::app_names::Updater,
     pub(crate) provenance: crate::app_provenance::Runner,
     pub(crate) index: crate::app_index::Updater,
@@ -200,6 +201,7 @@ impl Session {
             token,
             syncer: crate::app_sync::Syncer::default(),
             wd_extension: Default::default(),
+            wd_history: Default::default(),
             names,
             provenance,
             index,
@@ -614,6 +616,13 @@ impl Application {
         replacement.syncer.per_run = session.syncer.per_run;
 
         session.close();
+        let wd_state = session.wd_extension.snapshot();
+        if !wd_state.is_null() {
+            let previous = session.library.instance_path().to_owned();
+            session.wd_history.insert(previous, wd_state);
+        }
+        replacement.wd_history = std::mem::take(&mut session.wd_history);
+        replacement.wd_extension.restore(replacement.wd_history.remove(replacement.library.instance_path()));
         self.exports.stop();
         // 导入不会跟着切换走：它在发布之前停止，替换后的会话从干净的状态开始。
         self.imports.cancel(crate::app_imports::SWITCHED);

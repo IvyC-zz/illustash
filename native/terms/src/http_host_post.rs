@@ -70,25 +70,10 @@ pub(super) fn handle(request: Request, host: &Host, received: u64, text: &str, b
             return failure(request, damage.error(), true);
         }
     }
-    if session.wd_extension.running()
-        && matches!(
-            request.url(),
-            "/api/sync"
-                | "/api/recognition/import"
-                | "/api/human-conclusions/export"
-                | "/api/human-conclusions/import"
-                | "/api/human-conclusions/restore"
-                | "/api/libraries/import"
-                | "/api/libraries/export"
-                | "/api/libraries/sources/add"
-                | "/api/libraries/sources/remove"
-        )
-    {
-        return failure(request, wd_running(), true);
-    }
     match request.url() {
         "/api/human-conclusions/export" => {
-            let result = session.human_exports.start(&session.library, session.generation, &session.token);
+            let result = wd_idle(&session)
+                .and_then(|()| session.human_exports.start(&session.library, session.generation, &session.token));
             drop(session);
             return reply(request, result, true);
         }
@@ -98,7 +83,8 @@ pub(super) fn handle(request: Request, host: &Host, received: u64, text: &str, b
             return reply(request, result, true);
         }
         "/api/human-conclusions/import" | "/api/human-conclusions/restore" => {
-            let result = human_import(host, &session, &body, request.url().ends_with("/restore"));
+            let result = wd_idle(&session)
+                .and_then(|()| human_import(host, &session, &body, request.url().ends_with("/restore")));
             drop(session);
             return reply(request, result, true);
         }
@@ -115,12 +101,12 @@ pub(super) fn handle(request: Request, host: &Host, received: u64, text: &str, b
         // 导入是后台任务（#26、#88）：请求做完校验、启动任务后立即应答；页面轮询 GET /api/imports，可以取消。
         // 识别结果导入始终绑定在开始时的图库上。取消、切换图库或退出，都会让两种导入在发布点之前停下。
         "/api/recognition/import" => {
-            let started = recognition_import(host, &session, &body);
+            let started = wd_idle(&session).and_then(|()| recognition_import(host, &session, &body));
             drop(session);
             return reply(request, started.map(started_task), true);
         }
         "/api/libraries/import" => {
-            let started = library_import(host, &session, &body);
+            let started = wd_idle(&session).and_then(|()| library_import(host, &session, &body));
             drop(session);
             return reply(request, started.map(started_task), true);
         }
@@ -235,6 +221,13 @@ fn wd_extension(url: &str, host: &Host, session: &mut Session, body: &Json) -> R
     let identity = crate::app_tasks::TaskIdentity::new(&session.library, session.generation, &session.token)?;
     snapshot["task"] = session.wd_extension.start_for(&session.library, identity, action)?;
     Ok(snapshot.into())
+}
+
+fn wd_idle(session: &Session) -> Result<()> {
+    if session.wd_extension.running() {
+        return Err(wd_running());
+    }
+    Ok(())
 }
 
 fn wd_running() -> Error {
@@ -484,7 +477,9 @@ fn route(
         )
         .map_err(management_error),
         "/api/libraries/forget" => forget(session, body),
-        "/api/libraries/export" => host.exports.start(&session.library, session.generation),
+        "/api/libraries/export" => {
+            wd_idle(session).and_then(|()| host.exports.start(&session.library, session.generation))
+        }
         "/api/integrity" => Ok(session.check_now()),
         "/api/integrity/rescue" => crate::app_create::optional_reference(&host.reference)
             .and_then(|reference| session.start_rescue(reference.map(Path::to_owned))),
@@ -493,6 +488,7 @@ fn route(
     })
 }
 fn sync(host: &Host, received: u64, session: &mut Session) -> Result<Json> {
+    wd_idle(session)?;
     if session.index.writing() {
         return Err(Error::Invalid("角色索引正在更新，请稍后".into()));
     }
@@ -517,6 +513,7 @@ fn research(url: &str, session: &mut Session, body: &Json) -> Result<Json> {
     session.research.start(&lib, kind, serde_json::json!({}), None).map(|_| Json::object([("started", true.into())]))
 }
 fn sources(url: &str, received: u64, session: &mut Session, body: &Json) -> Result<Json> {
+    wd_idle(session)?;
     // 进行中的同步持有一份固定的来源副本；只在两次同步之间修改来源。
     if session.syncer.running() || session.index.writing() {
         return Err(Error::Invalid("正在同步或更新角色索引，请稍后再修改来源".into()));

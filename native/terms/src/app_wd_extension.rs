@@ -52,9 +52,10 @@ impl Package {
     fn compatible(&self, manifest: &str) -> Result<()> {
         let doc: Value =
             serde_json::from_str(manifest).map_err(|e| Error::invalid(format!("识别账本清单无效：{e}")))?;
-        let wd = match doc["format"].as_str() {
-            Some("illustash-recognition/2") => &doc["recognition"]["models"]["wd"],
-            Some("illustash-recognition/1") => &doc["models"]["wd"],
+        // 带角色认领的交付把公开清单包在 recognition 字段里，其他交付直接存公开清单。
+        let manifest = if doc.get("format").is_some() { &doc } else { &doc["recognition"] };
+        let wd = match manifest["format"].as_str() {
+            Some("illustash-recognition/1" | "illustash-recognition/2") => &manifest["models"]["wd"],
             _ => &Value::Null,
         };
         if wd["version"] != "swinv2_448"
@@ -290,21 +291,28 @@ impl Progress<'_> {
 }
 
 #[derive(Default)]
-pub(crate) struct Tasks(Option<(Task, Arc<Mutex<Value>>)>);
+pub(crate) struct Tasks {
+    active: Option<(Task, Arc<Mutex<Value>>)>,
+    previous: Option<Value>,
+}
 
 impl Tasks {
+    pub(crate) fn restore(&mut self, previous: Option<Value>) {
+        self.previous = previous;
+    }
+
     pub(crate) fn running(&self) -> bool {
-        self.0.as_ref().is_some_and(|(task, _)| task.running())
+        self.active.as_ref().is_some_and(|(task, _)| task.running())
     }
 
     pub(crate) fn stop(&mut self) {
-        if let Some((mut task, _)) = self.0.take() {
+        if let Some((task, _)) = &mut self.active {
             task.stop();
         }
     }
 
-    fn snapshot(&self) -> Value {
-        let Some((task, state)) = &self.0 else { return Value::Null };
+    pub(crate) fn snapshot(&self) -> Value {
+        let Some((task, state)) = &self.active else { return self.previous.clone().unwrap_or(Value::Null) };
         let mut snap = lock_ignoring_poison(state).clone();
         if snap["status"] == "running" && !task.running() {
             if let TaskOutcome::Failed(message) = task.outcome() {
@@ -316,7 +324,7 @@ impl Tasks {
     }
 
     pub(crate) fn cancel(&self, id: &str) -> Result<()> {
-        if let Some((task, state)) = &self.0 {
+        if let Some((task, state)) = &self.active {
             let snap = lock_ignoring_poison(state);
             if snap["id"] == id && snap["status"] == "running" {
                 if snap["phase"] != "scan" {
@@ -376,7 +384,8 @@ impl Tasks {
             }
             Ok(())
         });
-        self.0 = Some((task, state));
+        self.previous = None;
+        self.active = Some((task, state));
         Ok(initial)
     }
 }
@@ -428,9 +437,8 @@ pub(crate) fn status(resources: &Path, library: &Library, tasks: &Tasks, busy: O
 
 pub(crate) fn auto_enabled(library: &Library) -> Result<bool> {
     let app = crate::app_library::read_connection(&library.db())?;
-    Ok(enabled(&app)?.is_some_and(|state| {
-        crate::app_models::wd_extension().is_ok_and(|spec| state.package_sha256 == spec.file.sha256)
-    }))
+    let spec = crate::app_models::wd_extension()?;
+    Ok(enabled(&app)?.is_some_and(|state| state.package_sha256 == spec.file.sha256))
 }
 
 /// 识别账本的水位和本次同步可恢复的交付。已经完成的旧批次不会被重新评分。
@@ -678,14 +686,13 @@ mod tests {
             snapshot(&app, "SELECT id,asset_id,term_id,version,score FROM term_current_evidence ORDER BY id"),
             evidence
         );
-        assert!(package
-            .compatible(
-                &json!({"format":"illustash-recognition/2","recognition":{"models":{"wd":{
-                    "version":"swinv2_448","dimension":1024,"sha256":"unrelated","tags_sha256":"tags"
-                }}}})
-                .to_string()
-            )
-            .is_err());
+        let mut manifest = json!({"format":"illustash-recognition/2","models":{"wd":{
+            "version":"swinv2_448","dimension":1024,"sha256":"model","tags_sha256":"tags"
+        }}});
+        package.compatible(&manifest.to_string()).unwrap();
+        package.compatible(&json!({"recognition": manifest,"character_claims": {}}).to_string()).unwrap();
+        manifest["models"]["wd"]["sha256"] = "unrelated".into();
+        assert!(package.compatible(&manifest.to_string()).is_err());
 
         f.write(|tx| wd_extension::invalidate(tx, &["weak".into()])).unwrap();
         assert_eq!(

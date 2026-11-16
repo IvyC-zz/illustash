@@ -305,7 +305,7 @@
 
  "native/terms/src/app_resources.rs":"d691ec21499b906972a02d49a21790f2a301c34eb4dea0bd9c301675dd9e2c0a",
 
- "native/terms/src/app_service.rs":"ce47d5fd13bc818dacfea7dac0fcc9612f795cdc71d02b8aa745ec8b57149824",
+ "native/terms/src/app_service.rs":"0204038585f7b81eb5aff1c4e6b4718f465ace17a149984c32c5dc259feacad5",
 
  "native/terms/src/app_settings.rs":"20f5eb9c25a3a14920b85b48e75186564c5e01f6129cca02b06b2f63d60b2c41",
 
@@ -323,7 +323,7 @@
 
  "native/terms/src/app_upgrade.rs":"de6b529fbb01865fb9adeb78ae45ca4b5a541b14129b9472f58f10ac693ce6cf",
 
- "native/terms/src/app_wd_extension.rs":"f68a7cf3fb16a898201dacf47a4e947914c1818e603c5942491eec26494eea1c",
+ "native/terms/src/app_wd_extension.rs":"23acfc50aaa4bf2943f9e3053e2f3bb216fe444628635dbbe883455ef62bba22",
 
  "native/terms/src/bin/illustash-terms.rs":"04ee80bb280034a16f8ddd9fe97e8de0700713259c44f76858f70b8713d4c594",
 
@@ -351,7 +351,7 @@
 
  "native/terms/src/http_host_get.rs":"04176a000b87c3ab8cfb0a1efe59419a0b27e8b0398e725f4fdae8147e627de9",
 
- "native/terms/src/http_host_post.rs":"e5d44b7f4492f9b10e3217c00f6fdd3031494b326a821a9a160325ce6f28d9e5",
+ "native/terms/src/http_host_post.rs":"05dd8441c05edceea7206126c1d194707e7d8882cd332c261737b1bb8425f6ea",
 
  "native/terms/src/http_json.rs":"42ec65687fad69e430186543d3ef27b8141030e6694b07f683ee91f678478d6b",
 
@@ -529,7 +529,7 @@
  "native/terms/src/app_human_conclusions/hashes.rs":{"policy":"assets","current_runtime":"rust-human-snapshot-lifecycle","storage_domain":"app"},
  "native/terms/src/app_human_conclusions/reports.rs":{"policy":"application","current_runtime":"rust-human-snapshot-lifecycle","storage_domain":"app"},
  "crates/core/src/wd_extension.rs":{"policy":"application","current_runtime":"rust-core-wd-extension-evidence","storage_domain":"app"},
- "native/terms/src/app_wd_extension.rs":{"policy":"result-import","current_runtime":"rust-native-wd-extension","storage_domain":"source-read+app"}
+ "native/terms/src/app_wd_extension.rs":{"policy":"result-import","current_runtime":"rust-native-wd-extension","storage_domain":"source-read+app","boundary_notes":{"authorization":"#550 已批准的图库扩展开关和重扫记录，与扩展证据在应用库同事务提交。来源库快照只读取 WD 向量，应用提交前以 IMMEDIATE 事务锁定来源版本。"}}
 },
 "limitations":[
  "审计生产 HTTP/DB/事务/动态执行/启动/CLI；保留研究/测试/生成代码。",
@@ -607,7 +607,7 @@
  "native/terms/src/cli.rs":{"cli-entry":["recognition-import","folder-scan","photos-scan","library-scan","library-create","http","serve","wd-pending","names-command","names-project","names-search","character-command","identity-command","learning-snapshot","publish-learning","reproject-characters","validate","migrate","import","judge","tag","reproject","undo","wd-extension"],"database-write":[[0,3],3,1]},
  "crates/core/src/character_sql/fold.sql":{"database-write":["UPDATE:duplicates"]},
  "crates/core/src/character_commands.rs":{"database-write":[[0,10],[184,2],198,[317,2],[318,2],316,14,15,"INSERT OR REPLACE INTO:assertions",[312,2],313,18,[35,4],"INSERT OR IGNORE INTO:deferred",[321,2],[322,2],315,"INSERT OR REPLACE INTO:identity_uncertain",175,314,190,"DELETE FROM:identity_anchor_decisions","INSERT INTO:identity_anchor_decisions","INSERT INTO:identity_anchor_history"]},
- "native/terms/src/http_host_get.rs":{"http-branch":[17,306,97,"/api/diagnostics",42,39,"/api/similar|/api/clusters",26,41,43,296,295,305,293,291,"/api/human-conclusions","/api/human-conclusions/report","/api/settings","/api/libraries"]},
+ "native/terms/src/http_host_get.rs":{"http-branch":[17,306,97,"/api/diagnostics",42,39,"/api/similar|/api/clusters",26,41,43,296,295,305,293,291,"/api/human-conclusions","/api/human-conclusions/report","/api/settings","/api/libraries","/api/wd-extension"]},
  "native/terms/src/app_create.rs":{"database-write":{"ATTACH":1,"dynamic-or-wrapper":9,"INSERT INTO:main.":1,"CREATE INDEX:if":1,"COMMIT":3,"DETACH":1,"ALTER TABLE:assets":1,"INSERT OR IGNORE INTO:meta":1}},
  "native/terms/src/app_index.rs":{"database-write":[[0,7],34,[1,5],33,283,284,285,286,[208,2],12,[199,2],287,249,201,[3,2]],"entrypoint":[4]},
  "native/terms/src/http_browse.rs":{"http-branch":["/api/assets|/api/ids",[246,3],[77,2],[248,3],24,99,89,"/api/assets|/api/assets/count|/api/ids",[78,3]],"database-write":[[7,2],[0,2]]},
@@ -616,7 +616,7 @@
  "crates/core/src/names_commands.rs":{"database-write":{"INSERT OR IGNORE INTO:term_key_names":1,"dynamic-or-wrapper":8,"DELETE FROM:term_names":4,"DELETE FROM:term_key_names":1,"DELETE FROM:term_key_aliases":1,"INSERT INTO:term_key_aliases":1}},
  "native/terms/src/app_profiles.rs":{"http-branch":[[23,8],[16,5],[17,7],[44,3],[83,3],[242,4],[98,3]],"database-write":[[3,3],0]},
  "crates/core/src/character_import.rs":{"database-write":{"INSERT OR IGNORE INTO:term_links":1,"dynamic-or-wrapper":15,"UPDATE:term_tree":3,"UPDATE:terms":1,"INSERT INTO:term_batches":1,"INSERT OR IGNORE INTO:assertions":1,"INSERT INTO:imported":1,"DELETE FROM:auto_rules":1,"INSERT OR IGNORE INTO:auto_rules":4,"INSERT INTO:excluded":1,"DELETE FROM:excluded":1,"DELETE FROM:touched":1,"INSERT OR IGNORE INTO:touched":1,"INSERT INTO:assets":1,"DELETE FROM:duplicates":1,"INSERT INTO:duplicates":1,"INSERT OR REPLACE INTO:meta":2,"DELETE FROM:assets":1,"DELETE FROM:candidates":1,"REINDEX":3,"INSERT OR REPLACE INTO:sync_added":1}},
- "native/terms/src/http_host_post.rs":{"http-branch":[[303,2],[282,2],[275,2],[280,2],[279,2],[274,2],[294,2],264,295,"/api/diagnostics/open-logs",305,"/api/human-conclusions/",[307,2],[308,2],[309,2],"/api/human-conclusions/restore",265,"/api/human-conclusions/import|/api/human-conclusions/restore",266,267,[41,2],268,270,292,247,231,74,88,24,23,16,17,44,83,242,98,80,79,76,269,100,37,95,40,42,293,[230,2],39,43,271,272,273,276,278,281,296,[26,2],277]},
+ "native/terms/src/http_host_post.rs":{"http-branch":[[303,2],[282,2],[275,2],[280,2],[279,2],[274,2],[294,2],264,295,"/api/diagnostics/open-logs",305,"/api/human-conclusions/",[307,2],[308,2],[309,2],"/api/human-conclusions/restore",265,"/api/human-conclusions/import|/api/human-conclusions/restore",266,267,[41,2],268,270,292,247,231,74,88,24,23,16,17,44,83,242,98,80,79,76,269,100,37,95,40,42,293,[230,2],39,43,271,272,273,276,278,281,296,[26,2],277,"/api/wd-extension/package","/api/wd-extension/enable|/api/wd-extension/withdraw|/api/wd-extension/cancel"]},
  "native/terms/src/app_provenance.rs":{"database-write":{"INSERT OR IGNORE INTO:pending_runs":3,"UPDATE:runs":3,"INSERT OR IGNORE INTO:native_meta":2,"dynamic-or-wrapper":4,"UPDATE:native_meta":1,"COMMIT":2,"INSERT INTO:runs":1,"DELETE FROM:pending_runs":1,"ATTACH":2,"PRAGMA:c.execute_batch(\"pragma defer_foreign_keys":1,"INSERT INTO:leads|UPDATE:set":1,"INSERT INTO:native_delivery":1},"entrypoint":{"process-start":1}},
  "crates/core/src/character_sql/evidence_default.sql":{"database-write":[196]},
  "native/terms/src/app_migration_sql/artists.sql":{"database-write":["CREATE TABLE IF NOT EXISTS:artist_verdicts","CREATE INDEX IF NOT EXISTS:artist_verdicts_artist"]},
@@ -668,7 +668,7 @@
  "native/terms/src/app_human_conclusions/reports.rs":{"database-write":[[0,2],"INSERT INTO:human_import_reports","INSERT INTO:human_import_report_rows"]},
  "desktop/src/updater.rs":{"entrypoint":["process-start"]},
  "crates/core/src/wd_extension.rs":{"database-write":{"dynamic-or-wrapper":1,"INSERT INTO:memberships":1}},
- "native/terms/src/app_wd_extension.rs":{"database-write":{"dynamic-or-wrapper":3}}
+ "native/terms/src/app_wd_extension.rs":{"database-write":{"dynamic-or-wrapper":4,"COMMIT":1,"INSERT OR REPLACE INTO:meta":1,"DELETE FROM:meta":1}}
 },
 "policies":{
  "application":{"final_owner":"rust","responsibility":"HTTP 参数/目标、人工命令、正式事务/投影；Python 包装待迁移","acceptance":"合成状态码/原始字节、返回/DB/历史/撤销/事件对照；竞争与注入失败原子回滚","deletion_condition":"Rust 调用链及无 Python 验收后删生产 Python；保留旧对照","stages":["M2","M3"]},
