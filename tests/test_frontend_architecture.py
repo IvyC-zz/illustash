@@ -242,7 +242,7 @@ class FrontendArchitectureTest(unittest.TestCase):
         for relative, old, new in (
                 ('ui/overlay.js', "  if (composing(e)) return;  // 组字时的 Esc 是取消组字，不关浮层；方向键是选字\n", ""),
                 ('ui/palette.js', "q('#pfAlias').onkeydown = e => { if (composing(e)) return; ", "q('#pfAlias').onkeydown = e => { "),
-                ('ui/palette.js', "const p = palette; if (!p || composing(e)) return;", "const p = palette; if (!p) return;")):
+                ('ui/combo.js', "if (composing(e) || !shown()) return;", "if (!shown()) return;")):  # 命令面板等四处结果菜单（#432）
             with self.subTest(relative=relative, old=old), Tree() as tree:
                 tree.replace(relative, old, new)
                 self.assertViolation(tree, 'ime-composing', f'{relative}: 键盘处理函数没有调用 composing()')
