@@ -37,6 +37,14 @@ impl Group {
             _ => Err(Error::invalid("子文件夹的分法不正确")),
         }
     }
+    /// 没有角色（画师）的图放进哪个子文件夹：中文原文，调用方按页面语言翻译后传给 `Exports::start`。
+    pub(crate) fn fallback(self) -> &'static str {
+        match self {
+            Self::None => "",
+            Self::Character => "未识别角色",
+            Self::Artist => "画师未知",
+        }
+    }
 }
 /// 子文件夹名最多几个字符。
 const FOLDER_CHARS: usize = 80;
@@ -79,6 +87,7 @@ impl Exports {
         generation: u64,
         ids: Vec<String>,
         group: Group,
+        fallback: String,
         destination: PathBuf,
     ) -> Result<Json> {
         if ids.is_empty() {
@@ -106,8 +115,9 @@ impl Exports {
                 state["done"] = done.into();
                 counts.write(&mut state);
             };
-            let result =
-                std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| run(&lib, &ids, group, &dest, &c, &report)));
+            let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                run(&lib, &ids, (group, &fallback), &dest, &c, &report)
+            }));
             let result = result.unwrap_or_else(|_| Err((Error::invalid("导出任务异常退出"), Counts::default())));
             let mut state = s.lock().expect("app_asset_export state lock poisoned");
             match result {
@@ -188,17 +198,18 @@ fn names_connection(library: &Library) -> Result<Connection> {
     Ok(c)
 }
 /// 一张图要放进哪些子文件夹（不分时是图片所在的文件夹本身）。
-fn folders(c: &Connection, group: Group, id: &str) -> Result<Vec<String>> {
+/// `fallback` 是没有角色（画师）时的子文件夹名（已按页面语言翻译）。
+fn folders(c: &Connection, (group, fallback): (Group, &str), id: &str) -> Result<Vec<String>> {
     let (names, none) = match group {
         Group::None => return Ok(vec![String::new()]),
-        Group::Character => (crate::http_browse::character_names(c, id)?, "未识别角色"),
+        Group::Character => (crate::http_browse::character_names(c, id)?, fallback),
         Group::Artist => {
             let artists = crate::http_artists::for_asset(c, true, id, None, false)?;
             let names = match artists.get("artists") {
                 Some(Json::Array(list)) => list.iter().map(|a| a.field("name").text().to_owned()).collect(),
                 _ => Vec::new(),
             };
-            (names, "画师未知")
+            (names, fallback)
         }
     };
     let mut out: Vec<String> = Vec::new();
@@ -219,7 +230,7 @@ type Failure = (Error, Counts);
 fn run(
     library: &Library,
     ids: &[String],
-    group: Group,
+    group: (Group, &str),
     destination: &Path,
     cancel: &AtomicBool,
     report: &dyn Fn(usize, &Counts),
@@ -469,14 +480,14 @@ mod tests {
         fs::create_dir_all(&out).unwrap();
         let ids: Vec<String> = ["a", "b", "p", "missing"].map(String::from).to_vec();
         let cancel = AtomicBool::new(false);
-        let counts = run(&lib, &ids, Group::None, &out, &cancel, &|_, _| {}).map_err(|(e, _)| e).unwrap();
+        let counts = run(&lib, &ids, (Group::None, ""), &out, &cancel, &|_, _| {}).map_err(|(e, _)| e).unwrap();
         assert_eq!(counts, Counts { copied: 2, existed: 0, failed: 2, derived: 1 });
         assert_eq!(fs::read(out.join("a.png")).unwrap(), b"synthetic a");
         // 照片的派生图用「照片」里的文件名、派生图的扩展名。
         assert_eq!(fs::read(out.join("P.jpeg")).unwrap(), b"synthetic p");
         assert_eq!(fs::read(dir.join("art/a.png")).unwrap(), b"synthetic a");
         // 再导出一次：都已存在，不多出带编号的副本。
-        let again = run(&lib, &ids, Group::None, &out, &cancel, &|_, _| {}).map_err(|(e, _)| e).unwrap();
+        let again = run(&lib, &ids, (Group::None, ""), &out, &cancel, &|_, _| {}).map_err(|(e, _)| e).unwrap();
         assert_eq!(again, Counts { copied: 0, existed: 2, failed: 2, derived: 1 });
         assert_eq!(fs::read_dir(&out).unwrap().count(), 2);
         // 照片来源的图不显示位置；路径只按资产 ID 查。

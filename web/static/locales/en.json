@@ -2983,5 +2983,7 @@
   "没有导出过": "Nothing has been exported yet",
   "导出到的文件夹不在了": "The export folder is no longer there",
   "无法建立文件夹：{e}": "Couldn’t create the folder: {e}",
-  "写入导出文件夹失败：{e}": "Couldn’t write to the export folder: {e}"
+  "写入导出文件夹失败：{e}": "Couldn’t write to the export folder: {e}",
+  "未识别角色": "No character",
+  "画师未知": "Unknown artist"
 }

@@ -208,8 +208,16 @@ fn export(request: Request, host: &Host, received: u64, body: &Json, translate: 
         // 只导出选中的这几张，不带上它们的重复副本。
         crate::app_commands::selected_scope(&c, &context, &selection, false)
     })();
-    let result =
-        ids.and_then(|ids| session.asset_exports.start(&session.library, session.generation, ids, group, destination));
+    let result = ids.and_then(|ids| {
+        session.asset_exports.start(
+            &session.library,
+            session.generation,
+            ids,
+            group,
+            translate(group.fallback()),
+            destination,
+        )
+    });
     drop(session);
     reply(request, result, true);
 }
