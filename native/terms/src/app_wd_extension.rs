@@ -403,12 +403,15 @@ fn check_file(library: &Library, path: &Path, scope: Option<&[String]>, progress
 }
 
 pub(crate) fn status(resources: &Path, library: &Library, tasks: &Tasks, busy: Option<&str>) -> Result<Value> {
+    // 先看任务是否已经提交，再读应用库快照。看到终态时，库里的开关和计数必须已经生效。
+    let task = tasks.snapshot();
     let mut info = crate::app_models::extension_info(resources)?;
     let app = crate::app_library::read_connection(&library.db())?;
+    let snapshot = app.unchecked_transaction()?;
     let source = crate::app_library::read_connection(&library.source())?;
     let vectors = vector_count(&source, None)?;
-    let active = enabled(&app)?;
-    let (images, assigned): (usize, usize) = app.query_row(
+    let active = enabled(&snapshot)?;
+    let (images, assigned): (usize, usize) = snapshot.query_row(
         "SELECT (SELECT count(DISTINCT uuid) FROM candidates WHERE source='WD_EXT'),
                 (SELECT count(*) FROM memberships WHERE sources='WD_EXT')",
         [],
@@ -431,7 +434,7 @@ pub(crate) fn status(resources: &Path, library: &Library, tasks: &Tasks, busy: O
         "scored":active.as_ref().map_or(0, |state| state.scored),
         "images":images,"assigned":assigned,"vectors":vectors,"blocked":blocked
     });
-    info["task"] = tasks.snapshot();
+    info["task"] = task;
     Ok(info)
 }
 

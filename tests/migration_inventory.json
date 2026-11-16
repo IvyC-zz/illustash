@@ -273,7 +273,7 @@
 
  "native/terms/src/app_migration_sql/provenance.sql":"a780f1f8837dd2c90a556539c114d56cdaa513b057fb667bf0c5c9d604f75934",
 
- "native/terms/src/app_models.rs":"2e334ba532182cf1f29a3be840e6885a5cc608dd93f8043e610aee5e85f41cc5",
+ "native/terms/src/app_models.rs":"ef6f17b1a269c68963e548c7216a5067c11b1c24305638ccde3883eab8347d04",
 
  "native/terms/src/app_name_sources.rs":"a9d895621405e92c2bdacd7f547f28feec7f294f307d628ea25d5e2bf27f9515",
 
@@ -323,7 +323,7 @@
 
  "native/terms/src/app_upgrade.rs":"de6b529fbb01865fb9adeb78ae45ca4b5a541b14129b9472f58f10ac693ce6cf",
 
- "native/terms/src/app_wd_extension.rs":"26c68ef7b4173774295aaf4050d89cc8054e2553ab89e87f2f6bda635986b2b3",
+ "native/terms/src/app_wd_extension.rs":"83308f79f0f1cee45d49d471f35de7014fadf8b0e9c0bd4307eef9ecd28252f1",
 
  "native/terms/src/bin/illustash-terms.rs":"04ee80bb280034a16f8ddd9fe97e8de0700713259c44f76858f70b8713d4c594",
 

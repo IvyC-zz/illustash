@@ -1128,6 +1128,8 @@ pub(crate) fn extension_file(resources: &Path) -> Result<Option<PathBuf>> {
 }
 
 pub(crate) fn extension_info(resources: &Path) -> Result<Value> {
+    // 先读任务快照；看到下载已结束时才开始确认激活后的文件。
+    let download = WD_EXTENSION.snapshot();
     let place = extension_place(resources)?;
     let spec = wd_extension()?;
     let entry = &spec.file;
@@ -1147,7 +1149,7 @@ pub(crate) fn extension_info(resources: &Path) -> Result<Value> {
             "have":have,"partial":!ready && have > 0,
             "sources":place.sources(entry).into_iter().map(|(host, _)| host).collect::<Vec<_>>()
         },
-        "download":WD_EXTENSION.snapshot()
+        "download":download
     }))
 }
 
