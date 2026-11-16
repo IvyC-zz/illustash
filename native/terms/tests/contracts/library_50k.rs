@@ -213,6 +213,16 @@ fn measure(origin: &str, token: &str, url: &str) -> f64 {
     start.elapsed().as_secs_f64() * 1000.0 / 50.0
 }
 
+#[cfg(windows)]
+fn peak_rss_mib(pid: u32) -> f64 {
+    let cmd = format!("(Get-Process -Id {pid}).PeakWorkingSet64");
+    let out =
+        Command::new("powershell.exe").args(["-NoProfile", "-NonInteractive", "-Command", &cmd]).output().unwrap();
+    assert!(out.status.success(), "无法读取宿主峰值工作集");
+    let value: f64 = String::from_utf8(out.stdout).unwrap().trim().parse().unwrap();
+    value / 1_048_576.0
+}
+
 fn medians(mut samples: BTreeMap<String, Vec<f64>>) {
     for (name, values) in &mut samples {
         assert_eq!(values.len(), 3);
@@ -224,7 +234,9 @@ fn medians(mut samples: BTreeMap<String, Vec<f64>>) {
 #[test]
 #[ignore = "只在空闲验收机上运行 release 宿主合成图库计时"]
 fn benchmark_galleries_http() {
-    assert!(!cfg!(debug_assertions), "需用 release 编译");
+    if cfg!(debug_assertions) {
+        panic!("需用 release 编译");
+    }
     let candidate = Path::new(env!("CARGO_BIN_EXE_illustash-terms"));
     let baseline = PathBuf::from(std::env::var_os("ILLUSTASH_BENCH_BASELINE").expect("显式指定基线 release 宿主"));
     let (_scratch, root, _) = materialize(&json!({"input": {}}), "gallery-bench");
@@ -265,6 +277,8 @@ fn benchmark_galleries_http() {
             for (name, url) in legacy {
                 samples.entry(format!("{label}_{name}_ms")).or_default().push(measure(&origin, &token, url));
             }
+            #[cfg(windows)]
+            samples.entry(format!("{label}_legacy_peak_rss_mib")).or_default().push(peak_rss_mib(_host.child.id()));
             if label == "candidate" {
                 for (group, filters) in &groups {
                     for (route, path) in [("page", "/api/assets"), ("count", "/api/assets/count")] {
@@ -287,7 +301,9 @@ fn benchmark_galleries_http() {
 #[test]
 #[ignore = "只在空闲验收机上运行 release 宿主合成图库计时"]
 fn benchmark_favorites_http() {
-    assert!(!cfg!(debug_assertions), "需用 release 编译");
+    if cfg!(debug_assertions) {
+        panic!("需用 release 编译");
+    }
     let binary = PathBuf::from(std::env::var_os("ILLUSTASH_FAVORITE_BINARY").expect("显式指定 #447 release 宿主"));
     let (_scratch, root, _) = materialize(&json!({"input": {}}), "favorite-bench");
     let Library50k { package, .. } = populate(&root);
