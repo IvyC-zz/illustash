@@ -28,6 +28,9 @@ mod entry;
 #[path = "common/wait.rs"]
 mod wait;
 
+#[path = "contracts/library_50k.rs"]
+mod library_50k;
+
 const DATABASES: [&str; 3] = ["source.sqlite", "library.sqlite", "provenance.sqlite"];
 
 struct Sandbox(PathBuf);
