@@ -173,7 +173,8 @@ mod win {
             let data: IDataObject = unsafe { items.BindToHandler(None, &BHID_DataObject)? };
             // 只允许复制。SHDoDragDrop 自己提供拖放源，在鼠标松开或取消之前不返回（期间照常分发窗口消息）。
             // SAFETY: hwnd 是主窗口；data 有效。
-            unsafe { SHDoDragDrop(Some(hwnd), &data, None::<&IDropSource>, DROPEFFECT_COPY)? };
+            let effect = unsafe { SHDoDragDrop(Some(hwnd), &data, None::<&IDropSource>, DROPEFFECT_COPY)? };
+            eprintln!("[drag] 结束，效果 {}", effect.0);
             Ok(())
         })();
         for list in lists {
