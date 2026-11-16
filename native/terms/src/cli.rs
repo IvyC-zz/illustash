@@ -37,8 +37,9 @@ use crate::Error;
 use serde_json::json;
 use std::path::Path;
 
-pub const COMMANDS: [&str; 23] = [
+pub const COMMANDS: [&str; 24] = [
     "recognition-import",
+    "wd-extension",
     "folder-scan",
     "photos-scan",
     "library-scan",
@@ -87,6 +88,9 @@ pub fn run(args: &[String]) -> u8 {
         ["recognition-import", "--library", _library, "--root", root, "--model-specs"] => crate::app_recognition::model_specs(Path::new(root)),
         ["recognition-import", "--library", library, "--root", _root, "--resume"] => crate::app_library::Library::open(Path::new(library)).and_then(|lib| crate::app_recognition::resume(&lib,&std::sync::atomic::AtomicBool::new(false),&|_,_| Ok(()))),
         ["recognition-import", "--library", library, "--root", root, "--package", package] => crate::app_library::Library::open(Path::new(library)).and_then(|lib| crate::app_recognition::import_package(&lib,Path::new(package),Path::new(root),&std::sync::atomic::AtomicBool::new(false),&|_,_| Ok(()))),
+        ["wd-extension", "--library", library, "--package", package] => crate::app_library::Library::open(Path::new(library)).and_then(|lib| crate::app_wd_extension::apply(&lib,Path::new(package))),
+        ["wd-extension", "--library", library, "--withdraw"] => crate::app_library::Library::open(Path::new(library)).and_then(|lib| crate::app_wd_extension::withdraw(&lib)),
+        ["wd-extension", ..] => Err(Error::invalid("用法：wd-extension --library <图库.pilib> --package <扩展包> | wd-extension --library <图库.pilib> --withdraw")),
         ["folder-scan", "--db", db] => {
             let mut input=String::new();
             let source = std::io::Read::read_to_string(&mut std::io::stdin(), &mut input).map_err(Error::from).and_then(|_| crate::strict_json::parse(&input).map_err(Error::Invalid));

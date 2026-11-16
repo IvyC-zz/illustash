@@ -195,11 +195,12 @@ pub const HUMAN_ORIGINS: [&str; 3] = ["user", "album", "legacy"];
 /// 证据来源不能冒充人。
 pub const RESERVED_SOURCES: [&str; 5] = ["user", "human", "album", "legacy", "verdict"];
 
-pub const SCHEMA_VERSION: i64 = 9;
+pub const SCHEMA_VERSION: i64 = 10;
 
 /// 可替换的机器证据（`source`, `method`）：按有效批次生效（`term_active_evidence`），成功的空结果让旧证据失效。
-/// 其余来源的证据全部有效。与 V2 里 `term_evidence_sets` 的 CHECK 一致，加一种要一次迁移。
-pub const REPLACEABLE: [(&str, &str); 2] = [("wd", "wd_character"), ("ccip_index", "char_ext")];
+/// 其余来源的证据全部有效。与当前 `term_evidence_sets` 的 CHECK 一致，加一种要一次迁移。
+pub const REPLACEABLE: [(&str, &str); 3] =
+    [("wd", "wd_character"), ("ccip_index", "char_ext"), (crate::wd_extension::SOURCE, crate::wd_extension::METHOD)];
 
 /// 整个来源一起替换的机器证据（第 3 版）：一次交付是这个来源的全量快照，覆盖到的图上它所有方法的证据都按批次生效，
 /// 批次的方法记为 `*`。溯源每次交的包就是 provenance.sqlite 的全量快照（tests/reference/provenance/export.py（#9 已删除））：快照里没有了的
@@ -424,8 +425,8 @@ CREATE TABLE IF NOT EXISTS actions(id INTEGER PRIMARY KEY AUTOINCREMENT,label TE
 ";
 
 /// 每个版本一段，按顺序执行；已发布的段不再修改。
-const MIGRATIONS: [fn(&Connection) -> Result<()>; 9] =
-    [v1, v2, v3, v4, v5, v6, v7, v8, crate::human_conclusions::migrate];
+const MIGRATIONS: [fn(&Connection) -> Result<()>; 10] =
+    [v1, v2, v3, v4, v5, v6, v7, v8, crate::human_conclusions::migrate, v10];
 
 fn v1(conn: &Connection) -> Result<()> {
     Ok(conn.execute_batch(V1)?)
@@ -650,6 +651,28 @@ fn v3(conn: &Connection) -> Result<()> {
             [set],
         )?;
         crate::store::rebuild_active_evidence(conn)?;
+    }
+    Ok(())
+}
+
+/// 第 10 版增加独立的 WD 扩展候选批次。复制原批次和有效集，保留证据与旧归属。
+fn v10(conn: &Connection) -> Result<()> {
+    const V3_SOURCES: &str = "'wd.wd_character','ccip_index.char_ext'";
+    const V10_SOURCES: &str = "'wd.wd_character','ccip_index.char_ext','wd_extension.linear_head'";
+    conn.execute_batch(&V3_SETS.replace(V3_SOURCES, V10_SOURCES))?;
+    conn.execute_batch(&V3.replace(V3_SOURCES, V10_SOURCES))?;
+    let view: Option<String> = conn
+        .query_row("SELECT sql FROM sqlite_schema WHERE type='view' AND name='variant_memberships'", [], |r| r.get(0))
+        .optional()?;
+    if let Some(view) = view.filter(|sql| !sql.contains("v.source<>'WD_EXT'")) {
+        // 扩展候选不能给已有主归属追加皮肤。核心独立测试库可以没有应用视图。
+        let sql = crate::character_projection::scoped(
+            &view,
+            "v.uuid=m.uuid AND",
+            "v.uuid=m.uuid AND v.source<>'WD_EXT' AND",
+        )?;
+        conn.execute("DROP VIEW variant_memberships", [])?;
+        conn.execute_batch(&sql)?;
     }
     Ok(())
 }
@@ -1612,6 +1635,51 @@ mod tests {
             .unwrap();
         commit_writing(tx).unwrap();
         assert!(guard(&c, "x; DROP TABLE terms").is_err());
+    }
+
+    #[test]
+    fn v9_to_v10_keeps_existing_batches_and_requires_an_active_set_for_extension() {
+        let mut c = Connection::open_in_memory().unwrap();
+        crate::configure(&c).unwrap();
+        migrate_to(&mut c, 9).unwrap();
+        c.execute_batch(
+            "INSERT INTO term_assets(namespace,key) VALUES ('library','a');
+             INSERT INTO terms(key,kind,origin) VALUES ('p','character','legacy');
+             INSERT INTO term_evidence(asset_id,term_id,source,method,version,fingerprint) VALUES
+              (1,1,'wd','wd_character','base',zeroblob(16)),
+              (1,1,'ccip_index','char_ext','base',zeroblob(16)),
+              (1,1,'provenance','ocr','base',zeroblob(16));
+             INSERT INTO term_evidence_sets(producer,source,method,scope) VALUES
+              ('t','wd','wd_character','all'),('t','ccip_index','char_ext','all'),('t','provenance','*','all');
+             INSERT INTO term_evidence_set_rows VALUES (1,1),(2,2),(3,3);",
+        )
+        .unwrap();
+        crate::store::rebuild_active_evidence(&c).unwrap();
+        let ids = |c: &Connection| rows(c, "SELECT id FROM term_current_evidence ORDER BY id");
+        let old_ids = ids(&c);
+        let active = rows(&c, "SELECT * FROM term_active_evidence ORDER BY asset_id,source");
+        assert_eq!(migrate_to(&mut c, 10).unwrap(), 9);
+        assert_eq!(ids(&c), old_ids);
+        assert_eq!(rows(&c, "SELECT * FROM term_active_evidence ORDER BY asset_id,source"), active);
+
+        c.execute_batch(
+            "INSERT INTO term_evidence(asset_id,term_id,source,method,version,fingerprint)
+                VALUES (1,1,'wd_extension','linear_head','test',zeroblob(16));",
+        )
+        .unwrap();
+        assert_eq!(ids(&c), old_ids);
+        crate::store::publish_asset_batch(
+            &c,
+            "wd_extension",
+            ("wd_extension", "linear_head"),
+            &[1],
+            &[4].into_iter().collect(),
+            None,
+        )
+        .unwrap();
+        assert_eq!(ids(&c).len(), old_ids.len() + 1);
+        assert!(crate::store::rebuild_active_evidence(&c).unwrap().is_empty());
+        assert!(rows(&c, "PRAGMA foreign_key_check").is_empty());
     }
 
     #[test]

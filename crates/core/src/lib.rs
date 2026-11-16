@@ -39,6 +39,7 @@ mod schema_rules;
 pub mod store;
 pub mod strict_json;
 pub mod undo_labels;
+pub mod wd_extension;
 #[cfg(not(test))]
 pub mod schema {
     pub use super::schema_rules::*;

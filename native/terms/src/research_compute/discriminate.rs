@@ -214,7 +214,8 @@ pub fn claims(
         }
     }
     let mut pseudo = BTreeMap::<String, BTreeSet<String>>::new();
-    for (u, e) in strings(c, "SELECT DISTINCT uuid,entity FROM candidates")? {
+    // 可撤回的扩展头不提供伪标签，撤回后不会留下用它选取的训练负例。
+    for (u, e) in strings(c, "SELECT DISTINCT uuid,entity FROM candidates WHERE source<>'WD_EXT'")? {
         if !judged.contains(&u) && usable(&u) {
             pseudo.entry(u).or_default().insert(e);
         }
@@ -448,6 +449,9 @@ mod tests {
     fn claims_need_index_gate_and_distance_from_removed() {
         let (c, f, groups) = library(true);
         let out = claims(&c, &f, &BTreeSet::new(), &groups, &f.uuids).unwrap();
+        c.execute("INSERT INTO candidates VALUES ('U1', 'A', 'WD_EXT', 0.99),('far', 'B', 'WD_EXT', 0.99)", [])
+            .unwrap();
+        assert_eq!(claims(&c, &f, &BTreeSet::new(), &groups, &f.uuids).unwrap(), out);
         let a: BTreeSet<_> = out.keys().filter(|(_, e)| e == "A").map(|(u, _)| u.as_str()).collect();
         assert!(a.contains("near"), "{a:?}");
         assert!(!a.contains("far"), "outside the gate: {a:?}");

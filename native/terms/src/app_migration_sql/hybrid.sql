@@ -42,7 +42,7 @@ CREATE VIEW variant_memberships AS
  FROM memberships m JOIN entities e ON e.parent_id=m.entity AND e.merged_into IS NULL
  LEFT JOIN assertions s ON s.uuid=m.uuid AND s.entity=e.id
  WHERE (s.status='confirmed' AND s.origin<>'album') OR (coalesce(s.status,'')<>'rejected' AND EXISTS
- (SELECT 1 FROM candidates v JOIN entities x ON x.id=v.entity WHERE v.uuid=m.uuid AND (x.id=e.id OR x.merged_into=e.id)));
+ (SELECT 1 FROM candidates v JOIN entities x ON x.id=v.entity WHERE v.uuid=m.uuid AND v.source<>'WD_EXT' AND (x.id=e.id OR x.merged_into=e.id)));
 CREATE VIEW identity_assignments AS
  SELECT m.uuid,m.entity AS character_id,v.entity AS variant_id,m.status,m.origin
  FROM memberships m LEFT JOIN variant_memberships v ON v.uuid=m.uuid AND v.parent_id=m.entity;

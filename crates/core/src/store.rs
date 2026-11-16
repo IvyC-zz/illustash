@@ -532,19 +532,30 @@ pub fn publish_snapshot(
     rows: &BTreeSet<i64>,
     package: Option<i64>,
 ) -> Result<i64> {
+    publish_asset_batch(conn, source, (source, "*"), covered, rows, package)
+}
+
+pub(crate) fn publish_asset_batch(
+    conn: &Connection,
+    producer: &str,
+    (source, method): (&str, &str),
+    covered: &[AssetId],
+    rows: &BTreeSet<i64>,
+    package: Option<i64>,
+) -> Result<i64> {
     conn.execute(
-        "INSERT INTO term_evidence_sets(producer,source,method,scope,package_id) VALUES (?1,?1,'*','assets',?2)",
-        params![source, package],
+        "INSERT INTO term_evidence_sets(producer,source,method,scope,package_id) VALUES (?1,?2,?3,'assets',?4)",
+        params![producer, source, method, package],
     )?;
     let set = conn.last_insert_rowid();
     let mut put =
         conn.prepare_cached("INSERT OR IGNORE INTO term_evidence_set_assets(set_id,asset_id) VALUES (?1,?2)")?;
     let mut active = conn.prepare_cached(
-        "INSERT OR REPLACE INTO term_active_evidence(asset_id,source,method,set_id) VALUES (?1,?2,'*',?3)",
+        "INSERT OR REPLACE INTO term_active_evidence(asset_id,source,method,set_id) VALUES (?1,?2,?3,?4)",
     )?;
     for &a in covered {
         put.execute([set, a])?;
-        active.execute(params![a, source, set])?;
+        active.execute(params![a, source, method, set])?;
     }
     let covered: BTreeSet<AssetId> = covered.iter().copied().collect();
     let mut add =

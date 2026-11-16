@@ -34,7 +34,7 @@ fn compact(v: &Value) -> String {
         _ => crate::character_json::dump(v, true),
     }
 }
-fn file(path: &Path, limit: u64) -> Result<Vec<u8>> {
+pub(crate) fn file(path: &Path, limit: u64) -> Result<Vec<u8>> {
     let metadata = fs::symlink_metadata(path)?;
     if !metadata.is_file() || metadata.len() > limit {
         return Err(invalid());
@@ -901,6 +901,7 @@ pub(crate) fn realistic(app: &Connection, src: &Connection, publishing: &[String
     Ok(result)
 }
 fn import_changes(app: &Connection, src: &Connection, library: &Library, ids: &[String]) -> Result<()> {
+    illustash_core::wd_extension::invalidate(app, ids)?;
     let list = serde_json::to_string(ids).expect("internal JSON value is serializable").replace('\'', "''");
     let scope = format!("uuid IN (SELECT value FROM json_each('{list}'))");
     let rows=source_rows(src,"SELECT uuid,filename,src_path,width,height,added_at,src_kind FROM assets WHERE in_scope=1 AND coalesce(trashed,0)=0 AND uuid IN ({})",ids)?;
