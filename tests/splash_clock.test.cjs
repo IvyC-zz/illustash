@@ -30,7 +30,8 @@ function run({fps = 60, reduce = false, launched = false, shell = false} = {}) {
   const timers = [];
   const root = element(); root.hasAttribute = k => shell && k === 'data-shell';
   const name = element('Illustash');
-  root.querySelector = sel => sel === '.sp-name' ? name : element();
+  const parts = {'.sp-name': name};
+  root.querySelector = sel => parts[sel] ||= element();
   const context = {
     document: {getElementById: id => id === 'splash' ? root : null, querySelector: () => null, createElementNS: () => element()},
     location: {search: launched ? '?launched' : ''}, URLSearchParams, Math, Number, Array, Object, Promise,
@@ -54,7 +55,7 @@ function run({fps = 60, reduce = false, launched = false, shell = false} = {}) {
     }
     now = end;
   };
-  return {root, splash: context.splash, advance, now: () => now,
+  return {root, parts, splash: context.splash, advance, now: () => now,
     fps(n) { rate = n; nextFrame = n && frame ? now + 1000 / n : 0; }};
 }
 // 从现在起到启动画面被移除经过的毫秒数，最多等 limit。
@@ -146,4 +147,17 @@ for (const fps of [5, 0]) {
 }
 test('settled()：减少动态效果时立即解析', async () => {
   assert.ok(await settledAfter(run({shell: true, reduce: true})) <= 50);
+});
+
+// 外壳启动页在折叠期间收到升级询问或启动错误时调用 halt()（#521）：图标立即停在成形后的位置，不再按整列居中压到提示文字上。
+test('halt()：折叠期间停下时图标立即到成形位置，此后不再移动', async () => {
+  for (const at of [0, 300, 1500, 2500]) {
+    const s = run({shell: true}); s.advance(at);
+    s.splash.halt();
+    const svg = s.parts['.sp-icon svg'];
+    assert.match(svg.style.transform, /^translateY\(0px\)/, `${at} 毫秒时停下：${svg.style.transform}`);
+    s.advance(5000);
+    assert.match(svg.style.transform, /^translateY\(0px\)/);
+    assert.ok(await settledAfter(s) <= 50);
+  }
 });
