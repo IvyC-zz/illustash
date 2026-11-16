@@ -2908,19 +2908,18 @@
   "打开大图也可以回答。": "You can also answer in the large view.",
   "看不清的可以跳过，换一张。": "Skip a picture you can’t make out to get another.",
   "选中的图可以恢复到未识别。": "Selected pictures can be returned to unidentified.",
-  "长得像的未识别图分在一组，可以整组确认。": "Look-alike unidentified pictures are grouped so you can confirm a whole group.",
+  "按长相分组的未识别图，可以整组确认。": "Unidentified pictures grouped by look; a whole group can be confirmed at once.",
   "点一下缩略图，把它排除在这组之外。": "Click a thumbnail to leave it out of the group.",
   "组头的按钮对整组生效。": "The buttons in a group’s header act on the whole group.",
   "同色角标是同一组。": "Badges of one color are one group.",
   "修改任一份会同步到整组。": "Changing any copy changes the whole group.",
   "组里的角色不一致时不折叠，对齐以后折叠成一张。": "A group whose characters disagree is not folded; once they agree it folds into one picture.",
-  "画的是同一幅画，但不是同一个文件。": "The same artwork in different files.",
+  "同一幅画的不同文件。": "The same artwork in different files.",
   "点一组进去看。": "Open a group to see it.",
-  "一组固定的随机图，用来检查「找回画师」找到的画师对不对。": "A fixed random set of pictures for checking whether the artists “Find artists” found are right.",
+  "一组固定的随机图，逐张核对「找回画师」找到的画师。": "A fixed random set of pictures for checking the artists “Find artists” found.",
   "每次打开都是同一批。": "The same set every time.",
   "按涉及的图片数排序。": "Sorted by the number of pictures involved.",
   "高亮的按钮是外部资料建议的做法。": "The highlighted button is what external sources suggest.",
   "选中两张以上可以判断它们的关系。": "Select two or more to decide how they relate.",
-  "排除只做标记，不改动原图文件。": "Excluding only marks pictures; the original files are not changed.",
-  "像截图，但画面里有人物，规则拿不准。": "They look like screenshots but have people in them, so the rules can’t decide."
+  "像截图，但有人物。": "They look like screenshots but have people."
 }
