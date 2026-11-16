@@ -268,6 +268,9 @@ fn relate(request: Request, host: &Host, received: u64, mut session: RwLockWrite
 }
 fn longtail(host: &Host, session: &Session, body: &Json) -> Result<Json> {
     use crate::app_ccip_longtail;
+    if session.library.frozen() {
+        return Err(Error::Conflict("图库只读".into()));
+    }
     if session.syncer.running() || session.index.writing() {
         return Err(Error::Conflict("正在同步或更新角色索引，请稍后重试".into()));
     }
@@ -280,7 +283,13 @@ fn longtail(host: &Host, session: &Session, body: &Json) -> Result<Json> {
                 .ok_or_else(|| Error::invalid("请选择本机参考包文件"))?;
             Some(PathBuf::from(path))
         }
-        Some("enable") => Some(app_ccip_longtail::local_package(&session.library)),
+        Some("enable") => {
+            let path = app_ccip_longtail::local_package(&session.library);
+            if !path.try_exists()? {
+                return Err(Error::Conflict("参考包还没就位，请先从文件导入".into()));
+            }
+            Some(path)
+        }
         Some("withdraw") => None,
         _ => return Err(Error::invalid("参考包操作不正确")),
     };

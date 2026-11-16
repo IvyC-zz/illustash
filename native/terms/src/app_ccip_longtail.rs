@@ -25,6 +25,7 @@ const CCIP_SHA256: &str = "4ea118d16496274f4f6e08d3afc768cc592389e8f7f32f8732ce2
 const DIMENSION: usize = 768;
 const DELIVERY_ERROR: &str = "ccip_longtail_delivery_error";
 const INDEX_GENERATION: &str = "ccip_longtail_index_generation";
+const LAST_SCAN: &str = "ccip_longtail_last_scan";
 const ROLES: usize = 54;
 
 struct Package {
@@ -288,6 +289,11 @@ pub(crate) fn apply(
     crate::schema::begin_writing(&tx)?;
     let changed = ccip_longtail::apply(&tx, PACKAGE_SHA256, &hits)?;
     tx.execute("INSERT OR REPLACE INTO meta(key,value) VALUES (?1,?2)", [INDEX_GENERATION, &generation.to_string()])?;
+    tx.execute(
+        "INSERT INTO meta(key,value) VALUES (?1,json_object('enabled_at',CURRENT_TIMESTAMP,'checked_at',CURRENT_TIMESTAMP,'scored',?2))
+         ON CONFLICT(key) DO UPDATE SET value=json_set(meta.value,'$.checked_at',CURRENT_TIMESTAMP,'$.scored',?2)",
+        rusqlite::params![LAST_SCAN, count],
+    )?;
     tx.execute("DELETE FROM meta WHERE key=?1", [DELIVERY_ERROR])?;
     check()?;
     let mut tx = Some(tx);
@@ -306,7 +312,7 @@ pub(crate) fn withdraw(library: &Library, observer: &dyn Observer) -> Result<Val
     let tx = app.transaction_with_behavior(TransactionBehavior::Immediate)?;
     crate::schema::begin_writing(&tx)?;
     let changed = ccip_longtail::withdraw(&tx)?;
-    tx.execute("DELETE FROM meta WHERE key IN (?1,?2)", [DELIVERY_ERROR, INDEX_GENERATION])?;
+    tx.execute("DELETE FROM meta WHERE key IN (?1,?2,?3)", [DELIVERY_ERROR, INDEX_GENERATION, LAST_SCAN])?;
     let mut tx = Some(tx);
     observer.publish(&mut || crate::schema::commit_writing(tx.take().expect("角色参考包只提交一次")))?;
     Ok(json!({"changed":changed}))
@@ -322,6 +328,21 @@ pub(crate) fn status(library: &Library, root: &Path) -> Result<Value> {
         app.query_row("SELECT count(*) FROM memberships WHERE sources='CCIP_LONGTAIL'", [], |r| r.get(0))?;
     let error: Option<String> =
         app.query_row("SELECT value FROM meta WHERE key=?1", [DELIVERY_ERROR], |r| r.get(0)).optional()?;
+    let (enabled_at, checked_at, scored): (Option<String>, Option<String>, i64) = app
+        .query_row(
+            "SELECT json_extract(value,'$.enabled_at'),json_extract(value,'$.checked_at'),json_extract(value,'$.scored') FROM meta WHERE key=?1",
+            [LAST_SCAN],
+            |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)),
+        )
+        .optional()?
+        .unwrap_or_default();
+    let source = crate::app_library::read_connection(&library.source())?;
+    let vectors: i64 = source.query_row(
+        "SELECT count(*) FROM embeddings v JOIN assets a ON a.uuid=v.uuid
+         WHERE v.model='ccip' AND a.in_scope=1 AND coalesce(a.trashed,0)=0",
+        [],
+        |r| r.get(0),
+    )?;
     let needs_scan = if enabled.is_some() {
         let prior: Option<String> =
             app.query_row("SELECT value FROM meta WHERE key=?1", [INDEX_GENERATION], |r| r.get(0)).optional()?;
@@ -331,10 +352,9 @@ pub(crate) fn status(library: &Library, root: &Path) -> Result<Value> {
     } else {
         false
     };
-    Ok(
-        json!({"roles":ROLES,"package_sha256":PACKAGE_SHA256,"enabled":enabled,"needs_scan":needs_scan,"available":available,
-        "candidates":candidates,"assigned":memberships,"error":error,"writable":!library.frozen()}),
-    )
+    Ok(json!({"roles":ROLES,"package_sha256":PACKAGE_SHA256,"package_bytes":PACKAGE_BYTES,"enabled":enabled,
+        "needs_scan":needs_scan,"available":available,"candidates":candidates,"assigned":memberships,"error":error,
+        "writable":!library.frozen(),"vectors":vectors,"enabled_at":enabled_at,"checked_at":checked_at,"scored":scored}))
 }
 
 fn delivery_snapshot(
