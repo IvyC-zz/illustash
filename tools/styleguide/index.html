@@ -312,7 +312,7 @@
   <p class="sg-lead">“胶囊形的小块”有二十多个类，分筛选芯片、信息标签、角标、圆点几类。</p>
 
   <div class="sg-item" id="e-filter"><header><h3>筛选芯片</h3><span class="sg-tag hand">手写</span><span class="sg-cls"><code>.chips-row</code><code>.chip-filter</code><code>.chip-filter.on</code></span></header>
-    <p class="sg-src">来源：<code>ui/shell.js</code> subTabs / renderChrome（图库的页面分流、皮肤筛选、“可能也是 TA”）· <code>ui/catalog.js</code> drawShelf（作品页的 全部 / 已关注 / 还在核对的链接 三个筛选）。</p>
+    <p class="sg-src">来源：<code>ui/shell.js</code> subTabs / renderChrome（图库的页面分流、造型筛选、“可能也是 TA”）· <code>ui/catalog.js</code> drawShelf（作品页的 全部 / 已关注 / 还在核对的链接 三个筛选）。</p>
     <div class="sg-stage"><div class="chips-row"><a class="chip-filter on" href="#e-filter">全部 <span>1,204</span></a><a class="chip-filter" href="#e-filter">已识别 <span>1,100</span></a><button class="chip-filter">可能也是 TA <span>12</span></button></div></div>
     <p class="sg-note"><b>并行写法：</b>同样是“一排可选项”，另有 <code>.cast-tab</code>（角色页的作品标签）、<code>.cast-buckets button</code>（列表视图的分组）、<code>.settings-nav a</code>（设置页左栏）、<code>.segmented</code>、<code>.menu-item</code>。选中态各自写：<code>.on</code>（accent-soft 底）或 <code>.on</code>（黑底白字）。</p>
   </div>
@@ -328,7 +328,7 @@
     <p class="sg-src">来源：<code>.tag</code> — <code>ui/detail.js</code> inspect（画面标签，实际是 button）· <code>.variant-chip</code> — <code>ui/detail.js</code> identityChips / 我的标签 · <code>.alt</code> — <code>ui/detail.js</code> identityChips（“也可能是”）· <code>.tag-on</code> — <code>ui/settings.js</code> · <code>.set-scope</code> — <code>ui/settings.js</code> cardHead · <code>.oc-badge</code> — <code>ui/shell.js</code>（角色标题旁） · <code>.rel-kind</code> — <code>ui/palette.js</code> openRelate · <code>.pair-label</code> — <code>ui/review.js</code> · <code>.cast-tags span</code> — <code>ui/catalog.js</code> · <code>.group-traits span</code> — <code>ui/review.js</code></p>
     <div class="sg-stage">
       <div class="sg-pair"><button class="tag">white hair</button><i>.tag</i></div>
-      <div class="sg-pair"><span class="variant-chip">夏日<button title="去掉子标签">×</button></span><i>.variant-chip（内含 button）</i></div>
+      <div class="sg-pair"><span class="variant-chip">夏日<button title="去掉造型">×</button></span><i>.variant-chip（内含 button）</i></div>
       <div class="sg-pair"><button class="variant-add">＋ 标签 <kbd>G</kbd></button><i>.variant-add</i></div>
       <div class="sg-pair"><button class="alt"><kbd>1</kbd>karen_(blue_archive)</button><i>.alt (+ kbd 圆形序号)</i></div>
       <div class="sg-pair"><button class="alt weak"><kbd>2</kbd>aijou_karen</button><i>.alt.weak</i></div>
@@ -514,7 +514,7 @@
       <section class="inspector-section cc-card"><a class="cc-name" href="#s-detail">Karen<small class="char-work">Blue Archive</small></a><div class="cc-orig">カレン</div><div class="cc-path">Blue Archive · 美术部</div>
         <div class="cc-stats"><div class="cc-line"><span>收藏 <b>312</b> 张 · 始于 2023.04</span><em>本月 +12</em></div><div class="cc-bars"><i style="height:30%"></i><i style="height:55%"></i><i style="height:40%"></i><i style="height:90%" class="now"></i></div>
           <div class="cc-same"><h5>同一角色<a href="#s-detail">全部 ›</a></h5><div><button><img data-ph="1" alt=""></button><button><img data-ph="2" alt=""></button><button><img data-ph="3" alt=""></button><button><img data-ph="4" alt=""></button></div></div></div></section>
-      <section class="inspector-section"><h3 class="section-title">角色</h3><div class="identities"><div class="identity"><span class="dot confirmed"></span><a class="identity-name" href="#s-detail">Karen</a><span class="identity-actions"><button class="icon small">⇄</button><button class="icon small">×</button></span><div class="variant-row"><span class="variant-chip">夏日<button>×</button></span><button class="variant-add">＋ 子标签</button></div></div><button class="add-identity">＋ 也是…</button></div>
+      <section class="inspector-section"><h3 class="section-title">角色</h3><div class="identities"><div class="identity"><span class="dot confirmed"></span><a class="identity-name" href="#s-detail">Karen</a><span class="identity-actions"><button class="icon small">⇄</button><button class="icon small">×</button></span><div class="variant-row"><span class="variant-chip">夏日<button>×</button></span><button class="variant-add">＋ 造型</button></div></div><button class="add-identity">＋ 也是…</button></div>
         <div class="alts"><h3>也可能是</h3><div class="alt-row"><button class="alt"><kbd>1</kbd>Rio</button><button class="alt weak"><kbd>2</kbd>Aijou</button></div></div></section>
       <section class="inspector-section"><h3 class="section-title">我的标签</h3><div class="user-tags"><span class="variant-chip"><a href="#s-detail"># 夏日</a><button>×</button></span><button class="variant-add">＋ 标签 <kbd>G</kbd></button></div></section>
       <section class="inspector-section"><dl class="facts"><div><dt>尺寸</dt><dd class="mono">2000 × 2500</dd></div><div><dt>加入</dt><dd class="mono">2026-11-12 10:21</dd></div><div><dt>文件</dt><dd>IMG_0001.jpg</dd></div></dl></section>

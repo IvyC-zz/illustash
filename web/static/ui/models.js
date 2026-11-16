@@ -7,6 +7,7 @@ import {SYNC_ACTIVE, INDEX_ACTIVE, startSync, pollSync, onJob} from '../core/job
 import {loadModels, modelsPost, modelsWaiting, modelsFinished, modelsArrived, onModels, saveAcceleration, fallbacks} from '../core/models.js';
 import {$, toast} from './dom.js';
 import {confirmAction} from './dialog.js';
+import {home} from '../core/human.js';
 
 const running = m => m?.job?.status === 'running';
 const left = m => Math.max(0, (m?.total || 0) - (m?.have || 0));
@@ -86,7 +87,7 @@ export function accelerationLine(m = state.models) {
     ? t('用 Core ML 加速标签与角色特征计算。首次需要准备编译缓存；加速不可用时自动用 CPU。')
     : t('用显卡计算，识别更快，角色判定和只用 CPU 时一致。');
   const fell = Object.values(fallbacks(m))[0];
-  return `<label class="switch-line"><span><b>${t('使用 GPU 加速识别')}</b><small>${hint} ${t('关掉就全部用 CPU。')} · ${t('下次识别时生效')}</small>${fell ? `<em>${esc(t('上次没能用上加速，已改用 CPU：{reason}', {reason: fell.reason}))}</em>` : ''}</span><input type="checkbox" class="switch" data-acceleration ${a.on ? 'checked' : ''}></label>`;
+  return `<label class="switch-line"><span><b>${t('使用 GPU 加速识别')}</b><small>${hint} ${t('关掉就全部用 CPU。')} · ${t('下次识别时生效')}</small>${fell ? `<em>${esc(t('上次没能用上加速，已改用 CPU：{reason}', {reason: tb(fell.reason)}))}</em>` : ''}</span><input type="checkbox" class="switch" data-acceleration ${a.on ? 'checked' : ''}></label>`;
 }
 
 // 下载或导入刚结束时提示的一句（#375），没什么要说时为空。模型刚到（`arrived`）时说开始识别；首次下载在同一个任务里
@@ -122,7 +123,7 @@ export function renderModelsCard() {
     <p class="settings-note">${mirrorNote(m)}</p>
     <div class="sync-now form-actions"><div class="spacer"></div>
       ${m.mirror !== m.mirror_default ? `<button class="quiet" data-models="mirror-reset">${t('恢复默认')}</button>` : ''}<button class="primary" data-models="mirror">${t('保存')}</button></div>` : ''}
-    <table class="settings-table models-files"><tr><td>${t('存放位置')}</td><td class="mono">${esc(m.location)}</td></tr>
+    <table class="settings-table models-files"><tr><td>${t('存放位置')}</td><td class="mono" title="${esc(m.location)}">${esc(home(m.location))}</td></tr>
       ${m.files.map(f => `<tr><td class="mono">${esc(f.path)}</td><td class="mono" title="SHA-256 ${esc(f.sha256)}">${fileSize(f.size)} · ${esc(f.sha256.slice(0, 12))}…</td></tr>`).join('')}</table>`;
   // 任务运行期间会轮询：只在有变化时重画，正在输入镜像时绝不重画。
   if (card.dataset.html === html || card.contains(document.activeElement) && document.activeElement.matches('input')) return;

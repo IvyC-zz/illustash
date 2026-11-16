@@ -77,7 +77,7 @@ export async function renderSimilar() {
       <div class="spacer"></div><button class="quiet" id="similarScan" ${busy || s.status === 'off' ? 'disabled' : ''} title="${t('给新加入的图算签名，比较还没比较过的候选')}">${t('重新检查')}</button></div>
     ${busy && s.total ? `<div class="progress"><span style="width:${Math.round((s.done || 0) / s.total * 100)}%"></span></div>` : ''}
     <div class="group-grid">${groups.map(g => `<a class="group-card" href="#/s/${g.gid}"><div class="group-covers">${g.covers.map(u => `<img src="/image?id=${encodeURIComponent(u)}&size=thumb" loading="lazy" alt="">`).join('')}</div>
-      <div class="group-meta"><b>${t('第 {id} 组', {id: g.gid})}</b><span>${t('{n} 张', {n: number(g.size)})}</span></div>
+      <div class="group-meta"><b>${t('相似组 {id}', {id: g.gid})}</b><span>${t('{n} 张', {n: number(g.size)})}</span></div>
       <div class="group-traits">${Object.entries(g.kinds).sort((a, b) => b[1] - a[1]).map(([k, n]) => `<span>${RELATION_NAMES[k] || k}${n > 1 ? ' ×' + n : ''}</span>`).join('')}</div></a>`).join('')
       || `<p class="empty">${busy ? t('还在检查，找到的组会陆续出现。') : t('没有找到相似的图。')}</p>`}</div>`;
   for (const b of $('groupsPage').querySelectorAll('[data-kind]')) b.onclick = () => go({page: 'similar', kind: b.dataset.kind});
@@ -99,7 +99,7 @@ function identityEvidence(x) {
   const h = x.hint, name = tag => tag === x.a.tag ? x.a.name : tag === x.b.tag ? x.b.name : tag.replaceAll('_', ' ');
   const parts = [];
   if (h?.kind === 'duplicate_of') parts.push(t('{source}：同一个 tag 的别名', {source: esc(h.source || t('外部资料'))}));
-  else if (h?.kind === 'form_of') parts.push(t('{source}：「{subject}」是「{object}」的一种形态', {source: esc(h.source || t('外部资料')), subject: esc(name(h.subject)), object: esc(name(h.object))}));
+  else if (h?.kind === 'form_of') parts.push(t('{source}：「{subject}」是「{object}」的一个造型', {source: esc(h.source || t('外部资料')), subject: esc(name(h.subject)), object: esc(name(h.object))}));
   if (x.distance !== null && x.distance !== undefined) parts.push(t('参考图外观距离 {d}', {d: x.distance.toFixed(3)}) + (x.distance <= 0.01 ? t('（几乎分不开）') : ''));
   return parts.join(' · ') || t('参考图外观很接近');
 }
@@ -113,9 +113,9 @@ function identityCard(x, i) {
     <div class="pair-body">${identitySide(x.a, 'A')}${identitySide(x.b, 'B')}</div>
     <p class="pair-evidence">${identityEvidence(x)}</p>
     <div class="pair-actions">
-      ${btn('same', t('同一角色'), t('其实是同一个人：合并显示，图和人工结论都不搬动，可撤销'))}
-      ${btn('b_of_a', t('B 是 A 的一种形态'), t('B 挂到 A 下面作为子标签（服装、异格、另一形态）'))}
-      ${btn('a_of_b', t('A 是 B 的一种形态'), t('A 挂到 B 下面作为子标签'))}
+      ${btn('same', t('记为同一角色（不搬图）'), t('把两个角色合在一起显示，图和人工结论留在原处'))}
+      ${btn('b_of_a', t('B 是 A 的一个造型'), t('B 挂到 A 下面作为造型（服装、异格、变身等）'))}
+      ${btn('a_of_b', t('A 是 B 的一个造型'), t('A 挂到 B 下面作为造型'))}
       ${btn('different', t('不同角色'), t('只是长得像、经常同框，或是 TA 的吉祥物、宠物：记下来，以后不再问'))}
       <span class="spacer"></span>${btn('skip', t('暂不判断'), t('先放一边，队列里不再出现（可撤销）'))}
     </div></article>`;
@@ -153,8 +153,8 @@ async function decideIdentity(i, act) {
         a_of_b: {a: x.a.id, b: x.b.id, kind: 'form_of'}, different: {a: x.a.id, b: x.b.id, kind: 'different_from'}}[act]};
   try {
     const r = act === 'skip' ? await post('/api/identity/skip', {a: x.a.id, b: x.b.id}) : await post('/api/identity/decision', body);
-    setLatest(r.undo); toast(act === 'skip' ? t('已暂不判断') : {same: t('已把 {a} 并入 {b}', {a: small.name, b: big.name}), b_of_a: t('{a} 已作为 {b} 的一种形态', {a: x.b.name, b: x.a.name}),
-      a_of_b: t('{a} 已作为 {b} 的一种形态', {a: x.a.name, b: x.b.name}), different: t('已记下 {a} 和 {b} 是不同角色', {a: x.a.name, b: x.b.name})}[act], true);
+    setLatest(r.undo); toast(act === 'skip' ? t('已暂不判断') : {same: t('已把 {a} 和 {b} 记为同一角色', {a: small.name, b: big.name}), b_of_a: t('{a} 已作为 {b} 的一个造型', {a: x.b.name, b: x.a.name}),
+      a_of_b: t('{a} 已作为 {b} 的一个造型', {a: x.a.name, b: x.b.name}), different: t('已记下 {a} 和 {b} 是不同角色', {a: x.a.name, b: x.b.name})}[act], true);
     card?.classList.add('leaving');
     await new Promise(done => setTimeout(done, 170));
     await renderIdentity('keep');

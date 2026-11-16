@@ -14,6 +14,7 @@ import {confirmAction} from './dialog.js';
 import {createLayer} from './overlay.js';
 import {openIndexAdd} from './catalog.js';
 import {modelsLine, modelsBar, modelsActions} from './models.js';
+import {home} from '../core/human.js';
 import {loadModels, onModels} from '../core/models.js';
 // 「开始」先显示有哪些内容会离开本机；授权只覆盖这一次运行。
 let provenanceArmed = false;
@@ -25,8 +26,7 @@ export function openTasks({armProvenance = false} = {}) {
 // 文件能打开、但不是 App 能读的图片的那些：它们在哪里，和图库页上一样。
 export function syncDamaged(d) {
   if (!d?.count) return '';
-  const short = p => p.replace(/^\/Users\/[^/]+/, '~');
-  const rows = d.paths.map(p => `<div class="setting-line lib-folder"><span class="lib-path" title="${esc(p)}"><bdi>${esc(short(p))}</bdi></span></div>`).join('');
+  const rows = d.paths.map(p => `<div class="setting-line lib-folder"><span class="lib-path" title="${esc(p)}"><bdi>${esc(home(p))}</bdi></span></div>`).join('');
   const more = d.count > d.paths.length ? `<p class="muted-note">${t('另有 {n} 张未列出。', {n: number(d.count - d.paths.length)})}</p>` : '';
   return fold('task-sync-damaged', t('{n} 张图片已损坏或格式不支持', {n: number(d.count)}),
     `<p class="muted-note">${t('这些文件读得到，但不是能打开的图片：已经加入图库，图上显示「无法打开」，不参与识别。修好或换成正常的图片后，下次同步会重新识别。')}</p>${rows}${more}`);
