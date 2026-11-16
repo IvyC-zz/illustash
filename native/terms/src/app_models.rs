@@ -1133,9 +1133,7 @@ pub(crate) fn extension_info(resources: &Path) -> Result<Value> {
     let entry = &spec.file;
     let ready = usable(&place.root, entry);
     let partial = partial_dir(&place.root);
-    let have = if ready {
-        entry.size
-    } else if usable(&partial, entry) {
+    let have = if ready || usable(&partial, entry) {
         entry.size
     } else {
         fs::metadata(part(&partial, entry)).map_or(0, |m| m.len().min(entry.size))
