@@ -237,7 +237,7 @@ class FrontendArchitectureTest(unittest.TestCase):
     def test_removing_a_guard_from_the_repository_is_caught(self):
         # 真实文件上的回归：把已有的防护拿掉，规则要报出来（覆盖具名函数、onkeydown 和 addEventListener 三种写法）。
         for relative, old, new in (
-                ('ui/overlay.js', "if (e.key !== 'Escape' || composing(e)) return;", "if (e.key !== 'Escape') return;"),
+                ('ui/overlay.js', "  if (composing(e)) return;  // 组字时的 Esc 是取消组字，不关浮层；方向键是选字\n", ""),
                 ('ui/palette.js', "q('#pfAlias').onkeydown = e => { if (composing(e)) return; ", "q('#pfAlias').onkeydown = e => { "),
                 ('ui/palette.js', "const p = palette; if (!p || composing(e)) return;", "const p = palette; if (!p) return;")):
             with self.subTest(relative=relative, old=old), Tree() as tree:
