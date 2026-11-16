@@ -53,7 +53,7 @@ export const detailAfterViewer = (s = state) => s.focused && s.viewerItem?.uuid 
 
 // 单图／选择快捷键在这一页做什么。key：'remove'（⌫、Delete）、'c'、'a'、't'、'g'、'x'、's'。
 // ctx：view 页面注册表里本页的条目（core/pages.js 的 viewOf），char 是否在角色页，maybe 是否在角色页的「可能也是 TA」，
-// variants 本页的角色有没有子标签，n 作用于几张选中的图（keySelection），item 当前图（没有选中时用，决定 ⌫ 有没有
+// variants 本页的角色有没有造型，n 作用于几张选中的图（keySelection），item 当前图（没有选中时用，决定 ⌫ 有没有
 // 可移出的角色）。
 // 返回 {bar: 动作}（交给选择栏的同名按钮）、{single: 动作}（作用于当前图），或 null：这一页没有对应的动作。
 // 有选中时只返回本页选择栏上画着的按钮（ui/grid.js 的 renderSelection，docs/WEB_UI_MAP.md 第 4.1 节），选择栏上
@@ -79,7 +79,7 @@ export function keyAction(key, {view, char = false, maybe = false, variants = fa
       if (!n) return {single: 'also'};
       if (char) return maybe ? null : {bar: 'also'};
       return assigns ? {bar: 'assign'} : null;
-    // 子标签按钮只在角色页、这个角色有子标签时画出来。
+    // 造型按钮只在角色页、这个角色有造型时画出来。
     case 't': return char && n && !maybe && variants ? {bar: 'variant'} : null;
     case 'g': return n ? {bar: 'tag'} : {single: 'tag'};
     case 'x': { const act = view.bar === 'excluded' ? 'include' : 'exclude'; return n ? {bar: act} : {single: act}; }
@@ -110,7 +110,7 @@ export const SHORTCUTS = [
   {keys: '⌫', codes: ['Backspace', 'Delete'], does: () => t('不是这个角色：有选中时作用于选中的图（角色页移出，图库、重复等页选「不是…」），没有选中时移除当前这张的角色')},
   {keys: 'C', codes: ['c'], does: () => t('换成别的角色：图上已有角色时换掉它（角色页换掉本页的角色），还没有角色时设为角色')},
   {keys: 'A', codes: ['a'], does: () => t('追加角色，原有的角色保留')},
-  {keys: 'T', codes: ['t'], does: () => t('子标签（角色页，选中图片时）')},
+  {keys: 'T', codes: ['t'], does: () => t('造型（角色页，选中图片时）')},
   {keys: 'S', codes: ['s'], does: () => t('跳过（「全部未识别」和各组；没有选中时跳过当前这张）；在「已跳过」页为恢复到未识别')},
   {keys: 'X', codes: ['x'], does: () => t('排除非插画内容（截图、照片等）；在「已排除」页为恢复')},
   {keys: 'G', codes: ['g'], does: () => t('添加或移除自定义标签（与自动标签分开保存）')},
