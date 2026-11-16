@@ -295,7 +295,7 @@ mod tests {
         let settings = macos_defaults(&root, Some(home.clone().into_os_string()), None).unwrap();
         assert_eq!(settings.len(), 7);
         assert_eq!(settings[0].1, root.join("resources").into_os_string());
-        assert_eq!(settings[1].1, root.join("resources/models").into_os_string());
+        assert_eq!(settings[1].1, root.join("resources").join("models").into_os_string());
         assert_eq!(settings[2].1, home.join("Library/Application Support/Illustash/Shared").into_os_string());
         assert!(settings.iter().all(|(key, _)| !key.contains("NETWORK") && !key.contains("PYTHON")));
         // 四个 worker 变量都指向同一个程序，kind 由宿主启动时传入。
