@@ -157,3 +157,11 @@ test('an older library is opened only after the person agrees to upgrade it (#19
   assert.deepEqual(sent, [{path: '/tmp/synthetic.pilib'}]);
   assert.equal(dialogs.length, 1, 'asked before upgrading; declined, so nothing more was sent');
 });
+
+test('the full backup section names both backup folders, the upgrade one included (#517)', () => {
+  const row = (path, name) => ui.backupFolder('合成', path, name);
+  assert.equal(row('/Users/合成/Pictures/Illustash/合成.pilib', 'library-backups'),
+    '<tr><td>合成</td><td class="mono" title="/Users/合成/Pictures/Illustash/合成.pilib/library-backups">~/Pictures/Illustash/合成.pilib/library-backups</td></tr>');
+  assert.match(row('D:\\图库\\合成.pilib', 'backups'), /title="D:\\图库\\合成\.pilib\\backups"/);
+  assert.match(row('/tmp/a&b.pilib', 'backups'), /\/tmp\/a&amp;b\.pilib\/backups/);
+});

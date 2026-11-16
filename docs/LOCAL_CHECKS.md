@@ -118,7 +118,7 @@
 
 词条第 9 版的新增状态及物理表／有效视图适配，由 Rust/Python 共用 [精确清单](../tests/baseline_additions.json) 与 v7 历史参考分开验收（#441）：表、meta 键和映射以该清单为唯一明细，每项登记引入版本和具名的严格语义测试。适配只用于实时应用库对历史参考的投影；冻结侧存在清单要分离的新增表、meta 键或物理表时直接失败。物理表与有效视图的完整列及带类型的行（含重数）须一致，才应用映射；历史结构属性表达只在该投影中重建。不使用通配或期望交集，旧表旧列、类型、行重数、响应和名称增量校验保持。Python `baseline_state()`、Rust `state()`/`exact()`、当前库前后比较、原样备份和失败回滚仍保留物理表、原始属性及全部新状态。
 
-自动人工备份会在开库后写入保护状态、摘要缓存和 WAL。HTTP 共享夹具先等待真实首份快照与摘要补算结束，再采集操作前的完整状态；需要比较切库目标前后状态的夹具先打开并完成目标的首备份。settings/startup/cache 的 `package.library_bytes`、`library.bytes` 及 libraries 的当前包 `info.library_bytes` 按当前主库加 WAL 的独立文件大小精确核验，其余响应字节和头继续对照冻结记录。仅 v5/v6 迁移及撤销等价用例用可释放的 `ILLUSTASH_TEST_HUMAN_BACKUP_GATE` 文件闸门保留原完整状态比较，随后释放并验收真实首备份；等待不持数据库或发布锁，切库及退出照常取消，产品不设置该变量（#441）。
+自动人工备份会在开库后写入保护状态、摘要缓存和 WAL。HTTP 共享夹具先等待真实首份快照与摘要补算结束（补齐摘要后马上再出的那一份也要写完，`refill` 为假，#516），再采集操作前的完整状态；需要比较切库目标前后状态的夹具先打开并完成目标的首备份。settings/startup/cache 的 `package.library_bytes`、`library.bytes` 及 libraries 的当前包 `info.library_bytes` 按当前主库加 WAL 的独立文件大小精确核验，其余响应字节和头继续对照冻结记录。仅 v5/v6 迁移及撤销等价用例用可释放的 `ILLUSTASH_TEST_HUMAN_BACKUP_GATE` 文件闸门保留原完整状态比较，随后释放并验收真实首备份；等待不持数据库或发布锁，切库及退出照常取消，产品不设置该变量（#441）。
 
 新基准和 Python 固定期望都录在导入按 tag 后缀建作品（#296）之前。重放时设上只供测试的环境变量 `ILLUSTASH_TEST_NO_IMPORT_WORKS`（`baseline.rs` 在启动核心时设，`tests/fixed_expectations.py` 加载时设），导入照旧规则走，录下的期望不改（用户 2026-11-12 定）；产品从不设置它。所以对照测试不覆盖导入建作品，这一段由 `crates/core` 的 `character_import` 单元测试（「不是作品」清单）和 `native/terms` 的 `app_create`（新图库从索引导入角色时建作品）、`app_recognition`（WD 结果按 tag 后缀归作品）测试负责。
 
@@ -183,7 +183,7 @@ PR 应明确区分“当前 head 上完整执行退出 0”和“当前候选仅
 
 1. 从 `origin/main` 开候选分支 `integrate/<日期>-<序号>`，按顺序把这批 PR 的 head 逐个 `git merge --no-ff` 进来；合不上的退回原会话，写明冲突文件，这一批不带它。同一批里有前后叠着的 PR，按叠放顺序合。
    例外是迁移清单的指纹冲突（2026-10-18 用户批准）。`tests/migration_inventory.json` 每个 `sources` 指纹单独一行、指纹之间空一行（规范格式由 `python -m tools.migration_inventory fmt` 写出，`check` 和单元测试拦住不规范的格式），两个 PR 改不同文件的指纹时 git 会自动合并，只有两边改了同一个文件的指纹时才冲突。如果冲突只在这个文件，并且正在合入的 PR 相对共同基点只改了 `sources`，集成会话自己解决：取候选里的版本，再跑 `python -m tools.migration_inventory sync-sources`，它只把 `sources` 改成当前源码的指纹并按规范格式写回，不动边界和归属；然后确认 `python -m tools.migration_inventory report` 的 `warnings` 和 `errors` 都为空，提交合并。正在合入的 PR 如果还改了这个文件里的边界、归属或别的键，照旧退回原会话。GitHub 是逐个 PR 合并的，前一个 PR 合入后，这个 PR 在 GitHub 上仍会冲突，所以重算的结果要放到它的 head 上：候选里合入它的那个合并提交是它原 head 的后代，把这个提交快进推到它的分支，不用强推，测过的提交就是 PR head。推的是别的会话的分支，每次推之前先请用户同意，推完通知原会话合入前别再推送，并在 PR 里留评论说明。
-2. 候选里只要有一个 PR 需要全量（普通代码或数据层），就在候选 head 上经 `collab_run.py` 跑一次 `tools/check_all.sh`；含数据层改动的，升级测试照常包含。整批都是界面级或只改文档时，按各自门槛检查（`node --test`、相对链接），不跑全量。
+2. 候选里只要有一个 PR 需要全量（普通代码或数据层），就在候选 head 上经 `collab_run.py` 跑一次 `tools/check_all.sh`；含数据层改动的，升级测试照常包含。整批都是界面级或只改文档时，按各自门槛检查（界面级跑 `node --test` 和 `tests.test_frontend_architecture`、`tests.test_styleguide_sync` 两条 Python 测试，只改文档的查相对链接），不跑全量。
 3. 全量失败时，先排除负载等环境原因（#219），再按 PR 二分定位，把失败的 PR 退回原会话，其余重新组批。
 4. 通过后请用户批准合并。批准后按候选里的顺序，用 `gh pr merge --merge --match-head-commit <PR head>` 逐个合入；全部合完后核对 `origin/main^{tree}` 与候选 head 的 tree 相同，不同就停下报告。集成会话之外没有人合并，所以合并期间 main 不会被别人改动。
 5. 在每个合入的 PR 里留一条评论：候选 head、同批 PR、全量结果（机器、系统、架构、工具链、通过与跳过）。删除已合并的远端分支和候选分支。

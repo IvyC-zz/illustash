@@ -1,4 +1,5 @@
 //! 会话后台保护人工修订；合并等待从首次变脏算起，文件成功发布后才清理旧快照。
+//! 快照只用已有摘要，随后补算。每次开库第一次补算让最近一份快照缺的摘要全部补齐时，立刻再出一份，不等一小时（#516）。
 use super::*;
 use crate::{
     app_library::Library,
@@ -35,6 +36,12 @@ struct State {
     running: bool,
     #[serde(skip)]
     unreadable_snapshots: usize,
+    /// 最近一份快照之后那一轮补算仍缺摘要的图数，即现在确实读不到的图；补算还没跑完时为空。
+    #[serde(skip)]
+    hash_unreadable: Option<u64>,
+    /// 补算让最近一份快照缺的摘要全部补齐，下一份快照不受合并等待和一小时间隔限制；每次开库最多一次。
+    #[serde(skip)]
+    refill: bool,
 }
 impl State {
     fn observe(&mut self, revision: i64, now: i64) {
@@ -49,7 +56,7 @@ impl State {
         if self.retry_at.is_some_and(|at| now < at) {
             return false;
         }
-        if self.snapshots.is_empty() {
+        if self.snapshots.is_empty() || self.refill {
             return true;
         }
         self.pending_revision.is_some()
@@ -57,6 +64,9 @@ impl State {
             && self.last_success.is_none_or(|at| now >= at + INTERVAL)
     }
     fn next(&self) -> Option<i64> {
+        if self.refill {
+            return self.retry_at.or(self.pending_since);
+        }
         if self.pending_revision.is_none() && !self.snapshots.is_empty() && self.retry_at.is_none() {
             return None;
         }
@@ -95,6 +105,8 @@ impl Backups {
         value["next_attempt"] = serde_json::json!(state.next());
         value["running"] = serde_json::json!(state.running);
         value["unreadable_snapshots"] = serde_json::json!(state.unreadable_snapshots);
+        value["hash_unreadable"] = serde_json::json!(state.hash_unreadable);
+        value["refill"] = serde_json::json!(state.refill);
         if self.task.as_ref().is_some_and(|t| matches!(t.outcome(), crate::app_tasks::TaskOutcome::Failed(_))) {
             value["last_error"] = serde_json::json!("人工备份任务异常结束");
         }
@@ -152,6 +164,8 @@ fn run(db: &Path, library: &str, context: &TaskContext, shared: &Arc<Mutex<State
     let mut state = State::default();
     let mut initialized = false;
     let mut fill = true;
+    // 开库后的第一轮补算已经跑过：之后补齐的摘要照旧进下一小时的快照。
+    let mut refilled = false;
     loop {
         context.check()?;
         let now = chrono::Utc::now().timestamp();
@@ -200,6 +214,8 @@ fn run(db: &Path, library: &str, context: &TaskContext, shared: &Arc<Mutex<State
                         state.snapshots = catalog.items;
                     }
                     state.hash_missing = item.hash_coverage.missing;
+                    state.hash_unreadable = None;
+                    state.refill = false;
                     state.protected_revision = Some(captured.revision);
                     state.observe(revision::read(&crate::app_library::read_connection(db)?)?, now);
                     state.last_error = None;
@@ -209,10 +225,16 @@ fn run(db: &Path, library: &str, context: &TaskContext, shared: &Arc<Mutex<State
                     fill = true;
                 }
                 if fill {
-                    // 首份只用已有摘要，随后补算；补齐触发下一修订，仍遵守两份自动文件至少间隔一小时。
+                    // 快照只用已有摘要，随后补算；补齐触发下一修订。两份自动文件至少间隔一小时，例外是每次开库
+                    // 第一次这一轮把最近一份缺的摘要全部补齐：从 v8 升级的图库第一份快照全缺摘要（#516）。只放开
+                    // 一次，平时新标的图照旧进下一小时的快照，不让每份快照后面都跟一份。
                     state.running = true;
                     *shared.lock().expect("人工备份状态锁中毒") = state.clone();
-                    let _ = capture_guarded(db, library, Mode::Fill, &|| context.check(), Some(context))?;
+                    let filled = capture_guarded(db, library, Mode::Fill, &|| context.check(), Some(context))?;
+                    let unreadable = filled.snapshot.coverage().missing;
+                    state.hash_unreadable = Some(unreadable);
+                    state.refill = !refilled && state.hash_missing > 0 && unreadable == 0;
+                    refilled = true;
                     state.observe(revision::read(&crate::app_library::read_connection(db)?)?, now);
                     state.running = false;
                     fill = false;
