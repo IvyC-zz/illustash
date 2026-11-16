@@ -9,6 +9,7 @@ use crate::{
     },
     Error, Result,
 };
+use illustash_core::{error::invalid, schema::FAVORITE_KEY};
 use rusqlite::{types::Value, Connection, OptionalExtension};
 use std::collections::{HashMap, HashSet};
 /// 重复图 `d` 所在的组里，各份副本所属的身份不完全相同。
@@ -171,10 +172,66 @@ fn digit_extra(c: char) -> bool {
     R.iter().any(|&(a, b)| (a..=b).contains(&(c as u32)))
 }
 /// /api/assets（以及作用于浏览选区的命令）接受的筛选参数。
-const FILTERS: [&str; 15] = [
+const FILTERS: [&str; 17] = [
     "entity", "variant", "status", "q", "tag", "utag", "pool", "order", "nsfw", "dup", "reason", "cluster", "work",
-    "day", "artist",
+    "day", "artist", "has", "not",
 ];
+const FAVORITE_TERM: &str = "(SELECT id FROM terms WHERE key=? AND kind='mark')";
+
+fn condition_filter(f: &HashMap<String, String>, filter: &mut Filter) -> Result<()> {
+    let mut count = 0;
+    for (key, op) in [("has", "IN"), ("not", "NOT IN")] {
+        let Some(raw) = f.get(key) else { continue };
+        let conditions: Vec<String> = serde_json::from_str(raw).map_err(|_| Error::invalid("筛选参数不正确"))?;
+        count += conditions.len();
+        if count > 20 || conditions.iter().any(|s| *s != "fav") {
+            return invalid("筛选参数不正确");
+        }
+        if !conditions.is_empty() {
+            let sql = format!(
+                "a.uuid {op} (
+                   WITH favorites AS MATERIALIZED (
+                     SELECT x.key FROM term_projection p JOIN term_assets x ON x.id=p.asset_id
+                     WHERE p.term_id={FAVORITE_TERM}
+                       AND p.state='confirmed' AND x.namespace='library')
+                   SELECT key FROM favorites
+                   UNION ALL
+                   SELECT y.uuid FROM favorites f JOIN duplicates d ON d.uuid=f.key JOIN duplicates y ON y.grp=d.grp)"
+            );
+            filter.add(sql, [FAVORITE_KEY.to_owned()]);
+        }
+    }
+    Ok(())
+}
+
+fn marks_favorite(q: &HashMap<String, String>) -> bool {
+    value(q, "marks").split(',').any(|mark| mark == "fav")
+}
+
+/// 展开当前页的副本再查裁决。标记显示只需查这些图，不必读全库收藏。
+fn decorate_favorite(c: &Connection, items: &mut [Json]) -> Result<()> {
+    if items.is_empty() {
+        return Ok(());
+    }
+    let page = Json::Array(items.iter().map(|item| get(item, "uuid")).collect()).dump();
+    let sql = format!(
+        "WITH page AS MATERIALIZED (SELECT value AS uuid FROM json_each(?)),
+         copies(uuid, member) AS (
+           SELECT uuid,uuid FROM page
+           UNION ALL
+           SELECT p.uuid,y.uuid FROM page p JOIN duplicates d ON d.uuid=p.uuid
+           JOIN duplicates y ON y.grp=d.grp AND y.uuid<>p.uuid)
+         SELECT DISTINCT y.uuid FROM copies y
+         CROSS JOIN term_assets x ON x.namespace='library' AND x.key=y.member
+         CROSS JOIN term_projection p ON p.asset_id=x.id AND p.term_id={FAVORITE_TERM}
+         WHERE p.state='confirmed'"
+    );
+    let favorites: HashSet<_> = strings(c, &sql, &[&page, FAVORITE_KEY])?.into_iter().collect();
+    for item in items {
+        item.set("fav", favorites.contains(get(item, "uuid").text()).into());
+    }
+    Ok(())
+}
 /// 正在构建的浏览选区：针对图片 `a` 的 SQL 子句及其参数，其中可能有一个是聚类或相似组的 id，按整数绑定。
 struct Filter {
     clauses: Vec<String>,
@@ -252,6 +309,7 @@ pub(crate) fn selection(
     if !v("utag").is_empty() {
         filter.add("a.uuid IN (SELECT uuid FROM asset_tags WHERE tag=?)", [v("utag").into()]);
     }
+    condition_filter(f, &mut filter)?;
     let order = f.get("order").map(String::as_str).unwrap_or("newest");
     let ordering = ordering(order, pool, dup, status, &entity)?;
     let args = bound(filter.args, filter.numeric_index, v("cluster"))?;
@@ -1126,6 +1184,9 @@ fn home(c: &Connection, q: &HashMap<String, String>) -> Result<Json> {
         ]));
     }
     decorate(c, &mut all)?;
+    if marks_favorite(q) {
+        decorate_favorite(c, &mut all)?;
+    }
     let mut at = 0;
     for (g, n) in result.iter_mut().zip(lengths) {
         let items = all[at..at + n].to_vec();
@@ -1198,7 +1259,13 @@ pub fn read(c: &Connection, context: &LibraryContext, path: &str, q: &HashMap<St
             Json::object([("kinds", kinds)])
         }
         "/api/review-pools" => pools(c, value(q, "nsfw"))?,
-        "/api/detail" => detail(c, context, value(q, "id"))?,
+        "/api/detail" => {
+            let mut item = detail(c, context, value(q, "id"))?;
+            if marks_favorite(q) {
+                decorate_favorite(c, std::slice::from_mut(&mut item))?;
+            }
+            item
+        }
         "/api/home" => home(c, q)?,
         "/api/assets" | "/api/assets/count" | "/api/ids" => assets(c, context, path, q)?,
         _ => return Err(Error::Invalid("未迁移浏览接口".into())),
@@ -1262,6 +1329,9 @@ fn assets(c: &Connection, context: &LibraryContext, path: &str, q: &HashMap<Stri
     args.extend([Value::Integer(limit), Value::Integer(offset)]);
     let mut items = typed_rows(c, &sql, &args)?;
     decorate(c, &mut items)?;
+    if marks_favorite(q) {
+        decorate_favorite(c, &mut items)?;
+    }
     Ok(Json::object([("items", Json::Array(items)), ("total", total), ("offset", offset.into())]))
 }
 

@@ -135,6 +135,7 @@
 - 每张图片返回 `memberships`，每个父角色包含 `status,origin,evidence:{sources,max_score},variants`。状态区分 `confirmed` 与 `machine`；`confirmed` 数组为前端兼容字段。
 - `GET /api/detail?id=` 另返回 `ownership`，包含有效归属与 `rejected` 父角色记录，每项带 origin 和证据。原始 assertions/candidates 继续返回，保留历史人工结论和逐来源证据。
 - `GET /api/ids` 使用相同筛选和排序，直接返回 UUID 数组；支持 offset/limit，limit 最大 5000，供跨区段选择使用。
+- 收藏（#447）：`has=["fav"]` 只看收藏，`not=["fav"]` 排除收藏。实际请求对 JSON 数组做 URL 编码，条件与其他筛选取交集，`has` 和 `not` 合计至多 20 条。列表、计数、ID 和按筛选选图的写入都用这一口径。图片本身或重复组内任一份有有效收藏，即算收藏。`GET /api/assets`、`GET /api/home`、`GET /api/detail` 带 `marks=fav` 时在每个图片对象末尾附布尔字段 `fav`，详情在顶层附该字段。省略 `marks` 时沿用原回复。
 - `/api/entities` 仍用于查找或创建实体；`/api/review-pools` 仅返回「未识别」。`/api/tasks` 返回 404；pending/conflicts 筛选返回 400。
 
 ### 写入与撤销
@@ -154,6 +155,8 @@ change/reassign 的选择方式二选一：
 服务端获取 `BEGIN IMMEDIATE` 后解析筛选、排除、校验并写入，选集与写入不会分离到两个事务。实际选集超过 500 张必须明确 `confirm:true`；一次只有一个 action，整批撤销。空选集或非法 ID 返回 400，不留下部分写入。筛选对象不接受未知字段，防止拼写错误意外扩大操作范围。
 
 `POST /api/sweep {"entity":"父角色 ID"}` 检查该角色全部机器归属，不受当前前端分页/筛选影响。`POST /api/undo {"id":123}` 撤销最近未撤销 action；跨重启保留。写接口继续要求同源与 CSRF token。
+
+`POST /api/favorite` 沿用 `/api/tag` 的 `ids` 或 `filter` 选图、`exclude` 与 `confirm` 规则。默认收藏，`add:false` 取消。对选中的重复组写入全部副本，提示张数按组计。回复 `{"undo":…}`，在从未建立收藏词条的库里直接取消会返回 `{"undo":null}`。人工裁决与快照规则见 [词条数据模型](TERMS_SCHEMA.md#人工标记447)。
 
 ## 阶段 1.5–3（2026-09-23，Claude 直接实现）
 

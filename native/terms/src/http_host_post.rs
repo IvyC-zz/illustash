@@ -385,6 +385,7 @@ fn route(
 ) -> Option<Result<Json>> {
     Some(match url {
         "/api/tag"
+        | "/api/favorite"
         | "/api/undo"
         | "/api/artist/verdict"
         | "/api/curate"

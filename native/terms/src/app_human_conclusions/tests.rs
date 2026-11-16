@@ -140,8 +140,8 @@ impl Fixture {
         assert!(!data.contains("source-a.png"));
         path
     }
-    fn undo(&self, id: i64) -> Result<Json> {
-        let context = LibraryContext {
+    fn context(&self) -> LibraryContext {
+        LibraryContext {
             db: self.db.clone(),
             generation: "synthetic".into(),
             library: Some(self.root.clone()),
@@ -149,9 +149,11 @@ impl Fixture {
             tags: self.root.join("unused.csv"),
             token: Some("synthetic".into()),
             read_only: None,
-        };
+        }
+    }
+    fn undo(&self, id: i64) -> Result<Json> {
         crate::app_commands::request(
-            &context,
+            &self.context(),
             "/api/undo",
             &crate::http_json::parse_request(&json!({"id":id}).to_string()).unwrap(),
         )
@@ -164,6 +166,55 @@ impl Drop for Fixture {
     fn drop(&mut self) {
         let _ = fs::remove_dir_all(&self.root);
     }
+}
+
+#[test]
+fn favorite_snapshot_restores_fixed_key_and_undo_allows_reusing_it() {
+    use illustash_core::schema::FAVORITE_KEY;
+    let set = |f: &Fixture, ids: &[&str], add: bool| {
+        crate::app_commands::request(
+            &f.context(),
+            "/api/favorite",
+            &crate::http_json::parse_request(&json!({"ids":ids,"add":add}).to_string()).unwrap(),
+        )
+        .unwrap()
+    };
+    let confirmed = |f: &Fixture| {
+        f.count("SELECT count(*) FROM term_projection p JOIN terms t ON t.id=p.term_id WHERE t.kind='mark' AND p.state='confirmed'")
+    };
+    let source = Fixture::new("favorite-source");
+    source.asset("a", "source-a.png", 1);
+    source.asset("b", "source-b.png", 2);
+    set(&source, &["a", "b"], true);
+    set(&source, &["b"], false);
+    let path = source.root.join("favorite.illustash-human.jsonl");
+    let snapshot = capture(&source.db, &source.id, &|| Ok(())).unwrap();
+    assert_eq!(snapshot.coverage().verified, 2);
+    snapshot.write(&mut File::create(&path).unwrap()).unwrap();
+
+    let target = Fixture::new("favorite-target");
+    target.asset("moved-a", "target-a.png", 1);
+    target.asset("moved-b", "target-b.png", 2);
+    let restore = || import_file(&target.db, &target.id, &path, &|| Ok(())).unwrap();
+    let result = restore();
+    let action = result.action_id.unwrap();
+    let c = crate::open(&target.db).unwrap();
+    let (term, kind) = crate::store::term_by_key(&c, FAVORITE_KEY).unwrap().unwrap();
+    assert_eq!(kind, crate::Kind::Mark);
+    let a = crate::store::library_asset(&c, "moved-a").unwrap().unwrap();
+    let b = crate::store::library_asset(&c, "moved-b").unwrap().unwrap();
+    assert_eq!(crate::store::state(&c, a, term).unwrap().as_deref(), Some("confirmed"));
+    assert!(crate::store::state(&c, b, term).unwrap().is_none());
+    assert_eq!(target.count("SELECT count(*) FROM term_verdicts WHERE verdict='clear'"), 1);
+    assert_eq!(restore().action_id, None);
+    target.undo(action).unwrap();
+    assert_eq!(confirmed(&target), 0);
+    let again = restore().action_id.unwrap();
+    assert_eq!(confirmed(&target), 1);
+    target.undo(again).unwrap();
+    set(&target, &["moved-b"], true);
+    assert_eq!(confirmed(&target), 1);
+    assert_eq!(target.count("SELECT count(*) FROM term_records WHERE kind='mark'"), 1);
 }
 
 #[test]
