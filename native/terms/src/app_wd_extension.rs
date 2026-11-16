@@ -574,6 +574,40 @@ mod tests {
     }
 
     #[test]
+    fn shared_projection_keeps_existing_extension_until_it_is_withdrawn() {
+        use illustash_core::ccip_longtail;
+        let f = Fixture::new();
+        let asset = "overlap".to_owned();
+        f.write(|tx| {
+            crate::character_commands::command(
+                tx,
+                &json!({"op":"refresh","assets":[[asset,"sample.png","sample.png",8,8,"2026-11-16","folder"]],
+                    "indexed":"2026-11-16","index":{},"labels":[],"decisions":[],"duplicates":[]}),
+            )?;
+            let a = [ccip_longtail::Hit { uuid: asset.clone(), tag: "longtail_role".into(), score: 0.85 }];
+            let b = [Hit { uuid: asset.clone(), tag: "extension_role".into(), probability: 0.99 }];
+            let scope = std::slice::from_ref(&asset);
+            let sources = || snapshot(tx, "SELECT sources FROM memberships WHERE uuid='overlap'");
+            let candidates = || snapshot(tx, "SELECT source FROM candidates WHERE uuid='overlap' ORDER BY source");
+
+            assert_eq!(ccip_longtail::apply(tx, "synthetic-a", &a)?, 1);
+            assert_eq!(wd_extension::apply_scoped(tx, "synthetic-b", scope, &b)?, 1);
+            assert_eq!(sources(), vec![json!(["CCIP_LONGTAIL"])]);
+            assert_eq!(candidates(), vec![json!(["CCIP_LONGTAIL"]), json!(["WD_EXT"])]);
+
+            assert_eq!(ccip_longtail::withdraw(tx)?, 1);
+            assert_eq!(sources(), vec![json!(["WD_EXT"])]);
+            assert_eq!(ccip_longtail::apply(tx, "synthetic-a", &a)?, 1);
+            assert_eq!(sources(), vec![json!(["WD_EXT"])]);
+            assert_eq!(wd_extension::withdraw(tx)?, 1);
+            assert_eq!(sources(), vec![json!(["CCIP_LONGTAIL"])]);
+            assert_eq!(candidates(), vec![json!(["CCIP_LONGTAIL"])]);
+            Ok(())
+        })
+        .unwrap();
+    }
+
+    #[test]
     fn evidence_replaces_and_restores_without_rewriting_old_sources() {
         round_trip(false);
         round_trip(true);

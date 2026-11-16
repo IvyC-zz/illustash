@@ -338,6 +338,7 @@ impl Fixture {
             proxy: None,
             on_demand: true,
             in_use: false,
+            raw_archive: false,
         }
     }
     fn hf(&self, path: &str) -> String {
@@ -528,6 +529,7 @@ fn imported_files_and_zip_entries_are_matched_by_hash_whatever_their_names() {
         proxy: None,
         on_demand: true,
         in_use: false,
+        raw_archive: false,
     };
     let chosen = fixture.dir.join("downloads");
     fs::create_dir_all(&chosen).unwrap();
@@ -584,6 +586,53 @@ fn imported_files_and_zip_entries_are_matched_by_hash_whatever_their_names() {
     ] {
         assert!(post(models, &place, bad).is_err());
     }
+}
+
+#[test]
+fn reference_package_uses_the_whole_zip_for_download_and_import_verification() {
+    let fixture = Fixture::new();
+    let mut zip = zip::ZipWriter::new(std::io::Cursor::new(Vec::new()));
+    zip.start_file("synthetic.txt", zip::write::SimpleFileOptions::default()).unwrap();
+    zip.write_all(b"reference pack fixture").unwrap();
+    let good = zip.finish().unwrap().into_inner();
+    let mut bad = good.clone();
+    bad[0] ^= 1;
+    let server = serve(vec![("/good.zip", good.clone(), Mode::Normal), ("/bad.zip", bad.clone(), Mode::Normal)]);
+    let make_place = |root: &str, remote: &str| {
+        let mut place = fixture.place(&server);
+        let mut manifest = (*place.manifest).clone();
+        manifest.files = vec![Entry {
+            path: "fixture.zip".into(),
+            size: good.len() as u64,
+            sha256: sha(&good),
+            source: Source::Project { url: format!("{}/{remote}", server.base) },
+            optional: false,
+        }];
+        place.manifest = Box::leak(Box::new(manifest));
+        place.root = fixture.dir.join(root);
+        place.raw_archive = true;
+        place
+    };
+    let invalid = make_place("invalid", "bad.zip");
+    let valid = make_place("valid", "good.zip");
+    let job = models();
+    post(job, &invalid, json!({"action":"download"})).unwrap();
+    assert_eq!(finished(job)["status"], "failed");
+    assert!(!invalid.root.join("fixture.zip").exists());
+    post(job, &valid, json!({"action":"download"})).unwrap();
+    assert_eq!(finished(job)["status"], "done");
+    assert_eq!(fs::read(valid.root.join("fixture.zip")).unwrap(), good);
+
+    let renamed = fixture.dir.join("renamed.zip");
+    fs::write(&renamed, &good).unwrap();
+    post(job, &invalid, json!({"action":"import","paths":[renamed]})).unwrap();
+    assert_eq!(finished(job)["results"][0]["result"], "accepted");
+    post(job, &invalid, json!({"action":"import","paths":[renamed]})).unwrap();
+    assert_eq!(finished(job)["results"][0]["result"], "already");
+    fs::write(&renamed, bad).unwrap();
+    post(job, &invalid, json!({"action":"import","paths":[renamed]})).unwrap();
+    assert_eq!(finished(job)["results"][0]["result"], "mismatch");
+    assert_eq!(fs::read(invalid.root.join("fixture.zip")).unwrap(), good);
 }
 
 #[test]

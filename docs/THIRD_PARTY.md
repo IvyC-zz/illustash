@@ -78,3 +78,5 @@ WD 角色扩展 v1（#534）从 Illustash 0.3 起支持，通过项目的 GitHub
 | Character Index | [deepghs/character_index](https://huggingface.co/datasets/deepghs/character_index) | 已有共享角色索引的来源数据；不随安装包分发，应用也不下载。新用户补充角色参考特征走「检查新角色」（Danbooru 公开图片，每次运行前确认） | MIT |
 
 应用「关于」页另列出致谢的上游项目与数据源（Danbooru、Bangumi 等）；联网获取的数据按各站点条款使用，见 [找回画师](PROVENANCE.md) 与 [名字](TERMS_NAMES.md#9-显示名来源与后台更新)。
+
+长尾参考包使用上述 CCIP 特征模型，从公开 Danbooru 缩图生成参考和锚点。原图版权归原作者；包携带特征、阈值和来源清单。冻结的 Character Index 基础索引用于筛选和评估，版权和 MIT 归属按上游保留。包版本、样本范围和复跑口径见 [#557](https://github.com/shio-vinyl/illustash/issues/557#issuecomment-6915312907)。

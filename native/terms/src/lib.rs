@@ -32,6 +32,7 @@ pub mod app_models;
 mod app_onboarding;
 pub mod app_service;
 use illustash_platform::app_paths;
+mod app_ccip_longtail;
 mod app_photos;
 mod app_platform;
 mod app_preferences;

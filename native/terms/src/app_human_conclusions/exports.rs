@@ -21,7 +21,7 @@ pub(crate) struct Exports {
 }
 impl Exports {
     pub(crate) fn running(&self) -> bool {
-        self.tasks.running()
+        self.tasks.busy()
     }
 
     pub(crate) fn state(&self) -> Json {

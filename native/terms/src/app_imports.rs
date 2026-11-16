@@ -7,6 +7,8 @@ use crate::{
     Error, Result,
 };
 use std::{
+    collections::HashMap,
+    path::PathBuf,
     sync::{
         atomic::{AtomicBool, Ordering},
         Arc, Mutex,
@@ -33,14 +35,22 @@ impl Observer for Silent {}
 pub(crate) enum Kind {
     Archive,
     Recognition,
+    CcipEnable,
+    CcipWithdraw,
     HumanConclusions,
     HumanExport,
 }
 impl Kind {
+    fn ccip(self) -> bool {
+        matches!(self, Self::CcipEnable | Self::CcipWithdraw)
+    }
+
     fn name(self) -> &'static str {
         match self {
             Kind::Archive => "archive",
             Kind::Recognition => "recognition",
+            Kind::CcipEnable => "enable",
+            Kind::CcipWithdraw => "withdraw",
             Kind::HumanConclusions => "human_conclusions",
             Kind::HumanExport => "human_export",
         }
@@ -145,14 +155,30 @@ impl Current {
 #[derive(Default)]
 pub(crate) struct Imports {
     current: Mutex<Option<Current>>,
+    ccip_completed: Mutex<HashMap<(PathBuf, String), Json>>,
     closed: AtomicBool,
 }
 impl Imports {
     pub(crate) fn state(&self) -> Json {
         lock_ignoring_poison(&self.current)
             .as_ref()
+            .filter(|c| !c.kind.ccip())
             .map(Current::snapshot)
             .unwrap_or_else(|| Json::object([("status", "idle".into())]))
+    }
+    pub(crate) fn ccip_state(&self, library: &crate::app_library::Library) -> Option<Json> {
+        let current = lock_ignoring_poison(&self.current);
+        if let Some(c) = current.as_ref().filter(|c| {
+            let context = c.task.context();
+            let identity = context.identity();
+            c.kind.ccip() && identity.package == library.instance_path() && identity.library_id == library.id()
+        }) {
+            return Some(c.snapshot());
+        }
+        lock_ignoring_poison(&self.ccip_completed).get(&(library.instance_path().into(), library.id().into())).cloned()
+    }
+    pub(crate) fn busy(&self) -> bool {
+        lock_ignoring_poison(&self.current).as_ref().is_some_and(|c| c.task.running())
     }
     /// 在后台启动 `work`，回答它的初始状态。`file` 是给页面看的输入名称。
     pub(crate) fn start(
@@ -167,10 +193,16 @@ impl Imports {
             return Err(Error::Invalid("服务正在退出".into()));
         }
         if current.as_ref().is_some_and(|c| c.task.running()) {
-            if matches!(kind, Kind::HumanConclusions | Kind::HumanExport) {
+            if matches!(kind, Kind::HumanConclusions | Kind::HumanExport) || kind.ccip() {
                 return Err(Error::Conflict("已有任务正在进行，请等它结束或取消后再试".into()));
             }
             return Err(Error::Invalid("已有导入正在进行，请等它结束或取消后再试".into()));
+        }
+        if let Some(previous) = current.as_ref().filter(|c| c.kind.ccip()) {
+            let context = previous.task.context();
+            let identity = context.identity();
+            lock_ignoring_poison(&self.ccip_completed)
+                .insert((identity.package.clone(), identity.library_id.clone()), previous.snapshot());
         }
         let generation = identity.generation;
         let state = Arc::new(Mutex::new(State::from(Json::object([
@@ -190,7 +222,7 @@ impl Imports {
             let result = work(&progress);
             let stopped = context.cancellation().load(Ordering::SeqCst) || crate::platform_process::stopping();
             let mut state = lock_ignoring_poison(&shared);
-            if matches!(kind, Kind::HumanConclusions | Kind::HumanExport) {
+            if matches!(kind, Kind::HumanConclusions | Kind::HumanExport) || kind.ccip() {
                 state.set("committed", progress.published.load(Ordering::SeqCst).into());
             }
             match result {
@@ -202,7 +234,11 @@ impl Imports {
                         use crate::diagnostics::{self, Operation, Publication};
                         let reason = Error::Invalid(value.get("error").map(Json::text).unwrap_or("").to_owned());
                         let d = diagnostics::failure(
-                            if kind == Kind::Recognition { Operation::Recognition } else { Operation::Archive },
+                            if kind == Kind::Recognition || kind.ccip() {
+                                Operation::Recognition
+                            } else {
+                                Operation::Archive
+                            },
                             diagnostics::stage(state.get("stage").map(Json::text).unwrap_or("")),
                             &reason,
                             Publication::Committed,
@@ -223,7 +259,11 @@ impl Imports {
                 Err(error) => {
                     use crate::diagnostics::{self, Operation, Publication};
                     let d = diagnostics::failure(
-                        if kind == Kind::Recognition { Operation::Recognition } else { Operation::Archive },
+                        if kind == Kind::Recognition || kind.ccip() {
+                            Operation::Recognition
+                        } else {
+                            Operation::Archive
+                        },
                         diagnostics::stage(state.get("stage").map(Json::text).unwrap_or("")),
                         &error,
                         if progress.published.load(Ordering::SeqCst) {
@@ -244,21 +284,48 @@ impl Imports {
         *current = Some(Current { task, state, reason, kind, generation });
         Ok(answer)
     }
-    pub(crate) fn running(&self) -> bool {
-        lock_ignoring_poison(&self.current).as_ref().is_some_and(|c| c.task.running())
+    /// 识别交付或正在检查长尾包时，同步和索引写入要等它。
+    pub(crate) fn recognition_running(&self, generation: u64) -> bool {
+        self.active_kind(generation).is_some_and(|kind| kind == Kind::Recognition || kind.ccip())
     }
 
-    /// 这个会话的识别导入已被接受或正在运行：同步和索引写入要等它。
-    pub(crate) fn recognition_running(&self, generation: u64) -> bool {
+    pub(crate) fn active_kind(&self, generation: u64) -> Option<Kind> {
         lock_ignoring_poison(&self.current)
             .as_ref()
-            .is_some_and(|c| c.kind == Kind::Recognition && c.generation == generation && c.task.running())
+            .filter(|c| c.generation == generation && c.task.running())
+            .map(|c| c.kind)
+    }
+    pub(crate) fn cancel_import(&self) -> Json {
+        self.cancel_where(CANCELLED, |c| !c.kind.ccip())
+    }
+    pub(crate) fn cancel_ccip(&self, generation: u64, id: &str) -> Result<()> {
+        let context = {
+            let current = lock_ignoring_poison(&self.current);
+            let item = current.as_ref().filter(|c| {
+                c.kind.ccip()
+                    && c.generation == generation
+                    && c.task.running()
+                    && c.task.context().identity().task_id == id
+            });
+            let item = item.ok_or_else(|| Error::Conflict("这个参考包任务已结束或已切换图库".into()))?;
+            if item.kind == Kind::CcipWithdraw || item.snapshot().get("stage").map(Json::text) == Some("committing") {
+                return Err(Error::Conflict("正在写入参考包结果，请等任务结束".into()));
+            }
+            item.stop(CANCELLED)
+        };
+        if let Some(context) = context {
+            context.cancel();
+        }
+        Ok(())
     }
     /// 请正在运行的导入停下，回答那一刻的状态；页面轮询直到结束。
     pub(crate) fn cancel(&self, reason: &'static str) -> Json {
+        self.cancel_where(reason, |_| true)
+    }
+    fn cancel_where(&self, reason: &'static str, applies: impl FnOnce(&Current) -> bool) -> Json {
         let (stopping, answer) = {
             let current = lock_ignoring_poison(&self.current);
-            match current.as_ref() {
+            match current.as_ref().filter(|c| applies(c)) {
                 Some(c) => (c.stop(reason), c.snapshot()),
                 None => (None, Json::object([("status", "idle".into())])),
             }

@@ -945,10 +945,11 @@ fn ownership(c: &Connection, id: &str, mut members: Vec<Json>) -> Result<Json> {
 fn alternatives(c: &Connection, id: &str) -> Result<Json> {
     let sql = format!(
         "WITH extension AS (
-           SELECT coalesce(e.parent_id,e.id) AS entity,max(v.score) AS score
+           SELECT coalesce(e.parent_id,e.id) AS entity,v.source,max(v.score) AS score
            FROM candidates v JOIN {ENTITIES} e ON e.id=v.entity
-           WHERE v.uuid=?1 AND v.source='WD_EXT' AND EXISTS(SELECT 1 FROM meta WHERE key='wd_extension')
-           GROUP BY coalesce(e.parent_id,e.id)
+           WHERE v.uuid=?1 AND (v.source='CCIP_LONGTAIL'
+             OR (v.source='WD_EXT' AND EXISTS(SELECT 1 FROM meta WHERE key='wd_extension')))
+           GROUP BY coalesce(e.parent_id,e.id),v.source
          )
          SELECT *
          FROM (
@@ -957,11 +958,15 @@ fn alternatives(c: &Connection, id: &str) -> Result<Json> {
            JOIN {ENTITIES} e ON e.id=v.entity
            WHERE v.uuid=?1
            UNION ALL
-           SELECT e.id,entity_name(e.id),e.work,'WD_EXT',v.score,NULL,NULL,0,0,1
+           SELECT e.id,entity_name(e.id),e.work,v.source,v.score,NULL,
+                  CASE WHEN v.source='CCIP_LONGTAIL' THEN v.score END,0,0,
+                  CASE WHEN v.source='CCIP_LONGTAIL' THEN 1 ELSE 2 END
            FROM extension v JOIN {ENTITIES} e ON e.id=v.entity
            WHERE NOT EXISTS(SELECT 1 FROM family_evidence f WHERE f.uuid=?1 AND f.entity=v.entity)
+             AND (v.source='CCIP_LONGTAIL' OR NOT EXISTS(
+                 SELECT 1 FROM extension x WHERE x.entity=v.entity AND x.source='CCIP_LONGTAIL'))
            UNION ALL
-           SELECT e.id,entity_name(e.id),e.work,group_concat(w.source),max(w.score),NULL,max(w.score),1000,1,2
+           SELECT e.id,entity_name(e.id),e.work,group_concat(w.source),max(w.score),NULL,max(w.score),1000,1,3
            FROM weak_claims w
            JOIN {ENTITIES} e ON e.id=w.entity
            WHERE w.uuid=?1 AND NOT EXISTS(SELECT 1 FROM family_evidence f WHERE f.uuid=w.uuid AND f.entity=w.entity)

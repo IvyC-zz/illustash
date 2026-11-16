@@ -215,7 +215,9 @@ pub fn claims(
     }
     let mut pseudo = BTreeMap::<String, BTreeSet<String>>::new();
     // 可撤回的扩展头不提供伪标签，撤回后不会留下用它选取的训练负例。
-    for (u, e) in strings(c, "SELECT DISTINCT uuid,entity FROM candidates WHERE source<>'WD_EXT'")? {
+    for (u, e) in
+        strings(c, "SELECT DISTINCT uuid,entity FROM candidates WHERE source NOT IN ('WD_EXT','CCIP_LONGTAIL')")?
+    {
         if !judged.contains(&u) && usable(&u) {
             pseudo.entry(u).or_default().insert(e);
         }

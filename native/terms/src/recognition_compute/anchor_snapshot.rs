@@ -4,6 +4,7 @@ use super::{
     models::hash,
 };
 use crate::{Error, Result};
+use illustash_core::ccip_longtail::Hit;
 use rusqlite::Connection;
 use serde::{Deserialize, Serialize};
 use std::{
@@ -29,6 +30,111 @@ pub struct Snapshot {
     pub index: AnchorIndex,
     pub limits: Vec<f32>,
 }
+pub(crate) struct Reference {
+    pub id: String,
+    pub tag: String,
+    pub vector: Vec<f32>,
+    pub metadata: Metadata,
+}
+
+struct Input {
+    fingerprint: Fingerprint,
+    vectors: Vec<Vec<f32>>,
+    ids: Vec<String>,
+    metadata: HashMap<String, Metadata>,
+    patched: HashSet<String>,
+}
+
+impl Input {
+    fn build(self, check: &dyn Fn() -> Result<()>) -> Result<Snapshot> {
+        let index = anchors::anchor_index_checked(&self.vectors, &self.ids, &self.metadata, check)?;
+        let limits = anchors::claim_thresholds(&self.ids, &index, &self.patched)?;
+        Ok(Snapshot { fingerprint: self.fingerprint, vectors: self.vectors, index, limits })
+    }
+}
+
+pub(crate) struct LongtailSnapshot {
+    pub anchors: Snapshot,
+    tags: HashMap<String, String>,
+}
+
+impl LongtailSnapshot {
+    pub(crate) fn load(
+        shared: &Path,
+        source: &Connection,
+        references: &[Reference],
+        check: &dyn Fn() -> Result<()>,
+    ) -> Result<Self> {
+        crate::index_generation::stable(shared, || {
+            let mut input = load_input(shared, source, check)?;
+            if input.ids.is_empty() {
+                return Err(Error::Conflict("请先安装基础角色索引".into()));
+            }
+            let mut known =
+                source.prepare_cached("SELECT danbooru_tag FROM characters WHERE danbooru_tag IS NOT NULL")?;
+            let roles = known.query_map([], |r| r.get::<_, String>(0))?.collect::<rusqlite::Result<HashSet<_>>>()?;
+            let mut tags = HashMap::new();
+            for reference in references {
+                check()?;
+                if input.metadata.contains_key(&reference.id) || roles.contains(&reference.tag) {
+                    continue;
+                }
+                input.ids.push(reference.id.clone());
+                input.vectors.push(reference.vector.clone());
+                input.metadata.insert(reference.id.clone(), reference.metadata.clone());
+                input.patched.insert(reference.id.clone());
+                tags.insert(reference.id.clone(), reference.tag.clone());
+            }
+            if !tags.is_empty() {
+                let mut ordered = input.ids.into_iter().zip(input.vectors).collect::<Vec<_>>();
+                ordered.sort_unstable_by(|a, b| a.0.cmp(&b.0));
+                (input.ids, input.vectors) = ordered.into_iter().unzip();
+            }
+            Ok(Self { anchors: input.build(check)?, tags })
+        })
+    }
+
+    pub(crate) fn scan(
+        &self,
+        rows: &[(String, Vec<f32>)],
+        check: &dyn Fn() -> Result<()>,
+        progress: &dyn Fn(usize),
+    ) -> Result<Vec<Hit>> {
+        let mut hits = Vec::new();
+        if self.tags.is_empty() {
+            progress(rows.len());
+            return Ok(hits);
+        }
+        // 与全索引重扫使用同一分块尺寸和最近九项。
+        for (part, batch) in rows.chunks(4000).enumerate() {
+            let vectors = batch.iter().map(|(_, vector)| vector.clone()).collect::<Vec<_>>();
+            let distances = anchors::cross_checked(&self.anchors.vectors, &vectors, check)?;
+            for (position, (uuid, _)) in batch.iter().enumerate() {
+                check()?;
+                let column = distances.iter().map(|vector| vector[position]).collect::<Vec<_>>();
+                let mut seen = HashSet::new();
+                for i in crate::index_compute::numeric::nearest_nine(&column) {
+                    let entity = &self.anchors.index.entities[i];
+                    if !seen.insert(entity) {
+                        continue;
+                    }
+                    let distance = column[i];
+                    let limit = self.anchors.limits[i];
+                    if limit > 0. && distance <= limit {
+                        if let Some(tag) = self.tags.get(entity) {
+                            let rounded = format!("{:.4}", f64::from(distance));
+                            let score = 1. - rounded.parse::<f64>().map_err(|e| Error::invalid(e.to_string()))?;
+                            hits.push(Hit { uuid: uuid.clone(), tag: tag.clone(), score });
+                        }
+                    }
+                }
+            }
+            progress(part * 4000 + batch.len());
+        }
+        Ok(hits)
+    }
+}
+
 fn anchored(shared: &Path) -> Result<bool> {
     let a = shared.join("char-anchors.npy").try_exists()?;
     let b = shared.join("char-anchors.txt").try_exists()?;
@@ -57,48 +163,19 @@ impl Snapshot {
     }
     /// 来自同一次完整索引发布（index_generation）的锚点、id 和逐角色文件。
     pub(crate) fn load_checked(shared: &Path, source: &Path, check: &dyn Fn() -> Result<()>) -> Result<Self> {
-        crate::index_generation::stable(shared, || Self::load_once(shared, source, check))
-    }
-    fn load_once(shared: &Path, source: &Path, check: &dyn Fn() -> Result<()>) -> Result<Self> {
-        check()?;
-        if !anchored(shared)? {
-            return Ok(Self {
-                fingerprint: absent(),
-                vectors: vec![],
-                index: AnchorIndex { entities: vec![], p90: vec![], p50: vec![], p75: vec![] },
-                limits: vec![],
-            });
-        }
-        let id_bytes = read(&shared.join("char-anchors.txt"), check)?;
-        let ids = std::str::from_utf8(&id_bytes)
-            .map_err(|e| Error::invalid(e.to_string()))?
-            .lines()
-            .map(str::trim)
-            .filter(|s| !s.is_empty())
-            .map(String::from)
-            .collect::<Vec<_>>();
-        let bytes = read(&shared.join("char-anchors.npy"), check)?;
-        let digest = crate::strict_json::sha256_hex(&bytes);
-        let raw = crate::app_recognition::vectors_checked(bytes, ids.len(), 768, check)?;
-        let matrix = raw
-            .chunks_exact(768 * 4)
-            .map(|row| {
-                check()?;
-                Ok(row.chunks_exact(4).map(|b| f32::from_le_bytes(b.try_into().expect("four-byte chunk"))).collect())
-            })
-            .collect::<Result<Vec<Vec<f32>>>>()?;
-        let source = crate::sqlite::open_with_flags(source, rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY)?;
-        let (metadata, metadata_hash) = metadata(&source, check)?;
-        let (patched, patch_hash) = patches(shared, check)?;
-        let fingerprint = Fingerprint {
-            vectors: Some(digest),
-            ids: Some(crate::strict_json::sha256_hex(&id_bytes)),
-            metadata: Some(metadata_hash),
-            patches: Some(patch_hash),
-        };
-        let index = anchors::anchor_index_checked(&matrix, &ids, &metadata, check)?;
-        let limits = anchors::claim_thresholds(&ids, &index, &patched)?;
-        Ok(Self { fingerprint, vectors: matrix, index, limits })
+        crate::index_generation::stable(shared, || {
+            check()?;
+            if !anchored(shared)? {
+                return Ok(Snapshot {
+                    fingerprint: absent(),
+                    vectors: vec![],
+                    index: AnchorIndex { entities: vec![], p90: vec![], p50: vec![], p75: vec![] },
+                    limits: vec![],
+                });
+            }
+            let source = crate::sqlite::open_with_flags(source, rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY)?;
+            load_input(shared, &source, check)?.build(check)
+        })
     }
     /// 在源库租约下做线性的权威复查：不构建矩阵或索引。
     pub(crate) fn fingerprint(
@@ -130,6 +207,45 @@ impl Snapshot {
     ) -> Result<Vec<Claim>> {
         anchors::claims_checked(asset, &self.vectors, feature, &self.index, &self.limits, check)
     }
+}
+fn load_input(shared: &Path, source: &Connection, check: &dyn Fn() -> Result<()>) -> Result<Input> {
+    check()?;
+    if !anchored(shared)? {
+        return Ok(Input {
+            fingerprint: absent(),
+            vectors: vec![],
+            ids: vec![],
+            metadata: HashMap::new(),
+            patched: HashSet::new(),
+        });
+    }
+    let id_bytes = read(&shared.join("char-anchors.txt"), check)?;
+    let ids = std::str::from_utf8(&id_bytes)
+        .map_err(|e| Error::invalid(e.to_string()))?
+        .lines()
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
+        .map(String::from)
+        .collect::<Vec<_>>();
+    let bytes = read(&shared.join("char-anchors.npy"), check)?;
+    let digest = crate::strict_json::sha256_hex(&bytes);
+    let raw = crate::app_recognition::vectors_checked(bytes, ids.len(), 768, check)?;
+    let matrix = raw
+        .chunks_exact(768 * 4)
+        .map(|row| {
+            check()?;
+            Ok(row.chunks_exact(4).map(|b| f32::from_le_bytes(b.try_into().expect("four-byte chunk"))).collect())
+        })
+        .collect::<Result<Vec<Vec<f32>>>>()?;
+    let (metadata, metadata_hash) = metadata(source, check)?;
+    let (patched, patch_hash) = patches(shared, check)?;
+    let fingerprint = Fingerprint {
+        vectors: Some(digest),
+        ids: Some(crate::strict_json::sha256_hex(&id_bytes)),
+        metadata: Some(metadata_hash),
+        patches: Some(patch_hash),
+    };
+    Ok(Input { fingerprint, vectors: matrix, ids, metadata, patched })
 }
 fn patches(shared: &Path, check: &dyn Fn() -> Result<()>) -> Result<(HashSet<String>, String)> {
     let mut paths = if shared.join("char-index").try_exists()? {

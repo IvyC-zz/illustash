@@ -491,10 +491,12 @@ impl Application {
         }
     }
     pub(crate) fn wd_busy(&self, session: &Session) -> Option<&'static str> {
-        if session.syncer.running() || self.imports.recognition_running(session.generation) {
+        if session.syncer.running()
+            || self.imports.active_kind(session.generation) == Some(crate::app_imports::Kind::Recognition)
+        {
             Some("syncing")
         } else if session.index.writing()
-            || self.imports.running()
+            || self.imports.busy()
             || self.exports.running()
             || session.human_exports.running()
         {
