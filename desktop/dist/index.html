@@ -177,7 +177,7 @@ function renderWelcome() {
     <div class="w-track"><span style="width:${im.total ? Math.min(100, im.done / im.total * 100) : 0}%"></span></div>
     <div class="sp-actions" style="justify-content:flex-start"><button class="btn" data-act-w="import-cancel" ${im.cancelling ? 'disabled' : ''}>${im.cancelling ? t('正在取消…') : t('取消')}</button></div></div>`;
   const form = !W.form || im ? '' : `<div class="w-form">
-    <p class="w-note">${t('图片保留在原位置，不复制、不修改。按图片来自哪里分别添加文件夹，每类可以有多个，子文件夹会一起读取。选 X 或 Pixiv 的文件夹才能用以图搜图、画师回查。')}</p>
+    <p class="w-note">${t('按图片来自哪里分别添加文件夹，每类可以有多个。子文件夹会一起读取；图片保留在原位置，不复制。选 X 或 Pixiv 的文件夹才能用以图搜图、画师回查。')}</p>
     <div class="w-cols">${origins.map(([id, label]) => `<div class="w-col-box"><h3>${esc(label)}</h3>
       ${W.seq.filter(([o]) => o === id).map(([, p]) => `<div class="w-picked"><span title="${esc(p)}"><bdi>${esc(home(p))}</bdi></span><button data-drop="${esc(p)}" title="${t('不添加这个文件夹')}">×</button></div>${folderCheck(id, p)}`).join('')}
       <button class="btn" data-pick="${id}">${t('添加文件夹…')}</button></div>`).join('')}</div>
@@ -191,7 +191,7 @@ function renderWelcome() {
       : `<div class="sp-actions" style="justify-content:flex-start"><button class="btn primary" data-act-w="create">${t('创建并打开')}</button></div>`}</div>`;
   document.getElementById('wcol').innerHTML = `<div class="w-head"><img src="icon.png" alt=""><h1>Illustash</h1></div>
     ${recent.length ? `<p class="w-note">${t('最近的图库')}</p><div class="w-recent">${recent.map(l => `<button data-open="${esc(l.path)}" ${im ? 'disabled' : ''}><b>${esc(l.name)}</b><small><bdi>${esc(home(l.path))}</bdi></small></button>`).join('')}</div>`
-      : `<p class="w-note">${t('还没有图库。图库记下图片在哪里、识别结果和你的整理，图片本身留在原来的文件夹里。')}</p>`}
+      : `<p class="w-note">${t('还没有图库。')}</p>`}
     <div class="w-entries">
       ${entry('new', t('新建图库'), t('选择图片所在的文件夹，从头识别。'), W.form && !im)}
       ${entry('pick-library', t('打开已有图库…'), t('打开之前建好的图库（.pilib）。'))}
