@@ -192,7 +192,7 @@ function watchPosters(root) {
 }
 function poster(c, sub, rank = 0, big = false) {
   const r = recentOf(c), skins = (c.variants || []).filter(v => v.count).length;
-  return `<a class="cast-poster" href="${charHash(c.id)}" data-char="${esc(c.id)}"><span class="img">${cover(c, big ? 'medium' : 'thumb')}</span>${rank ? `<span class="rank">${rank}</span>` : ''}${r ? `<span class="pill ${rank ? 'r' : 'l'}"><i></i>+${number(r)}</span>` : ''}${!rank && skins ? `<span class="pill r">${t('{n} 个皮肤', {n: skins})}</span>` : ''}<span class="cap"><b title="${esc(nameTip(c))}">${c.kind === 'oc' ? `<em>${t('原创')}</em>` : ''}${esc(c.name)}</b><small>${sub}</small></span></a>`;
+  return `<a class="cast-poster" href="${charHash(c.id)}" data-char="${esc(c.id)}"><span class="img">${cover(c, big ? 'medium' : 'thumb')}</span>${rank ? `<span class="rank">${rank}</span>` : ''}${r ? `<span class="pill ${rank ? 'r' : 'l'}"><i></i>+${number(r)}</span>` : ''}${!rank && skins ? `<span class="pill r">${t('{n} 个造型', {n: skins})}</span>` : ''}<span class="cap"><b title="${esc(nameTip(c))}">${c.kind === 'oc' ? `<em>${t('原创')}</em>` : ''}${esc(c.name)}</b><small>${sub}</small></span></a>`;
 }
 const fan = chars => `<span class="cast-fan">${[1, 2, 0].map(i => `<i>${cover(chars[i])}</i>`).join('')}</span>`;
 function tiers(list, showWork) {
@@ -248,7 +248,7 @@ function castList() {
   const max = Math.max(1, ...base.map(c => c.count)), shown = rows.slice(0, cast.limit || 300);
   const th = (k, label) => `<th data-sort="${k}" class="${cast.sort === k ? 'on' : ''}" aria-sort="${cast.sort === k ? (cast.dir < 0 ? 'descending' : 'ascending') : 'none'}">${label}${cast.sort === k ? (cast.dir < 0 ? ' ↓' : ' ↑') : ''}</th>`;
   return `<div class="cast-buckets">${BUCKETS.map(([k, label, f]) => `<button data-bucket="${k}" class="${cast.bucket === k ? 'on' : ''}">${label}<small>${number(base.filter(f).length)}</small></button>`).join('')}</div>
-    <table class="cast-table"><thead><tr>${th('name', t('角色'))}${th('work', t('作品'))}${th('count', t('张数'))}${th('recent', t('近 30 天'))}${th('last', t('最后收藏'))}${th('skins', t('皮肤'))}</tr></thead><tbody>
+    <table class="cast-table"><thead><tr>${th('name', t('角色'))}${th('work', t('作品'))}${th('count', t('张数'))}${th('recent', t('近 30 天'))}${th('last', t('最后收藏'))}${th('skins', t('造型'))}</tr></thead><tbody>
     ${shown.map(c => { const a = catalog.activity.get(c.id), skins = (c.variants || []).filter(v => v.count).length, orig = c.tag && c.tag !== c.name ? c.tag.replaceAll('_', ' ') : '';
       return `<tr data-char="${esc(c.id)}"><td><div class="cast-who">${avatar(c, 36)}<span><b>${esc(c.name)}</b>${orig ? `<small>${esc(orig)}</small>` : ''}</span></div></td><td>${esc(c.kind === 'oc' ? t('原创角色') : c.work_name || '—')}</td><td><div class="cast-bar"><i style="width:${Math.max(4, Math.log(c.count + 1) / Math.log(max + 1) * 110)}px"></i>${number(c.count)}</div></td><td>${a?.recent ? `<span class="cast-plus">+${number(a.recent)}</span>` : '<span class="dim">—</span>'}</td><td class="mono">${esc(a?.last || '')}</td><td>${skins || '<span class="dim">—</span>'}</td></tr>`; }).join('')}
     </tbody></table>${rows.length > shown.length ? `<button class="quiet cast-more" id="castMore">${t('再显示 300 位（共 {n} 位）', {n: number(rows.length)})}</button>` : ''}`;

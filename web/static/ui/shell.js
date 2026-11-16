@@ -37,7 +37,7 @@ function metaShown({error: e, directory, queue}) {
   navCount('countExcluded', state.pendingCount, t('像截图、等你确认的图'));
   $('navDuplicates').href = state.dupInfo.mixed ? hashFor({page: 'duplicates', dup: 'mixed'}) : '#/duplicates';
   $('navExcluded').href = state.pendingCount ? '#/pending' : '#/excluded';
-  if (queue) { navCount('countIdentity', state.identityCount, t('长得像、可能是同一人或同一人另一形态的角色对')); $('navIdentity').hidden = !state.identityCount && viewOf(state.route).nav !== 'identity'; }
+  if (queue) { navCount('countIdentity', state.identityCount, t('长得像、可能是同一人或同一人另一个造型的角色对')); $('navIdentity').hidden = !state.identityCount && viewOf(state.route).nav !== 'identity'; }
   // 角色还没读到时（state.char 为空）算图库页：这一刻不重画。
   const view = viewOf(state.route, state.char);
   if (view.onMeta) view.onMeta({directory}); else renderChrome();
@@ -283,15 +283,15 @@ implement({
   audit: {help: () => [t('鼠标移到角色 tag 上，点 ✓ 或 ✗ 回答。'), t('选中多张后按 Y（是）或 N（不是）。'), t('打开大图也可以回答。'), t('看不清的可以跳过，换一张。')]},
   unmatched: {helpHint: true},
   skipped: {help: () => [t('选中的图可以恢复到未识别。')], helpHint: true},
-  groups: {help: () => [t('长得像的未识别图分在一组，可以整组确认。'), t('点一下缩略图，把它排除在这组之外。'), t('组头的按钮对整组生效。')]},
+  groups: {help: () => [t('按长相分组的未识别图，可以整组确认。'), t('点一下缩略图，把它排除在这组之外。'), t('组头的按钮对整组生效。')]},
   group: {helpHint: true},
   duplicates: {help: () => [t('同色角标是同一组。'), t('修改任一份会同步到整组。'), t('组里的角色不一致时不折叠，对齐以后折叠成一张。')]},
-  similar: {help: () => [t('画的是同一幅画，但不是同一个文件。'), t('点一组进去看。')]},
-  'artist-audit': {help: () => [t('一组固定的随机图，用来检查「找回画师」找到的画师对不对。'), t('每次打开都是同一批。')]},
+  similar: {help: () => [t('同一幅画的不同文件。'), t('点一组进去看。')]},
+  'artist-audit': {help: () => [t('一组固定的随机图，逐张核对「找回画师」找到的画师。'), t('每次打开都是同一批。')]},
   identity: {help: () => [t('按涉及的图片数排序。'), t('高亮的按钮是外部资料建议的做法。')]},
   sgroup: {help: () => [t('选中两张以上可以判断它们的关系。')], helpHint: true},
-  excluded: {help: () => [t('排除只做标记，不改动原图文件。')], helpHint: true},
-  pending: {help: () => [t('像截图，但画面里有人物，规则拿不准。')], helpHint: true},
+  excluded: {helpHint: true},
+  pending: {help: () => [t('像截图，但有人物。')], helpHint: true},
 });
 implement({
   // 图库页不因计数变化重画；资料库只重画目录；设置页重画整页；其余重画标题和工具栏。

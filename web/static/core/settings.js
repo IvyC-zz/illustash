@@ -58,6 +58,11 @@ export async function loadLibraries() {
   try { state.libraries = await api('/api/libraries'); } catch { state.libraries = null; }
   await changed.emit('libraries');
 }
+// 当前图库的 ID（library.json 的 id），给只属于一个图库的偏好做键（core/prefs.js 的 libraryPrefs，#523）。切换图库时
+// 整页重新载入，所以每个页面只取一次；取不到时是空字符串，下次再取。
+let libraryId = null;
+export const currentLibraryId = () => libraryId ??= api('/api/libraries').then(x => x?.info?.id || '', () => '')
+  .then(id => { if (!id) libraryId = null; return id; });
 // POST /api/libraries/<action>，带着发起请求的那个页面的 token：确认框可能比它的会话活得久。
 export const libraryRequest = (action, body = {}, token = session.token) =>
   api('/api/libraries/' + action, {method: 'POST', body: JSON.stringify(body), headers: {'X-CSRF-Token': token}});
