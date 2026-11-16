@@ -102,6 +102,16 @@
 
 用法：`illustash-rustc-wrapper --stats` 查看命中率和缓存占用；单条命令前加 `ILLUSTASH_SCCACHE=0` 临时不用缓存；回退就删掉 `~/.cargo/config.toml` 里的 `rustc-wrapper` 一行。缓存放在 `~/Library/Caches/sccache-illustash`，上限 10 GB（`SCCACHE_CACHE_SIZE`）。加上或去掉 wrapper 都不会让已有的 target 重新编译。`local_acceptance.py` 会记录 `~/.cargo/config.toml` 的摘要，所以这个文件一改，已有的验收记录下次复用时就会以「环境改变」被拒一次，重跑一次 `local_acceptance.py run` 就能生成新记录。
 
+**#587 复测和自家 crate 的限制**（2026-11-17）：同一改动（main `49703ec4` 上往 `native/terms/src/app_names.rs` 追加一个函数）在三个新建的工作树里先后跑 `cargo test --locked --no-run --all-features --manifest-path native/terms/Cargo.toml`，都从空 target 开始，用正式的包装脚本、另用一套端口和缓存目录，`taskpolicy -b`（同 `bg`），经 `collab_run.py timing` 开跑（开跑前 30 秒平均 19.6%，门槛 20%；跑的过程中别的会话的后台编译没停，1 分钟负载 8～12），每项单次，Apple M2 8 核、macOS 26.7.1、Rust 1.94.1：
+
+| 情况 | 墙钟 | Rust 命中 |
+|---|---|---|
+| 第一个工作树，sccache 空缓存 | 913 秒 | 0 / 153 |
+| 第二个工作树，缓存已热 | 506 秒 | 117 / 153（76%） |
+| 第三个工作树，不开 sccache（`ILLUSTASH_SCCACHE=0`） | 863 秒 | — |
+
+第二个工作树比不开 sccache 快约四成，空缓存时多花约 6%，缓存共 144 MiB。没命中的是 illustash 自己的 crate 和带 build script 的依赖（实测 `crates/core` 时是 `illustash_core`、`proc_macro2`、`serde`、`serde_core`、`serde_json`、`libsqlite3_sys`、`rusqlite`）。sccache 0.19 把 `CARGO_MANIFEST_DIR`、`OUT_DIR` 这类带工作树绝对路径的环境变量算进缓存键，换一个工作树就对不上；关掉 incremental（`CARGO_INCREMENTAL=0`）、再设 `SCCACHE_BASEDIRS` 指向各工作树根目录，未命中的仍是这 7 个，所以 wrapper 维持上面的接法，不为自家 crate 关 incremental。自家 crate 要省编译，只能靠把定向检查挪到验收机（见上文「检查放哪台机器」）。
+
 ## 修改测试的导航
 
 业务契约和固定期望的比较规则见 [架构参考](ARCHITECTURE_DIRECTION.md)；本节说明测试分工、依赖和修改方法，测试入口与合并门槛仍按上文及 AGENTS.md。
