@@ -51,6 +51,6 @@ export const state = {
   // ---- 详情栏与大图：ui/detail.js ----
   focused: null, detail: null, viewer: -1, viewerItem: null, question: null,
 
-  // ---- 「第 N 组」页标题用的近似组信息：ui/shell.js（进入该页前读取） ----
-  groupNear: null, groupNearId: null, groupTraits: null,
+  // ---- 「第 N 组」页标题用的近似组信息和各组的先后（空了时「下一组」用）：ui/shell.js（进入该页前读取） ----
+  groupNear: null, groupNearId: null, groupTraits: null, groupOrder: [],
 };

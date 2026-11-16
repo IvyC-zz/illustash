@@ -166,11 +166,14 @@ export function mergeCharacter(c) {
 }
 // ---------- 原创角色 ----------
 // 原创角色（kind='oc'）：画师自己的角色，不属于任何作品。没起名的叫「原创角色 N」。
-// 快速标注用共用的那一个「原创角色（未细分）」；一个相似分组（全是同一个人）仍然得到它自己的 OC。
+// 单张或零散的快速标注用共用的那一个「原创角色（未细分）」；整组标为原创角色（按组整理页的组头、组页标题的
+// 「整组标为原创角色」）都新建一个独立的 OC（separate，用户 2026-11-14 在 #386 定，2-29）。返回写入是否成功。
 export async function markOc(body, leaving, separate = false) {
-  let entity; try { entity = await post(separate ? '/api/entities' : '/api/oc/shared', {kind: 'oc'}); } catch (err) { toast(err.message); return; }
+  let entity; try { entity = await post(separate ? '/api/entities' : '/api/oc/shared', {kind: 'oc'}); } catch (err) { toast(err.message); return false; }
   prefs.set('picks', [{id: entity.id, name: entity.name}, ...prefs.get('picks', []).filter(x => x.id !== entity.id)].slice(0, 8));
-  if (await mutate('/api/change', {...body, action: 'confirmed', entity: entity.id}, leaving) && poolIs(state.route, 'cluster') && !state.total) go(charRoute(entity.id));
+  const ok = await mutate('/api/change', {...body, action: 'confirmed', entity: entity.id}, leaving);
+  if (ok && poolIs(state.route, 'cluster') && !state.total) go(charRoute(entity.id));
+  return !!ok;
 }
 // 拆分共用的 OC 标记：按需计算相似分组，每组一次点击归到它自己的 OC（可撤销）。
 export async function splitOc(c) {

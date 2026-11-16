@@ -15,12 +15,12 @@ import {$, error, searchIcon, workSmall} from './dom.js';
 import {renderSettings, settingsSection} from './settings.js';
 import {artistName} from './artists.js';
 import {closeInspector, closeViewer} from './detail.js';
-import {filters, markSelectButton, placeFor, rememberPlace, reload, resetForRoute, selectAll, short, sweep, toggleFit, toggleSelecting} from './grid.js';
+import {filters, markSelectButton, placeFor, rememberPlace, reload, resetForRoute, selectAll, setNsfw, short, sweep, toggleFit, toggleSelecting} from './grid.js';
 import {guideTick} from './guide.js';
 import {createLayer} from './overlay.js';
 import {dayLabel} from './home.js';
 import {editProfile, markOc, mergeCharacter, openLocalLinks, openRelate, splitOc, toggleMascot, toggleOc} from './palette.js';
-import {nearText} from './review.js';
+import {groupOrder, nearText} from './review.js';
 
 // 搜索框和标签菜单的防抖。
 let searchTimer = 0, pickerTimer = 0;
@@ -222,6 +222,11 @@ export function renderHeading() {
 // 页面这一部分注册的处理函数。页面启动时调用一次。
 export function wireShell() {
   onMeta(metaShown);
+  $('empty').addEventListener('click', e => {
+    const act = e.target.closest('[data-empty]')?.dataset.empty;
+    if (act === 'nsfw') setNsfw('');
+    else if (act === 'next-group') nextGroup();
+  });
   window.addEventListener('hashchange', applyRoute);
 }
 
@@ -236,11 +241,12 @@ implement({
   unmatched: {heading: (r, {n}) => [t('未识别'), t('选中后设为角色，或跳过')]},
   skipped: {heading: (r, {n}) => [t('未识别'), t('可以恢复到未识别')]},
   groups: {heading: (r, {n}) => [t('未识别'), t('长得像的图分成一组，一组一组过 · 每确认一组，系统就学会认 TA 的一种样子')]},
-  group: {heading: (r, {n}) => [t('第 {id} 组', {id: esc(r.id)}), t('{n} 张长得像的未识别图', {n}) + (state.groupTraits?.length ? ' · ' + state.groupTraits.map(esc).join(' · ') : ''),
+  // 一组整理完了，标题不写「0 张」，由空状态给去处（#386 的 2-12）。
+  group: {heading: (r, {n}) => [t('第 {id} 组', {id: esc(r.id)}), [state.totalReady && !state.total ? '' : t('{n} 张长得像的未识别图', {n}), ...(state.groupTraits || []).map(esc)].filter(Boolean).join(' · '),
       `<span class="heading-links">${state.total ? `<button class="quiet" id="groupOc" title="${t('整组都是同一个原创角色：新建一个原创角色，把这组图都设为它')}">${t('整组标为原创角色')}</button>` : ''}${state.groupNear ? `<a class="quiet link" href="#/g/${state.groupNearId}">${esc(state.groupNear)} →</a>` : ''}</span>`]},
   duplicates: {heading: (r, {n}) => [t('重复'), r.dup ? t('对齐角色后自动折叠') : t('{n} 张', {n: number(state.dupInfo.count || 0)}) + ' · ' + t('修改任一份会同步到整组')]},
   similar: {heading: (r, {n}) => [t('重复'), t('画的是同一张、但不是同一个文件 · 只在本机比较')]},
-  'artist-audit': {heading: (r, {n}) => [t('画师抽查'), t('验收「找回画师」：固定的一组随机图，逐张判断机器找到的画师对不对')]},
+  'artist-audit': {heading: (r, {n}) => [t('画师抽查'), t('验收「找回画师」：固定的一组随机图，逐张判断机器找到的画师对不对') + (state.nsfw ? ` · <b>${t('这页不按 R18 筛选：R18 的图也在里面')}</b>` : '')]},
   identity: {heading: (r, {n}) => [t('身份整理'), t('{n} 对长得像的角色 · 按涉及图片数排序 · 每一步都可撤销', {n: number(state.identityCount || 0)})]},
   sgroup: {heading: (r, {n}) => [t('相似组 {id}', {id: esc(r.id)}), t('{n} 张 · 选中两张以上可以判断关系', {n}), state.total >= 2 && state.total <= 12 ? `<span class="heading-links"><button class="quiet" id="sgroupRelate">${t('判断关系')}</button></span>` : '']},
   excluded: {heading: (r, {n}) => [t('已排除'), t('只是标记，不改动原图')]},
@@ -258,5 +264,25 @@ implement({
     if (state.route !== route) return false;  // 分组加载期间已经导航走了：这个回应不属于任何页面
     const g = result.clusters.find(x => String(x.cid) === route.id);
     state.groupNear = g?.near ? nearText(g) : null; state.groupNearId = g?.near || null; state.groupTraits = g?.traits || [];
+    state.groupOrder = groupOrder(result.clusters).map(x => String(x.cid));
   }},
 });
+// 网格空了时的去处（#386 的 2-12、2-16）：一组整理完了去下一组或回到按组整理；待确认、已跳过清空了回到同一入口的
+// 主页签；「只看 R18」时图库空了给「显示全部」。按钮由 wireShell 里 #empty 的点击处理。
+const emptyLink = (href, label) => `<a class="quiet link" href="${href}">${label}</a>`;
+const showAll = r => state.nsfw === 'only' ? `<button class="quiet" data-empty="nsfw">${t('显示全部')}</button>` : '';
+implement({
+  library: {emptyNext: showAll},
+  character: {emptyNext: showAll},
+  group: {emptyNext: r => (state.groupOrder.some(id => id !== r.id) ? `<button class="quiet" data-empty="next-group">${t('下一组')} →</button>` : '') + emptyLink('#/groups', t('回到按组整理'))},
+  skipped: {emptyNext: () => emptyLink('#/groups', t('回到按组整理'))},
+  pending: {emptyNext: () => emptyLink('#/excluded', t('回到已排除'))},
+});
+// 「下一组」：重读分组，取原来排在这组后面、还在的第一组；后面都没了就取最前面那组；一组都没了回到按组整理。
+async function nextGroup() {
+  const at = state.route.id, order = state.groupOrder, from = order.indexOf(at);
+  let result; try { result = await api('/api/clusters?nsfw=' + state.nsfw); } catch (e) { error(readError(e)); return; }
+  const left = new Set(result.clusters.map(x => String(x.cid))); left.delete(at);
+  const pick = order.slice(from + 1).find(id => left.has(id)) || groupOrder(result.clusters).map(x => String(x.cid)).find(id => id !== at);
+  location.hash = pick ? '#/g/' + encodeURIComponent(pick) : '#/groups';
+}
