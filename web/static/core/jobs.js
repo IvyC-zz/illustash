@@ -8,6 +8,7 @@ import {home, isMac, megabytes, number, stamp} from './format.js';
 import {session, api, post, shared} from './session.js';
 import {state} from './state.js';
 import {listeners} from './events.js';
+import {poller} from './poll.js';
 const changed = listeners();
 // /api/index 的最新回应（关注列表、作品、检查与添加的状态）。资料库、设置页、引导读到新的回应也经这里换上。
 export function setIndex(value) { state.index = value; }
@@ -70,23 +71,19 @@ export function syncLine(s) {
   if (s.status === 'error') return photosRefused(s) ? t('同步失败：没有访问照片图库的权限') : t('同步失败');
   return t('本地图库');
 }
-let syncTimer = null, lastImported = 0, syncPoll = 0;
-export async function pollSync() {
-  clearTimeout(syncTimer);
-  // 几次轮询会重叠（任务面板、定时器、启动之后）：更早的回应最后才到时，不能让状态倒退。
-  const poll = ++syncPoll;
-  try {
-    const {state: s, history, damaged} = await api('/api/sync');
-    if (poll !== syncPoll) return;
-    const was = state.sync.status, ended = SYNC_ACTIVE.includes(was) && !SYNC_ACTIVE.includes(s.status);
-    state.sync = s; state.syncHistory = history; state.syncDamaged = damaged;
-    // 有新图片，或一次运行已落定：图库显示的内容可能变了。
-    const arrived = (s.imported || 0) > lastImported || ended;
-    if (arrived) lastImported = s.imported || 0;
-    await changed.emit('sync', {was, ended, arrived});
-    if (SYNC_ACTIVE.includes(s.status)) syncTimer = setTimeout(pollSync, 2000);
-  } catch (e) { if (poll === syncPoll) syncTimer = setTimeout(pollSync, 10000); }
-}
+let lastImported = 0;
+// 同步进行中每 2 s 读一次；读失败 10 s 后再试。重叠的轮询由 core/poll.js 的序号守卫。
+export const pollSync = poller(async fresh => {
+  const {state: s, history, damaged} = await api('/api/sync');
+  if (!fresh()) return 0;
+  const was = state.sync.status, ended = SYNC_ACTIVE.includes(was) && !SYNC_ACTIVE.includes(s.status);
+  state.sync = s; state.syncHistory = history; state.syncDamaged = damaged;
+  // 有新图片，或一次运行已落定：图库显示的内容可能变了。
+  const arrived = (s.imported || 0) > lastImported || ended;
+  if (arrived) lastImported = s.imported || 0;
+  await changed.emit('sync', {was, ended, arrived});
+  return SYNC_ACTIVE.includes(s.status) ? 2000 : 0;
+});
 export const syncDoneText = s => t('同步完成：新加入 {n} 张', {n: number(s.imported)});
 export async function startSync() { await post('/api/sync', {}); state.sync = {status: 'scanning'}; }
 
@@ -98,20 +95,18 @@ export function indexLine(s, check) {
     paused: t('添加角色已暂停，等你确认后继续') + n,
     error: s.kind === 'add' ? t('添加角色失败：{reason}', {reason: tb(s.message || '')}) : s.kind === 'drop' ? t('移除角色失败：{reason}', {reason: tb(s.message || '')}) : t('检查失败：{reason}', {reason: tb(s.message || '')})}[s.status] || (check ? t('上次检查：{time} · 待添加 {n} 个角色', {time: stamp(check.checked_at), n: number(check.missing.length)}) : t('尚未检查'));
 }
-let indexTimer = 0;
-export async function pollIndex() {
-  clearTimeout(indexTimer);
+export const pollIndex = poller(async fresh => {
   const was = state.index?.state.status;
-  try {
-    const progress = await api('/api/index?progress=1');
-    // 只在可能有变化时才完整读取（作品、检查结果）；空闲时的轮询保持轻量。
-    setIndex(!state.index?.works || (!INDEX_ACTIVE.includes(progress.state?.status) && progress.state?.status !== was)
-      ? await shared('/api/index') : {...state.index, ...progress});
-  } catch (e) { indexTimer = setTimeout(pollIndex, 10000); return; }
+  const progress = await api('/api/index?progress=1');
+  if (!fresh()) return 0;
+  // 只在可能有变化时才完整读取（作品、检查结果）；空闲时的轮询保持轻量。
+  const full = !state.index?.works || (!INDEX_ACTIVE.includes(progress.state?.status) && progress.state?.status !== was) ? await shared('/api/index') : null;
+  if (!fresh()) return 0;
+  setIndex(full || {...state.index, ...progress});
   const s = state.index.state;
   await changed.emit('index', {was, ended: INDEX_ACTIVE.includes(was) && !INDEX_ACTIVE.includes(s.status)});
-  if (INDEX_ACTIVE.includes(s.status)) indexTimer = setTimeout(pollIndex, 2000);
-}
+  return INDEX_ACTIVE.includes(s.status) ? 2000 : 0;
+});
 // 一次运行结束时要说什么，按它怎样结束。
 export function indexEndText(s) {
   if (s.status === 'done') return s.kind === 'drop' ? t('已移除，{n} 张图片已重新识别', {n: number(s.changed)}) : t('已添加 {added} 个角色，{n} 张图片的识别结果已更新', {added: number(s.added), n: number(s.changed)});
@@ -152,21 +147,20 @@ export async function discardIndex(confirm) {
 // ---------- 显示名：Bangumi 优先，用户选择开启的模型 API 最后 ----------
 export const NAMES_ACTIVE = ['fetching', 'matching', 'translating', 'running'];
 export const namesLine = s => s.status === 'off' ? t('当前未启用') : NAMES_ACTIVE.includes(s.status) ? t('正在获取 {progress}', {progress: s.total ? `${number(s.done || 0)} / ${number(s.total)}` : '…'}) : s.status === 'error' ? t('获取失败，将在下次启动时重试') : s.status === 'unauthorized' ? t('未允许联网查询 · 可在设置 › 网络与隐私里允许') : t('已是最新');
-let namesTimer = 0;
-export async function pollNames() {
-  clearTimeout(namesTimer);
+export const pollNames = poller(async fresh => {
   const was = state.names?.state?.status, running = NAMES_ACTIVE.includes(was);
-  try {
-    const progress = await api('/api/names?progress=1');
-    // 运行期间保留现有的覆盖率和设置；完成时刷新一次。
-    setNames(!state.names?.counts || (running && !NAMES_ACTIVE.includes(progress.state?.status)) ? await api('/api/names') : {...state.names, ...progress});
-  } catch (e) { namesTimer = setTimeout(pollNames, 10000); return; }
+  const progress = await api('/api/names?progress=1');
+  if (!fresh()) return 0;
+  // 运行期间保留现有的覆盖率和设置；完成时刷新一次。
+  const full = !state.names?.counts || (running && !NAMES_ACTIVE.includes(progress.state?.status)) ? await api('/api/names') : null;
+  if (!fresh()) return 0;
+  setNames(full || {...state.names, ...progress});
   const now = NAMES_ACTIVE.includes(state.names.state?.status);
   await changed.emit('names', {was, ended: running && !now});
-  if (now) namesTimer = setTimeout(pollNames, 2000);
-}
+  return now ? 2000 : 0;
+});
 // 设置卡片刚显示的一次运行，2 s 后再轮询。
-export function pollNamesSoon() { clearTimeout(namesTimer); namesTimer = setTimeout(pollNames, 2000); }
+export const pollNamesSoon = () => pollNames.later(2000);
 export async function refreshNames() { mergeNames(await post('/api/names', {action: 'refresh'})); }
 
 // ---------- 相似图片（它的状态随 /api/settings 一起来） ----------
@@ -185,20 +179,21 @@ export const taskSimilar = s => s.status === 'off' ? t('这次启动没有开相
 // ---------- 找回画师（docs/PROVENANCE.md 第 8 节） ----------
 export const PROV_ACTIVE = ['running', 'stopping'];
 export const RUN_STATUS = {done: t('完成'), stopped: t('已停止'), failed: t('出错'), running: t('进行中')};
-let provenanceTimer = 0;
-export async function loadProvenance() {
-  clearTimeout(provenanceTimer);
+export const loadProvenance = poller(async fresh => {
   const was = state.provenance?.state?.status;
-  try { state.provenance = await api('/api/provenance'); } catch {
+  let answer; try { answer = await api('/api/provenance'); } catch {
+    if (!fresh()) return 0;
     // 一次读取失败不能结束对进行中运行的轮询：保留已显示的内容，再试一次。
-    if (PROV_ACTIVE.includes(was)) provenanceTimer = setTimeout(loadProvenance, 4000);
-    else { state.provenance = null; await changed.emit('provenance', {was, ended: false}); }
-    return;
+    if (PROV_ACTIVE.includes(was)) return 4000;
+    state.provenance = null; await changed.emit('provenance', {was, ended: false});
+    return 0;
   }
+  if (!fresh()) return 0;
+  state.provenance = answer;
   const s = state.provenance?.state?.status;
   await changed.emit('provenance', {was, ended: PROV_ACTIVE.includes(was) && !PROV_ACTIVE.includes(s)});
-  if (PROV_ACTIVE.includes(s)) provenanceTimer = setTimeout(loadProvenance, 1500);
-}
+  return PROV_ACTIVE.includes(s) ? 1500 : 0;
+});
 // 启动（{action: 'start', allow_network}）或停止一次运行；两种情况都会再轮询。
 export async function provenanceAction(body) {
   try { state.provenance = await post('/api/provenance', body); } finally { loadProvenance(); }
@@ -249,19 +244,15 @@ function humanSummary(job) {
   return job.result?.undo != null ? t('人工结论已导入。') : t('人工结论导入完成，没有新内容。');
 }
 // 几次轮询会重叠（启动的回应、定时器、取消）：更早的回应最后才到时不能让状态倒退，页面之后换了会话的回应丢掉（#34）。
-let importTimer = null, importPoll = 0;
-export async function pollImports() {
-  clearTimeout(importTimer);
-  const poll = ++importPoll, token = session.token;
-  try {
-    const job = await api('/api/imports');
-    if (poll !== importPoll || token !== session.token) return;
-    const was = state.importTask;
-    state.importTask = job;
-    await changed.emit('import', {was: was?.status, ended: IMPORT_ACTIVE.includes(was?.status) && was.id === job.id && !IMPORT_ACTIVE.includes(job.status)});
-    if (IMPORT_ACTIVE.includes(job.status)) importTimer = setTimeout(pollImports, 700);
-  } catch { if (poll === importPoll && token === session.token) importTimer = setTimeout(pollImports, 5000); }
-}
+export const pollImports = poller(async fresh => {
+  const token = session.token, current = () => fresh() && token === session.token;
+  let job; try { job = await api('/api/imports'); } catch { return current() ? 5000 : 0; }
+  if (!current()) return 0;
+  const was = state.importTask;
+  state.importTask = job;
+  await changed.emit('import', {was: was?.status, ended: IMPORT_ACTIVE.includes(was?.status) && was.id === job.id && !IMPORT_ACTIVE.includes(job.status)});
+  return IMPORT_ACTIVE.includes(job.status) ? 700 : 0;
+});
 // 已启动的导入（POST /api/libraries/import 的回应）立即显示，并一直轮询到它结束。
 export function importStarted(task) { state.importTask = task; changed.emit('import', {was: undefined, ended: false}); pollImports(); }
 export async function cancelImport() {

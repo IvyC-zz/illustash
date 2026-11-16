@@ -1,6 +1,7 @@
 // 详情面板里的画师（桌面布局，#199）：只在找到时显示，以及点击即授权的查找。
 import {esc, number} from '../core/format.js';
 import {t, tb} from '../core/i18n.js';
+import {poller} from '../core/poll.js';
 import {hashFor} from '../core/route.js';
 import {api, session} from '../core/session.js';
 import {state} from '../core/state.js';
@@ -10,7 +11,6 @@ import {toast} from './dom.js';
 // ---------- 画师（provenance/，这里只读）：只在找到时显示，从不显示成空栏 ----------
 // ---------- 按需查找画师（docs/PROVENANCE.md 第 9 节）：点击即授权这一次查找 ----------
 const LOOKUP_NOTE = t('查找画师会把所选图片的像素哈希和 IQDB 签名（一串文本，不是图片）发给 Danbooru，按结果显示画师和原帖。\n「找 TA 的其他图」会下载这位画师公开作品的小缩略图，只在本机比对；缩略图比完就删，只留比对用的签名。\n\n以后点这两个按钮不再提示。继续吗？');
-let lookupTimer = null;
 async function lookupAllowed() {
   try { if (localStorage.getItem('artistLookupOk')) return true; } catch {}
   if (!await confirmAction(LOOKUP_NOTE, t('查找画师'))) return false;
@@ -22,19 +22,21 @@ async function artistLookup(body, label, after) {
   if (!await lookupAllowed() || token !== session.token) return;
   try { await api('/api/provenance', {method: 'POST', body: JSON.stringify(body), headers: {'X-CSRF-Token': token}}); } catch (err) { toast(err.message); return; }
   toast(label);
-  clearTimeout(lookupTimer);
-  const poll = async () => {
-    let p;
-    try { p = await api('/api/provenance'); } catch { lookupTimer = setTimeout(poll, 2000); return; }
-    const s = p.state || {};
-    if (['running', 'stopping'].includes(s.status)) { lookupTimer = setTimeout(poll, 1500); return; }
-    const found = s.found || 0;
-    toast(['done', 'stopped'].includes(s.status) ? (found ? t('找到 {n} 张图的画师', {n: number(found)}) : t('没有找到新的画师'))
-      : t('查找没有完成：{reason}', {reason: tb(s.reason) || s.status}));
-    after?.(found);
-  };
-  lookupTimer = setTimeout(poll, 1500);
+  lookupAfter = after; lookupPoll.later(1500);
 }
+// 等这次查找结束（1.5 s 一次，读失败 2 s 后再试），然后说结果、交给 after。新的查找替换旧的（只等最后一次）。
+let lookupAfter = null;
+const lookupPoll = poller(async fresh => {
+  const p = await api('/api/provenance');
+  if (!fresh()) return 0;
+  const s = p.state || {};
+  if (['running', 'stopping'].includes(s.status)) return 1500;
+  const found = s.found || 0;
+  toast(['done', 'stopped'].includes(s.status) ? (found ? t('找到 {n} 张图的画师', {n: number(found)}) : t('没有找到新的画师'))
+    : t('查找没有完成：{reason}', {reason: tb(s.reason) || s.status}));
+  lookupAfter?.(found);
+  return 0;
+}, {retry: 2000});
 export const findArtists = (ids, after) => artistLookup({action: 'lookup', ids}, ids.length > 1 ? t('正在查找 {n} 张图的画师…', {n: number(ids.length)}) : t('正在查找画师…'), after);
 export const findArtistWorks = (artist, name, after) => artistLookup({action: 'artist', artist}, t('正在找 {name} 的其他图…', {name: name || t('这位画师')}), after);
 export function artistSection(d) {
