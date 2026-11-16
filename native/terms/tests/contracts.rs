@@ -406,6 +406,7 @@ fn artist_directory_contract() {
              UNION ALL SELECT 'wd_rating','explicit',id,'test' FROM terms WHERE key='dir-explicit';
          INSERT INTO assets(uuid,filename,width,height,added_at) VALUES
              ('dir-safe-a','a.png',10,10,'2026-10-01'),('dir-safe-z','z.png',10,10,'2026-10-01'),
+             ('dir-safe-b','b.png',10,10,'2026-10-03'),
              ('dir-adult','r.png',10,10,'2026-10-02'),('dir-hidden','h.png',10,10,'2026-10-03'),
              ('dir-excluded','e.png',10,10,'2026-10-04'),('dir-maybe','m.png',10,10,'2026-10-05'),
              ('dir-rejected','n.png',10,10,'2026-10-06'),('dir-removed','x.png',10,10,'2026-10-07');
@@ -419,10 +420,10 @@ fn artist_directory_contract() {
              SELECT a.id,t.id,CASE a.key WHEN 'dir-maybe' THEN 'maybe'
                                          WHEN 'dir-rejected' THEN 'rejected'
                                          WHEN 'dir-safe-a' THEN 'confirmed' ELSE 'machine' END
-             FROM term_assets a JOIN terms t ON t.key='dir-a' WHERE a.key LIKE 'dir-%';
+             FROM term_assets a JOIN terms t ON t.key='dir-a' WHERE a.key LIKE 'dir-%' AND a.key<>'dir-safe-b';
          INSERT INTO term_projection(asset_id,term_id,state)
              SELECT a.id,t.id,'machine' FROM term_assets a JOIN terms t
-                 ON (t.key='dir-b' AND a.key IN ('dir-safe-a','dir-adult'))
+                 ON (t.key='dir-b' AND a.key IN ('dir-safe-b','dir-adult'))
                  OR (t.key IN ('dir-c','dir-explicit') AND a.key='dir-adult');
          INSERT INTO term_projection(asset_id,term_id,state)
              SELECT a.id,t.id,'maybe' FROM term_assets a JOIN terms t ON t.key='dir-d' WHERE a.key='dir-maybe';",
@@ -465,7 +466,7 @@ fn artist_directory_contract() {
     }
     for (order, expected) in [
         ("count", ["dir-a", "dir-b", "dir-c"]),
-        ("recent", ["dir-a", "dir-b", "dir-c"]),
+        ("recent", ["dir-b", "dir-a", "dir-c"]),
         ("name", ["dir-b", "dir-a", "dir-c"]),
     ] {
         assert_eq!(page_ids(&get(&format!("/api/artist-directory?order={order}"))), expected);
@@ -517,7 +518,7 @@ fn benchmark_artist_directory() {
              FROM seq;
          INSERT INTO term_assets(namespace,key) SELECT 'library',printf('directory-%05d',i) FROM seq;
          CREATE TEMP TABLE synthetic AS
-             SELECT i,a.id,(i*7919)%50000 FROM seq JOIN term_assets a ON a.namespace='library' AND a.key=printf('directory-%05d',i);
+             SELECT i,a.id,(i*7919)%50000 AS permuted FROM seq JOIN term_assets a ON a.namespace='library' AND a.key=printf('directory-%05d',i);
          INSERT INTO terms(key,kind,origin)
              SELECT printf('directory-artist-%04d',i),'artist','synthetic' FROM seq WHERE i<4000;
          INSERT INTO term_names(term_id,value,role,source)
