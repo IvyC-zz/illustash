@@ -507,7 +507,9 @@ fn artist_directory_contract() {
 #[test]
 #[ignore = "release HTTP benchmark; run with collab_run.py timing"]
 fn benchmark_artist_directory() {
-    assert!(!cfg!(debug_assertions), "benchmark must be compiled --release");
+    if cfg!(debug_assertions) {
+        panic!("benchmark must be compiled --release");
+    }
     let category = "artist-directory-benchmark";
     let (_scratch, root, package) = materialize(&load("http_api"), category);
     migrate_fixture_terms(&package, category);
