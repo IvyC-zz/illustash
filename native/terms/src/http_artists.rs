@@ -125,8 +125,12 @@ fn directory_name(c: &Connection) -> Result<String> {
         let pixiv: Option<String> = ctx.get(4)?;
         Ok(display_name(ctx.get(0)?, linked_name.as_deref(), x.as_deref(), danbooru.as_deref(), pixiv.as_deref()))
     })?;
+    // 查当前画师在该站的链接，再对少量 key 排序，避免为了省排序而遍历整个站点的账号索引。
     let first_link = |system| {
-        format!("(SELECT l.key FROM term_links l WHERE l.term_id=t.id AND l.system='{system}' ORDER BY l.key LIMIT 1)")
+        format!(
+            "(SELECT l.key FROM term_links l INDEXED BY term_links_term
+              WHERE l.term_id=t.id AND l.system='{system}' ORDER BY l.key LIMIT 1)"
+        )
     };
     Ok(format!(
         "casefold(artist_display_name({CORE_NICKNAME},{},{},{},{}))",
