@@ -241,7 +241,10 @@ export async function editProfile(c) {
     <div class="field"><span>${t('别名')}</span><div class="alias-box" id="pfAliases"></div><input id="pfAlias" maxlength="120" placeholder="${t('输入别名后按回车，搜索时都能找到')}">
       <small>${p.other_aliases ? t('另有 {n} 个来自 Danbooru 等来源的别名，会自动更新', {n: number(p.other_aliases)}) : ''}</small></div>
     <label class="field"><span>${t('所属作品')}</span>${p.oc ? `<small>${t('原创角色不属于任何作品')}</small>` : `<div class="combo"><input id="pfWork" autocomplete="off" placeholder="${t('搜索作品，找不到可以新建')}"><div class="combo-menu" id="pfWorkMenu" hidden></div></div><small id="pfWorkNote"></small>`}</label>`;
-  const d = openDialog({title: t('编辑资料'), body, backdropClose: false, focus: !p.label_only && !p.tag ? '#pfTag' : '#pfName',
+  // 填了内容（和打开时不一样，或输入框里还有没按回车、没选中的字）时 Esc 先确认（#422 的 2-20）。
+  const typed = () => !!q('#pfAlias').value.trim() || !!q('#pfTag') && q('#pfTag').value !== (draft.tag ? draft.tag.replaceAll('_', ' ') : '')
+    || !!q('#pfWork') && q('#pfWork').value !== (draft.work?.label || '');
+  const d = openDialog({title: t('编辑资料'), body, backdropClose: false, focus: !p.label_only && !p.tag ? '#pfTag' : '#pfName', dirty: () => Object.keys(changes()).length > 1 || typed(),
     actions: `<button type="button" class="quiet" data-close>${t('取消')}</button><button class="primary" id="pfSave">${t('保存')}</button>`});
   const close = () => d.close();
   const q = sel => d.querySelector(sel);
@@ -264,9 +267,8 @@ export async function editProfile(c) {
     text => remoteNames('/api/works?' + new URLSearchParams({q: text, remote: 1})).then(r => r.found ? {found: r.found.map(w => ({tag: w.tag, label: workName(w.tag) || w.tag, detail: w.tag, extra: t('D 站 {n}', {n: number(w.posts)})}))} : r),
     text => text ? [{label: '', items: [{create: text, label: t('新建作品「{name}」', {name: text}), detail: t('只在本地')}]}] : []),
     r => { draft.work = r; workNote(); });
-  q('form').onsubmit = async e => {
-    e.preventDefault();
-    if (q('#pfSave').disabled) return;  // 同一时间只保存一次：双击不会多出第二个作品或资料
+  // 要保存的改动：只有 entity 一项就是没改。
+  function changes() {
     const body = {entity: p.id};
     const name = q('#pfName').value.trim(); if (name !== p.user_name) body.name = name;
     if (JSON.stringify(draft.aliases) !== JSON.stringify(p.aliases)) body.aliases = draft.aliases;
@@ -276,6 +278,12 @@ export async function editProfile(c) {
     if (q('#pfWork') && (draft.work ? !draft.work.id || draft.work.id !== p.work_id : !!p.work_id)) {
       body.work = !draft.work ? '' : draft.work.create ? {create: draft.work.create} : draft.work.tag ? {tag: draft.work.tag} : draft.work.id;
     }
+    return body;
+  }
+  q('form').onsubmit = async e => {
+    e.preventDefault();
+    if (q('#pfSave').disabled) return;  // 同一时间只保存一次：双击不会多出第二个作品或资料
+    const body = changes();
     if (Object.keys(body).length === 1) { close(); return; }
     q('#pfSave').disabled = true;
     try {

@@ -19,7 +19,7 @@ import {renderChrome, renderHeading} from './shell.js';
 import {findArtists} from './artists.js';
 import {answerAsk, closeInspector, closeViewer, ensureVisible, indexOf, inspect, openViewer, pickAlternative, showViewer, singleAction, step, zoomView} from './detail.js';
 import {jumpToCharacter, markOc, newIds, openPicker, openRelate, targets} from './palette.js';
-import {createLayer} from './overlay.js';
+import {createLayer, inPopover, popoverOpen} from './overlay.js';
 
 // ---------- 加载图片 ----------
 // 缩放是一个连续的目标列宽；网格对齐到整列，并在两者之间做动画。
@@ -445,7 +445,7 @@ function autoScroll() {
 export function renderSelection() {
   syncCards();
   const n = selCount(), bar = $('selectionBar'), r = state.route, kind = viewOf(r).bar;   // 选择栏的种类由页面登记
-  bar.hidden = !n; if (!n) { state.armed = null; return; }
+  bar.hidden = !n; markDetailKeys(); if (!n) { state.armed = null; return; }
   const big = n > 500, arm = key => state.armed === key ? ` armed` : '';
   const count = `<button class="icon" id="clearSel" title="${t('取消选择（Esc）')}">×</button><span class="sel-count">${state.sel.all ? t('已选全部 {n} 张', {n: number(n)}) : t('已选 {n} 张', {n: number(n)})}</span><div class="bar-divider"></div>`;
   let buttons = '';
@@ -482,6 +482,13 @@ export function renderSelection() {
   bar.innerHTML = count + buttons + (big ? `<span class="bar-note">${t('超过 500 张需再点一次确认')}</span>` : '');
   $('clearSel').onclick = quitSelecting;
   for (const b of bar.querySelectorAll('[data-act]')) b.onclick = () => runBarAction(b.dataset.act);
+}
+// 详情栏和选择栏同时在时，单图快捷键作用于选中的图（core/modes.js 的 keySelection）：详情栏按钮上的键标藏起来，
+// 免得「排除 X」看起来是排除详情栏里那张（#422 的 2-38，docs/WEB_UI_MAP.md 第 6 节）。问题条的 Y／N 照旧回答详情栏
+// 那张，只有随机抽查页（选择栏上有 Y／N）也藏。详情栏重画后（ui/detail.js 的 inspect）再调一次。
+export function markDetailKeys() {
+  const off = keySelection() > 0, audit = viewOf(state.route).bar === 'audit';
+  for (const k of $('inspector').querySelectorAll('kbd')) k.hidden = off && (audit || !k.closest('.ask-btns'));
 }
 // 选中的图上的角色（只看已读到的图；全选时为 null）：all 是出现过的，common 是每张都有的，C 换掉的就是它（#399）。
 function selectedChars() {
@@ -553,6 +560,7 @@ function runBarAction(act) {
   else if (act === 'variant') openVariantMenu(payload);
   else if (act === 'tag') openTagPicker(payload, n, state.sel.all ? null : state.items.filter(x => x && isSelected(x.uuid)));
   else if (act === 'notlib') {
+    if (state.sel.all) { toast(t('全选时请进入角色页移出')); return; }   // 按钮这时是禁用的，⌫ 说一样的话
     const present = new Map(); for (const id of state.sel.ids) { const item = state.items.find(x => x?.uuid === id); for (const m of item?.memberships || []) present.set(m.id, m); }
     if (!present.size) { toast(t('所选图片还没有角色')); return; }
     openPicker({title: t('这些图不是…'), items: [...present.values()], sentence: e => t('把 {name} 从 {n} 张中移出', {name: e.name, n: number(n)}), pick: e => mutate('/api/change', {...payload(), action: 'rejected', entity: e.id}, false)});
@@ -699,7 +707,9 @@ function afterViewChange(relayout) {
   if (relayout && !pageOf(state.route).panel) { layout(); renderGrid(true); }
 }
 // 视图选项是非模态浮层：Esc、点外关闭由浮层管理器（ui/overlay.js）统一处理。
-const viewLayer = createLayer({kind: 'popover', id: 'view-options', el: () => $('viewPopover'), anchor: () => $('viewButton'), onDismiss: reason => toggleViewPop(false, reason)});
+// 打开时焦点进第一项，↑ ↓ 在各项之间移动（#422）。
+const viewLayer = createLayer({kind: 'popover', id: 'view-options', el: () => $('viewPopover'), anchor: () => $('viewButton'), menu: true, focusIn: 'first',
+  onDismiss: reason => toggleViewPop(false, reason)});
 function toggleViewPop(open = $('viewPopover').hidden, reason) {
   $('viewPopover').hidden = !open; $('viewButton').classList.toggle('on', open); $('viewButton').setAttribute('aria-expanded', open);
   if (open) { renderViewPop(); viewLayer.open(); } else viewLayer.close(reason);
@@ -727,6 +737,9 @@ export function renderHelpKeys() {
   const text = x => typeof x === 'function' ? x() : x;
   $('helpKeys').innerHTML = SHORTCUTS.map(s => `<dt>${esc(platformText(text(s.keys)))}</dt><dd>${esc(platformText(s.does()))}</dd>`).join('');
 }
+
+// 焦点在这些控件上时 Enter、Space 交给控件自己（链接另外只认 Enter）。
+const ACTIVATES = 'button,summary,[role=button],[role=switch],[role=menuitem],[role=tab]';
 
 // 页面这一部分注册的处理函数。页面启动时调用一次。
 export function wireGrid() {
@@ -811,14 +824,20 @@ export function wireGrid() {
       else e.target.blur();
       return;
     }
+    // 焦点在按钮、开关、链接上时，Enter、Space 归它自己（#422 的 2-5）：链接只认 Enter，Space 照常是页面的快捷键。
+    // 网格卡片不拿焦点（焦点在 #viewport 上），不受影响。
+    if (!mod && (e.key === 'Enter' || e.key === ' ') && e.target.matches?.(e.key === 'Enter' ? ACTIVATES + ',a[href]' : ACTIVATES)) return;
     if (mod && key === 'z') { e.preventDefault(); undo(); return; }
+    // 焦点在开着的非模态浮层（任务面板、菜单……）里：按键归浮层自己的控件，单键快捷键不响应（#422 的 2-9、2-10）。
+    if (inPopover(e.target)) return;
     // ⌘A 是选择栏的快捷键：大图打开时选择栏被盖住，不响应。
     if (mod && key === 'a' && grid) { e.preventDefault(); if (!m.viewer) selectAll(); return; }
     // 浮层（含大图）的 Esc 已由浮层管理器处理；走到这里说明栈是空的，接着关详情栏、取消选择。
     if (e.key === 'Escape') { if (m.detail) closeInspector(); else quitSelecting(); return; }
     if (key === 'r' && !mod && !pageOf(state.route).panel) { e.preventDefault(); toggleFit(); return; }
     if (key === 'h' && !mod) { e.preventDefault(); setNsfw(state.nsfw === 'hide' ? '' : 'hide'); return; }
-    if (e.key === '/' && $('search')) { e.preventDefault(); $('search').focus(); return; }
+    // /：聚焦本页的搜索框，图库一类页面是 #search，资料库是 #charSearch（#422）。
+    if (e.key === '/' && ($('search') || $('charSearch'))) { e.preventDefault(); ($('search') || $('charSearch')).focus(); return; }
     const n = keySelection(), character = !!state.route.char;
     if ((key === 'y' || key === 'n') && !mod && !edits.busy && view.bar === 'audit' && n) { e.preventDefault(); answerAudit(key === 'y'); return; }
     if ((key === 'y' || key === 'n') && !mod && !edits.busy && state.question && [state.focused, m.viewer && state.viewerItem?.uuid].includes(state.question.ident)) { e.preventDefault(); answerAsk(key === 'y' ? 'yes' : 'no'); return; }
@@ -828,6 +847,8 @@ export function wireGrid() {
     if (!grid && !m.viewer && !m.detail) return;
     if (e.key === ' ') { e.preventDefault(); if (m.viewer) closeViewer(); else openViewer(grid ? viewerTarget() : indexOf(state.focused)); return; }
     if (['ArrowLeft', 'ArrowRight', 'ArrowUp', 'ArrowDown'].includes(e.key)) {
+      // 有非模态浮层开着时方向键不动网格（菜单的 ↑ ↓ 由浮层管理器先处理，#422 的 2-9）。
+      if (popoverOpen()) return;
       if (!grid) { if (e.key === 'ArrowLeft' || e.key === 'ArrowRight') { e.preventDefault(); step(e.key === 'ArrowLeft' ? -1 : 1); } return; }
       e.preventDefault();
       const from = state.cursor < 0 ? 0 : state.cursor;
@@ -835,6 +856,8 @@ export function wireGrid() {
       // 大图里只有 ← → 翻页；详情栏里 ↑ ↓ 也翻到上一行、下一行的图。
       if (m.viewer || m.detail) { if (Math.abs(delta) === 1 || !m.viewer) step(delta); return; }
       setCursor(Math.max(0, Math.min(state.total - 1, (state.cursor < 0 ? 0 : state.cursor + delta))));
+      // 用方向键在网格里走时焦点回到网格：鼠标点过的按钮（WebView2 里点击会让按钮拿焦点）不再接着收 Enter、Space。
+      if (!$('viewport').contains(document.activeElement)) $('viewport').focus({preventScroll: true});
       if (e.shiftKey && state.items[state.cursor]) { setSelected(state.items[state.cursor].uuid, true); renderSelection(); }
       if (!state.items[state.cursor]) loadPage(Math.floor(state.cursor / PAGE) * PAGE);
       ensureVisible(state.cursor); return;
@@ -846,11 +869,11 @@ export function wireGrid() {
     if (remove || ['c', 'a', 't', 'g', 'x', 's'].includes(key)) {
       if (remove) e.preventDefault();
       const item = n ? null : currentItem(); if (!n && !item) return;   // 没有选中也没有当前图：什么都不做
-      const act = keyAction(remove ? 'remove' : key, {view, char: character, n, item});
+      const act = keyAction(remove ? 'remove' : key, {view, char: character, n, item, maybe: !!state.route.maybe, variants: !!state.char?.variants?.length});
       if (act?.bar) runBarAction(act.bar);
       else if (act) singleAction(act.single);
-      // 整理页里这个键没有对应的动作：说一声，不再静默吞掉。
-      else if (view.click === 'cleanup') toast(t('这一页没有 {key} 对应的操作', {key: remove ? '⌫' : key.toUpperCase()}));
+      // 选择栏上没有这个键的按钮，或整理页里这个键没有对应的动作：说一声，不再静默吞掉（#422 的 2-21）。
+      else if (n || view.click === 'cleanup') toast(t('这一页没有 {key} 对应的操作', {key: remove ? '⌫' : key.toUpperCase()}));
       return;
     }
     if (/^[1-9]$/.test(e.key) && !n && state.detail && (m.detail || m.viewer)) { pickAlternative(state.detail, state.detail.uuid, Number(e.key) - 1, e.altKey); return; }

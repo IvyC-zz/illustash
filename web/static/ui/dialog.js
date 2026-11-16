@@ -12,7 +12,8 @@ export {isBackdropClick};
 // 带输入或选项的表单保持不关，免得误点丢掉填的东西；每个调用点都要写明属于哪一类。
 // `focus` 是拿焦点的控件的选择器（默认：浏览器的第一个可聚焦控件，或 [autofocus]）。
 // `onClose(d)` 在关闭时运行（在这里读 d.returnValue 和表单）；随后对话框被移除。
-export function openDialog({title, body = '', actions = '', cls = '', backdropClose = false, focus = '', onClose} = {}) {
+// `dirty()` 返回真时（表单填了还没保存），Esc 先问一句「放弃改动？」，确认了才关（#422）；×、取消照常直接关。
+export function openDialog({title, body = '', actions = '', cls = '', backdropClose = false, focus = '', onClose, dirty} = {}) {
   const d = document.createElement('dialog'); d.className = ('modal ' + cls).trim();
   d.setAttribute('aria-label', title);
   d.innerHTML = `<form method="dialog">
@@ -21,7 +22,12 @@ export function openDialog({title, body = '', actions = '', cls = '', backdropCl
   d.querySelector('h2').textContent = title;
   d.onclick = e => { if (e.target !== d && e.target.closest('[data-close]')) d.close(); };
   d.onclose = () => { try { return onClose?.(d); } finally { d.remove(); } };
-  document.body.append(d); openModal(d, {backdropClose, id: 'dialog'});
+  const onDismiss = dirty && (() => {
+    if (!dirty()) { d.close(); return; }
+    confirmAction(t('填写的内容还没有保存，关掉后不会保留。'), t('放弃改动？'), t('放弃改动')).then(yes => { if (yes) d.close(); });
+    return false;
+  });
+  document.body.append(d); openModal(d, {backdropClose, id: 'dialog', onDismiss});
   if (focus) d.querySelector(focus)?.focus?.();
   return d;
 }

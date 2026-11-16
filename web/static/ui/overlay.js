@@ -9,6 +9,8 @@
 //   overlay  盖满页面的层：导览、大图。没有点外关闭。
 // 栈按打开的先后排；Esc 只关栈顶一个，栈是空的就放行（页面自己的 Esc 兜底链接着走：输入框失焦 → 详情栏 → 取消选择）。
 // 层级（z-index）仍由 app.css 的 --z-* 令牌决定，这里不写：原生 modal 在浏览器顶层，高于所有 z-index。
+// 焦点（#422）：层打开时可以把焦点移进去（focusIn）；菜单（menu）里 ↑ ↓ Home End 在各项之间移动；盖满页面的层声明
+// 它盖住了哪些元素（inert），开着时这些元素设成 inert，Tab 走不到看不见的按钮上。
 
 import {composing} from '../core/keys.js';
 
@@ -16,6 +18,9 @@ const stack = [];
 let wired = null;
 const get = x => (typeof x === 'function' ? x() : x);
 const TYPING = 'input,textarea,select,[contenteditable]';
+// 菜单里能拿焦点的项；Home、End 在这几种输入框里留给光标。
+const ITEMS = 'button:not([disabled]),a[href],input:not([disabled]):not([type=hidden]),select:not([disabled]),[tabindex]:not([tabindex="-1"])';
+const CARET = 'input:not([type=range]):not([type=checkbox]):not([type=radio]),textarea';
 
 // 点在对话框自己的背景上（<dialog> 元素本身、在框外）。
 export function isBackdropClick(d, e) {
@@ -31,18 +36,60 @@ const alive = layer => {
   const el = get(layer.el);
   return !!el && el.isConnected !== false && !el.hidden && !el.closest?.('[hidden]') && !(layer.kind === 'modal' && el.open === false);
 };
-const prune = () => { for (let i = stack.length - 1; i >= 0; i--) if (!alive(stack[i])) stack.splice(i, 1); };
+const prune = () => { let gone = false; for (let i = stack.length - 1; i >= 0; i--) if (!alive(stack[i])) { stack.splice(i, 1); gone = true; } if (gone) syncInert(); };
 
+// 盖满页面的层开着时，它声明盖住的元素设成 inert；在它上面又开的层（例如大图上开的任务面板）所在的元素不设。
+// 由这里设上的才由这里去掉。
+const inerted = new Set();
+function syncInert() {
+  const want = new Set();
+  stack.forEach((layer, i) => {
+    if (!layer.inert || !alive(layer)) return;
+    const above = stack.slice(i + 1).map(x => get(x.el)).filter(Boolean);
+    for (const el of get(layer.inert) || []) if (el && !el.contains?.(get(layer.el)) && !above.some(x => el.contains?.(x))) want.add(el);
+  });
+  for (const el of inerted) if (!want.has(el)) { el.inert = false; inerted.delete(el); }
+  for (const el of want) if (!inerted.has(el)) { el.inert = true; inerted.add(el); }
+}
+// 层里现在能拿焦点的项（看得见的）。
+const items = el => [...(el?.querySelectorAll?.(ITEMS) || [])].filter(x => !x.closest('[hidden]') && (!x.getClientRects || x.getClientRects().length));
+function focusInto(layer) {
+  const el = get(layer.el); if (!el) return;
+  const target = layer.focusIn === 'first' ? items(el)[0] || el : el;
+  target.focus?.({preventScroll: true});
+}
+// 菜单里的 ↑ ↓（循环）、Home、End。焦点不在菜单里时，↓ 和 Home 进第一项，↑ 和 End 进最后一项。
+function moveInMenu(layer, e) {
+  const list = items(get(layer.el)); if (!list.length) return false;
+  const at = list.indexOf(e.target), key = e.key;
+  if (at < 0 && e.target?.closest?.(TYPING)) return false;   // 焦点在菜单外的输入框里：方向键归输入框
+  if ((key === 'Home' || key === 'End') && at >= 0 && e.target.matches?.(CARET)) return false;
+  const next = key === 'Home' ? 0 : key === 'End' ? list.length - 1
+    : at < 0 ? (key === 'ArrowDown' ? 0 : list.length - 1) : (at + (key === 'ArrowDown' ? 1 : list.length - 1)) % list.length;
+  list[next].focus({preventScroll: false});
+  return true;
+}
+const MENU_KEYS = ['ArrowDown', 'ArrowUp', 'Home', 'End'];
+
+// onDismiss 返回 false 表示这一层没有关（例如先问一句「放弃改动？」），它留在栈里。
 function dismiss(layer, reason) {
+  let kept = false;
   try {
-    if (layer.onDismiss) layer.onDismiss(reason);
+    if (layer.onDismiss) kept = layer.onDismiss(reason) === false;
     else if (layer.kind === 'modal') get(layer.el).close();
     else if (get(layer.el)) get(layer.el).hidden = true;
-  } finally { layer.close(reason); }
+  } finally { if (!kept) layer.close(reason); }
 }
 
 function onKeydown(e) {
-  if (e.key !== 'Escape' || composing(e)) return;  // 组字时的 Esc 是取消组字，不关浮层
+  if (composing(e)) return;  // 组字时的 Esc 是取消组字，不关浮层；方向键是选字
+  if (MENU_KEYS.includes(e.key) && !e.metaKey && !e.ctrlKey && !e.altKey) {
+    prune();
+    const top = stack[stack.length - 1];
+    if (top?.menu && moveInMenu(top, e)) { e.preventDefault(); e.stopImmediatePropagation(); }
+    return;
+  }
+  if (e.key !== 'Escape') return;
   prune();
   const top = stack[stack.length - 1];
   if (!top) return;
@@ -77,8 +124,11 @@ export function wireOverlays() {
 //   outside      点外关闭，popover 默认开，其余默认关
 //   backdropClose  modal 点背景是否关闭。默认不关；点背景关的是只读或确认类，带输入的表单要保持不关
 //   yieldToInput 焦点在层外的输入框时，Esc 不关这一层（只有大图用）
+//   focusIn      打开时把焦点移进去：'first' 第一个能拿焦点的项，'self' 层自己（要有 tabindex="-1"）；默认不动
+//   menu         是菜单：↑ ↓ Home End 在各项之间移动，网格的键盘处理收不到这几个键
+//   inert        盖满页面的层盖住的元素（元素数组或返回数组的函数）：开着时设成 inert
 //   onDismiss(reason)  Esc / 点外 / 点背景时怎样关掉它（reason: 'escape' | 'outside' | 'backdrop'）；
-//                modal 默认 close()，其余默认 hidden = true
+//                modal 默认 close()，其余默认 hidden = true。返回 false 表示没有关，层留在栈里
 // close(reason) 的 reason 决定焦点怎么办：'escape'、'api'（默认，选了一项之类）把焦点还给打开它的地方；
 // 'outside'、'silent'（页面重画导致）不动焦点。
 // 返回的层有 open()、close(reason)、isOpen。open() / close() 都可以重复调用；其他途径关掉它时也要调 close()，
@@ -91,12 +141,15 @@ export function createLayer(spec) {
       if (layer.isOpen) return layer;
       layer.opener = document.activeElement;
       stack.push(layer);
+      syncInert();
+      if (layer.focusIn) focusInto(layer);
       return layer;
     },
     close(reason = 'api') {
       const i = stack.indexOf(layer);
       if (i < 0) return;
       stack.splice(i, 1);
+      syncInert();
       // 对话框关闭时浏览器自己归还焦点；点外关闭时用户已经点向别处；页面重画时（'silent'）不该抢焦点。
       // 其余情况（Esc、选了一项）把焦点还给打开它的地方。
       if (layer.kind === 'modal' || reason === 'outside' || reason === 'silent') return;
@@ -110,10 +163,11 @@ export function createLayer(spec) {
 }
 
 // 打开一个 <dialog> 作为模态对话框，并登记进栈；对话框关闭时（任何途径）自动出栈。
-export function openModal(dialog, {backdropClose = false, id = ''} = {}) {
+// onDismiss 同 createLayer：Esc、点背景时代替 close() 运行，返回 false 时对话框留着。
+export function openModal(dialog, {backdropClose = false, id = '', onDismiss} = {}) {
   const known = stack.find(layer => layer.el === dialog);
   if (known) return known;
-  const layer = createLayer({kind: 'modal', id, el: dialog, backdropClose});
+  const layer = createLayer({kind: 'modal', id, el: dialog, backdropClose, ...(onDismiss ? {onDismiss} : {})});
   dialog.showModal();
   layer.open();
   dialog.addEventListener('close', () => layer.close('api'), {once: true});
@@ -121,7 +175,11 @@ export function openModal(dialog, {backdropClose = false, id = ''} = {}) {
 }
 
 // 清空栈、忘掉已挂的监听。只给测试用：每个测试换一个新的 document。
-export function resetLayers() { stack.length = 0; wired = null; }
+export function resetLayers() { stack.length = 0; wired = null; inerted.clear(); }
+// 有没有开着的非模态浮层（菜单、任务面板……）：开着时网格的键盘处理不吃方向键（#422）。
+export const popoverOpen = () => { prune(); return stack.some(layer => layer.kind === 'popover'); };
+// target 在不在一个开着的非模态浮层里：在的话按键归浮层自己的控件，网格的单键快捷键不响应。
+export const inPopover = target => { prune(); return stack.some(layer => layer.kind === 'popover' && get(layer.el)?.contains?.(target)); };
 // 栈里现在有哪些层（由下到上的 id），给测试和调试看。
 export const layerIds = () => { prune(); return stack.map(layer => layer.id); };
 // 关栈顶一层，与按 Esc 相同；栈空返回 false。

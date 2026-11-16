@@ -52,10 +52,15 @@ export function viewerTarget(s = state) {
 export const detailAfterViewer = (s = state) => s.focused && s.viewerItem?.uuid && s.viewerItem.uuid !== s.focused ? s.viewerItem.uuid : null;
 
 // 单图／选择快捷键在这一页做什么。key：'remove'（⌫、Delete）、'c'、'a'、't'、'g'、'x'、's'。
-// ctx：view 页面注册表里本页的条目（core/pages.js 的 viewOf），char 是否在角色页，n 作用于几张选中的图
-// （keySelection），item 当前图（没有选中时用，决定 ⌫ 有没有可移出的角色）。
+// ctx：view 页面注册表里本页的条目（core/pages.js 的 viewOf），char 是否在角色页，maybe 是否在角色页的「可能也是 TA」，
+// variants 本页的角色有没有造型，n 作用于几张选中的图（keySelection），item 当前图（没有选中时用，决定 ⌫ 有没有
+// 可移出的角色）。
 // 返回 {bar: 动作}（交给选择栏的同名按钮）、{single: 动作}（作用于当前图），或 null：这一页没有对应的动作。
-export function keyAction(key, {view, char = false, n = 0, item = null}) {
+// 有选中时只返回本页选择栏上画着的按钮（ui/grid.js 的 renderSelection，docs/WEB_UI_MAP.md 第 4.1 节），选择栏上
+// 没有的键返回 null，由键盘处理提示「这一页没有对应的操作」（#422 的 2-21）。
+export function keyAction(key, {view, char = false, maybe = false, variants = false, n = 0, item = null}) {
+  // 选择栏里有「设为角色」的页：默认选择栏（图库、重复、相似组）和未识别一类。
+  const assigns = ['default', 'unmatched', 'skipped'].includes(view.bar);
   switch (key) {
     // 有选中时 ⌫ 交给选择栏里标着 ⌫ 的按钮：角色页「不是 TA」、默认选择栏（图库、重复、相似组）「不是…」；
     // 别的选择栏没有这个按钮。
@@ -65,10 +70,17 @@ export function keyAction(key, {view, char = false, n = 0, item = null}) {
     // C＝换成、A＝追加（用户 2026-11-14 定，#399）：图上已有角色时 C 换掉它，还没有角色时 C、A 都是设为角色。
     // 单图的「换成」在 singleAction 里看这张图有没有角色，没有就退成设为。有选中时：角色页换掉本页的角色；
     // 默认选择栏（图库、重复、相似组）换掉选中的图共同的角色（replace，没有角色时同样退成设为）；未识别一类的图
-    // 还没有角色，C 是设为。
-    case 'c': return n ? {bar: char ? 'swap' : view.bar === 'default' ? 'replace' : 'assign'} : {single: 'swap'};
-    case 'a': return n ? {bar: char ? 'also' : 'assign'} : {single: 'also'};
-    case 't': return char && n ? {bar: 'variant'} : null;
+    // 还没有角色，C 是设为。「可能也是 TA」、随机抽查、已排除、待确认的选择栏上没有这几个按钮。
+    case 'c':
+      if (!n) return {single: 'swap'};
+      if (char) return maybe ? null : {bar: 'swap'};
+      return view.bar === 'default' ? {bar: 'replace'} : assigns ? {bar: 'assign'} : null;
+    case 'a':
+      if (!n) return {single: 'also'};
+      if (char) return maybe ? null : {bar: 'also'};
+      return assigns ? {bar: 'assign'} : null;
+    // 造型按钮只在角色页、这个角色有造型时画出来。
+    case 't': return char && n && !maybe && variants ? {bar: 'variant'} : null;
     case 'g': return n ? {bar: 'tag'} : {single: 'tag'};
     case 'x': { const act = view.bar === 'excluded' ? 'include' : 'exclude'; return n ? {bar: act} : {single: act}; }
     // S：未识别一类是跳过；已跳过页是恢复到未识别，和已排除页的 X 恢复收录对称（#399）。
@@ -88,7 +100,7 @@ export function keyAction(key, {view, char = false, n = 0, item = null}) {
 //   does   做什么、在哪生效
 export const SHORTCUTS = [
   {keys: '⌘K', codes: ['k'], does: () => t('跳转到角色')},
-  {keys: '/', codes: ['/'], does: () => t('搜索图库')},
+  {keys: '/', codes: ['/'], does: () => t('搜索（图库、资料库）')},
   {keys: () => t('拖动 · Shift 点击'), codes: [], does: () => t('连续选择；在空白处拖动可框选')},
   {keys: '⌘A', codes: ['a'], does: () => t('选中全部符合条件的图片')},
   {keys: () => t('方向键'), codes: ['ArrowLeft', 'ArrowRight', 'ArrowUp', 'ArrowDown'],

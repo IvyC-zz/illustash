@@ -75,15 +75,22 @@ test('Space 打开哪一张：光标 ＞ 详情栏 ＞ 第一张', () => {
 
 // 快捷键表（docs/WEB_UI_MAP.md 第 5 节）：有选中时交给选择栏，没有时作用于当前图，没有对应动作时为 null。
 test('单图／选择快捷键在各页做什么', () => {
-  const P = pages.PAGES, C = pages.CHARACTER, act = (key, view, n, item = items[0], char = view === C) => modes.keyAction(key, {view, char, n, item});
+  const P = pages.PAGES, C = pages.CHARACTER, act = (key, view, n, item = items[0], char = view === C, more = {}) => modes.keyAction(key, {view, char, n, item, ...more});
   // 角色页
   assert.deepEqual(act('remove', C, 2), {bar: 'remove'});
   assert.deepEqual(act('remove', C, 0), {single: 'remove'});
   assert.deepEqual(act('c', C, 2), {bar: 'swap'});
   assert.deepEqual(act('c', C, 0), {single: 'swap'});
   assert.deepEqual(act('a', C, 2), {bar: 'also'});
-  assert.deepEqual(act('t', C, 2), {bar: 'variant'});
+  assert.deepEqual(act('t', C, 2, items[0], true, {variants: true}), {bar: 'variant'});
+  assert.equal(act('t', C, 2), null, 'no variants: the bar has no T button');
   assert.equal(act('t', C, 0), null);
+  // 角色页「可能也是 TA」：选择栏只有「是 TA」「不是 TA ⌫」和通用按钮，C、A、T 没有对应的按钮（#422 的 2-21）
+  const maybe = {maybe: true, variants: true};
+  for (const key of ['c', 'a', 't']) assert.equal(act(key, C, 2, items[0], true, maybe), null, key);
+  assert.deepEqual(act('remove', C, 2, items[0], true, maybe), {bar: 'remove'});
+  assert.deepEqual(act('x', C, 2, items[0], true, maybe), {bar: 'exclude'});
+  assert.deepEqual(act('c', C, 0, items[0], true, maybe), {single: 'swap'}, 'no selection: still the current image');
   assert.equal(act('s', C, 2), null);
   // 浏览页（图库、重复）
   for (const view of [P.library, P.duplicates]) {
@@ -109,8 +116,16 @@ test('单图／选择快捷键在各页做什么', () => {
   assert.deepEqual(act('s', P.skipped, 2), {bar: 'resume'});
   assert.deepEqual(act('s', P.skipped, 0), {single: 'resume'});
   for (const view of [P.excluded, P.pending, P.audit, P.library]) assert.equal(act('s', view, 1), null, view.name);
-  // 未识别一类的图还没有角色：C 是设为
-  for (const view of [P.unmatched, P.skipped, P.group]) assert.deepEqual(act('c', view, 2), {bar: 'assign'}, view.name);
+  // 未识别一类的图还没有角色：C 是设为，A 也是（#399）
+  for (const view of [P.unmatched, P.skipped, P.group]) {
+    assert.deepEqual(act('c', view, 2), {bar: 'assign'}, view.name);
+    assert.deepEqual(act('a', view, 2), {bar: 'assign'}, view.name);
+  }
+  // 已排除、待确认、随机抽查的选择栏上没有「设为角色」：有选中时 C、A 没有对应的动作（#422 的 2-21）；没有选中时照旧作用于当前图
+  for (const view of [P.excluded, P.pending, P.audit]) {
+    for (const key of ['c', 'a', 't']) assert.equal(act(key, view, 2), null, `${view.name} ${key}`);
+    assert.deepEqual(act('c', view, 0), {single: 'swap'}, view.name);
+  }
   // X：已排除页恢复收录，其余排除
   assert.deepEqual(act('x', P.excluded, 1), {bar: 'include'});
   assert.deepEqual(act('x', P.excluded, 0), {single: 'include'});
@@ -203,9 +218,17 @@ test('整理页里没有对应动作的键给出提示（已知问题 13）', as
   // 没有选中也没有当前图：什么都不做，也不提示
   reset({route: {page: 'unmatched'}});
   assert.equal(press('Backspace'), '');
-  // 浏览页不提示（规则只管整理页）
+  // 选择栏上没有这个键的按钮时，浏览页也提示（#422 的 2-21）；浏览页没有选中时不提示
   reset({route: {page: 'library'}, sel: pick('a')});
+  assert.equal(press('s'), '这一页没有 S 对应的操作');
+  reset({route: {page: 'library'}, cursor: 0});
   assert.equal(press('s'), '');
+  // 随机抽查、已排除的选择栏上没有「设为角色」：C、A 提示，不打开命令面板
+  for (const p of ['audit', 'excluded', 'pending']) {
+    reset({route: {page: p}, sel: pick('a')});
+    assert.equal(press('c'), '这一页没有 C 对应的操作', p);
+    assert.equal(press('a'), '这一页没有 A 对应的操作', p);
+  }
 });
 
 test('换页时关闭大图（已知问题 6）', async () => {
