@@ -164,7 +164,7 @@ fn wd_package(request: Request, host: &Host, received: u64, mut body: Json, tran
         if !matches!(&body, Json::Object(fields) if fields.len() == 1) {
             return failure(request, Error::invalid("未知参数"), true);
         }
-        match crate::app_platform::choose("models", true, &crate::platform_process::stopping, translate) {
+        match crate::app_platform::choose("wd-extension", true, &crate::platform_process::stopping, translate) {
             Ok(picked) => match picked.get("paths") {
                 Some(paths @ Json::Array(list)) if !list.is_empty() => body.set("paths", paths.clone()),
                 _ => return cancelled(request),
