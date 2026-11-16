@@ -210,4 +210,6 @@ export function wireHome() {
 }
 
 // 首页登记：渲染入口，以及数据变了之后怎么重画（撤销、同步到新图、改动之后保持滚动；切换 R18 重新读；视图选项只重排）。
-implement({home: {render: () => renderHome(), reveal: revealHome, refresh: why => { if (why === 'view') drawHome(); else renderHome(why !== 'nsfw' && why !== 'ask'); }}});
+// 后退回到首页（restore）时按上次读到的天数重读、不换「认一认」，好让 applyRoute 滚回原来的位置（#526）。
+implement({home: {render: ({restore} = {}) => renderHome(!!restore && home.days.length > 0), reveal: revealHome,
+  refresh: why => { if (why === 'view') drawHome(); else renderHome(why !== 'nsfw' && why !== 'ask'); }}});

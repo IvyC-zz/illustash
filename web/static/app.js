@@ -19,7 +19,7 @@ import {wireCatalog} from './ui/catalog.js';
 import {refreshMeta} from './core/meta.js';
 import {pageOf} from './core/pages.js';
 import {parseHash, stepHistory} from './core/route.js';
-import {applyRoute, navCount, wireShell} from './ui/shell.js';
+import {applyRoute, wireShell} from './ui/shell.js';
 import {renderGrid, undo, wireGrid} from './ui/grid.js';
 import {wirePalette} from './ui/palette.js';
 import {wireDetail} from './ui/detail.js';
@@ -61,7 +61,6 @@ $('sidebarToggle').onclick = () => { if (innerWidth <= 760) $('sidebar').classLi
     const bootNsfw = state.nsfw;
     const boot = await api('/api/bootstrap?' + new URLSearchParams({nsfw: bootNsfw})); adoptToken(boot.token); setLatest(boot.undo);
     if (boot.read_only) toast(boot.read_only);   // 图库没能切换到词条核心：只读
-    navCount('countLibrary', boot.total);
     window.splash?.status(t('正在整理 {n} 张图…', {n: number(boot.total)}));
     const meta = refreshMeta({boot: bootNsfw === state.nsfw ? boot : null});
     const first = parseHash();

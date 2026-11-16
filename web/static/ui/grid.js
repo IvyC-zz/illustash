@@ -1,7 +1,7 @@
 // 图片网格（桌面布局，#199）：分页加载图片、虚拟网格和它的缩放、选择、选择栏的操作、键盘快捷键、视图选项和 R18
 // 筛选。
 import {edits, setLatest, undoLatest, undoneText} from '../core/edits.js';
-import {esc, number, platformText, shortcut} from '../core/format.js';
+import {esc, isMac, number, platformText, shortcut} from '../core/format.js';
 import {t, tb} from '../core/i18n.js';
 import {composing} from '../core/keys.js';
 import {REASONS, nameWithWork} from '../core/labels.js';
@@ -10,7 +10,7 @@ import {learnerState, learningSettled, metaSoon, refreshMeta} from '../core/meta
 import {prefs} from '../core/prefs.js';
 import {SHORTCUTS, currentSource, keyAction, keySelection, modes, selectionSize, shownUuid, viewerTarget} from '../core/modes.js';
 import {keyScope, pageOf, viewOf} from '../core/pages.js';
-import {browsing, cleanup, defaultSort, hashFor} from '../core/route.js';
+import {browsing, cleanup, defaultSort, hashFor, stepHistory} from '../core/route.js';
 import {api, post, readError} from '../core/session.js';
 import {state} from '../core/state.js';
 import {offerWatch} from './catalog.js';
@@ -92,7 +92,8 @@ export async function reload(reset = false, place = null) {
     if (place) restorePlace(place);
     renderGrid(); updateCount(); renderSelection();
     $('empty').hidden = !!state.total;
-    $('empty').innerHTML = viewOf(state.route).empty?.(state.route) || '';
+    const view = viewOf(state.route), text = view.empty?.(state.route, {nsfw: state.nsfw}) || '', next = text && view.emptyNext?.(state.route);
+    $('empty').innerHTML = next ? `<div>${text}<div>${next}</div></div>` : text;
     renderHeading();
     if (state.route.char) refreshMaybe(gen);
   } catch (e) { if (e.name !== 'AbortError' && gen === state.generation && route === state.route) { error(e.message); $('resultCount').textContent = t('读取失败'); } }
@@ -242,8 +243,21 @@ async function refreshMaybe(gen) {
   if (count === null || doubt === null || gen !== state.generation || (count === state.maybeCount && doubt === state.doubtCount)) return;
   state.maybeCount = count; state.doubtCount = doubt; renderChrome();
 }
-// 相邻的组用不同的色相，这样一眼就能看出哪些是一对。
-function dupHue(key) { let h = 0; for (const ch of key) h = (h * 31 + ch.charCodeAt(0)) >>> 0; return h % 12 * 30; }
+// 重复页的角标颜色：同一组同色，列表里相邻的两组一定不同色（#386 的 2-14）。每组先按组的键取 12 种色相之一，和前一组
+// 撞色时往后错开 5 档；前一组要看它自己的颜色，所以从这一段连续读到的第一张往后推。按 dataVersion 缓存，新读到一页时重算。
+const hueOf = key => { let h = 0; for (const ch of key) h = (h * 31 + ch.charCodeAt(0)) >>> 0; return h % 12; };
+const dupHues = {version: -1, at: []};
+function dupHue(i) {
+  if (dupHues.version !== state.dataVersion) { dupHues.version = state.dataVersion; dupHues.at = []; }
+  const at = dupHues.at, grp = k => state.items[k]?.dup?.grp;
+  let j = i; while (j > 0 && at[j] === undefined && grp(j - 1) !== undefined) j--;
+  for (let k = j; k <= i; k++) {
+    if (at[k] !== undefined) continue;
+    const prev = k > 0 && grp(k - 1) !== undefined ? at[k - 1] : undefined, own = hueOf(grp(k));
+    at[k] = grp(k) === grp(k - 1) && prev !== undefined ? prev : own === prev ? (own + 5) % 12 : own;
+  }
+  return at[i] * 30;
+}
 // 随机抽查的卡片：图的角色标签浮在底部，正在抽查的那个排在最前并着色。悬停在标签上显示 ✓ / ✗：在抽查的标签上它们
 // 回答抽查，在其他标签上它们确认或去掉那个角色。
 function auditTags(item) {
@@ -267,7 +281,7 @@ function cardHTML(item, i) {
   // 随机抽查 / 未识别 是在小尺寸下快速浏览的：它们的单行角标一直保留到 70 px 的格子。
   if (card?.audit && item.audit && state.cellW >= 70) extra += auditTags(item);
   if (viewOpts.hints && !item.memberships.length && item.hint && state.cellW >= (card?.hintMin ?? 120)) extra += `<span class="chips"><button class="hint-add" data-hint title="${t('机器觉得可能是 {name}，点一下设为 TA（可撤销）', {name: esc(item.hint.name)})}">+ ${esc(short(item.hint.name))}</button></span>`;
-  if (card?.dup && item.dup) extra += `<span class="dup-badge" style="--dup-hue:${dupHue(item.dup.grp)}" title="${t('同一组共 {n} 份副本', {n: item.dup.size})}">${item.dup.pos}/${item.dup.size}</span>`;
+  if (card?.dup && item.dup) extra += `<span class="dup-badge" style="--dup-hue:${dupHue(i)}" title="${t('同一组共 {n} 份副本', {n: item.dup.size})}">${item.dup.pos}/${item.dup.size}</span>`;
   else if (item.dup && state.cellW >= 70) extra += `<span class="dup-badge folded" title="${t('共 {n} 份相同副本，操作会同步到全部', {n: item.dup.size})}">×${item.dup.size}</span>`;
   // 窄图显示第一个名字和数量，而不是把每个名字都截短；悬停显示全部。
   const names = item.memberships.map(m => m.name), narrow = state.fit && ratio * state.cellW * 4 / 3 < 170 && names.length > 1;
@@ -295,17 +309,20 @@ export function renderGrid(relayout = false) {
     state.gridKey = key;
     const existing = new Map([...grid.children].map(el => [Number(el.dataset.index), el]));
     const keep = new Set();
+    const dupCards = !!viewOf(state.route).card?.dup;
     const layoutKey = `${state.cols}:${state.cellW}:${state.rowH}:${state.gap}:${state.fit}:${state.route.page}:${state.route.char}:${state.route.maybe}:${state.route.reason}`;
     for (let i = rowStart(first); i < rowStart(last); i++) {
       const item = state.items[i];
       let el = existing.get(i);
-      if (el && el._item === item && el._layoutKey === layoutKey) {
+      // 重复页的角标颜色看前一组：前面一页后读到时颜色可能变，变了的卡片要重画。
+      const hue = dupCards && item?.dup ? dupHue(i) : null;
+      if (el && el._item === item && el._layoutKey === layoutKey && el._hue === hue) {
         const box = cardRect(i);
         for (const [k, value] of Object.entries(box)) if (el.style[k] !== `${value}px`) el.style[k] = `${value}px`;
         keep.add(el); continue;
       }
       const previous = el; el = document.createElement('div');
-      el._item = item; el._layoutKey = layoutKey;
+      el._item = item; el._layoutKey = layoutKey; el._hue = hue;
       if (previous) previous.replaceWith(el);
       else grid.insertBefore(el, [...grid.children].find(child => Number(child.dataset.index) > i) || null);
       keep.add(el);
@@ -464,8 +481,14 @@ function autoScroll() {
 }
 // ---------- 选择栏与操作 ----------
 // 导出给样式清单页调用（tools/styleguide/live.js，#352）：改名或改参数时，tools/check_styleguide.py 会报出来。
+// 浏览页的「选择」按钮：进了选择模式就显示按下的样子，再点一次退出（#386 的 2-27）。整理页上它是「全选」，没有这个状态。
+export function markSelectButton() {
+  const b = $('selectButton'); if (!b || cleanup()) return;
+  const on = state.selecting || selCount() > 0;
+  b.classList.toggle('on', on); b.setAttribute('aria-pressed', on); b.title = on ? t('退出选择模式（Esc）') : t('进入选择模式');
+}
 export function renderSelection() {
-  syncCards();
+  syncCards(); markSelectButton();
   const n = selCount(), bar = $('selectionBar'), r = state.route, kind = viewOf(r).bar;   // 选择栏的种类由页面登记
   bar.hidden = !n; markDetailKeys(); if (!n) { state.armed = null; return; }
   const big = n > 500, arm = key => state.armed === key ? ` armed` : '';
@@ -501,7 +524,8 @@ export function renderSelection() {
   buttons += `<button class="quiet" data-act="tag">${t('标签')} <kbd>G</kbd></button>`;
   buttons += `<button class="quiet" data-act="findartist" title="${t('用像素哈希和 IQDB 查这些图的画师（只发哈希文本，不发图片；一次最多 500 张）')}">${t('查找画师')}</button>`;
   if (!state.sel.all && n >= 2 && n <= 12) buttons += `<button class="quiet" data-act="relate" title="${t('两两比较：同一张图、裁剪、差分、局部编辑，还是不同的图（只在本机计算）')}">${t('判断关系')}</button>`;
-  bar.innerHTML = count + buttons + (big ? `<span class="bar-note">${t('超过 500 张需再点一次确认')}</span>` : '');
+  const note = kind === 'audit' ? t('一次最多回答 500 张，这次答前 500 张') : t('超过 500 张需再点一次确认');
+  bar.innerHTML = count + buttons + (big ? `<span class="bar-note">${note}</span>` : '');
   $('clearSel').onclick = quitSelecting;
   for (const b of bar.querySelectorAll('[data-act]')) b.onclick = () => runBarAction(b.dataset.act);
 }
@@ -539,7 +563,8 @@ function needsArm(key) {
 }
 async function answerAudit(yes) {
   const sel = state.sel;
-  const ids = sel.all ? (await api('/api/ids?' + new URLSearchParams({...filters(), limit: 500}))).filter(u => !sel.exclude.has(u)) : [...sel.ids];
+  // 后端一次最多收 500 张的回答：多选了的只答前 500 张，选择栏上事先写明（#386 的 2-41）。
+  const ids = (sel.all ? (await api('/api/ids?' + new URLSearchParams({...filters(), limit: 500}))).filter(u => !sel.exclude.has(u)) : [...sel.ids]).slice(0, 500);
   if (ids.length) mutate('/api/audit/answer', {ids, ...(yes ? {yes: ids} : {no: ids})}, false, {advance: true});
 }
 function runBarAction(act) {
@@ -589,12 +614,13 @@ function runBarAction(act) {
   }
 }
 // 人工标签复用命令面板：已有的标签、采用一个 WD tag，或新建一个。所有选中图片上都已有的条目提供移除。
-export function openTagPicker(payload, n, loaded, leaving = () => !!state.route.utag) {
+// leaving(tag)：去掉这个标签以后图是不是离开本页。默认只有去掉的正是筛选用的那个标签时才算（#386 的 2-39）。
+export function openTagPicker(payload, n, loaded, leaving = tag => !!state.route.utag && tag === state.route.utag) {
   const present = new Map();
   for (const item of loaded || []) for (const tag of item.user_tags || []) present.set(tag, (present.get(tag) || 0) + 1);
   openPicker({title: t('标签'), tagMode: true, present, subject: (loaded || []).map(x => x.uuid), placeholder: t('输入标签，或搜索 WD 通用标签…'),
     sentence: e => e.remove ? t('从 {n} 张去掉标签 {tag}', {n: number(n), tag: e.tag}) : t('给 {n} 张加上标签 {tag}', {n: number(n), tag: e.tag}),
-    pick: e => mutate('/api/tag', {...payload(), tag: e.tag, add: !e.remove}, e.remove && leaving())});
+    pick: e => mutate('/api/tag', {...payload(), tag: e.tag, add: !e.remove}, e.remove && leaving(e.tag))});
 }
 function openVariantMenu(payload) {
   const r = state.route, n = selCount(), items = [];
@@ -834,6 +860,10 @@ export function wireGrid() {
     // 面板页没有单图快捷键，但面板页借列表开的大图（previewList）里，单图键照样作用于大图那张。
     const view = viewOf(state.route), scope = keyScope(view) || (m.viewer ? 'shown' : ''), grid = scope === 'grid';
     if (mod && key === 'k') { e.preventDefault(); jumpToCharacter(); return; }
+    // 后退、前进（#526）：Windows 上 Alt+← →，macOS 上 ⌘[ ⌘]（桌面 App 里由菜单接，网页形态在这里接），输入框里也生效。
+    // 浏览器自己的后退会退出图库页面，这里改走 stepHistory，只在这个图库的页面之间走。
+    const back = isMac ? e.metaKey && !e.altKey && (e.key === '[' || e.key === ']') : e.altKey && !mod && (e.key === 'ArrowLeft' || e.key === 'ArrowRight');
+    if (back) { e.preventDefault(); stepHistory(e.key === '[' || e.key === 'ArrowLeft' ? -1 : 1); return; }
     // ⌘＋／⌘－：大图打开时缩放大图；否则只在有网格的页面改网格列数，别的页面什么也不做（也不交给浏览器缩放）。
     if (mod && (key === '=' || key === '+' || key === '-')) {
       e.preventDefault(); const bigger = key !== '-';

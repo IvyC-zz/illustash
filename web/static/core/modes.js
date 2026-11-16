@@ -9,6 +9,7 @@
 //   大图  大图打开（viewer >= 0）。盖住网格、选择栏和详情栏：快捷键只作用于大图里那张，被盖住的选择栏不响应
 //        （选中保留，关掉大图后照旧；在大图里改了那张图之后，和其他写入一样清空选择）。
 // 当前图的来源优先级：大图 ＞ 详情栏 ＞ 键盘光标。
+import {isMac} from './format.js';
 import {t} from './i18n.js';
 import {state} from './state.js';
 
@@ -100,6 +101,7 @@ export function keyAction(key, {view, char = false, maybe = false, variants = fa
 //   does   做什么、在哪生效
 export const SHORTCUTS = [
   {keys: '⌘K', codes: ['k'], does: () => t('跳转到角色')},
+  {keys: () => isMac ? '⌘[ / ⌘]' : 'Alt+← / Alt+→', codes: ['[', ']'], does: () => t('后退、前进（只在这个图库的页面之间；鼠标侧键、标题左边的 ‹ 也可以）')},
   {keys: '/', codes: ['/'], does: () => t('搜索（图库、资料库）')},
   {keys: () => t('拖动 · Shift 点击'), codes: [], does: () => t('连续选择；在空白处拖动可框选')},
   {keys: '⌘A', codes: ['a'], does: () => t('选中全部符合条件的图片')},
