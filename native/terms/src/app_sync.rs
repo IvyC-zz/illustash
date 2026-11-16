@@ -168,7 +168,7 @@ impl Syncer {
                 };
                 let _ = apply();
             });
-            if let Some(window) = window.filter(|_| ctx.check().is_ok()) {
+            if let Some(window) = window.filter(|_| ctx.check().is_ok() || ctx.timed_out()) {
                 match window.delivered(&library) {
                     Ok(ids) => delivered.lock().expect("WD 扩展交付队列锁中毒").extend(ids),
                     Err(error) => eprintln!("无法读取本次同步的 WD 识别交付：{error}"),

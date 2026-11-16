@@ -1098,7 +1098,17 @@ fn extension_place(resources: &Path) -> Result<Place> {
     let shared = if std::env::var_os("ILLUSTASH_SHARED").is_some() {
         crate::app_resources::shared_path(resources)?
     } else {
-        crate::app_paths::app_support(&crate::app_paths::user_home()?).join("Shared")
+        let home = crate::app_paths::user_home()?;
+        let support = if cfg!(windows) && std::env::var_os("ILLUSTASH_APP_SUPPORT").is_none() {
+            std::env::var_os("LOCALAPPDATA")
+                .filter(|path| !path.is_empty())
+                .map(PathBuf::from)
+                .unwrap_or_else(|| home.join("AppData").join("Local"))
+                .join("Illustash")
+        } else {
+            crate::app_paths::app_support(&home)
+        };
+        support.join("Shared")
     };
     Ok(Place {
         root: shared.join("extensions").join(&manifest.pack),
