@@ -100,7 +100,7 @@ fn decode(mut data: &[u8]) -> Option<Matrix> {
     if !data.is_empty() {
         return None;
     }
-    Ok(Matrix { uuids, vectors: Vectors::Tags(Tags { width, offsets, entries }) })
+    Some(Matrix { uuids, vectors: Vectors::Tags(Tags { width, offsets, entries }) })
 }
 
 pub(crate) fn write(path: &Path, stamp: Stamp, matrix: &Matrix) -> io::Result<()> {
