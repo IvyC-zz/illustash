@@ -28,7 +28,7 @@
   <div class="sg-group">带行为的壳</div>
   <a href="#s-dialogs">对话框</a><a href="#s-pops">浮层菜单</a><a href="#s-tasks">任务面板</a><a href="#s-toast">toast · 选择栏</a><a href="#s-detail">详情栏</a><a href="#s-other">其它外壳</a>
   <div class="sg-group">附录</div>
-  <a href="#x-dups">并行写法一览</a><a href="#x-dead">疑似废弃的类</a>
+  <a href="#x-dups">并行写法一览</a><a href="#x-dead">拼出来的类</a>
 </nav>
 
 <main class="sg-main">
@@ -618,11 +618,12 @@
 </section>
 
 <section id="x-dead">
-  <h2>附录 · 本页没有找到来源的类</h2>
-  <p class="sg-lead">app.css 里有 534 个类名；其中下列 <b>32</b> 个在 <code>ui/*.js</code>、<code>core/*.js</code>、<code>app.js</code>、<code>index.html</code> 里<b>查不到字面出现</b>，也不是 <code>k-${kind}</code> / <code>s-${mode}</code> 那样动态拼出的（这两类是在用的：<code>.rel-kind.k-*</code>、<code>.nsfw-toggle.s-*</code>）。多半是已被后来的版本取代而没删：旧的角色索引页（<code>.char-*</code>、<code>.skin-*</code>、<code>.work-head</code>）、旧的设置行（<code>.task-row</code>、<code>.watch-chip</code>）、旧侧栏（<code>.entity-link</code>、<code>.side-hint</code>）等。因此本页没有给它们排样例。是否确实可以删，需要用户在 #319 决定。</p>
+  <h2>附录 · 拼出来的类</h2>
+  <p class="sg-lead">app.css 里的 504 个类名都能在 <code>ui/*.js</code>、<code>core/*.js</code>、<code>app.js</code>、<code>index.html</code> 里找到来源。其中 9 个不是字面出现，而是运行时拼出来的，搜不到全名也不能删：<code>.rel-kind.k-*</code>（<code>k-${kind}</code>，6 个）、<code>.nsfw-toggle.s-*</code>（<code>'s-' + state.nsfw</code>，2 个）、<code>.cast-shelf</code>（<code>'cast-' + cast.mode</code>）。<code>'task-' + task.key</code> 拼的是折叠块的 <code>data-fold-key</code>，不是类名。</p>
   <div class="sg-item"><div class="sg-stage col">
-    <p style="line-height:2.1"><span class="sg-tag dead">breadcrumb</span> <span class="sg-tag dead">cast-shelf</span> <span class="sg-tag dead">char-card</span> <span class="sg-tag dead">char-cover</span> <span class="sg-tag dead">char-grid</span> <span class="sg-tag dead">char-group</span> <span class="sg-tag dead">char-name</span> <span class="sg-tag dead">entity-link</span> <span class="sg-tag dead">lib-groups</span> <span class="sg-tag dead">nav-group</span> <span class="sg-tag dead">nsfw-dot</span> <span class="sg-tag dead">pin</span> <span class="sg-tag dead">prov-live</span> <span class="sg-tag dead">settings-sub</span> <span class="sg-tag dead">shut</span> <span class="sg-tag dead">side-hint</span> <span class="sg-tag dead">skin-chip</span> <span class="sg-tag dead">skin-more</span> <span class="sg-tag dead">skin-row</span> <span class="sg-tag dead">sync-text</span> <span class="sg-tag dead">tag-link</span> <span class="sg-tag dead">task-line</span> <span class="sg-tag dead">task-name</span> <span class="sg-tag dead">task-row</span> <span class="sg-tag dead">watch-chip</span> <span class="sg-tag dead">watch-row</span> <span class="sg-tag dead">work-caret</span> <span class="sg-tag dead">work-head</span> <span class="sg-tag dead">work-name</span> <span class="sg-tag dead">k-*（在用，动态）</span></p>
-    <p class="sg-cap">另：同一个选择器在 app.css 里写两遍以上、后面整体覆盖前面的有 <code>.primary</code>、<code>.segmented</code>、<code>.quiet</code>、<code>.settings-card</code>、<code>.settings-sub</code>、<code>dialog</code> 等；<code>.aa-card</code> 引用了从未定义的 <code>--panel</code>。</p>
+    <p style="line-height:2.1"><span class="sg-tag">k-crop</span> <span class="sg-tag">k-duplicate</span> <span class="sg-tag">k-edit</span> <span class="sg-tag">k-identical</span> <span class="sg-tag">k-subtle</span> <span class="sg-tag">k-variant</span> <span class="sg-tag">s-hide</span> <span class="sg-tag">s-only</span> <span class="sg-tag">cast-shelf</span></p>
+    <p class="sg-cap">2026-11-16（#430）删掉了 29 个没人用的类和它们的规则：旧角色索引（<code>.char-*</code>、<code>.skin-*</code>、<code>.work-*</code>、<code>.pin</code>）、旧侧栏（<code>.entity-link</code>、<code>.entity-name</code>、<code>.side-hint</code>、<code>.nav-group</code>、<code>.sync-text</code>）、旧设置行（<code>.task-row</code>、<code>.task-name</code>、<code>.task-line</code>、<code>.watch-row</code>、<code>.watch-chip</code>、<code>.settings-sub</code>）以及 <code>.breadcrumb</code>、<code>.nsfw-dot</code>、<code>.shut</code>、<code>.tag-link</code>、<code>.lib-groups</code>、<code>.prov-live</code>；同时删了导航已是 <code>&lt;a&gt;</code> 之后不再命中的 <code>.settings-nav button</code>。</p>
+    <p class="sg-cap">另：同一个选择器在 app.css 里写两遍以上、后面整体覆盖前面的有 <code>.primary</code>、<code>.segmented</code>、<code>.quiet</code>、<code>.settings-card</code>、<code>dialog</code> 等（基础层和改版层，#430 第 3 步合并）；<code>.aa-card</code> 引用了从未定义的 <code>--panel</code>。</p>
   </div></div>
   <p class="sg-note" style="padding-left:0">本页还<b>没有收录</b>：作品树行 <code>.shelf-row</code>、身份整理卡 <code>.pair-card</code>、画师抽查卡 <code>.aa-card</code>、按组整理 <code>.gsec</code>、首页日期头 <code>.home-dh</code>/条带 <code>.home-strip</code>、角色页榜单 <code>.cast-board</code>/<code>.cast-fan</code>/<code>.cast-rc</code>、角色列表 <code>.cast-table</code>、splash、tour 的镂空 <code>.tour-hole</code>——都是单页的版面，不是跨页复用的组件；第一轮先收可复用的，需要时再补。</p>
 </section>
