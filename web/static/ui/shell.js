@@ -11,7 +11,7 @@ import {cleanup, defaultSort, go, hashFor, noteHistory, parseHash, replaceRoute,
 import {api, readError} from '../core/session.js';
 import {state} from '../core/state.js';
 import {cast, createWork, drawCast, drawShelf, openTagged, renderIndexBody, searchIndex, shelf} from './catalog.js';
-import {$, error, searchIcon, workSmall} from './dom.js';
+import {$, error, helpTip, searchIcon, wireHelpTip, workSmall} from './dom.js';
 import {renderSettings, settingsSection} from './settings.js';
 import {artistName} from './artists.js';
 import {closeInspector, closeViewer} from './detail.js';
@@ -213,7 +213,12 @@ export function renderHeading() {
   if (view.drawHeading) { view.drawHeading(h, r, c); return; }
   const n = state.totalReady ? number(state.total) : '…';
   const [title, sub, links = ''] = view.heading(r, {n});
-  h.innerHTML = `<div class="heading-main"><h1>${title}</h1><p>${sub}</p></div>${links}`;
+  // 标题下面只放数量、状态和必须一眼看到的警告；这一页是什么、怎么操作收进标题旁的「?」（#527）。网格页的操作提示
+  // 就是注册表里的底栏提示（底栏默认隐藏），一个「·」分出一行，英文行首大写。
+  const hints = view.helpHint ? (view.hint?.(r) || '').split(' · ').filter(Boolean).map(x => esc(x.charAt(0).toLocaleUpperCase() + x.slice(1))) : [];
+  const [helpButton, helpPop] = helpTip([...(view.help?.(r) || []), ...hints]);
+  h.innerHTML = `<div class="heading-main"><h1>${title}${helpButton}</h1><p>${sub}</p>${helpPop}</div>${links}`;
+  wireHelpTip();
   $('localLinksButton')?.addEventListener('click', openLocalLinks);
   $('sgroupRelate')?.addEventListener('click', async () => openRelate(await api('/api/ids?' + new URLSearchParams({...filters(), limit: 12}))));
   $('groupOc')?.addEventListener('click', () => markOc({filter: filters(), exclude: [], confirm: state.total > 500}, false, true));
@@ -234,24 +239,42 @@ export function wireShell() {
 // 标题（页面名 → [标题, 副标题, 右侧链接]）、计数到达后重画什么、进入前要先读的数据。
 implement({
   character: {drawHeading: drawCharHeading},
-  home: {heading: (r, {n}) => [t('首页'), t('按加入日期分组') + (state.recentCount ? ' · ' + t('最近一次同步新加入 {n} 张', {n: number(state.recentCount)}) : '')]},
-  library: {heading: (r, {n}) => [r.artist ? t('画师 · {name}', {name: esc(artistName(r.artist))}) : r.day ? t('{day} 加入', {day: esc(dayLabel(r.day))}) : r.work ? esc((state.workTree || []).find(w => w.id === r.work)?.name || t('作品筛选')) : r.utag ? '# ' + esc(r.utag) : t('图库'), t('{n} 张', {n}) + (r.work ? ' · ' + t('包含所有子作品') : r.artist ? ' · ' + t('按画作比对找到') : '')]},
+  home: {heading: (r, {n}) => [t('首页'), state.recentCount ? t('最近一次同步新加入 {n} 张', {n: number(state.recentCount)}) : '']},
+  library: {heading: (r, {n}) => [r.artist ? t('画师 · {name}', {name: esc(artistName(r.artist))}) : r.day ? t('{day} 加入', {day: esc(dayLabel(r.day))}) : r.work ? esc((state.workTree || []).find(w => w.id === r.work)?.name || t('作品筛选')) : r.utag ? '# ' + esc(r.utag) : t('图库'), t('{n} 张', {n})]},
   characters: {heading: (r, {n}) => [t('资料库'), r.section === 'works' ? t('{n} 部作品', {n: number(state.index?.works?.length || 0)}) + (state.index?.watch?.works.length ? ' · ' + t('关注 {n} 部', {n: number(state.index.watch.works.length)}) : '') : t('{n} 位角色 · {works} 部作品', {n: number(state.chars.length), works: number(new Set(state.chars.map(workKey).filter(k => k !== 'oc' && k !== 'other')).size)}), !r.section && state.localLinks?.length ? `<span class="heading-links"><button class="quiet" id="localLinksButton" title="${t('关联后自动补中文名、别名和作品；和已有角色重复的可以合并')}">${t('{n} 个自建角色能对上 Danbooru', {n: number(state.localLinks.length)})}</button></span>` : '']},
-  audit: {heading: (r, {n}) => [t('随机抽查'), t('还剩 {left} / {n} 张 · 鼠标移到角色 tag 上点 ✓ / ✗，或选中多张按 Y / N；打开大图也会问「是 TA 吗？」', {left: number(state.pools.audit || 0), n}) + (state.nsfw ? ` · <b>${t('R18 筛选开着：抽查要看全部才准，按 H 切换')}</b>` : '')]},
-  unmatched: {heading: (r, {n}) => [t('未识别'), t('选中后设为角色，或跳过')]},
-  skipped: {heading: (r, {n}) => [t('未识别'), t('可以恢复到未识别')]},
-  groups: {heading: (r, {n}) => [t('未识别'), t('长得像的图分成一组，一组一组过 · 每确认一组，系统就学会认 TA 的一种样子')]},
+  audit: {heading: (r, {n}) => [t('随机抽查'), t('还剩 {left} / {n} 张', {left: number(state.pools.audit || 0), n}) + (state.nsfw ? ` · <b>${t('R18 筛选开着：抽查要看全部才准，按 H 切换')}</b>` : '')]},
+  unmatched: {heading: (r, {n}) => [t('未识别'), '']},
+  skipped: {heading: (r, {n}) => [t('未识别'), '']},
+  groups: {heading: (r, {n}) => [t('未识别'), '']},
   // 一组整理完了，标题不写「0 张」，由空状态给去处（#386 的 2-12）。
   group: {heading: (r, {n}) => [t('第 {id} 组', {id: esc(r.id)}), [state.totalReady && !state.total ? '' : t('{n} 张长得像的未识别图', {n}), ...(state.groupTraits || []).map(esc)].filter(Boolean).join(' · '),
       `<span class="heading-links">${state.total ? `<button class="quiet" id="groupOc" title="${t('整组都是同一个原创角色：新建一个原创角色，把这组图都设为它')}">${t('整组标为原创角色')}</button>` : ''}${state.groupNear ? `<a class="quiet link" href="#/g/${state.groupNearId}">${esc(state.groupNear)} →</a>` : ''}</span>`]},
-  duplicates: {heading: (r, {n}) => [t('重复'), r.dup ? t('对齐角色后自动折叠') : t('{n} 张', {n: number(state.dupInfo.count || 0)}) + ' · ' + t('修改任一份会同步到整组')]},
-  similar: {heading: (r, {n}) => [t('重复'), t('画的是同一张、但不是同一个文件 · 只在本机比较')]},
-  'artist-audit': {heading: (r, {n}) => [t('画师抽查'), t('验收「找回画师」：固定的一组随机图，逐张判断机器找到的画师对不对') + (state.nsfw ? ` · <b>${t('这页不按 R18 筛选：R18 的图也在里面')}</b>` : '')]},
-  identity: {heading: (r, {n}) => [t('身份整理'), t('{n} 对长得像的角色 · 按涉及图片数排序 · 每一步都可撤销', {n: number(state.identityCount || 0)})]},
-  sgroup: {heading: (r, {n}) => [t('相似组 {id}', {id: esc(r.id)}), t('{n} 张 · 选中两张以上可以判断关系', {n}), state.total >= 2 && state.total <= 12 ? `<span class="heading-links"><button class="quiet" id="sgroupRelate">${t('判断关系')}</button></span>` : '']},
-  excluded: {heading: (r, {n}) => [t('已排除'), t('只是标记，不改动原图')]},
-  pending: {heading: (r, {n}) => [t('已排除'), t('像截图但有人物，排除或保留')]},
+  duplicates: {heading: (r, {n}) => [t('重复'), r.dup ? '' : t('{n} 张', {n: number(state.dupInfo.count || 0)})]},
+  similar: {heading: (r, {n}) => [t('重复'), '']},
+  'artist-audit': {heading: (r, {n}) => [t('画师抽查'), state.nsfw ? `<b>${t('这页不按 R18 筛选：R18 的图也在里面')}</b>` : '']},
+  identity: {heading: (r, {n}) => [t('身份整理'), t('{n} 对长得像的角色', {n: number(state.identityCount || 0)})]},
+  sgroup: {heading: (r, {n}) => [t('相似组 {id}', {id: esc(r.id)}), t('{n} 张', {n}), state.total >= 2 && state.total <= 12 ? `<span class="heading-links"><button class="quiet" id="sgroupRelate">${t('判断关系')}</button></span>` : '']},
+  excluded: {heading: (r, {n}) => [t('已排除'), '']},
+  pending: {heading: (r, {n}) => [t('已排除'), '']},
   settings: {heading: (r, {n}) => [t('设置'), settingsSection()[2]]},
+});
+// 各页「?」里的说明（#527）：help(r) 是这一页的说明，一行一句；helpHint 表示再接上注册表里的操作提示。设置的副标题
+// 本来就是这一节的内容清单，留在原处；资料库、角色页的副标题都是数量和状态，没有「?」。
+implement({
+  home: {help: () => [t('按加入日期分组。')]},
+  library: {help: r => r.work ? [t('包含所有子作品的图。')] : r.artist ? [t('画师是按画作比对找到的。')] : [], helpHint: true},
+  audit: {help: () => [t('鼠标移到角色 tag 上，点 ✓ 或 ✗ 回答。'), t('选中多张后按 Y（是）或 N（不是）。'), t('打开大图也可以回答。'), t('看不清的可以跳过，换一张。')]},
+  unmatched: {helpHint: true},
+  skipped: {help: () => [t('选中的图可以恢复到未识别。')], helpHint: true},
+  groups: {help: () => [t('按长相分组的未识别图，可以整组确认。'), t('点一下缩略图，把它排除在这组之外。'), t('组头的按钮对整组生效。')]},
+  group: {helpHint: true},
+  duplicates: {help: () => [t('同色角标是同一组。'), t('修改任一份会同步到整组。'), t('组里的角色不一致时不折叠，对齐以后折叠成一张。')]},
+  similar: {help: () => [t('同一幅画的不同文件。'), t('点一组进去看。')]},
+  'artist-audit': {help: () => [t('一组固定的随机图，逐张核对「找回画师」找到的画师。'), t('每次打开都是同一批。')]},
+  identity: {help: () => [t('按涉及的图片数排序。'), t('高亮的按钮是外部资料建议的做法。')]},
+  sgroup: {help: () => [t('选中两张以上可以判断它们的关系。')], helpHint: true},
+  excluded: {helpHint: true},
+  pending: {help: () => [t('像截图，但有人物。')], helpHint: true},
 });
 implement({
   // 图库页不因计数变化重画；资料库只重画目录；设置页重画整页；其余重画标题和工具栏。
