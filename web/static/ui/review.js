@@ -1,7 +1,7 @@
 // 「整理」各页（桌面布局，#199）：未识别图片的相似分组、整个图库里的相似图片、相似的角色对，以及画师抽查。
-import {edits, setLatest} from '../core/edits.js';
+import {edits, exclusive} from '../core/edits.js';
 import {esc, number, stamp} from '../core/format.js';
-import {t, tb} from '../core/i18n.js';
+import {t} from '../core/i18n.js';
 import {SIMILAR_ACTIVE, similarLine} from '../core/jobs.js';
 import {RELATION_KINDS, RELATION_NAMES} from '../core/labels.js';
 import {refreshMeta, setIdentityCount} from '../core/meta.js';
@@ -11,7 +11,7 @@ import {charHash, go, hashFor} from '../core/route.js';
 import {api, post, readError} from '../core/session.js';
 import {state} from '../core/state.js';
 import {closeInspector, peekAt, wirePeek} from './detail.js';
-import {$, emptyLink, error, readFailure, reconcileSections, showArea, toast} from './dom.js';
+import {$, emptyLink, error, readFailure, reconcileSections, showArea, toast, written} from './dom.js';
 import {mutate} from './grid.js';
 import {markOc, openPicker, targets} from './palette.js';
 import {navCount, renderHeading} from './shell.js';
@@ -153,8 +153,8 @@ async function decideIdentity(i, act) {
         a_of_b: {a: x.a.id, b: x.b.id, kind: 'form_of'}, different: {a: x.a.id, b: x.b.id, kind: 'different_from'}}[act]};
   try {
     const r = act === 'skip' ? await post('/api/identity/skip', {a: x.a.id, b: x.b.id}) : await post('/api/identity/decision', body);
-    setLatest(r.undo); toast(act === 'skip' ? t('已暂不判断') : {same: t('已把 {a} 和 {b} 记为同一角色', {a: small.name, b: big.name}), b_of_a: t('{a} 已作为 {b} 的一个造型', {a: x.b.name, b: x.a.name}),
-      a_of_b: t('{a} 已作为 {b} 的一个造型', {a: x.a.name, b: x.b.name}), different: t('已记下 {a} 和 {b} 是不同角色', {a: x.a.name, b: x.b.name})}[act], true);
+    written(r.undo, act === 'skip' ? t('已暂不判断') : {same: t('已把 {a} 和 {b} 记为同一角色', {a: small.name, b: big.name}), b_of_a: t('{a} 已作为 {b} 的一个造型', {a: x.b.name, b: x.a.name}),
+      a_of_b: t('{a} 已作为 {b} 的一个造型', {a: x.a.name, b: x.b.name}), different: t('已记下 {a} 和 {b} 是不同角色', {a: x.a.name, b: x.b.name})}[act]);
     card?.classList.add('leaving');
     await new Promise(done => setTimeout(done, 170));
     await renderIdentity('keep');
@@ -209,13 +209,13 @@ async function renderArtistAudit() {
     ${d.items.length < d.pool ? `<p class="aa-more"><button class="quiet" id="aaMore">${t('再加 10 张')}</button></p>` : ''}`;
   $('viewport').scrollTop = scroll;
   for (const b of $('groupsPage').querySelectorAll('[data-aa]')) b.onclick = async () => {
-    if (edits.busy) return; edits.busy = true; b.disabled = true;
-    try {
-      const r = await post('/api/artist/verdict', {ids: [b.dataset.uuid], artist: b.dataset.artist, verdict: b.dataset.aa || null, name: b.dataset.name});
-      setLatest(r.undo); toast(tb(r.undo.label), true);
-    } catch (e) { toast(e.message); }
-    finally { edits.busy = false; setLatest(edits.latest); }
-    renderArtistAudit();
+    const ran = await exclusive(async () => {
+      b.disabled = true;
+      try { written((await post('/api/artist/verdict', {ids: [b.dataset.uuid], artist: b.dataset.artist, verdict: b.dataset.aa || null, name: b.dataset.name})).undo); }
+      catch (e) { toast(e.message); }
+      return true;
+    });
+    if (ran) renderArtistAudit();
   };
   $('aaMore')?.addEventListener('click', () => { prefs.set('artistAuditN', n + 10); renderArtistAudit(); });
 }

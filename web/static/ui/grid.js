@@ -1,8 +1,8 @@
 // 图片网格（桌面布局，#199）：分页加载图片、虚拟网格和它的缩放、选择、选择栏的操作、键盘快捷键、视图选项和 R18
 // 筛选。
-import {edits, setLatest, undoLatest, undoneText} from '../core/edits.js';
+import {edits, exclusive, undoLatest, undoneText} from '../core/edits.js';
 import {esc, isMac, number, platformText, shortcut} from '../core/format.js';
-import {t, tb} from '../core/i18n.js';
+import {t} from '../core/i18n.js';
 import {composing} from '../core/keys.js';
 import {REASONS, nameWithWork} from '../core/labels.js';
 import {undoRefusal} from '../core/human.js';
@@ -14,7 +14,7 @@ import {browsing, cleanup, defaultSort, hashFor, stepHistory} from '../core/rout
 import {api, post, readError} from '../core/session.js';
 import {state} from '../core/state.js';
 import {offerWatch} from './catalog.js';
-import {$, error, showArea, toast} from './dom.js';
+import {$, error, showArea, toast, written} from './dom.js';
 import {renderChrome, renderHeading} from './shell.js';
 import {findArtists} from './artists.js';
 import {answerAsk, closeInspector, closeViewer, ensureVisible, indexOf, inspect, openViewer, peek, pickAlternative, showViewer, singleAction, step, zoomView} from './detail.js';
@@ -651,8 +651,13 @@ export function currentItem() {
   const uuid = src.uuid, i = indexOf(uuid);
   return i >= 0 ? state.items[i] : uuid === kept.hold?.uuid ? kept.hold.item : state.viewerItem?.uuid === uuid ? state.viewerItem : null;
 }
-export async function mutate(path, body, leaving, {advance = false} = {}) {
-  if (edits.busy) return; edits.busy = true; document.body.classList.add('busy');
+export function mutate(path, body, leaving, {advance = false} = {}) {
+  return exclusive(async () => {
+    document.body.classList.add('busy');
+    try { return await write(path, body, leaving, advance); } finally { document.body.classList.remove('busy'); }
+  });
+}
+async function write(path, body, leaving, advance) {
   const started = performance.now();
   const advanceFrom = advance && state.viewer >= 0 ? state.viewerItem?.uuid : null;
   if (advance) kept.hold = null; else holdCurrent();
@@ -661,9 +666,9 @@ export async function mutate(path, body, leaving, {advance = false} = {}) {
   // 确认角色之后后台会学习，学完未识别计数和分组还会变（#400）：写入前先记下学习的状态，好知道之后要不要再读。
   const learner = path === '/api/change' && body.action === 'confirmed' ? learnerState().catch(() => null) : null;
   try {
-    const r = await post(path, body); setLatest(r.undo);
+    const r = await post(path, body);
     quitSelecting();
-    toast(tb(r.undo.label), true);
+    written(r.undo);
     if (path === '/api/change' && body.action === 'confirmed') offerWatch(body.entities || [body.entity]).catch(() => {});
     if (gone) { await new Promise(done => setTimeout(done, Math.max(0, 170 - (performance.now() - started)))); collapse(gone); }
     await reload(); pageOf(state.route).refresh?.('edit'); metaSoon(path === '/api/tag');
@@ -676,7 +681,6 @@ export async function mutate(path, body, leaving, {advance = false} = {}) {
     if (learner) learner.then(afterLearning);
     return true;
   } catch (e) { toast(e.message); for (const el of $('grid').querySelectorAll('.leaving')) el.classList.remove('leaving'); }
-  finally { edits.busy = false; document.body.classList.remove('busy'); setLatest(edits.latest); }
 }
 function collapse(gone) {
   const left = []; let removed = 0;
@@ -701,16 +705,18 @@ async function afterLearning(before) {
   if (await learningSettled(before) && !edits.busy) await reread('learned');
 }
 export async function undo() {
-  if (!edits.latest || edits.busy) return; edits.busy = true;
-  const learner = learnerState().catch(() => null);
-  try {
-    toast(undoneText(await undoLatest())); await reread('undo');
-    learner.then(afterLearning);
-  } catch (e) {
-    // 历史可能已经往前走了（另一个窗口，或服务端提交之后才失败）：显示它最新的一步。
-    // 撤销一次人工结论导入被拒（后面有改动依赖它）时，说清楚为什么（core/human.js）。
-    toast(undoRefusal(e, edits.latest)); refreshMeta().catch(err => error(readError(err)));
-  } finally { edits.busy = false; setLatest(edits.latest); }
+  if (!edits.latest) return;
+  return exclusive(async () => {
+    const learner = learnerState().catch(() => null);
+    try {
+      toast(undoneText(await undoLatest())); await reread('undo');
+      learner.then(afterLearning);
+    } catch (e) {
+      // 历史可能已经往前走了（另一个窗口，或服务端提交之后才失败）：显示它最新的一步。
+      // 撤销一次人工结论导入被拒（后面有改动依赖它）时，说清楚为什么（core/human.js）。
+      toast(undoRefusal(e, edits.latest)); refreshMeta().catch(err => error(readError(err)));
+    }
+  });
 }
 export async function sweep() {
   const c = state.char; if (!c?.unchecked) return;
