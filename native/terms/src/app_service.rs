@@ -369,6 +369,8 @@ impl Application {
             generation: 1,
             token,
             syncer: crate::app_sync::Syncer::default(),
+            wd_extension: Default::default(),
+            wd_history: Default::default(),
             names,
             provenance,
             index,

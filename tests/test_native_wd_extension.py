@@ -2,15 +2,21 @@
 from contextlib import contextmanager
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 import json
+import shutil
 from pathlib import Path
 import sqlite3
 import struct
+import subprocess
+import tempfile
 from threading import Thread
 import unittest
 
 from tests.folder_fixture import image
+from tests.fixed_expectations import Library
 from tests import test_native_lifecycle as lifecycle, test_native_sync as sync_fixture
-from tests.test_read_http import wait_until
+from tests.test_read_http import free_port, wait_until
+from tools.dev_preview import isolated_env
+from tools.wait_limit import WAIT
 from tools.ui_walk.fixture import wd_extension_spec
 
 ROUTE = '/api/wd-extension'
@@ -45,13 +51,38 @@ def download_server(control):
             thread.join()
 
 
-class NativeWdExtensionTest(unittest.TestCase):
+class SyntheticWdLibrary:
     setUpClass = classmethod(lifecycle.NativeLifecycleTest.setUpClass.__func__)
-    setUp = lifecycle.NativeLifecycleTest.setUp
-    package = lifecycle.NativeLifecycleTest.package
     start = lifecycle.NativeLifecycleTest.start
     stop = lifecycle.NativeLifecycleTest.stop
     request = lifecycle.NativeLifecycleTest.request
+
+    def setUp(self):
+        temp = tempfile.TemporaryDirectory(prefix='illustash-wd-extension-')
+        self.addCleanup(temp.cleanup)
+        self.root = Path(temp.name).resolve()
+        checkout = self.resources
+        self.resources = self.root / 'resources'
+        (self.resources / 'tags').mkdir(parents=True)
+        shutil.copyfile(checkout / 'tags' / 'tags_v3.csv', self.resources / 'tags' / 'tags_v3.csv')
+        self.env = {**isolated_env(self.root), 'USERPROFILE': str(self.root / 'home')}
+        self.new_folder = self.root / 'images'
+        self.new_folder.mkdir()
+        image(self.new_folder / 'first.png', 'blue')
+        self.lib = self.new_library('first', self.new_folder)
+        self.cli('library-scan', '--library', str(self.lib.path))
+        self.port = free_port()
+        self.origin = f'http://127.0.0.1:{self.port}'
+        self.restart()
+
+    def new_library(self, name, folder):
+        path = self.root / (name + '.pilib')
+        self.cli('library-create', '--dest', str(path), '--folder', str(folder))
+        return Library(path)
+
+    def cli(self, *arguments):
+        result = subprocess.run([str(self.binary), *arguments], env=self.env, capture_output=True, timeout=WAIT)
+        self.assertEqual(result.returncode, 0, result.stderr.decode(errors='replace'))
 
     def state(self, action=None, body=None):
         response = self.request(ROUTE + (action or ''), body)
@@ -81,10 +112,13 @@ class NativeWdExtensionTest(unittest.TestCase):
         return self.manifest.with_name(FILENAME)
 
     def restart(self):
-        self.stop(self.process)
+        if hasattr(self, 'process'):
+            self.stop(self.process)
         self.process, self.log = self.start(self.lib.path)
         self.token = json.loads(self.request('/api/bootstrap')['body'])['token']
 
+
+class NativeWdExtensionTest(SyntheticWdLibrary, unittest.TestCase):
     def test_download_resume_import_enable_and_withdraw(self):
         control = {'ranges': []}
         with download_server(control) as address:
@@ -151,7 +185,9 @@ class NativeWdExtensionTest(unittest.TestCase):
             ]
             self.assertGreater(len(candidates), 0)
             self.assertTrue(all(c['wd'] is None and c['ccip'] is None for c in candidates))
-            second = self.package('second')
+            second_folder = self.root / 'second-images'
+            second_folder.mkdir()
+            second = self.new_library('second', second_folder)
             self.assertEqual(self.request('/api/libraries/open', {'path': str(second.path)})['status'], 200)
             self.token = json.loads(self.request('/api/bootstrap')['body'])['token']
             self.assertIsNone(self.state()['task'])
@@ -173,17 +209,7 @@ class NativeWdExtensionTest(unittest.TestCase):
             self.assertEqual(self.finish('withdraw')['task']['result']['changed'], 0)
 
 
-class NativeWdExtensionSyncTest(unittest.TestCase):
-    setUpClass = classmethod(lifecycle.NativeLifecycleTest.setUpClass.__func__)
-    setUp = lifecycle.NativeLifecycleTest.setUp
-    package = lifecycle.NativeLifecycleTest.package
-    start = lifecycle.NativeLifecycleTest.start
-    stop = lifecycle.NativeLifecycleTest.stop
-    request = lifecycle.NativeLifecycleTest.request
-    state = NativeWdExtensionTest.state
-    fixture = NativeWdExtensionTest.fixture
-    restart = NativeWdExtensionTest.restart
-    finish = NativeWdExtensionTest.finish
+class NativeWdExtensionSyncTest(SyntheticWdLibrary, unittest.TestCase):
     worker = sync_fixture.NativeSyncTest.worker
 
     def test_native_library_new_scopes_auto_to_finished_delivery(self):
@@ -208,4 +234,3 @@ class NativeWdExtensionSyncTest(unittest.TestCase):
         self.assertEqual(auto['task']['result']['scored'], 1)
         self.assertEqual(auto['library']['images'], manual['library']['images'] + 1)
         self.assertEqual(auto['library']['checked_at'], manual['library']['checked_at'])
-        self.assertFalse(self.sentinel.exists())

@@ -237,12 +237,14 @@ class PackagingResourcesTest(unittest.TestCase):
         除此之外没有别的来源。"""
         registry = json.loads((pack.MODEL_LICENSES / 'sources.json').read_text())['files']
         self.assertEqual(sorted(registry), ['ccip/BigScience-OpenRAIL-M.pdf', 'ccip/deepghs-ccip-README.md',
-                                            'ccip/deepghs-ccip_onnx-README.md', 'wd-swinv2-tagger-v3/LICENSE-2.0.txt',
+                                            'ccip/deepghs-ccip_onnx-README.md', 'wd-extension/Character-Index-MIT.txt',
+                                            'wd-swinv2-tagger-v3/LICENSE-2.0.txt',
                                             'wd-swinv2-tagger-v3/SmilingWolf-wd-swinv2-tagger-v3-README.md',
                                             'wd-swinv2-tagger-v3/deepghs-wd14_tagger_with_embeddings-README.md'])
         notice = (pack.MODEL_LICENSES / 'NOTICE.txt').read_text()
         # 声明列出每个附带的模型文件和适用于它的许可文本。
         for name in ('wd_swinv2_v3_emb.onnx', 'model_feat.onnx', 'model_metrics.onnx', 'metrics.json',
+                     'wd-extension-v1.bin', 'wd-extension/Character-Index-MIT.txt',
                      'wd-swinv2-tagger-v3/LICENSE-2.0.txt', 'ccip/BigScience-OpenRAIL-M.pdf'):
             self.assertIn(name, notice)
         output = self.root / 'with models'

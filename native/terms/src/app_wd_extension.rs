@@ -105,7 +105,7 @@ fn has_table(src: &Connection, name: &str) -> Result<bool> {
         .query_row("SELECT EXISTS(SELECT 1 FROM sqlite_schema WHERE type='table' AND name=?)", [name], |r| r.get(0))?)
 }
 
-fn vector_count(src: &Connection, scope: &Option<String>) -> Result<usize> {
+fn vector_count(src: &Connection, scope: Option<&str>) -> Result<usize> {
     if !has_table(src, "embeddings")? {
         return Ok(0);
     }
@@ -115,7 +115,7 @@ fn vector_count(src: &Connection, scope: &Option<String>) -> Result<usize> {
 fn scan(
     src: &Connection,
     package: &Package,
-    scope: &Option<String>,
+    scope: Option<&str>,
     progress: &Progress<'_>,
 ) -> Result<(usize, Vec<Hit>)> {
     let total = vector_count(src, scope)?;
@@ -195,7 +195,7 @@ fn apply_loaded(
         |c: &Connection| -> rusqlite::Result<i64> { c.pragma_query_value(None, "data_version", |r| r.get(0)) };
     let before = version(&source)?;
     let snapshot = source.transaction()?;
-    let (checked, hits) = scan(&snapshot, package, &scope_json, progress)?;
+    let (checked, hits) = scan(&snapshot, package, scope_json.as_deref(), progress)?;
     snapshot.commit()?;
     if checked == 0 && scope.is_none() {
         return Err(Error::Conflict("这个图库没有已保存的 WD 向量".into()));
@@ -406,7 +406,7 @@ pub(crate) fn status(resources: &Path, library: &Library, tasks: &Tasks, busy: O
     let mut info = crate::app_models::extension_info(resources)?;
     let app = crate::app_library::read_connection(&library.db())?;
     let source = crate::app_library::read_connection(&library.source())?;
-    let vectors = vector_count(&source, &None)?;
+    let vectors = vector_count(&source, None)?;
     let active = enabled(&app)?;
     let (images, assigned): (usize, usize) = app.query_row(
         "SELECT (SELECT count(DISTINCT uuid) FROM candidates WHERE source='WD_EXT'),
