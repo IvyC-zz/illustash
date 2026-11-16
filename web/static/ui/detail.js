@@ -10,7 +10,7 @@ import {charHash, cleanup, go} from '../core/route.js';
 import {api} from '../core/session.js';
 import {state} from '../core/state.js';
 import {$, readFailure, workSmall} from './dom.js';
-import {PAGE, currentItem, kept, loadPage, mutate, openTagPicker, renderGrid, rowHeight, rowOf, rowTop, setCursor, syncCards, viewOpts} from './grid.js';
+import {PAGE, currentItem, kept, loadPage, markDetailKeys, mutate, openTagPicker, renderGrid, rowHeight, rowOf, rowTop, setCursor, syncCards, viewOpts} from './grid.js';
 import {newIds, openPicker, stage, targets} from './palette.js';
 import {artistSection, findArtistWorks, findArtists} from './artists.js';
 import {markHomeFocus} from './home.js';
@@ -80,6 +80,7 @@ export async function inspect(ident, quiet = false) {
       ${viewOpts.meta ? `<section class="inspector-section"><dl class="facts"><div><dt>${t('尺寸')}</dt><dd class="mono">${number(d.width)} × ${number(d.height)}</dd></div><div><dt>${t('加入')}</dt><dd class="mono">${esc((d.added_at || '').slice(0, 16).replace('T', ' '))}</dd></div><div><dt>${t('文件')}</dt><dd title="${esc(d.filename)}">${esc(d.filename)}</dd></div><div><dt>${t('文件形态')}</dt><dd>${d.src_kind === 'deriv' ? t('本地副本') : t('原图')}</dd></div></dl></section>
       <details class="inspector-section"><summary>${t('画面标签')}</summary><div class="tags">${d.tags.map(x => `<button class="tag" data-tag="${esc(x.value)}" title="${t('按此标签筛选图库 · WD {conf}', {conf: x.conf.toFixed(2)})}">${esc(x.value.replaceAll('_', ' '))}</button>`).join('') || `<p>${t('暂无')}</p>`}</div></details>` : ''}
       <div class="inspector-actions">${d.memberships.length ? `<button class="primary large" id="fixChar">${t('更正角色')} <kbd>C</kbd></button>` : `<button class="primary large" data-also="1">${t('设为角色…')} <kbd>C</kbd></button>`}${pageOf(state.route).skip && !d.memberships.length ? `<button class="secondary large" id="skipOne">${t('跳过')} <kbd>S</kbd></button>` : ''}${d.unknown ? `<button class="secondary large" id="resumeOne">${t('恢复到未识别')}${viewOf(state.route).bar === 'skipped' ? ' <kbd>S</kbd>' : ''}</button>` : ''}${curate}</div>`;
+    markDetailKeys();
     if (pc) loadCharStats(pc.id, ident, gen);
     $('fixChar')?.addEventListener('click', () => swapOne(d, ident, primary.id));
     $('inspector').querySelector('.preview img').addEventListener('error', e => { e.target.parentElement.innerHTML = `<div class="missing">${esc(unreadableText())}</div>`; }, {once: true});
@@ -212,7 +213,9 @@ export function ensureVisible(i) {
 // ---------- 全屏查看器 ----------
 const view = {scale: 1, x: 0, y: 0, fit: 1};
 // 大图是盖满页面的层：Esc 关它（焦点在层外的输入框里时让位给输入框失焦），关闭时焦点还给打开它的地方。
-const viewerLayer = createLayer({kind: 'overlay', id: 'viewer', el: () => $('viewer'), yieldToInput: true, onDismiss: reason => closeViewer(reason)});
+// 开着时焦点在大图上，它盖住的页面、选择栏和任务面板设成 inert，Tab 只在大图的按钮间走（#422）；提示条（撤销）不盖。
+const viewerLayer = createLayer({kind: 'overlay', id: 'viewer', el: () => $('viewer'), yieldToInput: true, focusIn: 'self',
+  inert: () => [document.querySelector('.app'), $('selectionBar'), $('taskPanel')], onDismiss: reason => closeViewer(reason)});
 export function openViewer(i) { if (i < 0 || !state.items[i]) return; state.viewer = i; $('viewer').hidden = false; viewerLayer.open(); document.body.classList.add('viewing'); showViewer(i); }
 // 详情栏开着时，关大图后它跟到大图里最后看的那张（core/modes.js 的 detailAfterViewer，#399）：光标已经在那张，
 // 不跟的话快捷键改的是详情栏里的旧图，Space、方向键却从光标那张走。
@@ -220,7 +223,7 @@ export function closeViewer(reason) {
   viewerLayer.close(reason); if (state.viewer < 0) return;
   const follow = detailAfterViewer();
   kept.hold = null; state.viewerItem = null; setCursor(state.viewer); $('viewer').hidden = true; document.body.classList.remove('viewing'); state.viewer = -1; ensureVisible(state.cursor);
-  if (follow) inspect(follow, true);
+  if (follow) inspect(follow, true); else markDetailKeys();   // 选择栏又不被盖住了：详情栏的键标跟着它
 }
 export async function showViewer(i, held = null) {
   if (i < 0 && !held) { closeViewer(); return; }

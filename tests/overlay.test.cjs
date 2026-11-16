@@ -153,3 +153,58 @@ test('dismissTop 与 Esc 相同，并返回栈里有没有层', () => {
   assert.equal(overlay.dismissTop(), false);
   const a = popover('a'); a.open(); assert.equal(overlay.dismissTop(), true); assert.equal(a.el.hidden, true);
 });
+
+// #422：焦点移进层、菜单里的方向键、盖满页面的层把下面设成 inert、onDismiss 可以不关。
+function menu(name, n = 3, extra = {}) {
+  const p = popover(name, extra), list = Array.from({length: n}, (_, i) => node(`${name}-${i}`, p.el, {matches: () => false}));
+  p.el.querySelectorAll = () => list;
+  return {...p, list};
+}
+test('focusIn 把焦点移进层：first 是第一项，self 是层自己；关闭后还给打开它的按钮', () => {
+  const m = menu('view', 3, {focusIn: 'first', menu: true});
+  m.button.focus(); m.open();
+  assert.equal(doc.activeElement, m.list[0]);
+  doc.key('Escape', m.list[0]);
+  assert.equal(doc.activeElement, m.button);
+  const t = popover('tasks', {focusIn: 'self'}); t.el.querySelectorAll = () => [];
+  t.button.focus(); t.open();
+  assert.equal(doc.activeElement, t.el);
+  doc.key('Escape', t.el); assert.equal(doc.activeElement, t.button);
+});
+test('菜单里 ↑ ↓ 循环移动、Home End 到两头，按键被消费；不是菜单的浮层不管方向键', () => {
+  const m = menu('more', 3, {menu: true}); m.open(); m.list[0].focus();
+  const down = doc.key('ArrowDown', m.list[0]);
+  assert.equal(doc.activeElement, m.list[1]); assert.equal(down.prevented && down.stopped, true);
+  doc.key('ArrowUp', m.list[1]); doc.key('ArrowUp', m.list[0]);
+  assert.equal(doc.activeElement, m.list[2], 'wraps around');
+  doc.key('Home', m.list[2]); assert.equal(doc.activeElement, m.list[0]);
+  doc.key('End', m.list[0]); assert.equal(doc.activeElement, m.list[2]);
+  // 焦点在菜单外（还在按钮上）：↓ 进第一项；在菜单外的输入框里：方向键归输入框
+  doc.key('ArrowDown', m.button); assert.equal(doc.activeElement, m.list[0]);
+  const typed = doc.key('ArrowDown', node('search', null, {typing: true})); assert.equal(typed.stopped, false);
+  m.closeAs('api');
+  const panel = popover('tasks'); panel.open();
+  const free = doc.key('ArrowDown', panel.item); assert.equal(free.stopped, false);
+  assert.equal(overlay.popoverOpen(), true); assert.equal(overlay.inPopover(panel.item), true); assert.equal(overlay.inPopover(node('grid')), false);
+});
+test('盖满页面的层把声明的元素设成 inert，关掉后恢复；它上面再开的层所在的元素不设', () => {
+  const app = node('app'), bar = node('bar'), tasks = node('tasks-root'), viewer = node('viewer');
+  const layer = overlay.createLayer({kind: 'overlay', id: 'viewer', el: viewer, inert: () => [app, bar, tasks]});
+  layer.open();
+  assert.deepEqual([app.inert, bar.inert, tasks.inert], [true, true, true]);
+  const panel = overlay.createLayer({kind: 'popover', id: 'tasks', el: node('panel', tasks)}); panel.open();
+  assert.equal(tasks.inert, false, 'a layer opened on top stays usable');
+  panel.close('api');
+  assert.equal(tasks.inert, true);
+  layer.close('api');
+  assert.deepEqual([app.inert, bar.inert, tasks.inert], [false, false, false]);
+  // 层被藏起来（没有走 close）时，下一次按键清栈，inert 一并去掉
+  layer.open(); viewer.hidden = true; doc.key('Escape');
+  assert.equal(app.inert, false);
+});
+test('onDismiss 返回 false 时层留在栈里（「放弃改动？」），之后照常关', () => {
+  const d = dialogNode('profile'); let ask = true;
+  overlay.openModal(d, {id: 'profile', onDismiss: () => { if (ask) return false; d.close(); }});
+  doc.key('Escape'); assert.equal(d.open, true); assert.deepEqual(overlay.layerIds(), ['profile']);
+  ask = false; doc.key('Escape'); assert.equal(d.open, false); assert.deepEqual(overlay.layerIds(), []);
+});

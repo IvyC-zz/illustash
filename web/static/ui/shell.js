@@ -153,9 +153,10 @@ export function renderChrome() {
   }
 }
 // 标签菜单和角色页的更多菜单是非模态浮层：Esc、点外关闭由浮层管理器（ui/overlay.js）统一处理。它们的元素随工具栏
-// 和标题重画而换掉，所以层按 id 找元素；重画后旧的层自己会从栈里清掉。
+// 和标题重画而换掉，所以层按 id 找元素；重画后旧的层自己会从栈里清掉。打开时焦点进第一项（标签菜单是搜索框），
+// ↑ ↓ 在各项之间移动（#422）。
 const menuLayer = (id, popover, button) => {
-  const layer = createLayer({kind: 'popover', id, el: () => $(popover), anchor: () => $(button), onDismiss: reason => setMenu(layer, false, reason)});
+  const layer = createLayer({kind: 'popover', id, el: () => $(popover), anchor: () => $(button), menu: true, focusIn: 'first', onDismiss: reason => setMenu(layer, false, reason)});
   layer.popover = popover;
   return layer;
 };
