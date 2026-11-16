@@ -256,3 +256,35 @@ test('a sync that ends reads the models again, so the card follows the latest re
   assert.equal(reads.filter(p => p === '/api/models').length, before + 1);
   delete globalThis.fetch;
 });
+
+// #429（#386 的 2-42）：点了按钮先禁用，取消系统选择框或请求失败以后卡片内容没变、不会重画，按钮也要恢复。
+test('a models button comes back after the file picker is cancelled or the request fails (#429)', async () => {
+  const page = web.fakePage(), clicks = [];
+  page.document.addEventListener = (type, fn) => { if (type === 'click') clicks.push(fn); };
+  let answer;
+  globalThis.fetch = async (path, options) => {
+    if (options?.method === 'POST') return answer();
+    return {ok: true, status: 200, json: async () => models()};
+  };
+  context.wireModels();
+  await new Promise(done => setTimeout(done, 0));
+  const card = page.el('setModels'), drawn = card.innerHTML;
+  assert.match(drawn, /data-models="import"/);
+  const press = async button => {
+    for (const fn of clicks) fn({target: {closest: sel => sel === '[data-models]' ? button : null}});
+    assert.equal(button.disabled, true, 'disabled while waiting');
+    for (let i = 0; i < 5; i++) await new Promise(done => setTimeout(done, 0));
+  };
+  for (const [what, reply] of [
+    ['cancelled', async () => ({ok: true, status: 200, json: async () => ({cancelled: true})})],
+    ['failed', async () => { throw new Error('offline'); }],
+  ]) {
+    answer = reply;
+    const button = {dataset: {models: 'import'}, disabled: false};
+    await press(button);
+    assert.equal(button.disabled, false, `back after the request ${what}`);
+    assert.equal(card.innerHTML, drawn, 'nothing changed, so nothing was redrawn');
+  }
+  assert.equal(page.el('toastText').textContent, 'offline');
+  delete globalThis.fetch;
+});

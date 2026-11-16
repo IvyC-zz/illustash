@@ -5,7 +5,7 @@ import {esc, bytes, number} from '../core/format.js';
 import {state} from '../core/state.js';
 import {SYNC_ACTIVE, INDEX_ACTIVE, startSync, pollSync, onJob} from '../core/jobs.js';
 import {loadModels, modelsPost, modelsWaiting, modelsFinished, modelsArrived, onModels, saveAcceleration, fallbacks} from '../core/models.js';
-import {$, toast} from './dom.js';
+import {$, toast, redraw, busy} from './dom.js';
 import {confirmAction} from './dialog.js';
 import {home} from '../core/human.js';
 
@@ -59,8 +59,8 @@ export function modelsFailures(m = state.models) {
 // 在会自己下载模型的安装里已经就位（用户 2026-10-19 定，#168）：可以删除，正在使用时不行。
 export function deleteButton(m = state.models) {
   if (!m?.on_demand || m.status !== 'ready') return '';
-  const busy = running(m) || SYNC_ACTIVE.includes(state.sync?.status) || INDEX_ACTIVE.includes(state.index?.state?.status);
-  return `<div class="models-acts"><button class="quiet small" data-models="delete" ${busy ? `disabled title="${t('正在识别或下载，等它结束再删除')}"` : ''}>${t('删除已下载的模型')}</button></div>`;
+  const working = running(m) || SYNC_ACTIVE.includes(state.sync?.status) || INDEX_ACTIVE.includes(state.index?.state?.status);
+  return `<div class="models-acts"><button class="quiet small" data-models="delete" ${working ? `disabled title="${t('正在识别或下载，等它结束再删除')}"` : ''}>${t('删除已下载的模型')}</button></div>`;
 }
 export const manualLink = (m = state.models) => m?.manual ? `<a class="link" href="${esc(m.manual)}" target="_blank" rel="noreferrer noopener">${t('手动下载说明')}</a>` : '';
 // 导入对每个选中的文件做了什么。
@@ -113,7 +113,7 @@ const mirrorNote = m => {
 // 设置 › 数据：状态、存放位置、镜像，以及同样的按钮。
 export function renderModelsCard() {
   const card = $('setModels'), m = state.models; if (!card) return;
-  if (!m) { card.innerHTML = `<h2>${t('识别模型')}</h2><p class="muted-note">…</p>`; return; }
+  if (!m) { redraw(card, `<h2>${t('识别模型')}</h2><p class="muted-note">…</p>`); return; }
   const html = `<h2>${t('识别模型')}<span class="set-scope" title="${t('保存在这台电脑上，所有图库共用')}">${t('所有图库共用')}</span></h2>
     <p class="settings-note">${m.on_demand ? t('图片识别要用 WD 和 CCIP 两个模型，安装包里没有带，第一次使用时下载。每个文件都按应用里写好的大小和 SHA-256 核对，对不上就不用，从哪里下载都一样安全。') : t('这个安装自带识别模型。')}</p>
     <div class="setting-line"><span>${esc(modelsLine(m))}${m.status === 'ready' && extra(m) !== 'download' ? '' : `<small class="line-hint">${manualLink(m)}</small>`}</span></div>
@@ -126,8 +126,7 @@ export function renderModelsCard() {
     <table class="settings-table models-files"><tr><td>${t('存放位置')}</td><td class="mono" title="${esc(m.location)}">${esc(home(m.location))}</td></tr>
       ${m.files.map(f => `<tr><td class="mono">${esc(f.path)}</td><td class="mono" title="SHA-256 ${esc(f.sha256)}">${fileSize(f.size)} · ${esc(f.sha256.slice(0, 12))}…</td></tr>`).join('')}</table>`;
   // 任务运行期间会轮询：只在有变化时重画，正在输入镜像时绝不重画。
-  if (card.dataset.html === html || card.contains(document.activeElement) && document.activeElement.matches('input')) return;
-  card.dataset.html = html; card.innerHTML = html;
+  redraw(card, html, {keepInput: true});
 }
 
 async function act(what) {
@@ -156,8 +155,7 @@ export function renderModels() { renderModelsCard(); }
 export function wireModels() {
   document.addEventListener('click', e => {
     const button = e.target.closest('[data-models]'); if (!button || button.disabled) return;
-    button.disabled = true;
-    act(button.dataset.models);
+    busy(button, () => act(button.dataset.models));
   });
   document.addEventListener('change', async e => {
     const box = e.target.closest('[data-acceleration]'); if (!box) return;
