@@ -1,7 +1,7 @@
 // 图片网格（桌面布局，#199）：分页加载图片、虚拟网格和它的缩放、选择、选择栏的操作、键盘快捷键、视图选项和 R18
 // 筛选。
 import {edits, setLatest, undoLatest, undoneText} from '../core/edits.js';
-import {esc, isMac, number, platformText, shortcut} from '../core/format.js';
+import {esc, isMac, number, platformText, screenScale, shortcut, thumbSize} from '../core/format.js';
 import {t, tb} from '../core/i18n.js';
 import {composing} from '../core/keys.js';
 import {REASONS, nameWithWork} from '../core/labels.js';
@@ -268,7 +268,7 @@ function auditTags(item) {
 }
 function cardHTML(item, i) {
   // 在两端对齐的行里，宽图比名义上的格子宽：按实际宽度决定它的缩略图和说明文字。
-  const r = state.route, ratio = state.fit ? imageRatio(item) : 1, size = state.cellW * Math.max(1, ratio) > 260 ? 'medium' : 'thumb';
+  const r = state.route, ratio = state.fit ? imageRatio(item) : 1, size = thumbSize(state.cellW * Math.max(1, ratio));
   let extra = '';
   if (r.char) {
     const m = item.memberships.find(m => m.id === r.char);
@@ -304,13 +304,14 @@ export function renderGrid(relayout = false) {
   if (relayout || before[0] !== state.cols || before[1] !== state.rowH) state.gridKey = '';
   const rows = rowCount(); grid.style.height = `${rowTop(rows)}px`;
   const first = Math.max(0, rowAt(v.scrollTop) - (state.fit ? 1 : 2)), last = Math.min(rows, state.fit ? rowAt(v.scrollTop + v.clientHeight) + 2 : Math.ceil((v.scrollTop + v.clientHeight) / state.rowH) + 2);
-  const key = `${first}:${last}:${state.cols}:${state.rowH}:${state.dataVersion}:${state.fit}:${gridLayoutKey}`;
+  // 屏幕倍率也算进键：窗口拖到倍率不同的屏幕后，下一次重画（滚动、改窗口大小）就按新倍率换缩略图档位（#452）。
+  const scale = screenScale(), key = `${first}:${last}:${state.cols}:${state.rowH}:${state.dataVersion}:${state.fit}:${gridLayoutKey}:${scale}`;
   if (key !== state.gridKey) {
     state.gridKey = key;
     const existing = new Map([...grid.children].map(el => [Number(el.dataset.index), el]));
     const keep = new Set();
     const dupCards = !!viewOf(state.route).card?.dup;
-    const layoutKey = `${state.cols}:${state.cellW}:${state.rowH}:${state.gap}:${state.fit}:${state.route.page}:${state.route.char}:${state.route.maybe}:${state.route.reason}`;
+    const layoutKey = `${state.cols}:${state.cellW}:${state.rowH}:${state.gap}:${state.fit}:${scale}:${state.route.page}:${state.route.char}:${state.route.maybe}:${state.route.reason}`;
     for (let i = rowStart(first); i < rowStart(last); i++) {
       const item = state.items[i];
       let el = existing.get(i);
