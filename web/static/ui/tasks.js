@@ -9,7 +9,7 @@ import {SYNC_ACTIVE, INDEX_ACTIVE, NAMES_ACTIVE, SIMILAR_ACTIVE, PROV_ACTIVE, RU
   namesLine, taskSimilar, pollSync, pollIndex, pollNames, loadProvenance, startSync, checkIndex, refreshNames, provenanceAction, PHOTOS_PRIVACY, photosHelp, photosRefused,
   importActive, importLine, cancelImport, pollImports} from '../core/jobs.js';
 import {loadLibraries, setSettings, updatesTick} from '../core/settings.js';
-import {$, toast, error, fold, wireFolds} from './dom.js';
+import {$, toast, error, fold, wireFolds, redraw, setDrawn, busy} from './dom.js';
 import {confirmAction} from './dialog.js';
 import {createLayer} from './overlay.js';
 import {openIndexAdd} from './catalog.js';
@@ -123,11 +123,11 @@ export function renderTasks() {
       {library: footLink('library', t('图库')), characters: footLink('characters', t('角色资料')), artists: footLink('artists', t('画师'))})}</p>`;
   const pop = $('taskPanel');
   // 任务运行期间会轮询：只在有变化时重画，这样点击绝不会因为按钮被替换而丢失。
-  if (pop.dataset.html === html) return;
   // 焦点在面板里时，重画后放回同一个按钮（按 data-task／data-prov 找），找不到就放在面板上，不掉到页面上（#422）。
   const had = pop.contains(document.activeElement) ? document.activeElement : null;
   const key = had && ['task', 'prov'].map(k => had.dataset?.[k] ? `[data-${k}="${had.dataset[k]}"]` : '').find(Boolean);
-  pop.dataset.html = html; pop.innerHTML = html; wireFolds(pop);
+  if (!redraw(pop, html)) return;
+  wireFolds(pop);
   if (had && !pop.contains(document.activeElement)) (key && pop.querySelector(key) || pop).focus({preventScroll: true});
 }
 export async function taskTick() {
@@ -152,7 +152,7 @@ const taskLayer = createLayer({kind: 'popover', id: 'tasks', el: () => $('taskPa
 export function toggleTasks(open = !taskPanel.open, reason) {
   taskPanel.open = open; $('taskPanel').hidden = !open;
   $('taskButton').setAttribute('aria-expanded', open); $('taskButton').classList.toggle('on', open);
-  if (open) { taskLayer.open(); delete $('taskPanel').dataset.html; renderTasks(); taskTick(); }
+  if (open) { taskLayer.open(); setDrawn($('taskPanel')); renderTasks(); taskTick(); }
   else { provenanceArmed = false; taskLayer.close(reason); }
 }
 // 面板的处理函数。页面启动时调用一次。
@@ -168,10 +168,9 @@ export function wireTasks() {
     const b = e.target.closest('[data-prov]'); if (!b) return;
     // 「开始」先显示有哪些内容会离开本机；授权只覆盖这一次运行。
     if (b.dataset.prov === 'arm' || b.dataset.prov === 'cancel') { provenanceArmed = b.dataset.prov === 'arm'; renderTasks(); return; }
-    b.disabled = true;
     const body = {action: b.dataset.prov};
     if (b.dataset.prov === 'start') { body.allow_network = b.dataset.network === '1'; provenanceArmed = false; }
-    try { await provenanceAction(body); } catch (err) { toast(err.message); }
+    await busy(b, () => provenanceAction(body).catch(err => toast(err.message)));
   });
   $('taskButton').onclick = e => { e.stopPropagation(); toggleTasks(); };
   $('taskPanel').addEventListener('click', async e => {
@@ -181,16 +180,19 @@ export function wireTasks() {
     if (act === 'close') { toggleTasks(false); return; }
     if (act === 'index-add') { openIndexAdd(); return; }
     if (act === 'photos-privacy') { location.href = PHOTOS_PRIVACY; return; }
-    b.disabled = true;
-    try {
-      if (act === 'sync') await startSync();
-      else if (act === 'index') { if (!await checkIndex(confirmAction)) return; }
-      else if (act === 'index-resume') { if (!await resumeIndex(confirmAction)) return; pollIndex(); }
-      else if (act === 'index-discard') { if (!await discardIndex(confirmAction)) return; }
-      else if (act === 'import-cancel') await cancelImport();
-      else if (act === 'names') { await refreshNames(); toast(t('已开始重新获取角色名称')); }
-      else if (act === 'similar') { await post('/api/similar', {}); setSettings(await api('/api/settings')); }
-    } catch (err) { toast(err.message); } finally { b.disabled = false; }
-    taskTick();
+    // 返回 false：在确认框里取消了，不用重新读取。
+    const started = await busy(b, async () => {
+      try {
+        if (act === 'sync') await startSync();
+        else if (act === 'index') return await checkIndex(confirmAction);
+        else if (act === 'index-resume') { if (!await resumeIndex(confirmAction)) return false; pollIndex(); }
+        else if (act === 'index-discard') return await discardIndex(confirmAction);
+        else if (act === 'import-cancel') await cancelImport();
+        else if (act === 'names') { await refreshNames(); toast(t('已开始重新获取角色名称')); }
+        else if (act === 'similar') { await post('/api/similar', {}); setSettings(await api('/api/settings')); }
+      } catch (err) { toast(err.message); }
+      return true;
+    });
+    if (started) taskTick();
   });
 }
