@@ -287,6 +287,16 @@ fn check_backup(
     fs::remove_dir_all(&check).unwrap();
 }
 
+/// 固定夹具的来源库布局照旧，只把词条库升到当前版本。
+fn migrate_fixture_terms(package: &Path, category: &str) {
+    let done = Command::new(env!("CARGO_BIN_EXE_illustash-terms"))
+        .args(["migrate", "--db"])
+        .arg(package.join("library.sqlite"))
+        .output()
+        .unwrap();
+    assert!(done.status.success(), "{category}: upgrade: {}", String::from_utf8_lossy(&done.stderr));
+}
+
 fn replay(category: &str) {
     let fixture = load(category);
     let (_scratch, root, package) = materialize(&fixture, category);
@@ -302,12 +312,7 @@ fn replay(category: &str) {
     // 较旧的 source.sqlite 布局一并更新，而这不在录制范围内），再检查并删除升级前备份。
     let upgrade = version < recorded;
     if version == recorded && recorded < illustash_terms::SCHEMA_VERSION {
-        let done = Command::new(env!("CARGO_BIN_EXE_illustash-terms"))
-            .args(["migrate", "--db"])
-            .arg(package.join("library.sqlite"))
-            .output()
-            .unwrap();
-        assert!(done.status.success(), "{category}: upgrade: {}", String::from_utf8_lossy(&done.stderr));
+        migrate_fixture_terms(&package, category);
         check_backup(&package, &root, &before, recorded, category);
         fs::remove_dir_all(package.join("library-backups")).unwrap();
     }
@@ -388,8 +393,9 @@ fn request_json(origin: &str, url: &str, body: Option<&Value>, token: &str) -> (
 fn artist_directory_contract() {
     let category = "artist-directory";
     let (_scratch, root, package) = materialize(&load("http_api"), category);
+    migrate_fixture_terms(&package, category);
     let binary = Path::new(env!("CARGO_BIN_EXE_illustash-terms"));
-    let (_host, origin, token) = launch(&root, &package, category, true, binary);
+    let (_host, origin, token) = launch(&root, &package, category, false, binary);
     let c = Connection::open(package.join("library.sqlite")).unwrap();
     c.execute_batch(
         "INSERT INTO terms(key,kind,origin) VALUES
@@ -504,8 +510,9 @@ fn benchmark_artist_directory() {
     assert!(!cfg!(debug_assertions), "benchmark must be compiled --release");
     let category = "artist-directory-benchmark";
     let (_scratch, root, package) = materialize(&load("http_api"), category);
+    migrate_fixture_terms(&package, category);
     let binary = Path::new(env!("CARGO_BIN_EXE_illustash-terms"));
-    let (_host, origin, token) = launch(&root, &package, category, true, binary);
+    let (_host, origin, token) = launch(&root, &package, category, false, binary);
     let c = Connection::open(package.join("library.sqlite")).unwrap();
     c.execute_batch(
         "BEGIN;
