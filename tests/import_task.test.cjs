@@ -139,3 +139,8 @@ test('a published import that could not be listed is offered to open instead of 
   assert.match(html, /data-open-library="\/Users\/me\/Pictures\/Illustash\/合成 2\.pilib" data-name="合成">打开这个图库/);
   assert.doesNotMatch(html, /data-lib-choose="zip" disabled/);
 });
+
+test('a Windows library path shortens the user folder too (#518)', () => {
+  const task = {...running(), status: 'done', result: {name: '合成', path: 'C:\\Users\\合成用户\\Pictures\\Illustash\\合成.pilib', listed: false, error: '写入失败'}};
+  assert.match(card(task).line(task), /保存在 ~\\Pictures\\Illustash\\合成\.pilib，/);
+});
