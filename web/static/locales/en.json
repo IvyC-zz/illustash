@@ -2659,7 +2659,9 @@
     "other": "Recent automatic snapshots ({n})"
   },
   "这份快照已经不在了，或没有通过完整性检查；图库没有改动。": "This snapshot is gone or failed its integrity check. Nothing was changed.",
-  "数据库升级前会自动备份一次。换回整库备份前先退出 app；备份之后的改动都会丢掉。": "A backup is made automatically before each database upgrade. Quit the app before swapping a full backup back in; changes made after the backup are lost.",
+  "上面的份数只算「立即备份」留下的，在图库文件夹的 backups 里。升级图库格式前还会自动另存一份，放在 library-backups 里，内容停在那次升级之前，换回后打开时会再升级一次。换回整库备份前先退出 app；备份之后的改动都会丢掉。": "The count above covers only backups made with “Back up now”, kept in the backups folder inside the library folder. Before the library format is upgraded, another backup is saved automatically in library-backups; it stops just before that upgrade, and Illustash asks you to upgrade again when you open it. Quit the app before swapping in a full backup; changes made after the backup are lost.",
+  "备份放在哪里": "Where backups are kept",
+  "升级前的备份": "Backup from before an upgrade",
   "已经写进这个图库。可以整步撤销：点下面的「撤销这次导入」，或用顶栏的撤销按钮。": "Written to this library. You can undo it as one step: click Undo this import below, or use the undo button in the toolbar.",
   "{label}（{n}）": "{label} ({n})",
   "已导入人工结论": "Imported human conclusions",

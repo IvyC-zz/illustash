@@ -26,7 +26,7 @@ import {renderIntegrityLine} from './integrity.js';
 import {renderModelsCard} from './models.js';
 import {openModal} from './overlay.js';
 import {renderHumanBlock, onHumanClick, wireHuman} from './human.js';
-import {loadHuman} from '../core/human.js';
+import {loadHuman, home} from '../core/human.js';
 
 // ---------- 名称：这个图库联网查询名称的授权 ----------
 // 名称的文字查询（只有 tag 和作品名）需要这个图库授权：授权之前，后端以「显示名联网尚未授权」拒绝。其他失败都是真正的
@@ -291,7 +291,9 @@ export async function renderSettings(fetchMissing = true, refresh = false) {
     setData: () => cardHead(t('备份与存储'), t('这里有两种备份。整库备份是应用数据库（人工整理记录所在的库）的完整副本，只能整份换回；人工结论快照只含人工整理的结论，可以导回这个或别的图库，只补上缺少的部分。要连识别结果和来源一起带到别处，用「设置 › 图库」里的「导出当前图库」。')) + `
       <h3 class="set-sub">${t('整库备份')}</h3>
       <div class="setting-line"><span>${info ? t('共 {n} 份备份', {n: number(info.backup_count)}) + (info.backups?.[0] ? `<small class="line-hint">${t('最近一次 {time}', {time: esc(localStamp(info.backups[0].time))})}</small>` : '') : '…'}</span><button class="quiet small" id="backupNow" ${!info ? 'disabled' : ''}>${t('立即备份')}</button></div>
-      <p class="set-sub-note">${t('数据库升级前会自动备份一次。换回整库备份前先退出 app；备份之后的改动都会丢掉。')}</p>
+      <p class="set-sub-note">${t('上面的份数只算「立即备份」留下的，在图库文件夹的 backups 里。升级图库格式前还会自动另存一份，放在 library-backups 里，内容停在那次升级之前，换回后打开时会再升级一次。换回整库备份前先退出 app；备份之后的改动都会丢掉。')}</p>
+      ${info ? fold('backupFolders', t('备份放在哪里'), `<table class="settings-table">${backupFolder(t('立即备份'), info.package.path, 'backups')}
+        ${backupFolder(t('升级前的备份'), info.package.path, 'library-backups')}</table>`) : ''}
       ${info?.backups?.length ? fold('backupList', t('最近的备份'), `<table class="settings-table">${info.backups.slice(0, 5).map(b => `<tr><td class="mono">${esc(b.name)}</td><td>${bytes(b.bytes)}</td></tr>`).join('')}</table>`) : ''}
       <h3 class="set-sub">${t('人工结论快照')}</h3>
       <div id="humanBlock"></div>
@@ -346,6 +348,12 @@ const ORIGINS = [['pixiv', 'Pixiv'], ['x', 'X'], ['other', t('其他')]];
 export const libForm = {open: false, name: '', folders: {}, photos: false, created: null};
 // 后端列出它知道的出处（#111）；后备值覆盖没有图库信息的旧布局。
 const origins = () => { const list = state.libraries?.info?.origins; return list?.length ? list.map(o => [o.id, tb(o.label)]) : ORIGINS; };
+// 整库备份在图库文件夹里的两处（#517，说法同 #492 的损坏提示）：backups 里是「立即备份」留下的，设置里的份数和清单
+// 只算这些；library-backups 里是升级图库格式前自动留下的。
+export function backupFolder(label, library, name) {
+  const path = library + (library.includes('\\') ? '\\' : '/') + name;
+  return `<tr><td>${label}</td><td class="mono" title="${esc(path)}">${esc(home(path))}</td></tr>`;
+}
 export function renderLibrariesCard() {
   const card = $('setLibraries'); if (!card || !onPage(state.route, 'settings')) return;
   const data = state.libraries;
