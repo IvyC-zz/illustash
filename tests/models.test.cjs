@@ -21,6 +21,26 @@ test('only an install that downloads its models waits for them', () => {
   assert.equal(context.modelsWaiting(undefined), false);
 });
 
+test('a finished reference-pack task reads the status again after an older read', async t => {
+  const previous = globalThis.fetch;
+  t.after(() => { globalThis.fetch = previous; context.state.models = null; });
+  let resolveOld;
+  let reads = 0;
+  const answer = value => ({ok: true, json: async () => value});
+  globalThis.fetch = async path => {
+    if (path === '/api/models') return answer(models());
+    assert.equal(path, '/api/ccip-longtail');
+    if (++reads === 1) return new Promise(resolve => { resolveOld = resolve; });
+    return answer({enabled: 'pack'});
+  };
+  const older = context.loadModels();
+  const fresh = context.loadModels({fresh: true});
+  resolveOld(answer({enabled: null}));
+  assert.equal((await older).longtail.enabled, null);
+  assert.equal((await fresh).longtail.enabled, 'pack');
+  assert.equal(reads, 2);
+});
+
 test('the download button says how much; nothing starts without it', () => {
   const m = models();
   assert.equal(context.modelsLine(m), '还没下载（约 618.0 MB）');

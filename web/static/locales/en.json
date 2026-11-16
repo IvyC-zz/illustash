@@ -6,13 +6,24 @@
   "准备识别时基础角色索引已更新": "The base character index changed while recognition was being prepared.",
   "参考包": "Reference Pack",
   "CCIP 长尾角色参考包": "CCIP Long-Tail Character Reference Pack",
+  "覆盖 {n} 个角色": {
+    "one": "Covers {n} character",
+    "other": "Covers {n} characters"
+  },
+  "启用": "Enable",
+  "启用…": "Enable…",
+  "撤回…": "Withdraw…",
+  "已取消": "Cancelled",
   "正在检查图片": "Checking pictures",
   "参考包操作失败：{reason}": "Reference pack operation failed: {reason}",
   "已撤回参考包": "Reference pack withdrawn",
   "已检查 {n} 张，{skipped} 张缺少可用向量": "Checked {n} pictures. {skipped} had no usable vectors.",
-  "已检查 {n} 张": "Checked {n} pictures",
+  "已检查 {n} 张": {
+    "one": "Checked {n} picture",
+    "other": "Checked {n} pictures"
+  },
   "本图库未启用": "Disabled for this library",
-  "已启用，{n} 张图有候选，{assigned} 张由参考包补归属": "Enabled. {n} pictures have candidates and {assigned} have a match from the pack.",
+  "已启用，{n} 张图有候选，{assigned} 张由参考包补归属": "Enabled. Pictures with candidates: {n}. Pictures assigned by this pack: {assigned}.",
   "参考包文件缺失": "Reference pack file is missing",
   "撤回参考包提供的机器候选和归属？": "Remove the machine candidates and matches from this reference pack?",
   "启用参考包并重扫本图库已保存的 CCIP 向量？": "Enable the reference pack and rescan the CCIP vectors saved in this library?",

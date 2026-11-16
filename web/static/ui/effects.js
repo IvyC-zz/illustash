@@ -44,7 +44,15 @@ export async function afterJob(job, change) {
   else if (job === 'import') {
     const task = state.importTask;
     if (change.ended && task.kind === HUMAN_IMPORT) { if (task.status === 'done' && (task.committed ?? task.result?.committed)) listChanged(); humanImportEnded(task); }
-    else if (change.ended) { toast(importLine(task)); if (task.status === 'done' && task.kind === 'archive') loadLibraries(); }
+    else if (change.ended) {
+      toast(importLine(task));
+      if (task.status === 'done' && task.kind === 'archive') loadLibraries();
+      if (task.status === 'done' && task.kind === 'ccip_longtail') {
+        listChanged();
+        await refreshMeta().catch(e => error(readError(e)));
+        if (!pageOf(state.route).panel && !selCount()) reload();
+      }
+    }
     renderLibrariesCard(); renderHumanBlock();
   }
 }

@@ -18,9 +18,12 @@ const adopt = async value => {
   await changed.emit(before, start);
   return value;
 };
-export function loadModels() {
+export function loadModels({fresh = false} = {}) {
   const token = session.token;
-  if (reading && readingToken === token) return reading;
+  if (reading && readingToken === token) {
+    // 任务结束后，已经发出的读取可能仍带着提交前的图库状态。
+    return fresh ? reading.catch(() => {}).then(() => token === session.token && loadModels()) : reading;
+  }
   readingToken = token;
   const request = Promise.all([api('/api/models'), api('/api/ccip-longtail').catch(() => null)])
     .then(([value, longtail]) => token === session.token ? adopt({...value, longtail}) : value)

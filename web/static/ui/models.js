@@ -121,7 +121,7 @@ function longtailCard(pack) {
     ? t('已启用，{n} 张图有候选，{assigned} 张由参考包补归属', {n: number(pack.candidates), assigned: number(pack.assigned)})
     : t('本图库未启用');
   return `<div class="setting-line"><span><b>${t('CCIP 长尾角色参考包')}</b>
-    <small class="line-hint" title="SHA-256 ${esc(pack.package_sha256)}">${t('这个图库')} · ${t('{n} 个角色', {n: number(pack.roles)})}</small></span></div>
+    <small class="line-hint" title="SHA-256 ${esc(pack.package_sha256)}">${t('覆盖 {n} 个角色', {n: number(pack.roles)})}</small></span></div>
     <p class="settings-note">${esc(status)}${pack.enabled && !pack.available ? ' ' + t('参考包文件缺失') : ''}</p>
     ${pack.needs_scan ? `<p class="muted-note">${t('基础角色索引已更新，请重新检查。')}</p>` : ''}
     ${pack.error ? `<p class="muted-note">${esc(tb(pack.error))}</p>` : ''}
@@ -207,9 +207,12 @@ export function wireModels() {
     if (arrived && !SYNC_ACTIVE.includes(state.sync?.status) && state.sync?.status !== 'off') startSync().then(pollSync).catch(e => toast(e.message));
   });
   // 一次同步结束：重新读取模型状态，卡片上的加速回退原因跟着最近一次识别变，不用等打开任务面板。
-  onJob((job, change) => {
-    if ((job === 'sync' || job === 'import') && change.ended) loadModels().catch(() => {});
-    if (job === 'import' && state.importTask?.kind === 'ccip_longtail') renderModels();
+  onJob(async (job, change) => {
+    if (job === 'import' && state.importTask?.kind === 'ccip_longtail') {
+      if (change.ended) await loadModels({fresh: true});
+      else renderModels();
+    }
+    if (job === 'sync' && change.ended) await loadModels();
   });
   loadModels().catch(() => {});
 }
