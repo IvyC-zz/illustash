@@ -74,6 +74,20 @@ function restoreLine(job) {
   if (job.status === 'done') return job.result?.undo != null ? t('已从自动快照恢复。') : t('从自动快照恢复完成，没有新内容。');
   return importLine(job);
 }
+// 最近一份快照缺内容摘要时的说明（#516）。快照只用已有摘要，缺的在后台补算：hash_unreadable 是补算后仍读不到的张数，
+// 补算还没跑完时为空。把「还没算」和「真的读不到」分开说；refill 表示都补齐了、后台马上再存一份。
+function hashNote(a) {
+  const n = a.hash_missing, m = a.hash_unreadable;
+  if (!n) return '';
+  const lost = t('从这份快照恢复时，缺摘要的图上的结论认不回来，会在报告里列出；其余的图不受影响。');
+  let text;
+  if (m == null) text = t('最近一份快照里有 {n} 张图还没有内容摘要，正在后台读取这些图补算。', {n: number(n)}) + lost;
+  else if (m === 0) text = a.refill ? t('最近一份快照里有 {n} 张图还没有内容摘要，已经补算好，马上会再存一份快照。', {n: number(n)})
+    : t('最近一份快照里有 {n} 张图还没有内容摘要，已经补算好，下一份快照会补上。', {n: number(n)});
+  else if (m >= n) text = t('最近一份快照里有 {n} 张图当时读不到，没能记下内容摘要：从它恢复时，不论是原图库还是换了位置的图库，这些图上的结论都认不回来，会在报告里列出；其余的图不受影响。', {n: number(n)});
+  else text = t('最近一份快照里有 {n} 张图还没有内容摘要。', {n: number(n)}) + t('其中 {n} 张图现在读不到，补不上；其余的已经补算好，下一份快照会补上。', {n: number(m)}) + lost;
+  return `<p class="muted-note">${text}</p>`;
+}
 let readFailed = null;
 // #humanBlock 的内容；h 是 GET /api/human-conclusions 的回应，job 是导入槽的任务。
 export function humanBlock(h = state.human, job = state.importTask) {
@@ -82,7 +96,7 @@ export function humanBlock(h = state.human, job = state.importTask) {
   const off = busy ? ` disabled title="${t('有导入或导出正在进行，等它结束再试')}"` : '';
   return `<p class="set-sub-note">${t('确认、移出、合并、原创角色这些人工整理的结论，单独存成一个小文件：可以导回这个图库，或者换了位置、换了电脑的图库；只补上缺少的部分，冲突时保留目标图库已有的。')}</p>
     ${autoLine(a)}
-    ${a.hash_missing ? `<p class="muted-note">${t('最近一份快照里有 {n} 张图当时读不到，没能记下内容摘要：从它恢复时，不论是原图库还是换了位置的图库，这些图上的结论都认不回来，会在报告里列出；其余的图不受影响。', {n: number(a.hash_missing)})}</p>` : ''}
+    ${hashNote(a)}
     ${a.cleanup_error ? `<p class="muted-note">${t('清理旧快照没有成功：{reason}。新快照照常生成。', {reason: esc(tb(a.cleanup_error))})}</p>` : ''}
     ${a.unreadable_snapshots ? `<p class="muted-note">${t('另有 {n} 份快照读不出来，不能用来恢复。', {n: number(a.unreadable_snapshots)})}</p>` : ''}
     ${snapshotList(a, busy)}

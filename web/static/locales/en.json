@@ -2608,6 +2608,27 @@
   "人工结论快照": "Human conclusion snapshots",
   "和这个图库已有的结论冲突，保留了已有的": "Conflicts with this library's conclusions; kept this library's",
   "角色或作品": "Character or series",
+  "从这份快照恢复时，缺摘要的图上的结论认不回来，会在报告里列出；其余的图不受影响。": " When restoring from this snapshot, the conclusions on pictures without a fingerprint can't be matched and are listed in the report; other pictures are not affected.",
+  "最近一份快照里有 {n} 张图还没有内容摘要，正在后台读取这些图补算。": {
+    "one": "In the latest snapshot, {n} picture has no content fingerprint yet. It is being read in the background to fill it in.",
+    "other": "In the latest snapshot, {n} pictures have no content fingerprint yet. They are being read in the background to fill them in."
+  },
+  "最近一份快照里有 {n} 张图还没有内容摘要，已经补算好，马上会再存一份快照。": {
+    "one": "In the latest snapshot, {n} picture had no content fingerprint yet. It has been filled in, and another snapshot will be saved shortly.",
+    "other": "In the latest snapshot, {n} pictures had no content fingerprint yet. They have been filled in, and another snapshot will be saved shortly."
+  },
+  "最近一份快照里有 {n} 张图还没有内容摘要，已经补算好，下一份快照会补上。": {
+    "one": "In the latest snapshot, {n} picture had no content fingerprint yet. It has been filled in and will be in the next snapshot.",
+    "other": "In the latest snapshot, {n} pictures had no content fingerprint yet. They have been filled in and will be in the next snapshot."
+  },
+  "最近一份快照里有 {n} 张图还没有内容摘要。": {
+    "one": "In the latest snapshot, {n} picture has no content fingerprint yet.",
+    "other": "In the latest snapshot, {n} pictures have no content fingerprint yet."
+  },
+  "其中 {n} 张图现在读不到，补不上；其余的已经补算好，下一份快照会补上。": {
+    "one": " {n} of them can't be read now, so it can't be filled in; the rest have been filled in and will be in the next snapshot.",
+    "other": " {n} of them can't be read now, so they can't be filled in; the rest have been filled in and will be in the next snapshot."
+  },
   "最近一份快照里有 {n} 张图当时读不到，没能记下内容摘要：从它恢复时，不论是原图库还是换了位置的图库，这些图上的结论都认不回来，会在报告里列出；其余的图不受影响。": {
     "one": "In the latest snapshot, {n} picture couldn't be read, so its content fingerprint is missing. When restoring from it, into this library or one that has moved, the conclusions on that picture can't be matched and are listed in the report; other pictures are not affected.",
     "other": "In the latest snapshot, {n} pictures couldn't be read, so their content fingerprints are missing. When restoring from it, into this library or one that has moved, the conclusions on those pictures can't be matched and are listed in the report; other pictures are not affected."

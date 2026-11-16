@@ -61,7 +61,7 @@ test('the automatic status says when it last succeeded, what is not protected ye
 
 test('a failure shows its reason and retry time; cleanup errors, missing fingerprints and unreadable snapshots each say what they mean', () => {
   const p = page({});
-  p.state.human = {automatic: automatic({last_error: '合成故障', retry_at: T + 300, hash_missing: 4, cleanup_error: '合成清理故障', unreadable_snapshots: 1}), export: {status: 'idle'}};
+  p.state.human = {automatic: automatic({last_error: '合成故障', retry_at: T + 300, hash_missing: 4, hash_unreadable: 4, cleanup_error: '合成清理故障', unreadable_snapshots: 1}), export: {status: 'idle'}};
   const html = ui.humanBlock();
   assert.match(html, /local-dot warn/);
   assert.match(html, /自动快照失败：合成故障/);
@@ -74,6 +74,21 @@ test('a failure shows its reason and retry time; cleanup errors, missing fingerp
     p.state.human = {automatic: automatic(extra), export: {status: 'idle'}};
     assert.ok(ui.humanBlock().includes(text), text);
   }
+});
+
+test('missing fingerprints that are still being filled in are not called unreadable; really unreadable ones still are (#516)', () => {
+  const p = page({});
+  const note = extra => { p.state.human = {automatic: automatic({hash_missing: 4, ...extra}), export: {status: 'idle'}}; return ui.humanBlock(); };
+  const pending = note({hash_unreadable: null});
+  assert.match(pending, /4 张图还没有内容摘要，正在后台读取这些图补算/);
+  assert.doesNotMatch(pending, /读不到/);
+  const filled = note({hash_unreadable: 0, refill: true});
+  assert.match(filled, /已经补算好，马上会再存一份快照/);
+  assert.doesNotMatch(filled, /读不到/);
+  assert.match(note({hash_unreadable: 0, refill: false}), /已经补算好，下一份快照会补上/);
+  assert.match(note({hash_unreadable: 1}), /4 张图还没有内容摘要。其中 1 张图现在读不到，补不上；其余的已经补算好/);
+  assert.match(note({hash_unreadable: 4}), /4 张图当时读不到/);
+  assert.doesNotMatch(note({hash_missing: 0, hash_unreadable: 0}), /内容摘要，|读不到/);
 });
 
 test('an export shows its stage with a cancel button, then where the file is with the home folder as ~', () => {
