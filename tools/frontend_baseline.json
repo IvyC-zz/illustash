@@ -37,7 +37,7 @@
   "document-listener": {
    "ui/grid.js::keydown": 1,
    "ui/models.js::click": 1,
-   "ui/settings.js::click": 3
+   "ui/settings.js::click": 1
   },
   "long-line": {
    "core/catalog.js": 3,
@@ -55,7 +55,7 @@
    "ui/models.js": 3,
    "ui/palette.js": 21,
    "ui/review.js": 16,
-   "ui/settings.js": 51,
+   "ui/settings.js": 50,
    "ui/shell.js": 20,
    "ui/tasks.js": 17
   },

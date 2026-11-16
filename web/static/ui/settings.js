@@ -45,7 +45,7 @@ export async function setNamesNetwork(allow) {
 let indexArmed = null;
 export async function renderIndexCard(fresh = true) {
   const route = state.route, token = session.token;
-  if (!$('indexCard') || !onPage(state.route, 'settings')) return;
+  if (!settingsCard('indexCard')) return;
   if (fresh || !state.index) { try { const value = await shared('/api/index'); if (route !== state.route || token !== session.token) return; setIndex(value); } catch (e) { if (route === state.route && token === session.token) readFailure($('indexCard'), e); return; } }
   const card = $('indexCard'), x = state.index; if (!x || !card) return;
   const s = x.state, active = INDEX_ACTIVE.includes(s.status), watched = x.watch.works.length;
@@ -72,7 +72,7 @@ export async function renderIndexCard(fresh = true) {
 // 从 Bangumi 取的中文 / 日文名字（只有文字查询）；配置好的模型 API 是用户选择开启的最后手段。
 export async function renderNamesCard(fresh = true) {
   const route = state.route, token = session.token;
-  if (!$('namesCard') || !onPage(state.route, 'settings')) return;
+  if (!settingsCard('namesCard')) return;
   if (fresh || !state.names) { try { const value = await shared('/api/names'); if (route !== state.route || token !== session.token) return; setNames(value); } catch (e) { if (route === state.route && token === session.token) readFailure($('namesCard'), e); return; } }
   // 等待期间页面可能已经重新渲染：总是对现在屏幕上的那张卡片操作。
   const card = $('namesCard'), x = state.names; if (!card) return; if (!x) { card.hidden = true; return; }
@@ -159,6 +159,14 @@ const SCOPE = {
 const scopeKey = key => key === 'browser' && state.updates?.install ? 'app' : key;
 const scope = key => `<span class="set-scope" data-scope="${key}" title="${SCOPE[scopeKey(key)][1]}">${SCOPE[scopeKey(key)][0]}</span>`;
 export const cardHead = (title, note = '', key = '') => `<h2>${title}${key ? scope(key) : ''}</h2>${note ? `<p class="settings-note">${note}</p>` : ''}`;
+// 卡片的数据还没读到时（#432 ③-9）：只有标题和「正在读取…」。
+const readingCard = title => `${cardHead(title)}<p class="muted-note">${t('正在读取…')}</p>`;
+// 设置页上的这张卡片；不在设置页、卡片没画出来时为 null，各卡片的绘制函数直接返回。
+const settingsCard = id => onPage(state.route, 'settings') ? $(id) : null;
+// 分段控件：options 是 [值, 文字]，current 那一段亮。group 是容器上的属性（设置项名 data-setting），item 是每一段上
+// 放值的属性名（默认 data-value；来源一行用 data-preset，前面再带上来源的 id）。
+const segmented = (options, current, {group = '', item = 'data-value'} = {}) => `<div class="segmented"${group ? ' ' + group : ''}>`
+  + options.map(([v, label]) => `<button class="${current === v ? 'on' : ''}" ${item}="${v}">${label}</button>`).join('') + '</div>';
 // 启动时的开关；本次启动仍以 --no-* 参数为准。
 function startupSwitch(key, name, hint) {
   const info = state.settings; if (!info?.startup) return '';
@@ -257,7 +265,7 @@ export async function renderSettings(fetchMissing = true, refresh = false) {
   const reasons = state.exclInfo.reasons || {};
   const sourcesOf = info?.package?.sources || state.libraries?.info?.sources || [];
   const photos = sourcesOf.some(x => x.kind === 'photos');
-  const segment = (name, options, current) => `<div class="segmented" data-setting="${name}">${options.map(([v, label]) => `<button class="${current === v ? 'on' : ''}" data-value="${v}">${label}</button>`).join('')}</div>`;
+  const segment = (name, options, current) => segmented(options, current, {group: `data-setting="${name}"`});
   // 按 App 分的计数只有照片来源才有（X 或 Pixiv 保存的图片）；文件夹图库没有。
   const apps = Object.entries(runs.find(r => r.sources)?.sources || {}).sort((a, b) => b[1].photos - a[1].photos);
   const appRow = ([, v]) => `<tr><td title="${esc(v.name)}">${esc(tb(v.name))}</td><td>${number(v.photos)}</td><td>${v.collected ? number(v.collected) : '—'}</td></tr>`;
@@ -354,18 +362,17 @@ export function backupFolder(label, library, name) {
   return `<tr><td>${label}</td><td class="mono" title="${esc(path)}">${esc(home(path))}</td></tr>`;
 }
 export function renderLibrariesCard() {
-  const card = $('setLibraries'); if (!card || !onPage(state.route, 'settings')) return;
+  const card = settingsCard('setLibraries'); if (!card) return;
   const data = state.libraries;
-  if (!data) { card.innerHTML = `<h2>${t('图库')}</h2><p class="muted-note">${t('正在读取…')}</p>`; return; }
+  if (!data) { card.innerHTML = readingCard(t('图库')); return; }
   const cur = data.info, list = origins();
-  const seg = (attr, value, options) => `<div class="segmented">${options.map(([v, label]) => `<button class="${v === value ? 'on' : ''}" ${attr}="${v}">${label}</button>`).join('')}</div>`;
   const editable = cur && !cur.test, last = cur?.sources.length <= 1;
   const remove = s => editable ? `<button class="quiet small" data-lib-remove="${esc(s.id)}" ${last ? `disabled title="${t('图库至少要保留一个来源')}"` : ''}>${t('移除')}</button>` : '';
   // #293：一个来源列表，每个文件夹的出处在它自己那一行设置，再加一行用来添加更多来源的按钮。
   const originOf = s => list.some(o => o[0] === s.preset) ? s.preset : 'other';
   const folders = !cur ? [] : cur.sources.filter(s => s.kind === 'folder').sort((a, b) => list.findIndex(o => o[0] === originOf(a)) - list.findIndex(o => o[0] === originOf(b)));
   const folderRow = s => `<div class="setting-line lib-folder"><span class="lib-path" title="${esc(s.path)}"><bdi>${esc(home(s.path))}</bdi></span>
-      <span class="lib-src">${editable ? seg(`data-lib-preset="${esc(s.id)}" data-preset`, s.preset, list) : `<span class="muted-note">${esc(list.find(o => o[0] === originOf(s))[1])}</span>`}${remove(s)}</span></div>`;
+      <span class="lib-src">${editable ? segmented(list, s.preset, {item: `data-lib-preset="${esc(s.id)}" data-preset`}) : `<span class="muted-note">${esc(list.find(o => o[0] === originOf(s))[1])}</span>`}${remove(s)}</span></div>`;
   const photos = cur?.sources.find(s => s.kind === 'photos');
   const sources = !cur ? '' : `<h3 class="set-sub">${t('来源')}</h3>
     ${folders.map(folderRow).join('')}${photos ? `<div class="setting-line lib-folder"><span><b>${t('iCloud 照片')}</b><small>${t('本机「照片」图库，按存图的 App 区分 X 和 Pixiv')}</small></span><span class="lib-src">${remove(photos)}</span></div>` : ''}
@@ -455,9 +462,9 @@ export async function openLibrary(path, name, agreed = null) {
 
 // ---------- 绑定的账号（docs/PROVENANCE.md 第 8 节）：所有图库共用；密钥存在钥匙串里 ----------
 function renderAccountsCard() {
-  const card = $('setAccounts'); if (!card || !onPage(state.route, 'settings')) return;
+  const card = settingsCard('setAccounts'); if (!card) return;
   const a = state.accounts;
-  if (!a) { card.innerHTML = `<h2>${t('账号')}</h2><p class="muted-note">${t('正在读取…')}</p>`; return; }
+  if (!a) { card.innerHTML = readingCard(t('账号')); return; }
   const p = a.pixiv, x = a.x, s = a.saucenao;
   card.innerHTML = `${cardHead(t('账号'), t('找回画师会读你的关注列表，把关注的人记为候选画师；在详情面板点「找 TA 的其他图」时，才拉这位画师公开作品的小图，在本机逐张比对。只读，不点赞、不关注、不发任何内容。'))}
     <h3 class="acct-h">Pixiv${scope('shared')}</h3>
@@ -496,10 +503,10 @@ async function accountAction(action, body = {}) {
 
 // ---------- 找回画师（docs/PROVENANCE.md 第 8 节）：设置卡片；运行的轮询在 core/jobs.js ----------
 export function renderProvenanceCard() {
-  const card = $('setProvenance'); if (!card || !onPage(state.route, 'settings')) return;
+  const card = settingsCard('setProvenance'); if (!card) return;
   const p = state.provenance;
-  if (!p) { redraw(card, `<h2>${t('找回画师')}</h2><p class="muted-note">${t('正在读取…')}</p>`); return; }
-  if (!p.available) { redraw(card, `<h2>${t('找回画师')}</h2><p class="muted-note">${t('只有图库包能找回画师。')}</p>`); return; }
+  if (!p) { redraw(card, readingCard(t('找回画师'))); return; }
+  if (!p.available) { redraw(card, `${cardHead(t('找回画师'))}<p class="muted-note">${t('只有图库包能找回画师。')}</p>`); return; }
   const s = p.state || {}, working = PROV_ACTIVE.includes(s.status), cov = p.coverage;
   const covLine = (label, key) => cov?.pictures?.[key] ? `<div class="prov-stat"><b>${pct(cov.with_artist?.[key] || 0, cov.pictures[key])}</b><span>${label}<small>${t('{done}/{total} 张', {done: number(cov.with_artist?.[key] || 0), total: number(cov.pictures[key])})}</small></span></div>` : '';
   const total = cov ? Object.values(cov.pictures || {}).reduce((a, b) => a + b, 0) : 0;
@@ -675,21 +682,41 @@ export async function onLibrariesClick(e) {
   else if ('importCancel' in d) await busy(btn, () => cancelImport().catch(err => toast(err.message)));
 }
 
+// 名称联网授权的按钮：设置 › 网络与隐私里的授权、撤销（重画卡片），以及搜索结果下面的「允许查询…」（允许后把输入的
+// 内容再搜一次）。点到了返回 true。
+function onNamesClick(e) {
+  const b = e.target.closest('[data-names-network]');
+  if (b) { setNamesNetwork(b.dataset.namesNetwork === '1').then(ok => { if (ok) { renderSettings(false); drawGuide(); } }); return true; }
+  const allow = e.target.closest('[data-names-allow]'); if (!allow) return false;
+  e.preventDefault();
+  const input = allow.closest('dialog, .combo, .watch-add, #picker')?.querySelector('input');
+  setNamesNetwork(true).then(ok => { if (ok) { input?.focus(); input?.dispatchEvent(new Event('input', {bubbles: true})); } });
+  return true;
+}
+// 检查更新的按钮：下载、安装、打开下载页（data-updates），以及「检查更新」。
+function onUpdatesClick(e) {
+  const act = e.target.closest('[data-updates]');
+  if (act) {
+    act.disabled = true;
+    updateAct(act.dataset.updates).then(redrawUpdates);
+    return true;
+  }
+  const b = e.target.closest('[data-updates-check]'); if (!b) return false;
+  b.disabled = true; b.textContent = t('正在检查…');
+  checkUpdates().then(u => toast(u.error ? tb(u.error) : u.newer ? t('有新版本 {version}', {version: u.latest}) : t('已是最新版本')), err => toast(err.message))
+    .then(redrawUpdates);
+  return true;
+}
+function redrawUpdates() {
+  if ($('aboutUpdates')) $('aboutUpdates').innerHTML = updatesLine();
+  drawNudge(); drawUpdateButton();
+}
+
 // 设置各页的处理函数，以及读取或更改它们的数据之后要做的事。页面启动时调用一次。
 export function wireSettings() {
-  // 设置 › 网络与隐私：授权或撤销，然后重画卡片。
-  document.addEventListener('click', async e => {
-    const b = e.target.closest('[data-names-network]');
-    if (b && await setNamesNetwork(b.dataset.namesNetwork === '1')) { renderSettings(false); drawGuide(); }
-  });
-  // 搜索下面的「允许查询…」按钮：一旦允许，就把输入的内容再搜一次。
-  document.addEventListener('click', async e => {
-    const b = e.target.closest('[data-names-allow]');
-    if (!b) return;
-    e.preventDefault();
-    const input = b.closest('dialog, .combo, .watch-add, #picker')?.querySelector('input');
-    if (await setNamesNetwork(true)) { input?.focus(); input?.dispatchEvent(new Event('input', {bubbles: true})); }
-  });
+  // 名称联网授权和检查更新的按钮不只在设置页里（搜索结果下面的「允许查询…」、导览里的更新提示），所以在 document 上
+  // 用一个监听接住（#432 ③-9，原来是三个）。
+  document.addEventListener('click', e => { onNamesClick(e) || onUpdatesClick(e); });
   onSettings((what, detail) => {
     if (what === 'data') {
       if (detail.error) error(readError(detail.error));
@@ -756,22 +783,6 @@ export function wireSettings() {
     loadProvenance();
   });
   $('updateButton').onclick = updateButtonClick;
-  document.addEventListener('click', async e => {
-    const act = e.target.closest('[data-updates]');
-    if (act) {
-      act.disabled = true;
-      await updateAct(act.dataset.updates);
-      if ($('aboutUpdates')) $('aboutUpdates').innerHTML = updatesLine();
-      drawNudge(); drawUpdateButton();
-      return;
-    }
-    const b = e.target.closest('[data-updates-check]'); if (!b) return;
-    b.disabled = true; b.textContent = t('正在检查…');
-    try { const u = await checkUpdates(); toast(u.error ? tb(u.error) : u.newer ? t('有新版本 {version}', {version: u.latest}) : t('已是最新版本')); }
-    catch (err) { toast(err.message); }
-    if ($('aboutUpdates')) $('aboutUpdates').innerHTML = updatesLine();
-    drawNudge(); drawUpdateButton();
-  });
   $('settingsPage').addEventListener('change', async e => {
     const box = e.target.closest('[data-updates-auto]'); if (!box) return;
     try { await updatesPost({action: 'auto', allow: box.checked}); toast(box.checked ? t('已打开自动检查更新') : t('已关闭自动检查更新')); }
