@@ -57,7 +57,7 @@
    "core/jobs.js": 4,
    "core/labels.js": 1,
    "core/meta.js": 1,
-   "core/route.js": 4,
+   "core/route.js": 3,
    "ui/artists.js": 6,
    "ui/catalog.js": 42,
    "ui/detail.js": 29,
@@ -69,7 +69,7 @@
    "ui/palette.js": 26,
    "ui/review.js": 18,
    "ui/settings.js": 52,
-   "ui/shell.js": 23,
+   "ui/shell.js": 21,
    "ui/tasks.js": 18
   },
   "css-literal": {

@@ -224,3 +224,22 @@ test('整理页都登记了底栏提示（已知问题 10）', () => {
   assert.match(pages.PAGES.group.hint(), /S 跳过/);
   assert.doesNotMatch(pages.PAGES.sgroup.hint(), /S 跳过|C 设为角色/);
 });
+
+// 排序记忆（#386 的 2-26）：每类页面一个偏好键；图库和角色页的键就是设置里的两项默认排序，未识别一类共用一个，
+// 其余各页各记各的；没记过的页面跟着图库默认排序。
+test('each kind of page remembers its own sort', () => {
+  const store = new Map(), saved = globalThis.localStorage;
+  globalThis.localStorage = {getItem: k => store.has(k) ? store.get(k) : null, setItem: (k, v) => store.set(k, v)};
+  try {
+    const {sortKey, defaultSort} = route, {prefs} = web.core();
+    assert.deepEqual(['library', 'unmatched', 'skipped', 'group', 'duplicates', 'excluded', 'pending', 'sgroup', 'audit'].map(page => sortKey({page})),
+      ['sortLibrary', 'sortUnmatched', 'sortUnmatched', 'sortUnmatched', 'sort.duplicates', 'sort.excluded', 'sort.pending', 'sort.sgroup', 'sort.audit']);
+    assert.equal(sortKey({page: 'library', char: 'c1'}), 'sortCharacter');
+    prefs.set('sortLibrary', 'oldest');
+    assert.equal(defaultSort({page: 'duplicates'}), 'oldest');
+    prefs.set('sort.duplicates', 'newest');
+    assert.deepEqual([defaultSort({page: 'duplicates'}), defaultSort({page: 'excluded'}), defaultSort({page: 'library'})], ['newest', 'oldest', 'oldest']);
+    prefs.set('sortCharacter', 'newest');
+    assert.equal(defaultSort({page: 'library', char: 'c1'}), 'newest');
+  } finally { globalThis.localStorage = saved; }
+});

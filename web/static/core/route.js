@@ -25,8 +25,16 @@ export function hashFor(r) {
   if (r.q) q.set('q', r.q); if (r.dup) q.set('dup', r.dup); if (r.reason) q.set('reason', r.reason); if (r.kind) q.set('kind', r.kind); if (r.maybe) q.set('maybe', r.maybe); if (r.tag) q.set('tag', r.tag); if (r.utag) q.set('utag', r.utag); if (r.sort && r.sort !== defaultSort(r)) q.set('sort', r.sort);
   return path + (q.toString() ? '?' + q : '');
 }
-export const defaultSort = r => r.char ? prefs.get('sortCharacter', 'suspicious') : viewOf(r).lead ? prefs.get('sortUnmatched', prefs.get('sortLibrary', 'newest')) : prefs.get('sortLibrary', 'newest');
+// 排序记在哪个偏好里（#386 的 2-26）：每一类页面一个键，下拉改了就写进去，离开再回来还是它。图库和角色页的键就是
+// 设置 › 通用里那两项默认排序，所以在页面上改和在设置里改是同一回事；未识别一类共用一个键，其余各页各一个。键由
+// core/pages.js 的 sortPref 登记。
+// 没改过排序的页面跟着设置里的图库默认排序。
+export const sortKey = r => viewOf(r).sortPref || 'sort.' + pageOf(r).name;
+export const defaultSort = r => r.char ? prefs.get('sortCharacter', 'suspicious') : prefs.get(sortKey(r), prefs.get('sortLibrary', 'newest'));
 export function go(route) { location.hash = hashFor(route); }
+// 加一个图库筛选（标签、我的标签）要去的地址：在有图库工具栏的页面（图库、角色页）上叠加到现有的筛选上，在别的
+// 页面去图库只按它筛选（#386 的 2-30）。工具栏和详情栏都用它。
+export const filterRoute = patch => ({...(pageOf(state.route).toolbar === 'library' ? state.route : {page: 'library'}), ...patch});
 // 角色是图库的一个筛选，不是单独的页面。
 export const charRoute = (id, variant = '') => ({page: 'library', char: id, variant});
 export const charHash = (id, variant = '') => hashFor(charRoute(id, variant));

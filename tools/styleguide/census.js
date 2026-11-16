@@ -1,9 +1,9 @@
 // 由 tools/styleguide/census.py 从 web/static/app.css 生成，不要手改。
 window.CENSUS = {
  "source": "web/static/app.css",
- "sha256": "f0885d0e11a028595d4b481c731d5f3764d76a089ad72f5d11eb17acc1dfe007",
+ "sha256": "edc670721355fef287a6a354d3403099ea1ccec759d1e342c813ebba35c84ba2",
  "lines": 1499,
- "rules": 1345,
+ "rules": 1343,
  "themeVars": {
   "light": {
    "--canvas": "#f4f4f6",
@@ -153,12 +153,12 @@ window.CENSUS = {
    "--ink": 53,
    "--canvas": 11,
    "--fs-13": 30,
-   "--hair": 35,
-   "--sh": 36,
-   "--muted": 138,
+   "--hair": 34,
+   "--sh": 37,
+   "--muted": 137,
    "--sheet": 67,
    "--soft": 86,
-   "--ink2": 71,
+   "--ink2": 72,
    "--accent": 43,
    "--accent-ink": 46,
    "--accent-btn": 13,
@@ -168,15 +168,15 @@ window.CENSUS = {
    "--radius-4": 20,
    "--space-4": 92,
    "--space-10": 97,
-   "--space-12": 73,
-   "--space-8": 134,
+   "--space-12": 74,
+   "--space-8": 133,
    "--radius-6": 34,
    "--h-36": 16,
    "--fs-15": 10,
    "--fs-11": 109,
    "--fs-12": 135,
    "--space-2": 49,
-   "--space-14": 45,
+   "--space-14": 44,
    "--space-6": 115,
    "--radius-round": 16,
    "--h-32": 12,
@@ -569,7 +569,7 @@ window.CENSUS = {
    {
     "name": "--space-8",
     "value": "8px",
-    "uses": 134
+    "uses": 133
    },
    {
     "name": "--space-10",
@@ -579,12 +579,12 @@ window.CENSUS = {
    {
     "name": "--space-12",
     "value": "12px",
-    "uses": 73
+    "uses": 74
    },
    {
     "name": "--space-14",
     "value": "14px",
-    "uses": 45
+    "uses": 44
    },
    {
     "name": "--space-16",
@@ -1152,7 +1152,7 @@ window.CENSUS = {
    }
   ]
  },
- "rgbaCalls": 90,
+ "rgbaCalls": 91,
  "fontSize": {
   "kinds": 22,
   "uses": 325,
@@ -1655,7 +1655,7 @@ window.CENSUS = {
   ]
  },
  "padding": {
-  "kinds": 127,
+  "kinds": 126,
   "uses": 256,
   "table": [
    {
@@ -1809,6 +1809,16 @@ window.CENSUS = {
     ]
    },
    {
+    "value": "0 var(--space-12)",
+    "uses": 4,
+    "examples": [
+     ".content",
+     ".jump",
+     ".menu-drop input",
+     ".lib-input"
+    ]
+   },
+   {
     "value": "var(--space-4) var(--space-10)",
     "uses": 4,
     "examples": [
@@ -1843,15 +1853,6 @@ window.CENSUS = {
     "uses": 3,
     "examples": [
      ".content"
-    ]
-   },
-   {
-    "value": "0 var(--space-12)",
-    "uses": 3,
-    "examples": [
-     ".content",
-     ".menu-drop input",
-     ".lib-input"
     ]
    },
    {
