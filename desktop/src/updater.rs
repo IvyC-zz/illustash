@@ -270,7 +270,7 @@ pub fn install(app: &AppHandle) -> Result<Value, String> {
         eprintln!("[updater] 安装 {version}");
         // Windows 上安装器启动成功后插件直接退出进程，不会回到这里。
         match update.install(&bytes) {
-            Ok(()) => handle.request_restart(),
+            Ok(()) => relaunch(&handle),
             Err(error) => {
                 let error = describe(error);
                 eprintln!("[updater] {version} 没有装上：{error}");
@@ -280,6 +280,36 @@ pub fn install(app: &AppHandle) -> Result<Value, String> {
         }
     });
     Ok(status(app))
+}
+
+/// 装好后重新打开应用。
+///
+/// macOS（#522）：Tauri 自带的重启在旧进程退出时直接运行新的可执行文件。新进程启动时会请求成为活动应用，但 macOS 14
+/// 起的协作式激活只让用户启动的、或当前活动应用让出前台的进程成为活动应用：这时旧进程已经退出，前台交给了访达，新窗口
+/// 虽然在最前面却不是活动窗口，第一下点击只用来激活窗口（WKWebView 不接受激活窗口的那一下点击）。所以改为在旧进程
+/// 仍是活动应用时经 LaunchServices（`open -n`）启动新版本，与用户在访达里打开一样，新进程直接成为活动应用；等 `open`
+/// 返回（新进程已经启动）再退出。本地服务在安装前已经停掉（`server::installing`），两个进程短暂并存不会争图库。
+/// `open` 不可用或失败时退回 Tauri 的重启。
+fn relaunch(app: &AppHandle) {
+    #[cfg(target_os = "macos")]
+    // 能走到安装说明程序在 `….app/Contents/MacOS/` 里（`packaged`），往上三层就是 .app。
+    if let Some(bundle) = std::env::current_exe().ok().and_then(|exe| exe.ancestors().nth(3).map(|p| p.to_owned())) {
+        let args: Vec<_> = std::env::args_os().skip(1).collect();
+        let mut open = std::process::Command::new("/usr/bin/open");
+        open.arg("-n").arg(&bundle);
+        if !args.is_empty() {
+            open.arg("--args").args(&args);
+        }
+        match open.status() {
+            Ok(status) if status.success() => {
+                app.exit(0);
+                return;
+            }
+            Ok(status) => eprintln!("[updater] open 没能打开新版本（{status}），改用直接重启"),
+            Err(error) => eprintln!("[updater] 运行 open 失败（{error}），改用直接重启"),
+        }
+    }
+    app.request_restart();
 }
 
 /// Windows 上插件把下载的安装包写进 `%TEMP%\<产品名>-<版本>-updater-<随机>\`，运行它之后就退出，不再删除（安装包
