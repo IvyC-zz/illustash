@@ -30,16 +30,8 @@ function identityChips(d, compact = false) {
     (alts ? `<div class="alts"><h3>${t('也可能是')}</h3><div class="alt-row">${alts}</div></div>` : '');
 }
 // PROTO = 从用户自己的裁决学到的原型（native/terms/src/research_compute/learn.rs）。
-const SOURCE_NAMES = {CCIP: t('外部索引'), PROTO: t('你的标注'), CCIP_LONGTAIL: t('参考包')};
-function evidence(e) {
-  if (!e) return '';
-  const sources = e.sources || [];
-  const label = sources.includes('CCIP_LONGTAIL') ? SOURCE_NAMES.CCIP_LONGTAIL
-    : sources.includes('PROTO') && !sources.includes('CCIP') ? SOURCE_NAMES.PROTO : SOURCE_NAMES.CCIP;
-  const scores = [e.wd != null ? `WD ${e.wd.toFixed(2)}` : '', e.ccip != null ? `${label} ${e.ccip.toFixed(3)}` : ''];
-  if (!('wd' in e)) scores.push(sources.map(s => SOURCE_NAMES[s] || s).join(' + '));
-  return scores.filter(Boolean).join(' · ');
-}
+const SOURCE_NAMES = {CCIP: t('外部索引'), PROTO: t('你的标注')};
+const evidence = e => !e ? '' : [e.wd != null ? `WD ${e.wd.toFixed(2)}` : '', e.ccip != null ? `${e.sources?.includes('PROTO') && !e.sources.includes('CCIP') ? SOURCE_NAMES.PROTO : SOURCE_NAMES.CCIP} ${e.ccip.toFixed(3)}` : '', !('wd' in e) && e.sources?.length ? e.sources.map(s => SOURCE_NAMES[s] || s).join(' + ') : ''].filter(Boolean).join(' · ');
 export const INSP_ICONS = {
   prev: '<svg viewBox="0 0 20 20" aria-hidden="true"><path d="m12 4.5-5.5 5.5 5.5 5.5"/></svg>',
   next: '<svg viewBox="0 0 20 20" aria-hidden="true"><path d="m8 4.5 5.5 5.5L8 15.5"/></svg>',

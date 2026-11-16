@@ -210,7 +210,6 @@ export const importActive = () => IMPORT_ACTIVE.includes(state.importTask?.statu
 export const IMPORT_STAGES = {
   archive: {reading: t('正在读取归档'), unpacking: t('正在解压'), cleaning: t('正在清除模型连接设置和联网授权'), checking: t('正在检查新图库能否打开'), publishing: t('正在登记新图库')},
   human_conclusions: {reading: t('正在读取文件'), matching: t('正在核对图片'), validating: t('正在校验'), committing: t('正在提交')},
-  ccip_longtail: {models: t('正在校验'), scoring: t('正在检查图片'), committing: t('正在提交')},
   recognition: {models: t('正在核对模型指纹'), reading: t('正在读取结果包'), verifying: t('正在校验识别结果'), writing: t('正在写入识别结果'), committing: t('正在提交'), projecting: t('正在更新图库索引')},
 };
 export const mib = n => (n / 1048576).toFixed(n < 10485760 ? 1 : 0);
@@ -228,7 +227,6 @@ function importSummary(job) {
   if (!job || job.status === 'idle') return '';
   const recognition = job.kind === 'recognition';
   if (job.kind === 'human_conclusions') return humanSummary(job);
-  if (job.kind === 'ccip_longtail') return longtailSummary(job);
   const name = job.file ? t('「{file}」', {file: job.file}) : '';
   if (job.status === 'running') return (recognition ? t('导入识别结果{name}：{step}', {name, step: (IMPORT_STAGES[job.kind] || {})[job.stage] || t('正在准备')}) : t('导入归档{name}：{step}', {name, step: (IMPORT_STAGES[job.kind] || {})[job.stage] || t('正在准备')})) + importCount(job) + '…';
   if (job.status === 'stopping') return recognition ? t('正在取消导入识别结果{name}…', {name}) : t('正在取消导入归档{name}…', {name});
@@ -241,18 +239,6 @@ function importSummary(job) {
   if (job.kind === 'archive') return t('已导入「{name}」，模型接口与名称联网授权需重新设置。', {name: r.name});
   if (r.status === 'pending') return t('识别结果已导入，后续处理尚未完成（{reason}）。', {reason: tb(r.error) || t('可稍后恢复')});
   return r.duplicate ? t('这份识别结果之前已经导入过。') : t('识别结果已导入。');
-}
-function longtailSummary(job) {
-  if (job.status === 'running') return (IMPORT_STAGES.ccip_longtail[job.stage] || t('正在准备')) + importCount(job);
-  if (job.status === 'stopping') return t('正在取消…');
-  if (job.status === 'cancelled') return t('已取消');
-  if (job.status === 'error') return t('参考包操作失败：{reason}', {reason: tb(job.error)});
-  if (job.status !== 'done') return '';
-  const r = job.result || {};
-  if (r.scored == null) return t('已撤回参考包');
-  const skipped = (r.missing || 0) + (r.incompatible || 0);
-  return skipped ? t('已检查 {n} 张，{skipped} 张缺少可用向量', {n: number(r.scored), skipped: number(skipped)})
-    : t('已检查 {n} 张', {n: number(r.scored)});
 }
 // 人工结论的导入和从自动快照恢复（#441）：同一个导入槽。完成后的报告和撤销由 core/human.js、ui/human.js 处理。
 function humanSummary(job) {

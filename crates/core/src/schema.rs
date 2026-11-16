@@ -195,7 +195,7 @@ pub const HUMAN_ORIGINS: [&str; 3] = ["user", "album", "legacy"];
 /// 证据来源不能冒充人。
 pub const RESERVED_SOURCES: [&str; 5] = ["user", "human", "album", "legacy", "verdict"];
 
-pub const SCHEMA_VERSION: i64 = 11;
+pub const SCHEMA_VERSION: i64 = 10;
 
 /// 可替换的机器证据（`source`, `method`）：按有效批次生效（`term_active_evidence`），成功的空结果让旧证据失效。
 /// 其余来源的证据全部有效。与当前 `term_evidence_sets` 的 CHECK 一致，加一种要一次迁移。
@@ -429,8 +429,8 @@ CREATE TABLE IF NOT EXISTS actions(id INTEGER PRIMARY KEY AUTOINCREMENT,label TE
 ";
 
 /// 每个版本一段，按顺序执行；已发布的段不再修改。
-const MIGRATIONS: [fn(&Connection) -> Result<()>; 11] =
-    [v1, v2, v3, v4, v5, v6, v7, v8, crate::human_conclusions::migrate, v10, v11];
+const MIGRATIONS: [fn(&Connection) -> Result<()>; 10] =
+    [v1, v2, v3, v4, v5, v6, v7, v8, crate::human_conclusions::migrate, v10];
 
 fn v1(conn: &Connection) -> Result<()> {
     Ok(conn.execute_batch(V1)?)
@@ -659,43 +659,22 @@ fn v3(conn: &Connection) -> Result<()> {
     Ok(())
 }
 
-const V3_SOURCES: &str = "'wd.wd_character','ccip_index.char_ext'";
-
-/// 第 10 版增加独立的 WD 扩展候选批次。复制原批次和有效集，保留证据与旧归属。
+/// 第 10 版增加独立的 WD 扩展和 CCIP 长尾候选批次。复制原批次与有效集。
 fn v10(conn: &Connection) -> Result<()> {
-    const V10_SOURCES: &str = "'wd.wd_character','ccip_index.char_ext','wd_extension.linear_head'";
+    const V3_SOURCES: &str = "'wd.wd_character','ccip_index.char_ext'";
+    const V10_SOURCES: &str =
+        "'wd.wd_character','ccip_index.char_ext','wd_extension.linear_head','ccip_longtail.anchor_p75'";
     conn.execute_batch(&V3_SETS.replace(V3_SOURCES, V10_SOURCES))?;
     conn.execute_batch(&V3.replace(V3_SOURCES, V10_SOURCES))?;
     let view: Option<String> = conn
         .query_row("SELECT sql FROM sqlite_schema WHERE type='view' AND name='variant_memberships'", [], |r| r.get(0))
         .optional()?;
-    if let Some(view) = view.filter(|sql| !sql.contains("v.source<>'WD_EXT'")) {
+    if let Some(view) = view.filter(|sql| !sql.contains("CCIP_LONGTAIL")) {
         // 扩展候选不能给已有主归属追加皮肤。核心独立测试库可以没有应用视图。
         let sql = crate::character_projection::scoped(
             &view,
             "v.uuid=m.uuid AND",
-            "v.uuid=m.uuid AND v.source<>'WD_EXT' AND",
-        )?;
-        conn.execute("DROP VIEW variant_memberships", [])?;
-        conn.execute_batch(&sql)?;
-    }
-    Ok(())
-}
-
-/// 第 11 版给 CCIP 长尾包独立的有效证据。“造型”视图继续只看基础候选。
-fn v11(conn: &Connection) -> Result<()> {
-    const SOURCES: &str =
-        "'wd.wd_character','ccip_index.char_ext','wd_extension.linear_head','ccip_longtail.anchor_p75'";
-    conn.execute_batch(&V3_SETS.replace(V3_SOURCES, SOURCES))?;
-    conn.execute_batch(&V3.replace(V3_SOURCES, SOURCES))?;
-    let view: Option<String> = conn
-        .query_row("SELECT sql FROM sqlite_schema WHERE type='view' AND name='variant_memberships'", [], |r| r.get(0))
-        .optional()?;
-    if let Some(view) = view.filter(|sql| !sql.contains("CCIP_LONGTAIL")) {
-        let sql = crate::character_projection::scoped(
-            &view,
-            "v.source<>'WD_EXT'",
-            "v.source NOT IN ('WD_EXT','CCIP_LONGTAIL')",
+            "v.uuid=m.uuid AND v.source NOT IN ('WD_EXT','CCIP_LONGTAIL') AND",
         )?;
         conn.execute("DROP VIEW variant_memberships", [])?;
         conn.execute_batch(&sql)?;
@@ -1664,7 +1643,7 @@ mod tests {
     }
 
     #[test]
-    fn v9_to_v10_keeps_existing_batches_and_requires_an_active_set_for_extension() {
+    fn v9_to_v10_preserves_old_batches_and_keeps_extensions_independently_replaceable() {
         let mut c = Connection::open_in_memory().unwrap();
         crate::configure(&c).unwrap();
         migrate_to(&mut c, 9).unwrap();
@@ -1690,7 +1669,8 @@ mod tests {
 
         c.execute_batch(
             "INSERT INTO term_evidence(asset_id,term_id,source,method,version,fingerprint)
-                VALUES (1,1,'wd_extension','linear_head','test',zeroblob(16));",
+                VALUES (1,1,'wd_extension','linear_head','test',zeroblob(16)),
+                       (1,1,'ccip_longtail','anchor_p75','test',zeroblob(16));",
         )
         .unwrap();
         assert_eq!(ids(&c), old_ids);
@@ -1703,43 +1683,14 @@ mod tests {
             None,
         )
         .unwrap();
-        assert_eq!(ids(&c).len(), old_ids.len() + 1);
+        let with_wd_extension = ids(&c);
+        assert_eq!(with_wd_extension.len(), old_ids.len() + 1);
+        let longtail = (crate::ccip_longtail::SOURCE, crate::ccip_longtail::METHOD);
+        crate::store::publish_asset_batch(&c, "enable", longtail, &[1], &[5].into_iter().collect(), None).unwrap();
+        assert_eq!(ids(&c).len(), with_wd_extension.len() + 1);
+        crate::store::publish_asset_batch(&c, "withdraw", longtail, &[1], &Default::default(), None).unwrap();
+        assert_eq!(ids(&c), with_wd_extension);
         assert!(crate::store::rebuild_active_evidence(&c).unwrap().is_empty());
-        assert!(rows(&c, "PRAGMA foreign_key_check").is_empty());
-    }
-
-    #[test]
-    fn v11_keeps_active_wd_and_makes_new_longtail_receipts_replaceable() {
-        let mut c = Connection::open_in_memory().unwrap();
-        crate::configure(&c).unwrap();
-        migrate_to(&mut c, 10).unwrap();
-        c.execute_batch(
-            "INSERT INTO term_assets(namespace,key) VALUES ('library','a');
-             INSERT INTO terms(key,kind,origin) VALUES ('p','character','legacy');
-             INSERT INTO term_evidence(asset_id,term_id,source,method,version,fingerprint) VALUES
-              (1,1,'wd_extension','linear_head','before',zeroblob(16));
-             INSERT INTO term_evidence_sets(producer,source,method,scope) VALUES
-              ('t','wd_extension','linear_head','all');
-             INSERT INTO term_evidence_set_rows VALUES (1,1);",
-        )
-        .unwrap();
-        crate::store::rebuild_active_evidence(&c).unwrap();
-        let active = rows(&c, "SELECT * FROM term_active_evidence ORDER BY asset_id,source");
-        assert_eq!(migrate_to(&mut c, 11).unwrap(), 10);
-        assert_eq!(rows(&c, "SELECT * FROM term_active_evidence ORDER BY asset_id,source"), active);
-        c.execute(
-            "INSERT INTO term_evidence(asset_id,term_id,source,method,version,fingerprint)
-             VALUES (1,1,'ccip_longtail','anchor_p75','after',zeroblob(16))",
-            [],
-        )
-        .unwrap();
-        let sources = |c: &Connection| rows(c, "SELECT source FROM term_current_evidence ORDER BY source");
-        let before = sources(&c);
-        let kind = (crate::ccip_longtail::SOURCE, crate::ccip_longtail::METHOD);
-        crate::store::publish_asset_batch(&c, "enable", kind, &[1], &[2].into_iter().collect(), None).unwrap();
-        assert_eq!(sources(&c).len(), before.len() + 1);
-        crate::store::publish_asset_batch(&c, "withdraw", kind, &[1], &Default::default(), None).unwrap();
-        assert_eq!(sources(&c), before);
         assert!(rows(&c, "PRAGMA foreign_key_check").is_empty());
     }
 
