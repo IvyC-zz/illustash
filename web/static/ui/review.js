@@ -10,10 +10,10 @@ import {prefs} from '../core/prefs.js';
 import {charHash, go, hashFor} from '../core/route.js';
 import {api, post, readError} from '../core/session.js';
 import {state} from '../core/state.js';
-import {closeInspector} from './detail.js';
+import {closeInspector, peekAt, wirePeek} from './detail.js';
 import {$, error, readFailure, reconcileSections, toast} from './dom.js';
 import {mutate} from './grid.js';
-import {markOc, openPicker} from './palette.js';
+import {markOc, openPicker, targets} from './palette.js';
 import {navCount, renderHeading} from './shell.js';
 
 // ---------- 未匹配图片的相似分组 ----------
@@ -28,7 +28,7 @@ export const groupOrder = clusters => [...clusters].sort((a, b) => !!b.lead - !!
 export async function renderGroups(keep = false) {
   if (!onPage(state.route, 'groups')) return;
   $('grid').hidden = true; $('empty').hidden = true; $('charIndex').hidden = true; $('settingsPage').hidden = true; $('groupsPage').hidden = false;
-  closeInspector(); $('selectionBar').hidden = true; $('resultCount').textContent = ''; $('hint').textContent = t('点一下图片：不算在这组里 · 组头的按钮对整组生效，都可以撤销');
+  closeInspector(); $('selectionBar').hidden = true; $('resultCount').textContent = ''; $('hint').textContent = t('点一下图片：不算在这组里 · 长按或 Space 看大图 · 组头的按钮对整组生效，都可以撤销');
   const scroll = $('viewport').scrollTop, revision = ++groups.revision, nsfw = state.nsfw;
   let result; try { result = await api('/api/clusters?nsfw=' + state.nsfw); } catch (e) { if (onPage(state.route, 'groups') && revision === groups.revision && nsfw === state.nsfw) readFailure($('groupsPage'), e); return; }
   const {clusters, learner} = result;
@@ -56,7 +56,7 @@ function groupSection(g) {
     ? `<span class="gsec-q">${t('是 {name} 吗？', {name: `<a href="${charHash(g.lead.id)}">${esc(g.lead.name)}</a>`})}<small>${t('{n} 张的线索都指向 TA', {n: number(g.lead.count)})}</small></span>
        <button class="primary" data-gact="yes"${n ? '' : ' disabled'}>${off.size ? t('其余 {n} 张是', {n: number(n)}) : t('都是')} ✓</button><button class="secondary" data-gact="no">${t('都不是')} ✗</button><button class="quiet" data-gact="assign">${t('是别人…')}</button>${ocSkip}`
     : `<span class="gsec-q muted">${t('还不知道是谁')}</span><button class="primary" data-gact="assign"${n ? '' : ' disabled'}>${t('设为…')}</button>${ocSkip}`;
-  const thumbs = g.members.slice(0, max).map(u => `<button class="gsec-img${off.has(u) ? ' off' : ''}" data-gimg="${esc(u)}" title="${off.has(u) ? t('点一下：算回这组') : t('点一下：不算在这组里')}"><img src="/image?id=${encodeURIComponent(u)}&size=thumb" loading="lazy" alt=""><i aria-hidden="true">✕</i></button>`).join('');
+  const thumbs = g.members.slice(0, max).map(u => `<button class="gsec-img${off.has(u) ? ' off' : ''}" data-gimg="${esc(u)}" data-peek="${esc(u)}" title="${off.has(u) ? t('点一下：算回这组') : t('点一下：不算在这组里')} · ${t('长按或 Space 看大图')}"><img src="/image?id=${encodeURIComponent(u)}&size=thumb" loading="lazy" alt="" draggable="false"><i aria-hidden="true">✕</i></button>`).join('');
   return `<section class="gsec" data-cid="${g.cid}"><div class="gsec-head"><b>${t('第 {id} 组', {id: g.cid})}</b><span class="muted-note">${t('{n} 张', {n: number(g.size)})}${g.traits?.length ? ' · ' + g.traits.slice(0, 2).map(esc).join(' · ') : ''}</span>${head}<a class="quiet link gsec-open" href="#/g/${g.cid}">${t('逐张看')} →</a></div>
     <div class="gsec-imgs">${thumbs}${g.members.length > max ? `<a class="gsec-rest" href="#/g/${g.cid}">+${number(g.members.length - max)}</a>` : ''}</div>${g.near ? `<div class="group-near">${nearText(g)}</div>` : ''}</section>`;
 }
@@ -105,7 +105,7 @@ function identityEvidence(x) {
 }
 function identitySide(s, label) {
   return `<div class="pair-side"><div class="pair-name"><span class="pair-label">${label}</span><a href="${charHash(s.id)}" title="${esc(s.tag || s.name)}">${esc(s.name)}</a><small>${t('{n} 张', {n: number(s.count)})}</small></div>
-    <div class="pair-thumbs">${s.samples.map(u => `<img src="/image?id=${encodeURIComponent(u)}&size=thumb" loading="lazy" alt="">`).join('') || `<span class="muted-note">${t('没有可显示的图')}</span>`}</div></div>`;
+    <div class="pair-thumbs">${s.samples.map(u => `<img src="/image?id=${encodeURIComponent(u)}&size=thumb" loading="lazy" alt="" data-peek="${esc(u)}" title="${t('看大图')}">`).join('') || `<span class="muted-note">${t('没有可显示的图')}</span>`}</div></div>`;
 }
 function identityCard(x, i) {
   const s = identitySuggestion(x), btn = (act, text, title) => `<button class="${s === act ? 'primary' : 'quiet'}" data-act="${act}" data-i="${i}" title="${esc(title)}">${text}</button>`;
@@ -196,7 +196,7 @@ export async function renderArtistAudit() {
   };
   const card = (it, i) => {
     const state_ = it.artists.some(a => a.rejected) ? ' no' : it.artists.length && it.artists.every(a => a.confirmed) ? ' yes' : '';
-    return `<div class="aa-card${state_}"><a class="aa-img" href="/image?id=${encodeURIComponent(it.uuid)}&size=full" target="_blank" title="${t('新标签页打开大图')}"><img src="/image?id=${encodeURIComponent(it.uuid)}&size=medium" alt="" loading="lazy"><span class="aa-no">${i + 1}</span></a>
+    return `<div class="aa-card${state_}"><a class="aa-img" href="/image?id=${encodeURIComponent(it.uuid)}&size=full" target="_blank" data-peek="${esc(it.uuid)}" title="${t('看大图')}"><img src="/image?id=${encodeURIComponent(it.uuid)}&size=medium" alt="" loading="lazy"><span class="aa-no">${i + 1}</span></a>
       <div class="aa-body">${it.artists.map(a => artistRow(it, a)).join('')}${it.posts?.length ? `<div class="aa-links">${t('原帖')} ${it.posts.map(p => link(p.url, p.site)).join(' · ')}</div>` : ''}</div></div>`;
   };
   $('groupsPage').innerHTML = `<div class="aa-summary">
@@ -221,8 +221,22 @@ export async function renderArtistAudit() {
 }
 
 // 页面这一部分注册的处理函数。页面启动时调用一次。
+// 面板页看大图时翻哪一组（ui/detail.js 的 wirePeek）：按组整理是这一组的全部图（不只是露出来的 16 张），身份整理是
+// 这一边的样图，画师抽查是这一批。
+function peekList(el) {
+  const sec = el.closest('.gsec'), side = el.closest('.pair-thumbs');
+  if (sec) return groups.list.find(x => x.cid === Number(sec.dataset.cid))?.members || [];
+  if (side) return [...side.querySelectorAll('[data-peek]')].map(x => x.dataset.peek);
+  return [...$('groupsPage').querySelectorAll('.aa-img[data-peek]')].map(x => x.dataset.peek);
+}
+// 大图关掉时把最后看的那张缩略图滚进视野（按组整理）。
+function revealThumb(uuid) { [...$('groupsPage').querySelectorAll('[data-peek]')].find(x => x.dataset.peek === uuid)?.scrollIntoView({block: 'nearest'}); }
 export function wireReview() {
+  wirePeek($('groupsPage'), peekList);
   $('groupsPage').addEventListener('click', async e => {
+    // 身份整理的样图、画师抽查的图：点一下看大图（#424 的 2-34）。画师抽查的图按住 ⌘／Ctrl、Shift 点还是在新窗口开原图。
+    const look = e.target.closest('.pair-thumbs [data-peek], .aa-img[data-peek]');
+    if (look && !e.metaKey && !e.ctrlKey && !e.shiftKey) { e.preventDefault(); peekAt(look); return; }
     const sec = e.target.closest('.gsec'); if (!sec) return;
     const g = groups.list.find(x => x.cid === Number(sec.dataset.cid)); if (!g) return;
     const img = e.target.closest('[data-gimg]');
@@ -238,14 +252,19 @@ export function wireReview() {
     else if (act === 'no') { if (await mutate('/api/change', {ids, action: 'rejected', entity: g.lead.id}, false)) renderGroups(true); }
     else if (act === 'skip') done(await mutate('/api/change', {ids, action: 'unknown'}, false));
     else if (act === 'oc') done(await markOc({ids}, false, true));
-    else if (act === 'assign') openPicker({title: t('这 {n} 张是…', {n: number(n)}), sentence: x => t('把这 {n} 张设为 {name}', {n: number(n), name: x.name}), suggest: {ids}, exclude: g.lead ? [g.lead.id] : [],
-      pick: async x => done(await mutate('/api/change', {ids, action: 'confirmed', entity: x.id}, false))});
+    // 面板顶上写「第 N 组 · M 张」，和缩略图一起（#424 的 2-3）；能多选，和选择栏的「设为…」一样（2-24）。
+    else if (act === 'assign') openPicker({title: t('这 {n} 张是…', {n: number(n)}), subjectText: t('第 {id} 组', {id: g.cid}) + ' · ' + t('{n} 张', {n: number(n)}),
+      sentence: x => t('把这 {n} 张设为 {name}', {n: number(n), name: x.name}), suggest: {ids}, exclude: g.lead ? [g.lead.id] : [], multi: true,
+      pick: async list => done(await mutate('/api/change', {ids, action: 'confirmed', ...targets(list)}, false))});
   });
 }
 
 // 复核面板页登记：渲染入口，以及撤销、切换 R18 之后怎么重画。
 implement({
-  groups: {render: () => renderGroups(), refresh: why => { if (why === 'undo' || why === 'learned') renderGroups(true); else if (why === 'nsfw') renderGroups(); }},
+  // 在这页开的大图里改了图（'edit' 时大图还开着）：重读分组，免得组里还留着已经设了角色、跳过或排除的图。组头按钮的写入
+  // 不走这里，它们自己把答过的组从页面上拿掉。
+  groups: {render: () => renderGroups(), reveal: revealThumb,
+    refresh: why => { if (why === 'undo' || why === 'learned' || why === 'edit' && state.viewer >= 0) renderGroups(true); else if (why === 'nsfw') renderGroups(); }},
   similar: {render: () => renderSimilar(), refresh: why => { if (why === 'nsfw') renderSimilar(); }},
   identity: {render: () => renderIdentity(), refresh: why => { if (why === 'undo') renderIdentity('keep'); else if (why === 'nsfw') renderIdentity(); }},
   // 画师抽查不按 R18 筛选（固定的一批随机图）：切换 R18 只重画标题里的提醒（#386 的 2-35）。

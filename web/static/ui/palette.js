@@ -37,7 +37,7 @@ const remember = (store, key, item, same) => store.set(key, [item, ...store.get(
 const rememberChar = async entity => remember(await recentIn(), 'picks', {id: entity.id, name: entity.name}, x => x.id === entity.id);
 export async function openPicker(opts) {
   const p = palette = {...opts, list: [], index: 0, generation: 0, staged: [], recent: libraryPrefs('')};
-  renderStaged();
+  renderStaged(); renderSubject(opts);
   $('pickerSearch').value = ''; $('pickerSearch').placeholder = opts.placeholder || t('输入角色 tag 或别名…');
   openModal($('picker'), {backdropClose: true, id: 'picker'}); $('pickerSearch').focus();
   p.recent = await recentIn();
@@ -128,6 +128,18 @@ function finalList(e, include) {
   const p = palette, list = [...p.staged];
   if (e && (include || !list.length) && !e.remove && !list.some(x => stageKey(x) === stageKey(e))) list.push(e);
   return list;
+}
+// 面板顶上的作用对象（#424 的 2-3）：要改的是哪几张图（最多画 8 张缩略图）和面板的标题（如「把这 10 张设为…」，按组整理是
+// 「第 2 组 · 10 张」），认名字时不用关掉面板去看图。作用于图片的面板才有：调用处给了 subject（uuid 列表；全选时为空，
+// 只写张数），或给了 suggest（按这些图推荐候选）；跳到角色、合并角色没有。
+const SUBJECT_MAX = 8;
+function renderSubject(opts) {
+  const box = $('pickerSubject'), ids = opts.subject || opts.suggest?.ids || (opts.suggest ? [] : null);
+  box.hidden = !ids;
+  if (!ids) { box.innerHTML = ''; return; }
+  const more = ids.length - SUBJECT_MAX, text = opts.subjectText || opts.title || '';
+  box.innerHTML = ids.slice(0, SUBJECT_MAX).map(u => `<img src="/image?id=${encodeURIComponent(u)}&size=thumb" alt="" loading="lazy" draggable="false">`).join('')
+    + `<span class="palette-label">${more > 0 ? `+${number(more)} · ` : ''}${esc(text)}</span>`;
 }
 function renderStaged() {
   const p = palette, box = $('pickerStaged');

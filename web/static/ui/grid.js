@@ -17,7 +17,7 @@ import {offerWatch} from './catalog.js';
 import {$, error, toast} from './dom.js';
 import {renderChrome, renderHeading} from './shell.js';
 import {findArtists} from './artists.js';
-import {answerAsk, closeInspector, closeViewer, ensureVisible, indexOf, inspect, openViewer, pickAlternative, showViewer, singleAction, step, zoomView} from './detail.js';
+import {answerAsk, closeInspector, closeViewer, ensureVisible, indexOf, inspect, openViewer, peek, pickAlternative, showViewer, singleAction, step, zoomView} from './detail.js';
 import {jumpToCharacter, markOc, newIds, openPicker, openRelate, targets} from './palette.js';
 import {createLayer, inPopover, popoverOpen} from './overlay.js';
 
@@ -99,7 +99,16 @@ export async function reload(reset = false, place = null) {
   } catch (e) { if (e.name !== 'AbortError' && gen === state.generation && route === state.route) { error(e.message); $('resultCount').textContent = t('读取失败'); } }
 }
 // 首页借用网格的列表放它自己的图（详情栏翻页、大图都按这个列表走）。
-export function showList(items) { state.items = items; state.total = items.length; }
+// 面板页看一组图的大图（previewList：按组整理、首页「认一认」、身份整理、画师抽查，#424 的 2-2、2-34）时列表先换成那一组，
+// 关大图时还回去（endPreview，ui/detail.js 的 closeViewer 调用）；这期间页面自己再 showList（首页写入后重画），换的是要还回去的那份。
+let lent = null;
+export function showList(items) { if (lent) { lent = items; return; } state.items = items; state.total = items.length; }
+export function previewList(ids, i) {
+  if (!lent) lent = state.items;
+  state.items = ids.map(uuid => ({uuid, memberships: []})); state.total = ids.length; openViewer(i);
+}
+export function endPreview() { if (!lent) return false; const items = lent; lent = null; showList(items); return true; }
+export const previewing = () => !!lent;
 // 后端接受了一次写入、或同步进了新图：已读到的计数和分页作废，下一次读取从头来（ui/effects.js 调用）。
 export function listChanged() { state.countDirty = true; state.readEpoch++; }
 export async function loadPage(offset) {
@@ -407,7 +416,20 @@ export function quitSelecting() { state.selecting = false; clearSelection(); }
 export function resetForRoute() { quitSelecting(); state.cursor = -1; state.totalReady = false; }
 // 键盘光标移到第 i 张（详情栏和大图翻页时跟着走）。
 export function setCursor(i) { state.cursor = i; }
+// I 和大图底栏的「信息」：开关详情栏（#424 的 2-7）。大图里是关掉大图、在详情栏里看这张；网格里看光标那张（没有光标取
+// 第一张），详情栏已经开着同一张就关掉，开着别的（整理页点图只选中、不换详情栏）就换成光标那张。首页没有光标，只能关。
+// 不显示详情栏的面板页，以及面板页借列表看的大图（previewList）不响应。
+export function toggleInfo() {
+  const scope = keyScope(viewOf(state.route)); if (!scope || previewing()) return;
+  if (state.viewer >= 0) { const uuid = state.viewerItem?.uuid; closeViewer(); if (uuid && state.focused !== uuid) inspect(uuid); return; }
+  const i = scope === 'grid' ? Math.max(0, state.cursor) : -1, item = state.items[i];
+  if (state.focused && (!item || item.uuid === state.focused)) { closeInspector(); return; }
+  if (!item) return;
+  setCursor(i); ensureVisible(i); inspect(item.uuid);
+}
 function selectionPayload() { return state.sel.all ? {filter: filters(), exclude: [...state.sel.exclude]} : {ids: [...state.sel.ids]}; }
+// 命令面板顶上画哪几张（ui/palette.js 的 subject）：全选时没有展开的 ID，只写张数。
+const selectionIds = () => state.sel.all ? [] : [...state.sel.ids];
 async function selectRange(a, b, on = true) {
   const lo = Math.min(a, b), hi = Math.max(a, b);
   if (hi - lo + 1 > 5000) { toast(t('一次最多连选 5,000 张；需要更多请用 {key}', {key: shortcut('A')})); return; }
@@ -568,7 +590,7 @@ function runBarAction(act) {
     else if (!chars.common.length) toast(t('所选图片没有共同的角色'));
     else if (chars.common.length === 1) swapSelected(chars.common[0], chars.common.map(m => m.id));
     // 第二个面板等这一个的 close 事件之后再开：在那之前浮层管理器还把它算作开着，同一个对话框不会再打开。
-    else openPicker({title: t('换掉哪个角色？'), items: chars.common, sentence: e => t('把 {n} 张的 {name} 换掉', {n: number(n), name: e.name}),
+    else openPicker({title: t('换掉哪个角色？'), items: chars.common, subject: selectionIds(), sentence: e => t('把 {n} 张的 {name} 换掉', {n: number(n), name: e.name}),
       pick: e => $('picker').addEventListener('close', () => swapSelected(e, chars.common.map(m => m.id)), {once: true})});
   }
   else if (act === 'also') openPicker({title: t('这 {n} 张也是…', {n: number(n)}), sentence: e => t('给 {n} 张加上 {name}', {n: number(n), name: e.name}), exclude: [r.char], suggest: selectionPayload(), multi: true,
@@ -588,7 +610,7 @@ function runBarAction(act) {
     if (state.sel.all) { toast(t('全选时请进入角色页移出')); return; }   // 按钮这时是禁用的，⌫ 说一样的话
     const present = new Map(); for (const id of state.sel.ids) { const item = state.items.find(x => x?.uuid === id); for (const m of item?.memberships || []) present.set(m.id, m); }
     if (!present.size) { toast(t('所选图片还没有角色')); return; }
-    openPicker({title: t('这些图不是…'), items: [...present.values()], sentence: e => t('把 {name} 从 {n} 张中移出', {name: e.name, n: number(n)}), pick: e => mutate('/api/change', {...payload(), action: 'rejected', entity: e.id}, false)});
+    openPicker({title: t('这些图不是…'), items: [...present.values()], subject: selectionIds(), sentence: e => t('把 {name} 从 {n} 张中移出', {name: e.name, n: number(n)}), pick: e => mutate('/api/change', {...payload(), action: 'rejected', entity: e.id}, false)});
   }
 }
 // 人工标签复用命令面板：已有的标签、采用一个 WD tag，或新建一个。所有选中图片上都已有的条目提供移除。
@@ -596,7 +618,7 @@ function runBarAction(act) {
 export function openTagPicker(payload, n, loaded, leaving = tag => !!state.route.utag && tag === state.route.utag) {
   const present = new Map();
   for (const item of loaded || []) for (const tag of item.user_tags || []) present.set(tag, (present.get(tag) || 0) + 1);
-  openPicker({title: t('标签'), tagMode: true, present, placeholder: t('输入标签，或搜索 WD 通用标签…'),
+  openPicker({title: t('标签'), tagMode: true, present, subject: (loaded || []).map(x => x.uuid), placeholder: t('输入标签，或搜索 WD 通用标签…'),
     sentence: e => e.remove ? t('从 {n} 张去掉标签 {tag}', {n: number(n), tag: e.tag}) : t('给 {n} 张加上标签 {tag}', {n: number(n), tag: e.tag}),
     pick: e => mutate('/api/tag', {...payload(), tag: e.tag, add: !e.remove}, e.remove && leaving(e.tag))});
 }
@@ -604,7 +626,8 @@ function openVariantMenu(payload) {
   const r = state.route, n = selCount(), items = [];
   if (r.variant) { const v = state.char.variants.find(v => v.id === r.variant); if (v) items.push({id: v.id, name: v.name, remove: true, hint: t('从所选图片去掉')}); }
   for (const v of state.char.variants) if (v.id !== r.variant) items.push({id: v.id, name: v.name, hint: t('{n} 张', {n: number(v.count)}), counted: true});
-  openPicker({title: t('造型'), items, placeholder: t('筛选造型'), sentence: e => e.remove ? t('从 {n} 张去掉 {name}', {n: number(n), name: e.name}) : t('给 {n} 张加上 {name}', {n: number(n), name: e.name}),
+  openPicker({title: t('造型'), items, subject: selectionIds(), placeholder: t('筛选造型'),
+    sentence: e => e.remove ? t('从 {n} 张去掉 {name}', {n: number(n), name: e.name}) : t('给 {n} 张加上 {name}', {n: number(n), name: e.name}),
     pick: e => mutate('/api/change', {...payload(), action: e.remove ? 'remove_variant' : 'add_variant', entity: e.id}, !!e.remove)});
 }
 
@@ -834,7 +857,8 @@ export function wireGrid() {
   document.addEventListener('keydown', e => {
     if (composing(e) || document.querySelector('dialog[open], #tour:not([hidden])')) return;
     const mod = e.metaKey || e.ctrlKey, key = e.key.toLowerCase(), m = modes();
-    const view = viewOf(state.route), scope = keyScope(view), grid = scope === 'grid';
+    // 面板页没有单图快捷键，但面板页借列表开的大图（previewList）里，单图键照样作用于大图那张。
+    const view = viewOf(state.route), scope = keyScope(view) || (m.viewer ? 'shown' : ''), grid = scope === 'grid';
     if (mod && key === 'k') { e.preventDefault(); jumpToCharacter(); return; }
     // 后退、前进（#526）：Windows 上 Alt+← →，macOS 上 ⌘[ ⌘]（桌面 App 里由菜单接，网页形态在这里接），输入框里也生效。
     // 浏览器自己的后退会退出图库页面，这里改走 stepHistory，只在这个图库的页面之间走。
@@ -854,6 +878,9 @@ export function wireGrid() {
       else e.target.blur();
       return;
     }
+    // Space 看大图的缩略图（按组整理、首页「认一认」，ui/detail.js 的 peek）：焦点在图上或鼠标停在图上时 Space 是看大图，
+    // 不是按下这个按钮（点一下是「不算」，#424 的 2-2）。
+    if (e.key === ' ' && !mod && !m.viewer && !edits.busy && peek(e.target)) { e.preventDefault(); return; }
     // 焦点在按钮、开关、链接上时，Enter、Space 归它自己（#422 的 2-5）：链接只认 Enter，Space 照常是页面的快捷键。
     // 网格卡片不拿焦点（焦点在 #viewport 上），不受影响。
     if (!mod && (e.key === 'Enter' || e.key === ' ') && e.target.matches?.(e.key === 'Enter' ? ACTIVATES + ',a[href]' : ACTIVATES)) return;
@@ -875,6 +902,7 @@ export function wireGrid() {
     // 首页（scope 'shown'）没有网格光标：下面的键只作用于详情栏或大图里那张，两者都没开时不响应；方向键只有 ← → 翻页，
     // ↑ ↓ 照常滚动页面。
     if (!grid && !m.viewer && !m.detail) return;
+    if (key === 'i' && !mod) { e.preventDefault(); toggleInfo(); return; }
     if (e.key === ' ') { e.preventDefault(); if (m.viewer) closeViewer(); else openViewer(grid ? viewerTarget() : indexOf(state.focused)); return; }
     if (['ArrowLeft', 'ArrowRight', 'ArrowUp', 'ArrowDown'].includes(e.key)) {
       // 有非模态浮层开着时方向键不动网格（菜单的 ↑ ↓ 由浮层管理器先处理，#422 的 2-9）。

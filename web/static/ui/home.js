@@ -7,7 +7,7 @@ import {implement, onPage} from '../core/pages.js';
 import {charHash, hashFor} from '../core/route.js';
 import {api, post, readError} from '../core/session.js';
 import {state} from '../core/state.js';
-import {INSP_ICONS, indexOf, inspect, openViewer} from './detail.js';
+import {INSP_ICONS, indexOf, inspect, openViewer, wirePeek} from './detail.js';
 import {$, toast, workSmall} from './dom.js';
 import {mutate, showList, viewOpts} from './grid.js';
 
@@ -151,6 +151,12 @@ export function drawHome() {
   home.observer?.disconnect();
   if (home.next) { home.observer = new IntersectionObserver(es => { if (es.some(e => e.isIntersecting)) moreHome(); }, {root: $('viewport'), rootMargin: '600px'}); home.observer.observe($('homeSentinel')); }
 }
+// 详情栏、大图翻页时把那张图滚进视野：横向的图条和整页都滚（#424 的 2-11，ui/detail.js 的 ensureVisible）。同一张图既是
+// 主图又在图条里时滚图条里那个。
+function revealHome(uuid) {
+  const all = [...$('homePage').querySelectorAll('.home-j')].filter(x => x.dataset.id === uuid), b = all.find(x => x.closest('.home-strip')) || all[0];
+  b?.scrollIntoView({block: 'nearest', inline: 'nearest', behavior: matchMedia('(prefers-reduced-motion: reduce)').matches ? 'auto' : 'smooth'});
+}
 export function markHomeFocus() { if (onPage(state.route, 'home')) for (const b of $('homePage').querySelectorAll('.home-j')) b.classList.toggle('on', b.dataset.id === state.focused); }
 // 首页「认一认」：一个角色，几张机器识别出的图；点掉错的，然后确认其余的。
 async function nextAsk() {
@@ -161,7 +167,7 @@ function askCardHTML() {
   const b = home.ask; if (!b || !viewOpts.ask || !b.items.length) return '';
   const off = home.askOff.size, why = b.kind === 'hint' ? t('和你确认过的 TA 很像 · 点对了就能认出更多') : b.kind === 'seed' ? t('再确认 {n} 张就能学会认 TA', {n: Math.max(1, 5 - b.confirmed)}) : t('抽查一下认得准不准');
   return `<section class="ask-card" id="askCard"><div class="ask-head"><b>${t('认一认')}</b><span>${t('这些是 {name} 吗？', {name: `<a href="${charHash(b.entity)}">${esc(b.name)}</a>${workSmall({id: b.entity, name: b.name})}`})}</span><small>${why}</small></div>
-    <div class="ask-row">${b.items.map(x => `<button class="ask-img${home.askOff.has(x.uuid) ? ' off' : ''}" data-askimg="${esc(x.uuid)}" title="${home.askOff.has(x.uuid) ? t('点一下：改回「是」') : t('点一下：不是 TA')}" style="aspect-ratio:${ratio(x)}"><img src="/image?id=${encodeURIComponent(x.uuid)}&size=thumb" alt="" loading="lazy"><i aria-hidden="true">✕</i></button>`).join('')}</div>
+    <div class="ask-row">${b.items.map(x => `<button class="ask-img${home.askOff.has(x.uuid) ? ' off' : ''}" data-askimg="${esc(x.uuid)}" data-peek="${esc(x.uuid)}" title="${home.askOff.has(x.uuid) ? t('点一下：改回「是」') : t('点一下：不是 TA')} · ${t('长按或 Space 看大图')}" style="aspect-ratio:${ratio(x)}"><img src="/image?id=${encodeURIComponent(x.uuid)}&size=thumb" alt="" loading="lazy" draggable="false"><i aria-hidden="true">✕</i></button>`).join('')}</div>
     <div class="ask-foot"><span>${off ? t('{n} 张不是 TA', {n: off}) : t('点掉不是 TA 的')}</span><button class="secondary" data-askcard="later">${t('以后再说')}</button><button class="primary" data-askcard="ok">${off === b.items.length ? t('都不是') : off ? t('其余 {n} 张是', {n: b.items.length - off}) : t('都对')}</button></div></section>`;
 }
 function redrawAskCard() { const el = $('askCard'), html = askCardHTML(); if (!el) return drawHome(); if (!html) { el.remove(); return; } const t = document.createElement('div'); t.innerHTML = html; el.replaceWith(t.firstElementChild); }
@@ -189,6 +195,8 @@ export function wireHome() {
     if (n) { const el = n.parentElement.querySelector('.home-strip'); el.scrollBy({left: Number(n.dataset.strip) * el.clientWidth * .8, behavior: matchMedia('(prefers-reduced-motion: reduce)').matches ? 'auto' : 'smooth'}); return; }
     const b = e.target.closest('.home-j'); if (b) inspect(b.dataset.id);
   });
+  // 「认一认」的图点一下是「不是 TA」，长按或 Space 看大图，大图里翻的是这一批（#424 的 2-34）。
+  wirePeek($('homePage'), () => home.ask?.items.map(x => x.uuid) || []);
   $('homePage').addEventListener('scroll', e => { if (e.target.classList?.contains('home-strip')) syncStrip(e.target); }, true);
   $('homePage').addEventListener('dblclick', e => { const b = e.target.closest('.home-j'); if (b) openViewer(indexOf(b.dataset.id)); });
   $('homePage').addEventListener('mouseover', e => {
@@ -203,4 +211,5 @@ export function wireHome() {
 
 // 首页登记：渲染入口，以及数据变了之后怎么重画（撤销、同步到新图、改动之后保持滚动；切换 R18 重新读；视图选项只重排）。
 // 后退回到首页（restore）时按上次读到的天数重读、不换「认一认」，好让 applyRoute 滚回原来的位置（#526）。
-implement({home: {render: ({restore} = {}) => renderHome(!!restore && home.days.length > 0), refresh: why => { if (why === 'view') drawHome(); else renderHome(why !== 'nsfw' && why !== 'ask'); }}});
+implement({home: {render: ({restore} = {}) => renderHome(!!restore && home.days.length > 0), reveal: revealHome,
+  refresh: why => { if (why === 'view') drawHome(); else renderHome(why !== 'nsfw' && why !== 'ask'); }}});

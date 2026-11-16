@@ -232,7 +232,7 @@ details[open].inspector-section summary::before{transform:rotate(90deg)}
 .viewer-bar .none-yet{color:#9696a2}
 .viewer-bar .alts{margin:0}
 .viewer-bar .alt{background:#ffffff0d;border-color:#ffffff24;color:#e2e2e8}
-.viewer-bar .alt kbd{color:#a2a2b0;border-color:#ffffff33}
+.viewer-bar .alt kbd,.viewer-bar .add-identity kbd{color:#a2a2b0;border-color:#ffffff33;border-style:solid;border-width:1px;background:transparent;box-shadow:none}
 
 /* 命令面板与对话框 */
 dialog{width:440px;max-width:calc(100vw - 32px);padding:22px;box-shadow:0 0 0 1px var(--hair),0 30px 70px -20px rgba(var(--sh),.4)}
@@ -243,7 +243,7 @@ dialog.palette{width:520px;padding:0;margin-top:14vh;overflow:hidden}
 .palette-label{font-size:var(--fs-11);color:var(--muted);padding:var(--space-8) var(--space-10) var(--space-4);letter-spacing:.3px}
 .palette-item{width:100%;display:flex;align-items:center;gap:var(--space-10);text-align:left;padding:var(--space-6) var(--space-8);border:0;background:transparent}
 .palette-item.on{background:var(--soft)}
-.palette-item img,.palette-glyph{width:34px;height:34px;object-fit:cover;background:var(--soft);flex-shrink:0;display:flex;align-items:center;justify-content:center;color:var(--muted)}
+.palette-item img,.palette-glyph,#pickerSubject img{width:34px;height:34px;object-fit:cover;background:var(--soft);flex-shrink:0;display:flex;align-items:center;justify-content:center;color:var(--muted)}
 .palette-text{flex:1;min-width:0;display:flex;flex-direction:column}
 .palette-name{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .palette-text small{font-size:var(--fs-11);color:var(--muted);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
@@ -433,7 +433,7 @@ dialog.relate{width:min(980px,calc(100vw - 32px));max-height:88vh;overflow:auto}
 .pair-name small{color:var(--muted);font-variant-numeric:tabular-nums;white-space:nowrap}
 .pair-label{flex:none;font-size:var(--fs-11);font-weight:600;color:var(--ink2);background:var(--soft);border-radius:var(--radius-4);padding:var(--space-1) var(--space-6)}
 .pair-thumbs{display:grid;grid-template-columns:repeat(4,1fr);gap:var(--space-4)}
-.pair-thumbs img{width:100%;aspect-ratio:1;object-fit:cover;border-radius:var(--radius-4);background:var(--soft);display:block}
+.pair-thumbs img{width:100%;aspect-ratio:1;object-fit:cover;border-radius:var(--radius-4);background:var(--soft);display:block;cursor:zoom-in}
 .pair-evidence{margin:10px 0 8px;font-size:var(--fs-12);color:var(--ink2)}
 .pair-actions{display:flex;flex-wrap:wrap;align-items:center;gap:var(--space-4)}
 .pair-actions .spacer{flex:1}
@@ -442,7 +442,7 @@ dialog.relate{width:min(980px,calc(100vw - 32px));max-height:88vh;overflow:auto}
 @media (max-width:700px){.pair-body{grid-template-columns:1fr}.pair-actions .spacer{display:none}}
 .chips .hint-add{font-size:var(--fs-10);background:var(--hint-bg);color:var(--hint-ink);border:0;border-radius:var(--radius-4);padding:var(--space-1) var(--space-6);box-shadow:0 0 0 .5px var(--hint-ring);cursor:pointer;font-family:inherit;overflow:hidden}
 .chips .hint-add:hover{background:var(--hint-bg-hover);color:#fff}
-.picker-staged{display:flex;flex-wrap:wrap;gap:var(--space-6);padding:var(--space-6) var(--space-10);border-bottom:1px solid var(--line)}
+.picker-staged{display:flex;flex-wrap:wrap;align-items:center;gap:var(--space-6);padding:var(--space-6) var(--space-10);border-bottom:1px solid var(--line)}
 .staged-chip{border:0;border-radius:var(--radius-pill);color:#fff;font-size:var(--fs-12);padding:var(--space-4) var(--space-10);cursor:pointer}
 .staged-chip:hover{opacity:.8}
 .palette-add{flex-shrink:0;width:22px;height:22px;display:inline-flex;align-items:center;justify-content:center;border-radius:var(--radius-6);color:var(--muted);opacity:0}
@@ -652,7 +652,7 @@ dialog::backdrop{background:rgba(20,20,30,.22);backdrop-filter:blur(3px)}
 .palette-item{border-radius:var(--radius-10)}
 .palette-item.on,.palette-item.staged{background:var(--accent-soft)}
 .palette-name{font-family:inherit;font-size:var(--fs-13);letter-spacing:0}
-.palette-item img,.palette-glyph{border-radius:var(--radius-10)}
+.palette-item img,.palette-glyph,#pickerSubject img{border-radius:var(--radius-10)}
 .staged-chip{background:var(--accent-btn)}
 /* 分组 */
 .group-card{border:0;border-radius:var(--radius-14);transition:transform .2s var(--ease),box-shadow .2s}

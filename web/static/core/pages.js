@@ -111,6 +111,7 @@ export const poolIs = (route, ...pools) => pools.includes(pageOf(route).pool);
 //   help(r), helpHint    标题旁「?」里的说明（一行一句）；helpHint 为真时再接上本页的 hint，一个「·」一行（#527）
 //   onMeta(info)         计数等元数据到达后重画什么；没有的页面重画工具栏
 //   emptyNext(r)         网格空了时空状态下面的去处（链接或 data-empty 按钮的 HTML，#386 的 2-12）；没有的页面只有一句话
+//   reveal(uuid)         主区不是网格的页面把这张图滚进视野：详情栏、大图翻页时，和面板页借列表看的大图关掉时（#424）
 //   refresh(why)         数据变了之后重画面板页：'edit' 改动之后、'undo' 撤销之后、'learned' 确认或撤销后后台学习
 //                        收尾之后（#400）、'sync' 同步到新图之后、'nsfw' 切换 R18 之后、'view' 视图选项之后、
 //                        'ask' 「偶尔问一句」开关之后
