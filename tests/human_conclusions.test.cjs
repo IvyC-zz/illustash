@@ -228,3 +228,12 @@ test('a finished import opens the report, joins the undo control, and a refused 
   assert.match(p.toasts.at(-1), /文件太大/);
   assert.equal(p.dialogs().length, 0);
 });
+
+test('the home folder is shortened on macOS and Windows, and nothing else is (#518)', () => {
+  const cases = [
+    ['/Users/合成/Downloads/x.jsonl', '~/Downloads/x.jsonl'], ['/Users/合成', '~'],
+    ['C:\\Users\\合成\\Downloads\\x.jsonl', '~\\Downloads\\x.jsonl'], ['d:/users/合成/x', '~/x'], ['C:\\Users\\合成', '~'],
+    ['/Users', '/Users'], ['/Volumes/盘/Users/合成/x', '/Volumes/盘/Users/合成/x'], ['C:\\Data\\Users\\合成', 'C:\\Data\\Users\\合成'],
+    ['C:\\UsersX\\合成', 'C:\\UsersX\\合成'], ['', ''], [null, '']];
+  for (const [path, shown] of cases) assert.equal(human.home(path), shown, path);
+});

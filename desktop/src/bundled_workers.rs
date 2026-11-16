@@ -125,7 +125,7 @@ fn models() -> Vec<String> {
 #[cfg(any(windows, target_os = "macos", test))]
 fn model_settings(compute: &Path, models: Models, shared: &Path) -> Vec<(&'static str, OsString)> {
     match models {
-        Models::Bundled => vec![("ILLUSTASH_MODELS", compute.join("resources/models").into_os_string())],
+        Models::Bundled => vec![("ILLUSTASH_MODELS", compute.join("resources").join("models").into_os_string())],
         Models::OnDemand => vec![
             (
                 "ILLUSTASH_MODELS",
@@ -154,13 +154,17 @@ fn defaults(
     let Some(local) = local.filter(|v| !v.is_empty()) else {
         return Err(tr("无法定位 LOCALAPPDATA；请检查 Windows 用户环境后重启"));
     };
-    let default_shared = Path::new(&local).join("Illustash/Shared").into_os_string();
+    // 逐段 join：Windows 上 join 不改字符串里的 `/`，写成 "Illustash/Shared" 会在显示的路径里混用分隔符（#518）。
+    let default_shared = Path::new(&local).join("Illustash").join("Shared").into_os_string();
     // 明确设置的 ILLUSTASH_SHARED 保留（configure 从不覆盖它）；模型跟着它走。
     let models = model_settings(compute, models, Path::new(shared.as_ref().unwrap_or(&default_shared)));
     let mut values = vec![("ILLUSTASH_ROOT", compute.join("resources").into_os_string())];
     values.extend(models);
-    values.push(("ILLUSTASH_RESEARCH_OPENBLAS_DLL", compute.join("resources/openblas/openblas.dll").into_os_string()));
-    let worker = compute.join("bin/illustash-worker.exe").into_os_string();
+    values.push((
+        "ILLUSTASH_RESEARCH_OPENBLAS_DLL",
+        compute.join("resources").join("openblas").join("openblas.dll").into_os_string(),
+    ));
+    let worker = compute.join("bin").join("illustash-worker.exe").into_os_string();
     for key in WORKER_KEYS {
         values.push((key, worker.clone()));
     }
@@ -424,7 +428,7 @@ mod tests {
     #[test]
     fn windows_complete_bundle_and_missing_component() {
         let scratch = scratch("illustash-bundle");
-        let root = scratch.join("relocated with spaces/compute");
+        let root = scratch.join("relocated with spaces").join("compute");
         fs::create_dir_all(&root).unwrap();
         fs::write(root.join("manifest.json"), windows_manifest("win32", "research", 1)).unwrap();
         assert!(defaults(&root, Some("user data".into()), None)
@@ -456,15 +460,20 @@ mod tests {
         assert_eq!(settings[0].1, root.join("resources").into_os_string());
         assert_eq!(
             settings[1].1,
-            Path::new("user data").join("Illustash/Shared").join("models").join(pack).into_os_string()
+            Path::new("user data").join("Illustash").join("Shared").join("models").join(pack).into_os_string()
         );
         assert_eq!(settings[2].1, OsString::from("1"));
-        assert_eq!(settings[3].1, root.join("resources/openblas/openblas.dll").into_os_string());
+        assert_eq!(settings[3].1, root.join("resources").join("openblas").join("openblas.dll").into_os_string());
         for (_, value) in &settings[4..8] {
-            assert_eq!(*value, root.join("bin/illustash-worker.exe").into_os_string());
+            assert_eq!(*value, root.join("bin").join("illustash-worker.exe").into_os_string());
         }
-        assert_eq!(settings[8].1, Path::new("user data").join("Illustash/Shared").into_os_string());
+        assert_eq!(settings[8].1, Path::new("user data").join("Illustash").join("Shared").into_os_string());
         assert!(settings.iter().all(|(key, _)| !key.contains("NETWORK") && !key.contains("PYTHON")));
+        // 设置页显示这些路径：Windows 上不能混用 `/`（#518）。
+        #[cfg(windows)]
+        for (key, value) in &settings {
+            assert!(!value.to_string_lossy().contains('/'), "{key} = {value:?}");
+        }
         // 明确指定的共享文件夹保留，下载的模型放在它下面。
         let explicit = defaults(&root, Some("user data".into()), Some("explicit shared".into())).unwrap();
         assert_eq!(explicit[1].1, Path::new("explicit shared").join("models").join(pack).into_os_string());
@@ -482,7 +491,7 @@ mod tests {
             fs::write(path, b"fixture").unwrap();
         }
         let settings = defaults(&root, Some("user data".into()), None).unwrap();
-        assert_eq!(settings[1], ("ILLUSTASH_MODELS", root.join("resources/models").into_os_string()));
+        assert_eq!(settings[1], ("ILLUSTASH_MODELS", root.join("resources").join("models").into_os_string()));
         assert!(settings.iter().all(|(key, _)| *key != "ILLUSTASH_MODELS_ON_DEMAND"));
         assert_eq!(settings.len(), 8);
         // 只登记了部分模型：两种包都不是，所以要重装。
