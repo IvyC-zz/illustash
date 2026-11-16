@@ -207,22 +207,26 @@ fn family_conflict(
             params![identity, tree.parent.is_none()],
             |r| r.get(0),
         )?;
-        return Ok(match verdict {
-            "yes" => c.query_row(
-                "SELECT EXISTS(SELECT 1 FROM effective_assertions WHERE uuid=?1 AND status='rejected'
-                AND (entity=?2 OR (character_id=?3 AND variant_id IS NULL)))",
-                params![asset, canonical, family],
-                |r| r.get(0),
-            )?,
-            "no" => c.query_row(
-                "SELECT EXISTS(SELECT 1 FROM effective_assertions WHERE uuid=?1 AND status='confirmed'
-                AND (entity=?2 OR (?4 AND character_id=?3)))
-                AND NOT EXISTS(SELECT 1 FROM effective_assertions WHERE uuid=?1 AND status='rejected' AND entity=?2)",
-                params![asset, canonical, family, root],
-                |r| r.get(0),
-            )?,
-            _ => false,
-        });
+        // 挂起按原身份键匹配；只有比较裁决时才使用代表身份和角色归属。
+        return Ok(c.query_row(
+            "WITH effective AS (
+                SELECT n.canonical_id AS entity,n.character_id,n.variant_id,s.status
+                FROM assertions s JOIN identity_nodes n ON n.id=s.entity JOIN assets a ON a.uuid=s.uuid
+                WHERE s.uuid=?1
+                  AND NOT EXISTS(SELECT 1 FROM identity_suspended h WHERE h.uuid=s.uuid AND h.entity=s.entity)
+                  AND NOT EXISTS(SELECT 1 FROM identity_uncertain u WHERE u.uuid=s.uuid)
+             )
+             SELECT CASE ?5
+                 WHEN 'yes' THEN EXISTS(SELECT 1 FROM effective WHERE status='rejected'
+                     AND (entity=?2 OR (character_id=?3 AND variant_id IS NULL)))
+                 WHEN 'no' THEN EXISTS(SELECT 1 FROM effective WHERE status='confirmed'
+                     AND (entity=?2 OR (?4 AND character_id=?3)))
+                     AND NOT EXISTS(SELECT 1 FROM effective WHERE status='rejected' AND entity=?2)
+                 ELSE 0
+             END",
+            params![asset, canonical, family, root, verdict],
+            |r| r.get(0),
+        )?);
     }
     match verdict {
         "yes"=>Ok(c.query_row("SELECT EXISTS(SELECT 1 FROM assertions WHERE uuid=?1 AND entity=?2 AND status='rejected')",

@@ -129,7 +129,13 @@ pub fn signatures(c: &Connection, f: &Matrix) -> Result<BTreeMap<String, String>
             members.entry(family).or_default().push(json!([id, canonical]));
         }
         let groups = artwork_groups(c)?;
-        let sql="SELECT s.character_id,s.raw_entity,s.uuid,s.status,s.origin,EXISTS(SELECT 1 FROM single_assets a WHERE a.uuid=s.uuid) FROM effective_assertions s ORDER BY 1,2,3";
+        // 沿代表角色分组，仍将原始裁决键写进指纹。挂起也按原始键匹配。
+        let sql = "SELECT n.character_id,s.entity,s.uuid,s.status,s.origin,
+                          EXISTS(SELECT 1 FROM single_assets o WHERE o.uuid=s.uuid)
+                   FROM assertions s JOIN identity_nodes n ON n.id=s.entity JOIN assets a ON a.uuid=s.uuid
+                   WHERE NOT EXISTS(SELECT 1 FROM identity_suspended h WHERE h.uuid=s.uuid AND h.entity=s.entity)
+                     AND NOT EXISTS(SELECT 1 FROM identity_uncertain u WHERE u.uuid=s.uuid)
+                   ORDER BY 1,2,3";
         let mut q = c.prepare(sql)?;
         let mut rows = q.query([])?;
         while let Some(r) = rows.next()? {
@@ -448,6 +454,49 @@ pub fn patch_anchors(snapshot: &Snapshot, root: &Path) -> Result<Anchors> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn hybrid_signature_reads_only_effective_assertions_in_production_schema() {
+        let root = std::env::temp_dir().join(format!("illustash-learn-test-{}", crate::store::new_key().unwrap()));
+        let library = root.join("synthetic.pilib");
+        fs::create_dir(&root).unwrap();
+        crate::app_create::create_folder(&library, &root, None, Some("other"), None).unwrap();
+        let mut c = crate::open(&library.join("library.sqlite")).unwrap();
+        let tx = c.transaction().unwrap();
+        crate::schema::begin_writing(&tx).unwrap();
+        tx.execute_batch("INSERT INTO meta VALUES ('identity_policy','hybrid');").unwrap();
+        for id in ["alias", "rep"] {
+            crate::character_entities::create(
+                &tx,
+                &crate::character_entities::New { id, kind: "character", ..Default::default() },
+                "user",
+            )
+            .unwrap();
+        }
+        tx.execute_batch(
+            "INSERT INTO identity_canonical VALUES ('alias','rep');
+             INSERT INTO assets(uuid) VALUES ('a'),('uncertain');
+             INSERT INTO single_assets(uuid) VALUES ('a');
+             INSERT INTO assertions VALUES ('a','alias','confirmed','review'),('a','rep','rejected','review'),
+                ('uncertain','alias','rejected','review'),('missing','alias','confirmed','review');
+             INSERT INTO identity_suspended VALUES ('a','rep','合成挂起','[]');
+             INSERT INTO identity_uncertain(uuid,options_json,reason) VALUES ('uncertain','[]','合成未定');",
+        )
+        .unwrap();
+        crate::schema::commit_writing(tx).unwrap();
+        let matrix = Matrix::new(vec![], vec![], 2).unwrap();
+        let actual = signatures(&c, &matrix);
+        drop(c);
+        fs::remove_dir_all(root).unwrap();
+        assert_eq!(
+            actual.unwrap(),
+            BTreeMap::from([(
+                "rep".into(),
+                "identity-v3:56b055a955ee1313692591f17fe82ddd0542387f48f2eeb45a58d1cd02a26e69".into()
+            )]),
+        );
+    }
+
     #[test]
     fn approved_float64_percentile_preserves_fixed_weak_boundary() {
         let mut spread = [0x3d6fd6f3, 0x3d4e22d6, 0x3d66a5d9, 0x3d015b47, 0x3d715049].map(f32::from_bits);
