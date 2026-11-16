@@ -11,7 +11,7 @@ import {state} from '../core/state.js';
 import {REASONS, FOLD_OPTIONS} from '../core/labels.js';
 import {SYNC_ACTIVE, INDEX_ACTIVE, NAMES_ACTIVE, PROV_ACTIVE, syncLine, indexLine, namesLine, importLine, importActive, pollSync, pollIndex,
   pollNamesSoon, loadProvenance, importStarted, pollImports, cancelImport, indexAction, setIndex, setNames} from '../core/jobs.js';
-import {onSettings, allowNames, loadSettingsData, saveStartup, saveFold, backupNow, clearCache, saveLanguage, loadAbout, saveModelApi, testModelApi,
+import {onSettings, allowNames, loadSettingsData, saveStartup, saveFold, backupNow, clearCache, saveLanguage, saveAfterTasks, loadAbout, saveModelApi, testModelApi,
   loadLibraries, libraryRequest, pollExport, chooseFolders, openLibraryRequest, libraryOpened, loadAccounts, accountRequest,
   waitPixivLogin, stopPixivLogin, checkUpdates, updatesPost, updatesTick} from '../core/settings.js';
 import {$, toast, error, readFailure, fold, wireFolds, redraw, setDrawn, busy} from './dom.js';
@@ -137,7 +137,7 @@ function patchSettingsPage(html, section) {
 // 用户带来的每个问题一页：看起来怎样、图片从哪来、图里是谁、谁画的、什么会离开本机、数据存在哪。每页列出它显示的
 // 卡片（#/settings/<id>）。
 const SETTINGS_SECTIONS = [
-  ['general', t('通用'), t('语言、外观、图片网格与默认排序'), ['setDisplay', 'setLanguage']],
+  ['general', t('通用'), t('语言、外观、图片网格与默认排序'), ['setDisplay', 'setLanguage', 'setWindow']],
   ['library', t('图库'), t('当前图库、来源、同步与排除'), ['setLibraries', 'setSync', 'setExclude', 'setFold']],
   ['characters', t('角色资料'), t('新角色检查、角色名称与翻译'), ['indexCard', 'namesCard', 'modelCard']],
   ['artists', t('画师'), t('找回画师与绑定的账号'), ['setProvenance', 'setAccounts']],
@@ -276,6 +276,10 @@ export async function renderSettings(fetchMissing = true, refresh = false) {
     // 里的表（#182），每个用它自己的语言命名。
     setLanguage: () => cardHead(t('语言'), '', 'shared') + `
       <div class="setting-line"><span>${t('界面语言')}<small class="line-hint">${t('切换后页面会重新载入')}</small></span>${segment('language', [['system', t('跟随系统')], ...I18N.languages.map(([code, name]) => [code, esc(name)])], I18N.preference)}</div>`,
+    // 只在桌面 App 里有（GET /api/settings 的 desktop，#451）：关窗时有任务在跑就在后台做完，这里定做完以后怎样。
+    setWindow: () => info?.desktop ? cardHead(t('关闭窗口'), '', 'shared') + `
+      <div class="setting-line"><span>${t('任务做完以后')}<small class="line-hint">${t('有任务在跑时关窗，窗口隐藏，任务在后台继续')}</small></span>
+        ${segment('afterTasks', [['quit', t('退出')], ['stay', t('留在后台')]], info.desktop.after_tasks)}</div>` : '',
     setSync: () => cardHead(t('同步'), t('只读读取来源里的图片，新增的导入并在本机识别；来源里删掉的图会从图库移除，人工整理记录保留。同步不联网。'), 'library') + `
       ${taskLink(s.status === 'off' ? t('这次启动没有开同步') : syncLine(s), SYNC_ACTIVE.includes(s.status) ? 'busy' : ['error', 'needs_recognition'].includes(s.status) ? 'warn' : s.status === 'off' ? 'off' : '')}
       ${startupSwitch('sync', t('启动时同步'), t('检查来源里新增和删除的图'))}
@@ -304,7 +308,8 @@ export async function renderSettings(fetchMissing = true, refresh = false) {
       ${info ? fold('dataPaths', t('存储位置'), `<table class="settings-table">${[[t('源数据库（识别结果，可以重建）'), info.source], [t('应用数据库（人工整理，不要删）'), info.library], [t('缩略图缓存（可以放心删）'), info.thumbnails]].map(([label, d]) => `<tr><td>${label}</td><td class="mono" title="${esc(d.path)}">${esc(home(d.path))}</td><td>${bytes(d.bytes)}</td></tr>`).join('')}</table>`) : ''}`,
   };
   patchSettingsPage(`<nav class="settings-nav" aria-label="${t('设置')}">${SETTINGS_SECTIONS.map(([id, title]) => `<a href="#/settings/${id}" class="${id === section ? 'on' : ''}"${id === section ? ' aria-current="page"' : ''}>${title}</a>`).join('')}</nav>
-    <div class="settings-main" data-section="${section}">${cards.map(id => `<section class="settings-card" id="${id}">${body[id] ? body[id]() : ''}</section>`).join('')}</div>`, section);
+    <div class="settings-main" data-section="${section}">${cards.map(id => [id, body[id] ? body[id]() : '']).filter(([id, html]) => html || !body[id])
+      .map(([id, html]) => `<section class="settings-card" id="${id}">${html}</section>`).join('')}</div>`, section);
   const page = $('settingsPage');
   renderAbout();
   renderModelsCard();
@@ -328,6 +333,7 @@ export async function renderSettings(fetchMissing = true, refresh = false) {
   for (const g of page.querySelectorAll('[data-setting]')) for (const b of g.querySelectorAll('button')) b.onclick = () => {
     const key = g.dataset.setting, v = b.dataset.value;
     if (key === 'language') { setLanguage(v); return; }
+    if (key === 'afterTasks') { saveAfterTasks(v).then(renderSettings, e => toast(e.message)); return; }
     if (key === 'fit') setFit(v === '1');
     if (key === 'nsfw') setNsfw(v);
     if (key === 'theme') { prefs.set('theme', v); window.applyTheme?.(); }

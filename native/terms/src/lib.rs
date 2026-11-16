@@ -9,6 +9,7 @@
 #![cfg_attr(not(test), warn(clippy::unwrap_used))]
 
 pub mod app_accounts;
+mod app_activity;
 mod app_archives;
 mod app_characters;
 mod app_commands;

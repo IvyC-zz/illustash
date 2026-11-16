@@ -11,7 +11,7 @@ import {adoptToken, onPost, api} from './core/session.js';
 import {setLatest} from './core/edits.js';
 import {onJob} from './core/jobs.js';
 import {$, platformHints, toast, wireToast, error, wireDom} from './ui/dom.js';
-import {wireTasks, taskTick} from './ui/tasks.js';
+import {wireTasks, taskTick, openTasks} from './ui/tasks.js';
 import {confirmAction} from './ui/dialog.js';
 import {openModal, wireOverlays} from './ui/overlay.js';
 import {wireSettings} from './ui/settings.js';
@@ -41,6 +41,8 @@ wireOverlays();
 wireShell();
 // 桌面 App 菜单的「后退／前进」（desktop/src/main.rs）调它。
 window.illustashHistory = stepHistory;
+// 点系统通知时外壳调它：回到窗口并打开任务面板（desktop/src/background.rs，#451）。
+window.illustashOpenTasks = () => openTasks();
 wireGrid();
 wirePalette();
 wireDetail();

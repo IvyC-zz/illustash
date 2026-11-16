@@ -120,18 +120,34 @@ fn acceleration_at(file: &Path) -> bool {
     read(file).get("acceleration").and_then(Value::as_bool).unwrap_or(true)
 }
 
-/// POST /api/preferences 的回复：`{"language": …, "acceleration": …}`。
+/// 桌面 App 里关窗转到后台以后，任务做完时退出（`quit`，默认）还是留在后台（`stay`）。只有外壳读它
+/// （desktop/src/background.rs，#451）；值不认识也按 `quit`。
+pub(crate) const AFTER_TASKS: &str = "after_tasks";
+const AFTER_TASKS_VALUES: [&str; 2] = ["quit", "stay"];
+pub(crate) fn after_tasks() -> &'static str {
+    file().map(|file| after_tasks_at(&file)).unwrap_or(AFTER_TASKS_VALUES[0])
+}
+fn after_tasks_at(file: &Path) -> &'static str {
+    match read(file).get(AFTER_TASKS).and_then(Value::as_str) {
+        Some("stay") => AFTER_TASKS_VALUES[1],
+        _ => AFTER_TASKS_VALUES[0],
+    }
+}
+
+/// POST /api/preferences 的回复：`{"language": …, "acceleration": …}`。`after_tasks` 随 GET /api/settings 的
+/// `desktop` 给页面，只在桌面 App 里有。
 pub(crate) fn info(locales: &[Locale]) -> Json {
     Json::object([("language", language(locales).into()), ("acceleration", acceleration().into())])
 }
 
-/// POST /api/preferences：`{"language": "en"}` 或 `{"acceleration": false}`，或两者都给。偏好设置从不授予联网，
+/// POST /api/preferences：`{"language": "en"}`、`{"acceleration": false}` 或 `{"after_tasks": "stay"}`，可以一起给。
+/// 偏好设置从不授予联网，
 /// 也不启动任务。
 pub(crate) fn set_json(body: &str, locales: &[Locale]) -> Result<()> {
     let Json::Object(changes) = crate::http_json::parse_request(body)? else {
         return Err(Error::Invalid("未知设置".into()));
     };
-    if changes.is_empty() || changes.iter().any(|(key, _)| key != "language" && key != "acceleration") {
+    if changes.is_empty() || changes.iter().any(|(key, _)| !["language", "acceleration", AFTER_TASKS].contains(&key.as_str())) {
         return Err(Error::Invalid("未知设置".into()));
     }
     let mut validated = Vec::new();
@@ -140,6 +156,7 @@ pub(crate) fn set_json(body: &str, locales: &[Locale]) -> Result<()> {
             ("language", Json::Scalar(Value::String(language))) if offered(&language, locales) => language.into(),
             ("language", _) => return Err(Error::Invalid("语言取值不正确".into())),
             ("acceleration", Json::Scalar(value @ Value::Bool(_))) => value,
+            (AFTER_TASKS, Json::Scalar(Value::String(v))) if AFTER_TASKS_VALUES.contains(&v.as_str()) => v.into(),
             _ => return Err(Error::Invalid("开关取值不正确".into())),
         };
         validated.push((key, value));
@@ -302,6 +319,20 @@ mod tests {
         fs::write(&file, "{broken").unwrap();
         set_language_at(&file, "system").unwrap();
         assert_eq!(fs::read_to_string(&file).unwrap(), "{\n  \"language\": \"system\"\n}\n");
+    }
+
+    #[test]
+    fn after_tasks_defaults_to_quit_and_only_takes_known_values() {
+        let f = Fixture::new();
+        let file = f.file();
+        assert_eq!(after_tasks_at(&file), "quit", "no file");
+        fs::create_dir_all(file.parent().unwrap()).unwrap();
+        for text in ["", "not json", "[]", r#"{"after_tasks": true}"#, r#"{"after_tasks": "later"}"#] {
+            fs::write(&file, text).unwrap();
+            assert_eq!(after_tasks_at(&file), "quit", "{text}");
+        }
+        set_at(&file, vec![(AFTER_TASKS.into(), "stay".into())]).unwrap();
+        assert_eq!(after_tasks_at(&file), "stay");
     }
 
     #[test]
