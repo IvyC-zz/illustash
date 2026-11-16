@@ -123,6 +123,8 @@ class PackagingResourcesTest(unittest.TestCase):
         for relative, digest in {
             'native/terms/vendor/pocketfft/LICENSE.md': 'a85ca13fdf90160b64a0698215868c13b74d835ad0a4e2ba44713b8c5058a056',
             'native/terms/licenses/LCMS.txt': '9ed584604d11ed0ab26211e1775687283008d35e164baa8294757fbd4d829f90',
+            'tags/general_names_zh_LICENSE.txt': 'd9db28b2e55ae4694f7ec9b38c3849cc604366a97470d347e7ef7d4e9e73e940',
+            'tags/general_names_ja_LICENSE.txt': '3a76e8780d8d5d86df9141e64b22e8f73d5c2b9330e7f9dab12c8e7362a4062c',
         }.items():
             self.assertEqual(hashlib.sha256((ROOT / relative).read_bytes()).hexdigest(), digest)
 

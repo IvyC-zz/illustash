@@ -38,8 +38,23 @@ python3 tools/gen_rust_licenses.py
 | LittleCMS 2.19 及 lcms2 封装层 | Rust 依赖 | MIT，原文 `native/terms/licenses/LCMS.txt` |
 | Unicode 字符数据 | `crates/core` 的 casefold 与 HTTP 字符表，由 `tools/gen_casefold.py`、`tools/gen_http_unicode.py` 从 Python `unicodedata`（Unicode 15.0）生成 | [Unicode License v3](https://www.unicode.org/license.txt) |
 | 标签表 | `tags/tags_v3.csv` | 取自 WD tagger 模型仓库的 `selected_tags.csv`（Apache-2.0）；标签名与计数源自 [Danbooru](https://danbooru.donmai.us) |
+| 画面标签对照表 | `tags/general_names.json` | 简体中文译名和社区别名取自 danbooru-tags-data-zh（MIT），日文名取自 CharaDB 的标签数据（CC0-1.0）。固定来源见下节 |
 
-每个分发产物（便携包、安装包）的 `resources/licenses/` 里有本项目 `LICENSE`、本文（`THIRD_PARTY.md`）、PocketFFT 和 LittleCMS 的许可原文，以及 Rust 依赖的许可正文 `rust-dependencies.txt`（见上节），见 [安装与平台](BACKEND_TASKS.md#独立安装与可选计算包)。
+每个分发产物（便携包、安装包）的 `resources/licenses/` 里有本项目 `LICENSE`、本文（`THIRD_PARTY.md`）、PocketFFT、LittleCMS 和画面标签对照表的许可原文，以及 Rust 依赖的许可正文 `rust-dependencies.txt`（见上节），见 [安装与平台](BACKEND_TASKS.md#独立安装与可选计算包)。
+
+### 画面标签对照表
+
+- 中文译名及社区别名使用 danbooru-tags-data-zh 的 [`tags/general.csv`](https://github.com/amenorira/danbooru-tags-data-zh/blob/8e73f3b1c15b30f873c11a8c65d2d8264cdf0224/tags/general.csv)。该版本的 README 将项目声明为 MIT。README 末尾另有社区交流与学习的用途说明，本项目按同一版本 [MIT 许可原文](https://github.com/amenorira/danbooru-tags-data-zh/blob/8e73f3b1c15b30f873c11a8c65d2d8264cdf0224/LICENSE) 给出的再分发条款使用，并保留 amenorira 的版权声明和许可原文。
+- 日文名使用 CharaDB 的 [`data/items_public.json`](https://github.com/taki-ttt/charadb/blob/7fe2e4b009ad6d85496101e929ac8528cb21d357/data/items_public.json)。其 [许可原文第 2 节](https://github.com/taki-ttt/charadb/blob/7fe2e4b009ad6d85496101e929ac8528cb21d357/LICENSE) 明确把该文件的标签数据按 CC0-1.0 发布。只取能直接对应单个 WD 标签的日文名。保留两份上游许可，见 [中文数据](../tags/general_names_zh_LICENSE.txt) 和 [日文数据](../tags/general_names_ja_LICENSE.txt)。
+
+| 输入或产物 | SHA-256 |
+|---|---|
+| `tags/tags_v3.csv` | `298633d94d0031d2081c0893f29c82eab7f0df00b08483ba8f29d1e979441217` |
+| danbooru-tags-data-zh 固定版 `tags/general.csv` | `4df46d24d61ee32b96d9aa79ae390b0c35bdd99ce15d591b617dc949e92c4240` |
+| CharaDB 固定版 `data/items_public.json` | `7d3afccb974dbec08b03b33cd8ba922849903af89ce51eb6428d63f0158f5e9e` |
+| `tags/general_names.json` | `958e30a1d99f37f6497d9ecf2dbc7ed1ef173b80637f6937d94a2ec4c0ec1ab6` |
+
+在仓库根目录运行 [`python3 tools/build_general_tag_names.py`](../tools/build_general_tag_names.py) 下载固定版本的两个数据文件、核对三个输入的 SHA-256 并重建。已有核对过的输入时，传 `--zh general.csv --ja items_public.json` 离线重建。生成脚本只取 WD v3 的 8,106 个 `category=0` 标签，以原 tag 为键，提取译名和别名字段。生成文件为 459,155 字节，共 7,773 个条目，其中 7,750 个含中文名、56 个含单列日文名。该文件编入原生宿主，安装和使用均可离线。
 
 ## 打包时加入的运行库
 

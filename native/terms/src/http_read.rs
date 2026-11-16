@@ -8,7 +8,11 @@ use crate::{
     Error, Result,
 };
 use rusqlite::{params, params_from_iter, types::ValueRef, Connection, OpenFlags, OptionalExtension};
-use std::{cell::RefCell, collections::HashMap, sync::Arc};
+use std::{
+    cell::RefCell,
+    collections::HashMap,
+    sync::{Arc, OnceLock},
+};
 use unicode_normalization::UnicodeNormalization;
 
 #[cfg(test)]
@@ -562,7 +566,13 @@ pub fn read(context: &LibraryContext, url: &str) -> Result<Option<(Json, u16)>> 
     let q = query(url);
     let path = url.split('?').next().unwrap_or(url);
     if path == "/api/general-tags" {
-        return Ok(Some((general_tags(context, q.get("q").map(String::as_str).unwrap_or(""))?, 200)));
+        let needle = q.get("q").map(String::as_str).unwrap_or("");
+        let tags = if q.get("format").is_some_and(|format| format == "menu") {
+            general_tag_menu(context, needle)?
+        } else {
+            general_tags(context, needle)?
+        };
+        return Ok(Some((tags, 200)));
     }
     let audit_n = match audit_size(path, &q) {
         Ok(n) => n,
@@ -630,6 +640,47 @@ fn general_tags(context: &LibraryContext, q: &str) -> Result<Json> {
     let vocabulary = tag_vocabulary(context)?;
     let tags = vocabulary.iter().filter(|n| crate::casefold::casefold(n).contains(&q)).take(30);
     Ok(Json::Array(tags.map(|n| n.as_str().into()).collect()))
+}
+
+#[derive(serde::Deserialize)]
+struct GeneralTagNames {
+    zh: Option<String>,
+    ja: Option<String>,
+    #[serde(default)]
+    aliases: Vec<String>,
+}
+
+fn tag_search_key(text: &str) -> String {
+    let normalized: String = text.nfkc().map(|c| if whitespace(c) { '_' } else { c }).collect();
+    crate::casefold::casefold(&normalized)
+}
+
+fn general_tag_menu(context: &LibraryContext, q: &str) -> Result<Json> {
+    static NAMES: OnceLock<HashMap<String, GeneralTagNames>> = OnceLock::new();
+    let names = NAMES.get_or_init(|| {
+        serde_json::from_str(include_str!("../../../tags/general_names.json")).expect("内置通用标签对照表必须有效")
+    });
+    let q = cut(&tag_search_key(trim(q)), 80);
+    let vocabulary = tag_vocabulary(context)?;
+    let mut matches = Vec::new();
+    for tag in vocabulary.iter() {
+        let entry = names.get(tag);
+        let localized_match = || {
+            entry.is_some_and(|entry| {
+                entry.zh.iter().chain(&entry.ja).chain(&entry.aliases).any(|name| tag_search_key(name).contains(&q))
+            })
+        };
+        if !q.is_empty() && !tag_search_key(tag).contains(&q) && !localized_match() {
+            continue;
+        }
+        let zh = entry.and_then(|entry| entry.zh.as_deref());
+        let ja = entry.and_then(|entry| entry.ja.as_deref());
+        matches.push(Json::object([("tag", tag.as_str().into()), ("zh", zh.into()), ("ja", ja.into())]));
+        if matches.len() == 30 {
+            break;
+        }
+    }
+    Ok(Json::Array(matches))
 }
 /// /api/artist-audit 抽查多少张图（其他读取为 50），或者请求被拒绝的原因。
 fn audit_size(path: &str, q: &HashMap<String, String>) -> std::result::Result<usize, String> {
