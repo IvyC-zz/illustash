@@ -88,7 +88,9 @@ fn search(origin: &str, token: &str, uri: &str) {
 #[test]
 #[ignore = "只在空闲验收机上运行 release 宿主合成图库计时"]
 fn benchmark_example_search_http() {
-    assert!(!cfg!(debug_assertions), "bench requires a release binary");
+    if cfg!(debug_assertions) {
+        panic!("bench requires a release binary");
+    }
     let binary = Path::new(env!("CARGO_BIN_EXE_illustash-terms"));
     let (_scratch, root, _) = materialize(&load("http_api"), "example-search-bench");
     let package = generate(&root);
