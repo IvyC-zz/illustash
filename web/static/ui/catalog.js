@@ -299,7 +299,7 @@ export async function openTagged() {
 export const shelf = {q: '', filter: 'all'};
 export async function renderShelf() {
   const route = state.route, token = session.token;
-  $('hint').textContent = t('点作品名看它的角色 · 检查关注作品的新角色前会确认联网');
+  $('hint').textContent = t('点作品名看它的角色');
   drawShelf();
   try { await loadIndex(); } catch (e) { if (route === state.route && token === session.token) readFailure($('charIndex'), e); return; }
   if (route !== state.route || token !== session.token) return;
@@ -342,7 +342,7 @@ export function drawShelf() {
   root.innerHTML = `${todo}${found}
     <div class="shelf-bar"><div class="chips-row">${chip('all', t('全部'), x.works.length)}${chip('watched', t('已关注'), watched.size)}${pendingN ? chip('pending', t('链接待确认'), pendingN) : ''}</div><div class="spacer"></div>
       <span class="watch-add"><input id="watchAdd" value="${esc(watchDraft)}" placeholder="${t('关注 Danbooru 上的作品…')}" spellcheck="false" autocomplete="off" role="combobox" aria-expanded="false" aria-controls="watchMenu"><div id="watchMenu" class="menu menu-drop watch-menu" role="listbox" hidden></div></span></div>
-    <div class="shelf-list">${shown.map(row).join('') || `<p class="muted-note shelf-empty">${x.works.length ? t('没有符合条件的作品') : t('还没有作品。给角色填写所属作品，或点右上角「新建作品」。')}</p>`}</div>`;
+    <div class="shelf-list">${shown.map(row).join('') || `<p class="muted-note shelf-empty">${x.works.length ? t('没有符合条件的作品') : t('还没有作品。')}</p>`}</div>`;
   wireWatchAdd(x, adoptWatch); wireFolds(root);
 }
 async function saveWatchList(works) {
@@ -369,8 +369,8 @@ export async function offerWatch(ids) {
   const w = x?.works?.find(y => y.id === works[0]); if (!w) return;
   if (x.watch.works.includes(w.id)) { toastMore(' · ' + t('「{name}」已关注', {name: w.name})); return; }
   toastMore('', w.watchable ? t('关注「{name}」的新角色', {name: w.name}) : t('关注「{name}」…', {name: w.name}), async () => {
-    if (!w.watchable) { const r = await workDialog(w, {watch: true}); if (r?.watch) toast(t('已关注「{name}」，检查新角色前会确认联网', {name: r.name})); return; }
-    try { await saveWatch([...state.index.watch.works, w.id]); toast(t('已关注「{name}」，检查新角色前会确认联网', {name: w.name})); renderIndexBody(); renderHeading(); }
+    if (!w.watchable) { const r = await workDialog(w, {watch: true}); if (r?.watch) toast(t('已关注「{name}」', {name: r.name})); return; }
+    try { await saveWatch([...state.index.watch.works, w.id]); toast(t('已关注「{name}」', {name: w.name})); renderIndexBody(); renderHeading(); }
     catch (e) { toast(e.message); }
   });
 }
@@ -385,11 +385,11 @@ export function workDialog(w, {watch = false} = {}) {
   const works = state.index?.works || [], watched = new Set(state.index?.watch?.works || []);
   return new Promise(resolve => {
     const parents = works.filter(x => !w || x.id !== w.id);
-    const body = `${watch && !w?.tag ? `<p class="dialog-lead">${t('关注要按 Danbooru 上的作品 tag 检查。先在下面找到这部作品，选中后保存就会关注。')}</p>` : ''}
+    const body = `${watch && !w?.tag ? `<p class="dialog-lead">${t('关注要用 Danbooru 上的作品 tag。在下面找到这部作品，选中后保存。')}</p>` : ''}
       <label class="field"><span>${t('在 Danbooru 上找')}</span><div class="combo"><input id="wdFind" autocomplete="off" spellcheck="false" placeholder="${t('输入作品名，中文、日文、英文都行')}"><div class="combo-menu" id="wdFindMenu" hidden></div></div>
         <small>${t('选中后自动填好下面的 tag，名称空着时也一起填上。只发送你输入的文字。')}</small></label>
       <label class="field"><span>${t('名称')}</span><input id="wdName" name="title" value="${esc(w?.name || '')}" maxlength="120" required autocomplete="off">
-        <small>${t('界面上显示的名字，用你习惯的叫法就行，和 Danbooru tag 无关，以后随时能改。')}</small></label>
+        <small>${t('界面上显示的名字，和 Danbooru tag 无关。')}</small></label>
       <label class="field"><span>${t('Danbooru 作品 tag')}<em class="opt">${t('可不填')}</em></span><input id="wdTag" name="tag" value="${esc(w?.tag || '')}" placeholder="${t('例如 blue_archive')}" spellcheck="false" autocomplete="off">
         <small id="wdTagNote"></small></label>
       <label class="field"><span>${t('上级作品')}<em class="opt">${t('可不填')}</em></span><select id="wdParent" name="parent"><option value="">${t('无')}</option>${parents.map(x => `<option value="${esc(x.id)}" ${w?.parent_id === x.id ? 'selected' : ''}>${esc(x.name)}</option>`).join('')}</select>
@@ -442,7 +442,7 @@ export function workDialog(w, {watch = false} = {}) {
 export function openIndexAdd(tag = '') {
   const token = session.token, x = state.index, list = (x?.check?.missing || []).filter(r => !tag || r.copyright === tag);
   if (!list.length) return;
-  const body = `<p class="muted-note">${t('这些角色在 Danbooru 上有、本地索引还没有。添加时每个角色下载约 20 张公开参考图（约 {mb} MB），在本机算好特征后重新扫描图库。点 tag 可以先去 Danbooru 看看。', {mb: x.mb_per_character})}</p>
+  const body = `<p class="muted-note">${t('这些角色在 Danbooru 上有、本地索引还没有。添加时每个角色下载约 20 张公开参考图（约 {mb} MB），算好特征后重新扫描图库。', {mb: x.mb_per_character})}</p>
     <div class="index-add-list"><table class="settings-table index-table"><tr><th><input type="checkbox" id="iaAll" aria-label="${t('全选')}" checked></th><th>${t('角色 tag')}</th><th>${t('作品')}</th><th>${t('D 站图数')}</th></tr>
       ${list.map(r => `<tr><td><input type="checkbox" data-pick="${esc(r.short_tag)}" ${indexSkip.has(r.short_tag) ? '' : 'checked'}></td><td><a class="link" href="https://danbooru.donmai.us/posts?tags=${encodeURIComponent(r.tag)}" target="_blank" rel="noreferrer noopener">${esc(r.tag)}</a></td><td>${esc(x.works.find(w => w.tag === r.copyright)?.name || workName(r.copyright))}</td><td>${number(r.post_count)}</td></tr>`).join('')}</table></div>`;
   const d = openDialog({title: t('添加新角色'), cls: 'index-add', body, backdropClose: false,
