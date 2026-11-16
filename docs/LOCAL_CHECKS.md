@@ -118,7 +118,7 @@
 
 词条第 9 版的新增状态及物理表／有效视图适配，由 Rust/Python 共用 [精确清单](../tests/baseline_additions.json) 与 v7 历史参考分开验收（#441）：表、meta 键和映射以该清单为唯一明细，每项登记引入版本和具名的严格语义测试。适配只用于实时应用库对历史参考的投影；冻结侧存在清单要分离的新增表、meta 键或物理表时直接失败。物理表与有效视图的完整列及带类型的行（含重数）须一致，才应用映射；历史结构属性表达只在该投影中重建。不使用通配或期望交集，旧表旧列、类型、行重数、响应和名称增量校验保持。Python `baseline_state()`、Rust `state()`/`exact()`、当前库前后比较、原样备份和失败回滚仍保留物理表、原始属性及全部新状态。
 
-自动人工备份会在开库后写入保护状态、摘要缓存和 WAL。HTTP 共享夹具先等待真实首份快照与摘要补算结束，再采集操作前的完整状态；需要比较切库目标前后状态的夹具先打开并完成目标的首备份。settings/startup/cache 的 `package.library_bytes`、`library.bytes` 及 libraries 的当前包 `info.library_bytes` 按当前主库加 WAL 的独立文件大小精确核验，其余响应字节和头继续对照冻结记录。仅 v5/v6 迁移及撤销等价用例用可释放的 `ILLUSTASH_TEST_HUMAN_BACKUP_GATE` 文件闸门保留原完整状态比较，随后释放并验收真实首备份；等待不持数据库或发布锁，切库及退出照常取消，产品不设置该变量（#441）。
+自动人工备份会在开库后写入保护状态、摘要缓存和 WAL。HTTP 共享夹具先等待真实首份快照与摘要补算结束（补齐摘要后马上再出的那一份也要写完，`refill` 为假，#516），再采集操作前的完整状态；需要比较切库目标前后状态的夹具先打开并完成目标的首备份。settings/startup/cache 的 `package.library_bytes`、`library.bytes` 及 libraries 的当前包 `info.library_bytes` 按当前主库加 WAL 的独立文件大小精确核验，其余响应字节和头继续对照冻结记录。仅 v5/v6 迁移及撤销等价用例用可释放的 `ILLUSTASH_TEST_HUMAN_BACKUP_GATE` 文件闸门保留原完整状态比较，随后释放并验收真实首备份；等待不持数据库或发布锁，切库及退出照常取消，产品不设置该变量（#441）。
 
 新基准和 Python 固定期望都录在导入按 tag 后缀建作品（#296）之前。重放时设上只供测试的环境变量 `ILLUSTASH_TEST_NO_IMPORT_WORKS`（`baseline.rs` 在启动核心时设，`tests/fixed_expectations.py` 加载时设），导入照旧规则走，录下的期望不改（用户 2026-11-12 定）；产品从不设置它。所以对照测试不覆盖导入建作品，这一段由 `crates/core` 的 `character_import` 单元测试（「不是作品」清单）和 `native/terms` 的 `app_create`（新图库从索引导入角色时建作品）、`app_recognition`（WD 结果按 tag 后缀归作品）测试负责。
 

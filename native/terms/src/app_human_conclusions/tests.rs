@@ -1339,3 +1339,60 @@ fn import_reports_only_track_their_own_committed_effect() {
     }
     assert!(reports::pending(&c, Some(c.last_insert_rowid())));
 }
+
+// 启动会话后台快照，轮询状态直到 done 成立；返回那一刻的状态。
+fn automatic_backups(fixture: &Fixture, done: impl Fn(&serde_json::Value) -> bool) -> serde_json::Value {
+    let library = crate::app_library::Library::open(fixture.db.parent().unwrap()).unwrap();
+    let mut backups = Backups::default();
+    backups.start(&library, 1, "synthetic").unwrap();
+    let deadline = crate::test_wait::deadline();
+    let value = loop {
+        let value: serde_json::Value = serde_json::from_str(&backups.status().dump()).unwrap();
+        if done(&value) {
+            break value;
+        }
+        assert!(std::time::Instant::now() < deadline, "{value}");
+        std::thread::sleep(std::time::Duration::from_millis(20));
+    };
+    backups.stop();
+    value
+}
+
+#[test]
+fn upgraded_library_without_cached_hashes_gets_a_complete_snapshot_right_after_filling() {
+    // 从 v8 升级的图库没有 human_asset_hashes：第一份快照全缺摘要，补算完立刻再出一份，不等一小时（#516）。
+    let fixture = Fixture::new("upgraded-without-hashes");
+    fixture.source();
+    assert_eq!(fixture.count("SELECT count(*) FROM human_asset_hashes"), 0);
+    let status = automatic_backups(&fixture, |s| {
+        s["snapshots"].as_array().unwrap().len() >= 2 && !s["running"].as_bool().unwrap()
+    });
+    let snapshots = status["snapshots"].as_array().unwrap();
+    assert_eq!(snapshots.len(), 2, "{status}");
+    assert_eq!(snapshots[0]["hash_coverage"]["missing"], 0, "{status}");
+    assert_eq!(snapshots[0]["hash_coverage"]["verified"], 4, "{status}");
+    assert_eq!(snapshots[1]["hash_coverage"]["missing"], 4, "{status}");
+    assert_eq!(status["hash_missing"], 0, "{status}");
+    assert_eq!(status["refill"], false, "{status}");
+    assert!(status["pending_revision"].is_null(), "补齐后的快照已覆盖补算带来的修订：{status}");
+    assert!(status["next_attempt"].is_null(), "{status}");
+    assert_eq!(fixture.count("SELECT count(*) FROM human_asset_hashes"), 4);
+}
+
+#[test]
+fn a_really_unreadable_picture_keeps_the_hourly_interval_and_is_reported_as_unreadable() {
+    let fixture = Fixture::new("upgraded-with-deleted-file");
+    fixture.source();
+    fs::remove_file(fixture.root.join("source-d.png")).unwrap();
+    let status = automatic_backups(&fixture, |s| !s["hash_unreadable"].is_null() && !s["running"].as_bool().unwrap());
+    let snapshots = status["snapshots"].as_array().unwrap();
+    assert_eq!(snapshots.len(), 1, "仍有图读不到时不提前再出快照：{status}");
+    assert_eq!(status["hash_missing"], 4, "{status}");
+    assert_eq!(status["hash_unreadable"], 1, "{status}");
+    assert_eq!(status["refill"], false, "{status}");
+    // 读得到的三张已补算，作为待保护的修订按一小时间隔进下一份快照。
+    assert!(!status["pending_revision"].is_null(), "{status}");
+    let next = status["next_attempt"].as_i64().unwrap();
+    assert!(next >= status["last_success"].as_i64().unwrap() + 3600, "{status}");
+    assert_eq!(fixture.count("SELECT count(*) FROM human_asset_hashes"), 3);
+}
