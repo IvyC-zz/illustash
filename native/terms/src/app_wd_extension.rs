@@ -448,12 +448,8 @@ pub(crate) struct DeliveryWindow {
 }
 
 impl DeliveryWindow {
-    pub(crate) fn start(library: &Library, resources: &Path) -> Result<Option<Self>> {
-        let app = crate::app_library::read_connection(&library.db())?;
-        let Some(current) = enabled(&app)? else { return Ok(None) };
-        if current.package_sha256 != crate::app_models::wd_extension()?.file.sha256
-            || crate::app_models::extension_file(resources)?.is_none()
-        {
+    pub(crate) fn start(library: &Library) -> Result<Option<Self>> {
+        if !auto_enabled(library)? {
             return Ok(None);
         }
         let source = crate::app_library::read_connection(&library.source())?;
@@ -462,7 +458,7 @@ impl DeliveryWindow {
         }
         let rowid = source.query_row("SELECT coalesce(max(rowid),0) FROM recognition_imports", [], |r| r.get(0))?;
         let pending = source
-            .prepare("SELECT digest FROM recognition_imports WHERE status='pending'")?
+            .prepare("SELECT digest FROM recognition_imports WHERE status NOT IN ('done','superseded')")?
             .query_map([], |r| r.get(0))?
             .collect::<rusqlite::Result<_>>()?;
         Ok(Some(Self { rowid, pending }))
@@ -537,6 +533,41 @@ mod tests {
 
     fn snapshot(c: &Connection, sql: &str) -> Vec<Value> {
         crate::app_migrate_data::rows(c, sql).unwrap()
+    }
+
+    #[test]
+    fn cancel_stops_scan_and_write_boundary_refuses_it() {
+        let f = Fixture::new();
+        for in_write in [false, true] {
+            let identity = TaskIdentity::new(&f.library, 1, "synthetic").unwrap();
+            let id = identity.task_id.clone();
+            let state = Arc::new(Mutex::new(json!({"id":id,"status":"running","phase":"scan"})));
+            let shared = state.clone();
+            let (ready, entered) = std::sync::mpsc::channel();
+            let (release, resume) = std::sync::mpsc::channel();
+            let task = Task::start(identity, None, move |ctx| {
+                let progress = Progress(Some((&ctx, &shared)));
+                if in_write {
+                    progress.begin_write()?;
+                }
+                ready.send(()).unwrap();
+                resume.recv_timeout(crate::test_wait::limit()).unwrap();
+                progress.check()
+            });
+            let mut tasks = Tasks { active: Some((task, state)), previous: None };
+            entered.recv_timeout(crate::test_wait::limit()).unwrap();
+            let cancelled = tasks.cancel(&id);
+            release.send(()).unwrap();
+            let task = &mut tasks.active.as_mut().unwrap().0;
+            assert!(task.wait(crate::test_wait::limit()));
+            if in_write {
+                assert!(matches!(cancelled, Err(Error::Conflict(_))));
+                assert!(matches!(task.outcome(), TaskOutcome::Done));
+            } else {
+                assert!(cancelled.is_ok());
+                assert!(matches!(task.outcome(), TaskOutcome::Cancelled));
+            }
+        }
     }
 
     #[test]

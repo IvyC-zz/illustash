@@ -151,6 +151,14 @@ class NativeWdExtensionTest(unittest.TestCase):
             ]
             self.assertGreater(len(candidates), 0)
             self.assertTrue(all(c['wd'] is None and c['ccip'] is None for c in candidates))
+            second = self.package('second')
+            self.assertEqual(self.request('/api/libraries/open', {'path': str(second.path)})['status'], 200)
+            self.token = json.loads(self.request('/api/bootstrap')['body'])['token']
+            self.assertIsNone(self.state()['task'])
+            self.assertFalse(self.state()['library']['enabled'])
+            self.assertEqual(self.request('/api/libraries/open', {'path': str(self.lib.path)})['status'], 200)
+            self.token = json.loads(self.request('/api/bootstrap')['body'])['token']
+            self.assertEqual(self.state()['task']['id'], enabled['task']['id'])
             self.state('/package', {'action': 'delete'})
             self.assertTrue(self.state()['library']['enabled'])
             self.restart()

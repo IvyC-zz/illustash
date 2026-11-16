@@ -151,7 +151,7 @@ impl Syncer {
         let delivered = self.wd_delivered.clone();
         self.task = Some(crate::app_tasks::Task::start_with(identity, deadline(), move |ctx| {
             let cancel = ctx.cancellation();
-            let window = crate::app_wd_extension::DeliveryWindow::start(&library, &root).unwrap_or_else(|error| {
+            let window = crate::app_wd_extension::DeliveryWindow::start(&library).unwrap_or_else(|error| {
                 eprintln!("无法记录本次同步的 WD 扩展范围：{error}");
                 None
             });
