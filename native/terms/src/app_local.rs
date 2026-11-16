@@ -356,6 +356,7 @@ mod tests {
         ));
         std::fs::create_dir_all(root.join("tags")).unwrap();
         let context = LibraryContext {
+            examples: None,
             db: root.join("library.sqlite"),
             generation: String::new(),
             library: None,

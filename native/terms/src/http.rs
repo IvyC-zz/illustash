@@ -15,6 +15,7 @@ pub struct LibraryContext {
     pub library: Option<PathBuf>,
     pub tags: PathBuf,
     pub source: Option<PathBuf>,
+    pub(crate) examples: Option<std::sync::Arc<crate::example_cache::Cache>>,
     pub token: Option<String>,
     pub read_only: Option<String>,
 }

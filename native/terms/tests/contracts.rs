@@ -197,6 +197,17 @@ fn materialize(fixture: &Value, category: &str) -> (Sandbox, PathBuf, PathBuf) {
 }
 
 fn launch(root: &Path, package: &Path, category: &str, upgrade: bool, binary: &Path) -> (Host, String, String) {
+    launch_inner(root, package, category, upgrade, binary, false)
+}
+
+fn launch_inner(
+    root: &Path,
+    package: &Path,
+    category: &str,
+    upgrade: bool,
+    binary: &Path,
+    desktop_pipe: bool,
+) -> (Host, String, String) {
     let listener = TcpListener::bind(("127.0.0.1", 0)).unwrap();
     let port = listener.local_addr().unwrap().port();
     drop(listener);
@@ -229,7 +240,13 @@ fn launch(root: &Path, package: &Path, category: &str, upgrade: bool, binary: &P
     if upgrade {
         command.arg("--upgrade");
     }
+    if desktop_pipe {
+        command.env("ILLUSTASH_DESKTOP_STDIN", "1").stdin(Stdio::piped());
+    }
     let mut host = Host { child: command.spawn().unwrap(), reaped: false };
+    if let Some(stdin) = host.child.stdin.as_mut() {
+        std::io::Write::write_all(stdin, &[1]).unwrap();
+    }
     let (ready, lines) = std::sync::mpsc::channel();
     let stdout = host.child.stdout.take().unwrap();
     thread::spawn(move || {
@@ -705,3 +722,6 @@ fn benchmark_release_host() {
     }
     assert!(!root.join("python-launched").exists());
 }
+
+#[path = "contracts/examples_bench.rs"]
+mod examples_bench;

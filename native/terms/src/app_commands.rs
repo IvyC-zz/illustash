@@ -450,6 +450,7 @@ mod tests {
             c.execute_batch("CREATE TABLE entities(id TEXT PRIMARY KEY); CREATE TABLE links(entity_id TEXT); INSERT INTO meta VALUES ('names_version','0'),('names_projected','0');").unwrap();
             c.execute_batch(crate::legacy_labels::VIEWS).unwrap();
             let context = LibraryContext {
+                examples: None,
                 db,
                 generation: "synthetic".into(),
                 library: Some(root.clone()),

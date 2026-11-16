@@ -490,6 +490,7 @@ mod tests {
         let report = run(&needed(&f.0).unwrap(), None).unwrap();
         assert_eq!((report.before, report.after, f.backups()), (8, crate::SCHEMA_VERSION, 1));
         let context = crate::http::LibraryContext {
+            examples: None,
             db: f.0.join("library.sqlite"),
             generation: "synthetic".into(),
             library: Some(f.0.clone()),
@@ -540,6 +541,7 @@ mod tests {
         let read = || state::read(&f.connection(), Domain::Deferred, "synthetic-a").unwrap();
         assert!(matches!(read(),State::Absent(m) if m.owner_action_id==2));
         let context = crate::http::LibraryContext {
+            examples: None,
             db: f.0.join("library.sqlite"),
             generation: "synthetic".into(),
             library: Some(f.0.clone()),

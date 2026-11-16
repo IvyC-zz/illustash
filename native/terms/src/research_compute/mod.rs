@@ -1,6 +1,6 @@
 //! 学习（#151）和图片关系（#152）共用的一次性研究计算程序。
 //! 任务身份、取消、指纹检查和正式发布仍由 App Research 负责。
-mod discriminate;
+pub(crate) mod discriminate;
 pub mod features;
 mod groups;
 mod learn;
