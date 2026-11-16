@@ -138,7 +138,6 @@ mod win {
                 Com::IDataObject,
                 Ole::{IDropSource, OleInitialize, OleUninitialize, DROPEFFECT_COPY},
             },
-            UI::Input::KeyboardAndMouse::{GetAsyncKeyState, VK_LBUTTON},
             UI::Shell::{
                 BHID_DataObject, Common::ITEMIDLIST, ILCreateFromPathW, ILFree, SHCreateShellItemArrayFromIDLists,
                 SHDoDragDrop,
@@ -174,16 +173,9 @@ mod win {
             let data: IDataObject = unsafe { items.BindToHandler(None, &BHID_DataObject)? };
             // 只允许复制。SHDoDragDrop 自己提供拖放源，在鼠标松开或取消之前不返回（期间照常分发窗口消息）。
             // SAFETY: hwnd 是主窗口；data 有效。
-            let started = std::time::Instant::now();
-            // SAFETY: 只读当前的按键状态。
-            let held = unsafe { GetAsyncKeyState(i32::from(VK_LBUTTON.0)) } < 0;
             let effect = unsafe { SHDoDragDrop(Some(hwnd), &data, None::<&IDropSource>, DROPEFFECT_COPY)? };
-            eprintln!(
-                "[drag] 结束，效果 {}，用时 {} ms，开始时左键{}",
-                effect.0,
-                started.elapsed().as_millis(),
-                if held { "按着" } else { "没按" }
-            );
+            // 0 是没放下（或放到了不接受的地方），1 是复制。不记录路径。
+            eprintln!("[drag] 结束，效果 {}", effect.0);
             Ok(())
         })();
         for list in lists {
