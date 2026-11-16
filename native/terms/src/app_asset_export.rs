@@ -177,7 +177,8 @@ impl Counts {
 
 /// 名字查询用的只读连接：应用库，挂上溯源库（画师）。
 fn names_connection(library: &Library) -> Result<Connection> {
-    let c = crate::sqlite::open_with_flags(library.db(), OpenFlags::SQLITE_OPEN_READ_ONLY | OpenFlags::SQLITE_OPEN_URI)?;
+    let c =
+        crate::sqlite::open_with_flags(library.db(), OpenFlags::SQLITE_OPEN_READ_ONLY | OpenFlags::SQLITE_OPEN_URI)?;
     c.busy_timeout(std::time::Duration::from_secs(10))?;
     crate::http_read::register_names(&c)?;
     let provenance = library.instance_path().join("provenance.sqlite");
@@ -322,7 +323,12 @@ fn place(source: &Path, directory: &Path, name: &str, cancel: &AtomicBool) -> st
     Err(Problem::Target(io::Error::other("同名文件太多")))
 }
 /// 复制完把修改时间设成和原图一样。失败或取消时删掉写了一半的文件。
-fn copy_into(source: &Path, mut file: File, target: &Path, cancel: &AtomicBool) -> std::result::Result<Placed, Problem> {
+fn copy_into(
+    source: &Path,
+    mut file: File,
+    target: &Path,
+    cancel: &AtomicBool,
+) -> std::result::Result<Placed, Problem> {
     let result = (|| {
         let mut from = File::open(source).map_err(|_| Problem::Source)?;
         let mut buffer = vec![0u8; 1 << 20];
@@ -444,7 +450,12 @@ mod tests {
         for (id, name, path, sid) in rows {
             let path = path.to_string_lossy().into_owned();
             db.execute("INSERT INTO assets(uuid,filename,src_path) VALUES (?,?,?)", [id, name, &path]).unwrap();
-            source.execute("INSERT INTO assets(uuid,filename,src_path,source_id) VALUES (?,?,?,?)", [id, name, &path, sid]).unwrap();
+            source
+                .execute(
+                    "INSERT INTO assets(uuid,filename,src_path,source_id) VALUES (?,?,?,?)",
+                    [id, name, &path, sid],
+                )
+                .unwrap();
         }
         drop((db, source));
         Library::open(&package).unwrap()

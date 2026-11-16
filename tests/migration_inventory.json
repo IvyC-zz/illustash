@@ -141,13 +141,13 @@
 
  "crates/platform/src/platform_credentials_macos.rs":"abc70d800812dd4e7bfee5c58ffd312f63be39c29892350f6cee130aaed44760",
 
- "crates/platform/src/platform_files.rs":"3192ada2ab42a2ecdc4f664e1afe1ea426497731124fd86c8bab58167fab7ffe",
+ "crates/platform/src/platform_files.rs":"245de5049c742e332469470917d3c34a0aeac8edeb40939253015ad9905fc973",
 
  "crates/platform/src/platform_filesystem.rs":"39ed52e513d383a7a850c358c99c03a7ba208374dff61d237bd014aef04ef6f6",
 
  "crates/platform/src/platform_folder.rs":"d52b375938b1d1d7bf5c06ba3be5ec935a696b7f96d58d33c215272abde0069e",
 
- "crates/platform/src/platform_photos.rs":"e73c39cd5558508d3cf48dd25bd913e429838c6dd5dd1b716f46eeeff6fa150c",
+ "crates/platform/src/platform_photos.rs":"b1a3dbe00bc59e5e0acd7e70f44939beaee825f4f18b8fb10ddfd6f433fd758f",
 
  "crates/platform/src/platform_process.rs":"841419607ad021b11aff58be3bb279f1cfeba5d5709263f88b9654d4a355b340",
 
@@ -179,7 +179,7 @@
 
  "desktop/src/bundled_workers.rs":"123206aa49f1c44e84879ce65e780661653b312fd7ca4ab0d1ef77e5255c2aa6",
 
- "desktop/src/drag.rs":"fb0ca28a3be9fb8fefb83a20e97e2b68675dfb73aff4f9ffe458f25e48f6ba28",
+ "desktop/src/drag.rs":"3ae977095fcb5d122a4ce68515fd6375f07f58d86dd14c74a4867facbf4de2fc",
 
  "desktop/src/i18n.rs":"ab24cd127b728f156f456069c1c7e10de2ea10cbeea476ef4eb552daa2ae931b",
 
@@ -207,9 +207,9 @@
 
  "native/terms/src/app_archives.rs":"a9a0735559c82df2283d06564d8f889b07d3a01cb00d8d310631f1b85e1b48eb",
 
- "native/terms/src/app_asset_export.rs":"406c451bf10b71b428100299c848c0d57d3280f8aeebdba3201230076e20dfe4",
+ "native/terms/src/app_asset_export.rs":"4fd12504321a236ed3422d98dba94290826daee3e0f4deb2836898291ef56011",
 
- "native/terms/src/app_asset_files.rs":"b0ccb2f67523a3d773b730aac06330c4be76b8a1e665a29d1d6a46981010238e",
+ "native/terms/src/app_asset_files.rs":"a33b3eddb934d5547dac2966c1e4ccbc7c5910ab030bbd2979ad193dac9e6c77",
 
  "native/terms/src/app_characters.rs":"6c9e9e080970dce30092747ebcf6bdcaee7d99a8463500888e5dab278f4a0cbd",
 
@@ -359,7 +359,7 @@
 
  "native/terms/src/http_host_get.rs":"a214e1761b63d3a95d4e745b3f3c5895d6ef44316805e01758573d0baa1fcc97",
 
- "native/terms/src/http_host_post.rs":"80a84d0bcc3e8d3ab2bcd52611ca881f3743febed98c2a497b97a600049956a0",
+ "native/terms/src/http_host_post.rs":"33b2bc9d8703a007584bb612945df49935195f5189d04772552e1cd49ec7dac2",
 
  "native/terms/src/http_json.rs":"42ec65687fad69e430186543d3ef27b8141030e6694b07f683ee91f678478d6b",
 

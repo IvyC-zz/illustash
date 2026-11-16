@@ -32,8 +32,8 @@ mod mac {
         MainThreadMarker, MainThreadOnly,
     };
     use objc2_app_kit::{
-        NSApplication, NSDragOperation, NSDraggingContext, NSDraggingItem, NSDraggingSession, NSDraggingSource, NSEvent,
-        NSEventModifierFlags, NSEventType, NSImage, NSWindow, NSWorkspace,
+        NSApplication, NSDragOperation, NSDraggingContext, NSDraggingItem, NSDraggingSession, NSDraggingSource,
+        NSEvent, NSEventModifierFlags, NSEventType, NSImage, NSWindow, NSWorkspace,
     };
     use objc2_foundation::{NSArray, NSPoint, NSRect, NSSize, NSString, NSURL};
 
@@ -85,10 +85,12 @@ mod mac {
             .enumerate()
             .map(|(i, path)| {
                 let url = NSURL::fileURLWithPath(&NSString::from_str(&path.to_string_lossy()));
-                let item = NSDraggingItem::initWithPasteboardWriter(NSDraggingItem::alloc(), ProtocolObject::from_ref(&*url));
+                let item =
+                    NSDraggingItem::initWithPasteboardWriter(NSDraggingItem::alloc(), ProtocolObject::from_ref(&*url));
                 // 几张图叠在鼠标下面，后面的稍微错开。
                 let offset = (i.min(4) as f64) * 4.0;
-                let origin = NSPoint::new(location.x - frame.width / 2.0 + offset, location.y - frame.height / 2.0 - offset);
+                let origin =
+                    NSPoint::new(location.x - frame.width / 2.0 + offset, location.y - frame.height / 2.0 - offset);
                 // SAFETY: contents 是 NSImage，NSDraggingItem 的文档允许用它作拖动时显示的内容。
                 unsafe { item.setDraggingFrame_contents(NSRect::new(origin, frame), Some(&image)) };
                 item
@@ -159,7 +161,7 @@ mod win {
                 // SAFETY: wide 以 NUL 结尾，调用期间有效；返回的 ID 列表在下面统一用 ILFree 释放。
                 let list = unsafe { ILCreateFromPathW(PCWSTR(wide.as_ptr())) };
                 if list.is_null() {
-                    return Err(windows::core::Error::from_win32());
+                    return Err(windows::core::Error::from_thread());
                 }
                 lists.push(list);
             }

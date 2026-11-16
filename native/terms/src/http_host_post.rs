@@ -156,7 +156,12 @@ fn files(request: Request, host: &Host, received: u64, body: &Json, translate: T
             Ok(session.asset_exports.cancel())
         }
         "/api/files/export/reveal" => {
-            let destination = host.session.read().expect("http_host_post session lock poisoned").asset_exports.destination(generation);
+            let destination = host
+                .session
+                .read()
+                .expect("http_host_post session lock poisoned")
+                .asset_exports
+                .destination(generation);
             match destination {
                 Some(folder) => crate::app_asset_files::show_folder(&folder).map(Into::into),
                 None => Err(Error::invalid("没有导出过")),
@@ -203,7 +208,8 @@ fn export(request: Request, host: &Host, received: u64, body: &Json, translate: 
         // 只导出选中的这几张，不带上它们的重复副本。
         crate::app_commands::selected_scope(&c, &context, &selection, false)
     })();
-    let result = ids.and_then(|ids| session.asset_exports.start(&session.library, session.generation, ids, group, destination));
+    let result =
+        ids.and_then(|ids| session.asset_exports.start(&session.library, session.generation, ids, group, destination));
     drop(session);
     reply(request, result, true);
 }

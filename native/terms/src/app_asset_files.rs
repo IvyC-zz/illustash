@@ -107,18 +107,16 @@ impl<'a> Lookup<'a> {
 /// 文件或文件夹名里用得了的一段：去掉控制字符和 Windows 不允许的字符，去掉首尾的点和空格，避开 Windows 的保留名，
 /// 截到 `max` 个字符；什么都不剩时用 `fallback`。
 pub(crate) fn safe_component(name: &str, fallback: &str, max: usize) -> String {
-    let cleaned: String = name
-        .chars()
-        .map(|c| if c.is_control() || "<>:\"/\\|?*".contains(c) { '_' } else { c })
-        .take(max)
-        .collect();
+    let cleaned: String =
+        name.chars().map(|c| if c.is_control() || "<>:\"/\\|?*".contains(c) { '_' } else { c }).take(max).collect();
     let cleaned = cleaned.trim_matches(['.', ' ']);
     let mut out = if cleaned.is_empty() { fallback.to_owned() } else { cleaned.to_owned() };
     let base = out.split('.').next().unwrap_or_default().trim_end().to_ascii_uppercase();
     if matches!(base.as_str(), "CON" | "PRN" | "AUX" | "NUL" | "CONIN$" | "CONOUT$")
-        || base.strip_prefix("COM").or_else(|| base.strip_prefix("LPT")).is_some_and(|n| {
-            matches!(n, "0" | "1" | "2" | "3" | "4" | "5" | "6" | "7" | "8" | "9" | "¹" | "²" | "³")
-        })
+        || base
+            .strip_prefix("COM")
+            .or_else(|| base.strip_prefix("LPT"))
+            .is_some_and(|n| matches!(n, "0" | "1" | "2" | "3" | "4" | "5" | "6" | "7" | "8" | "9" | "¹" | "²" | "³"))
     {
         out.insert(0, '_');
     }
@@ -224,7 +222,11 @@ pub(crate) fn show_folder(path: &Path) -> Result<serde_json::Value> {
 }
 
 /// 把这几张图拖到别的应用：外壳起系统的拖放，只允许「复制」。`icon` 是拖动时显示的小图（缩略图缓存，可能没有）。
-pub(crate) fn drag(library: &Library, ids: &[String], icon: impl Fn(&Located) -> Option<PathBuf>) -> Result<serde_json::Value> {
+pub(crate) fn drag(
+    library: &Library,
+    ids: &[String],
+    icon: impl Fn(&Located) -> Option<PathBuf>,
+) -> Result<serde_json::Value> {
     if !crate::app_desktop::available() {
         return Err(Error::invalid("拖出需要在 Illustash App 里"));
     }

@@ -93,8 +93,12 @@ mod imp {
         ) -> isize;
         fn ILCreateFromPathW(path: *const u16) -> *mut c_void;
         fn ILFree(list: *mut c_void);
-        fn SHOpenFolderAndSelectItems(folder: *const c_void, count: u32, items: *const *const c_void, flags: u32)
-            -> i32;
+        fn SHOpenFolderAndSelectItems(
+            folder: *const c_void,
+            count: u32,
+            items: *const *const c_void,
+            flags: u32,
+        ) -> i32;
     }
 
     fn wide(path: &Path) -> Vec<u16> {

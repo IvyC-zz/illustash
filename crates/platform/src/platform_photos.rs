@@ -34,7 +34,7 @@ fn root(raw: &str) -> Result<PathBuf> {
 /// 打开时的副本（#450）。只读打开 Photos.sqlite。
 pub fn original(raw: &str, uuid: &str) -> Result<(Option<PathBuf>, String)> {
     let root = root(raw)?;
-    let photos = crate::sqlite::open_with_flags(&root.join("database/Photos.sqlite"), OpenFlags::SQLITE_OPEN_READ_ONLY)?;
+    let photos = crate::sqlite::open_with_flags(root.join("database/Photos.sqlite"), OpenFlags::SQLITE_OPEN_READ_ONLY)?;
     photos.busy_timeout(std::time::Duration::from_millis(250))?;
     let row: Option<(String, String, String)> = photos
         .query_row(
