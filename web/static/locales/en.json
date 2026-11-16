@@ -168,7 +168,7 @@
   "等你确认": "Needs you",
   "进行中与其他任务": "Running and other tasks",
   "全部任务": "All tasks",
-  "各任务是否自动运行，在{link}里改。": "Whether tasks run automatically is set in {link}.",
+  "各任务是否自动运行，在设置的{library}、{characters}、{artists}里改。": "Whether tasks run automatically is set in Settings under {library}, {characters} and {artists}.",
   "已开始重新获取角色名称": "Fetching character names again",
   "没能把这个图库记进最近图库：{why}。图库照常可用，只是下次启动时可能不会自动打开它。": "Could not add this library to the recent ones: {why}. The library works as usual, but it may not open automatically next time.",
   "column\u0004移除": "Removed",
@@ -280,7 +280,6 @@
   "编辑资料…": "Edit details…",
   "和另一个角色是同一个人：把图和人工结论都并过去（可撤销）": "Same person as another character: move the pictures and your decisions over (undoable)",
   "合并到另一个角色…": "Merge into another character…",
-  "清除筛选": "Clear filter",
   "按加入日期分组": "Grouped by date added",
   "最近一次同步新加入 {n} 张": "{n} added by the last sync",
   "画师 · {name}": "Artist · {name}",
@@ -295,19 +294,13 @@
   },
   "还剩 {left} / {n} 张 · 鼠标移到角色 tag 上点 ✓ / ✗，或选中多张按 Y / N；打开大图也会问「是 TA 吗？」": "{left} / {n} left · hover a character tag and click ✓ / ✗, or select several and press Y / N; the large view asks “Is this them?” too",
   "R18 筛选开着：抽查要看全部才准，按 H 切换": "The R18 filter is on: a spot check is only accurate over everything; press H to switch",
-  "{n} 张 · 选中后设为角色，或跳过": {
-    "one": "{n} picture · select it to assign a character, or skip",
-    "other": "{n} pictures · select them to assign a character, or skip"
-  },
-  "已跳过 {n} 张 · 可以恢复到未识别": "{n} skipped · can be returned to unidentified",
+  "选中后设为角色，或跳过": "Select pictures to assign a character, or skip them",
+  "可以恢复到未识别": "They can be returned to unidentified",
   "长得像的图分成一组，一组一组过 · 每确认一组，系统就学会认 TA 的一种样子": "Look-alike pictures grouped together, one group at a time · each confirmed group teaches one more look of that character",
   "第 {id} 组": "Group {id}",
   "{n} 张长得像的未识别图": "{n} look-alike unidentified pictures",
-  "角色不一致 {n} 组 · 对齐角色后自动折叠": {
-    "one": "{n} group with disagreeing characters · it folds once the characters are aligned",
-    "other": "{n} groups with disagreeing characters · they fold once the characters are aligned"
-  },
-  "{groups} 组 · {n} 张 · 修改任一份会同步到整组": "{groups} groups · {n} pictures · changing any copy changes the whole group",
+  "对齐角色后自动折叠": "They fold once the characters are aligned",
+  "修改任一份会同步到整组": "changing any copy changes the whole group",
   "画的是同一张、但不是同一个文件 · 只在本机比较": "The same artwork in different files · compared on this computer only",
   "画师抽查": "Artist spot check",
   "验收「找回画师」：固定的一组随机图，逐张判断机器找到的画师对不对": "Check “Find artists”: a fixed random set of pictures; judge one by one whether the artist found is right",
@@ -317,11 +310,8 @@
     "one": "{n} picture · select two or more to compare them",
     "other": "{n} pictures · select two or more to compare them"
   },
-  "{n} 张 · 只是标记，不改动原图": {
-    "one": "{n} picture · only marked, the original file is not touched",
-    "other": "{n} pictures · only marked, the original files are not touched"
-  },
-  "待确认 {n} 张 · 像截图但有人物，排除或保留": "{n} to confirm · look like screenshots but have people; exclude or keep",
+  "只是标记，不改动原图": "Only marked; the original files are not touched",
+  "像截图但有人物，排除或保留": "They look like screenshots but have people; exclude or keep them",
   "关联后自动补中文名、别名和作品；和已有角色重复的可以合并": "Once linked, Chinese names, aliases and series fill in; duplicates of existing characters can be merged",
   "{n} 个自建角色能对上 Danbooru": {
     "one": "{n} character you created matches Danbooru",
@@ -2910,5 +2900,13 @@
   "从自动快照恢复：{step}": "Restoring from automatic snapshot: {step}",
   "正在取消恢复…": "Cancelling the restore…",
   "已从自动快照恢复。": "Restored from automatic snapshot.",
-  "从自动快照恢复完成，没有新内容。": "Restore from automatic snapshot finished; nothing new."
+  "从自动快照恢复完成，没有新内容。": "Restore from automatic snapshot finished; nothing new.",
+  "作品 · {name}": "Series · {name}",
+  "清除作品筛选": "Clear the series filter",
+  "清除画师筛选": "Clear the artist filter",
+  "导入图库": "Library import",
+  "导入识别结果": "Recognition results import",
+  "导入人工结论": "Your conclusions import",
+  "导入中": "Importing",
+  "退出选择模式（Esc）": "Leave selection mode (Esc)"
 }

@@ -1,13 +1,13 @@
 // 页面的框架（桌面布局，#199）：按地址切到对应页面、侧栏的计数、每个页面的标题和工具栏。页面在哪由 core/route.js
 // 负责；计数的数据由 core/meta.js 负责。
 import {workKey} from '../core/catalog.js';
-import {dateText, esc, number, shortcut} from '../core/format.js';
+import {esc, localDate, number, shortcut} from '../core/format.js';
 import {t} from '../core/i18n.js';
 import {REASONS, nameTip} from '../core/labels.js';
 import {fetchChar, onMeta, setChar} from '../core/meta.js';
 import {prefs} from '../core/prefs.js';
 import {implement, pageOf, viewOf} from '../core/pages.js';
-import {cleanup, defaultSort, go, hashFor, noteHistory, parseHash, replaceRoute, setRoute} from '../core/route.js';
+import {cleanup, defaultSort, go, hashFor, noteHistory, parseHash, replaceRoute, setRoute, sortKey} from '../core/route.js';
 import {api, readError} from '../core/session.js';
 import {state} from '../core/state.js';
 import {cast, createWork, drawCast, drawShelf, openTagged, renderIndexBody, searchIndex, shelf} from './catalog.js';
@@ -15,7 +15,7 @@ import {$, error, searchIcon, workSmall} from './dom.js';
 import {renderSettings, settingsSection} from './settings.js';
 import {artistName} from './artists.js';
 import {closeInspector, closeViewer} from './detail.js';
-import {filters, placeFor, rememberPlace, reload, resetForRoute, selectAll, short, sweep, toggleFit, toggleSelecting} from './grid.js';
+import {filters, markSelectButton, placeFor, rememberPlace, reload, resetForRoute, selectAll, short, sweep, toggleFit, toggleSelecting} from './grid.js';
 import {guideTick} from './guide.js';
 import {createLayer} from './overlay.js';
 import {dayLabel} from './home.js';
@@ -26,15 +26,17 @@ import {nearText} from './review.js';
 let searchTimer = 0, pickerTimer = 0;
 export const navCount = (id, n, title = '') => { $(id).textContent = n ? number(n) : ''; $(id).title = title; };
 // 一次元数据读取在屏幕上改动什么：侧栏的计数，以及显示它们的标题或页面。
-function metaShown({error: e, total, directory, queue}) {
+function metaShown({error: e, directory, queue}) {
   if (e) { error(readError(e)); return; }
-  // 图库计的是你能看到的；「整理」一节计的是还需要你处理的。
-  navCount('countLibrary', total); navCount('countCharacters', state.chars.length);
+  // 侧栏只在首页和「整理」一节计数，计的是还需要你处理的；点进去落在显示同一个数的页签上（#386 的 2-40）：
+  // 有角色不一致的副本组时「重复」去「角色不一致」，有待确认的图时「已排除」去「待确认」。
   navCount('countHome', state.recentCount, t('最近一次同步新加入的图'));
   navCount('countUnmatched', state.pools.unmatched, t('还没认出角色的图'));
   navCount('countAudit', state.pools.audit, t('随机抽查还剩几张')); $('navAudit').hidden = !state.pools.audit && viewOf(state.route).nav !== 'audit';
   navCount('countDuplicates', state.dupInfo.mixed, t('角色不一致的副本组，对齐后才会折叠'));
   navCount('countExcluded', state.pendingCount, t('像截图、等你确认的图'));
+  $('navDuplicates').href = state.dupInfo.mixed ? hashFor({page: 'duplicates', dup: 'mixed'}) : '#/duplicates';
+  $('navExcluded').href = state.pendingCount ? '#/pending' : '#/excluded';
   if (queue) { navCount('countIdentity', state.identityCount, t('长得像、可能是同一人或同一人另一个造型的角色对')); $('navIdentity').hidden = !state.identityCount && viewOf(state.route).nav !== 'identity'; }
   // 角色还没读到时（state.char 为空）算图库页：这一刻不重画。
   const view = viewOf(state.route, state.char);
@@ -82,8 +84,9 @@ function subTabs(r) {
   const at = viewOf(r).tab, all = at === 'all';
   switch (viewOf(r).tabs) {
     case 'unmatched': return row([
-      tab('#/groups', t('按组整理'), '', at === 'groups', t('长得像的未识别图分成一组，一组一组确认')),
-      tab('#/unmatched', t('全部未识别'), number(p.unmatched), all),
+      // 未识别的总数写在按组整理上：侧栏「未识别」落在这里，组里的和没成组的合起来就是它。
+      tab('#/groups', t('按组整理'), p.unmatched ? number(p.unmatched) : '', at === 'groups', t('长得像的未识别图分成一组，一组一组确认')),
+      tab('#/unmatched', t('全部未识别'), '', all),
       tab('#/skipped', t('已跳过'), p.skipped ? number(p.skipped) : '', at === 'skipped')]);
     case 'duplicates': return row([
       tab('#/duplicates', t('全部'), t('{n} 组', {n: number(state.dupInfo.groups)}), all && !r.dup),
@@ -123,32 +126,43 @@ export function renderChrome() {
   const skins = r.char && !r.maybe ? (state.char?.variants || []).filter(v => v.count) : [];
   const variants = skins.length ? `<div class="chips-row">${[{id: '', name: t('全部'), count: state.char.count}, ...skins].map(v => `<button class="chip-filter${(r.variant || '') === v.id ? ' on' : ''}" data-variant="${esc(v.id)}">${esc(v.name)} <span>${number(v.count)}</span></button>`).join('')}</div>` : '';
   const maybeChip = r.char && !tagPage && (state.maybeCount || r.maybe || state.doubtCount || r.doubt) ? `<div class="chips-row">${state.maybeCount || r.maybe ? `<button class="chip-filter${r.maybe ? ' on' : ''}" id="maybeChip" title="${t('机器觉得像 TA，但算给了别人或没算：确认「是 TA」或「不是 TA」')}">${t('可能也是 TA')} <span>${number(state.maybeCount)}</span></button>` : ''}${state.doubtCount || r.doubt ? `<button class="chip-filter${r.doubt ? ' on' : ''}" id="doubtChip" title="${t('单人图里，另一个角色的证据几乎一样强：多半两个都不对，看一眼再决定')}">${t('可能认错')} <span>${number(state.doubtCount)}</span></button>` : ''}</div>` : '';
+  // 生效的筛选各是一个胶囊，点 × 只清它自己（#386 的 2-30）；「标签」按钮只用来打开菜单、换一个标签。
+  const workName = r.work ? (state.workTree || []).find(w => w.id === r.work)?.name || t('作品筛选') : '';
+  const pill = (id, label, title) => `<button class="quiet on" id="${id}" title="${title}">${label} ×</button>`;
   const filtersHTML = view.toolbar === 'library' ? `<div class="search-wrap">${searchIcon()}<input type="search" id="search" spellcheck="false" autocorrect="off" autocapitalize="off" placeholder="${t('搜索角色、别名或文件名')}" aria-label="${t('搜索图库')}" value="${esc(r.q)}"><kbd>/</kbd></div>` +
-    (r.char ? `<button class="quiet on" id="charPill" title="${t('清除角色筛选')}">${t('角色 · {name}', {name: esc(short(state.char?.name || ''))})} ×</button>` : '') +
-    (r.utag ? `<button class="quiet on" id="utagPill" title="${t('清除标签筛选')}"># ${esc(r.utag)} ×</button>` : '') +
-    (r.day ? `<button class="quiet on" id="dayPill" title="${t('清除日期筛选')}">${t('{day} 加入', {day: esc(dayLabel(r.day))})} ×</button>` : '') +
-    `<div class="tag-control"><button id="tagButton" class="quiet${r.tag ? ' on' : ''}">${r.tag ? t('标签 · {tag}', {tag: esc(r.tag.replaceAll('_', ' '))}) + ' ×' : t('标签')}</button><div id="tagPopover" class="menu menu-drop" hidden><input id="tagSearch" type="search" spellcheck="false" autocorrect="off" autocapitalize="off" placeholder="${t('我的标签，或 white_hair 这类画面标签')}" aria-label="${t('搜索标签')}"><div id="tagOptions"></div></div></div>` + maybeChip + variants : tabs;
+    (r.char ? pill('charPill', t('角色 · {name}', {name: esc(short(state.char?.name || ''))}), t('清除角色筛选')) : '') +
+    (r.work ? pill('workPill', t('作品 · {name}', {name: esc(short(workName))}), t('清除作品筛选')) : '') +
+    (r.artist ? pill('artistPill', t('画师 · {name}', {name: esc(short(artistName(r.artist)))}), t('清除画师筛选')) : '') +
+    (r.utag ? pill('utagPill', `# ${esc(r.utag)}`, t('清除标签筛选')) : '') +
+    (r.tag ? pill('wdTagPill', t('标签 · {tag}', {tag: esc(r.tag.replaceAll('_', ' '))}), t('清除标签筛选')) : '') +
+    (r.day ? pill('dayPill', t('{day} 加入', {day: esc(dayLabel(r.day))}), t('清除日期筛选')) : '') +
+    `<div class="tag-control"><button id="tagButton" class="quiet">${t('标签')}</button><div id="tagPopover" class="menu menu-drop" hidden><input id="tagSearch" type="search" spellcheck="false" autocorrect="off" autocapitalize="off" placeholder="${t('我的标签，或 white_hair 这类画面标签')}" aria-label="${t('搜索标签')}"><div id="tagOptions"></div></div></div>` + maybeChip + variants : tabs;
   bar.innerHTML = filtersHTML +
     `<div class="spacer"></div><select id="sort" aria-label="${t('排序')}">${sorts.map(([v, label]) => `<option value="${v}"${r.sort === v ? ' selected' : ''}>${label}</option>`).join('')}</select>` +
     `<button class="quiet" id="selectButton" title="${cleanup() ? t('选中全部符合条件的图片') : t('进入选择模式')}">${cleanup() ? `${t('全选')} <kbd>${shortcut('A')}</kbd>` : t('选择')}</button>` +
     `<div class="icon-seg" id="fitToggle" role="group" aria-label="${t('显示方式')}"><button data-fit="0" class="${state.fit ? '' : 'on'}" title="${t('方格：裁成正方形（R）')}" aria-label="${t('方格')}">${FIT_ICONS.square}</button><button data-fit="1" class="${state.fit ? 'on' : ''}" title="${t('原始比例：完整显示整张图（R）')}" aria-label="${t('原始比例')}">${FIT_ICONS.fit}</button></div>`;
-  $('sort').onchange = e => { if (view.lead) prefs.set('sortUnmatched', e.target.value); replaceRoute({sort: e.target.value}); reload(true); };
+  // 改了排序就记成这一类页面的默认值，离开再回来还是它（#386 的 2-26）；记在哪个键由 core/route.js 的 sortKey 定。
+  $('sort').onchange = e => { prefs.set(sortKey(r), e.target.value); replaceRoute({sort: e.target.value}); reload(true); };
   $('selectButton').onclick = () => cleanup() ? selectAll() : toggleSelecting();
+  markSelectButton();
   for (const b of $('fitToggle').querySelectorAll('[data-fit]')) b.onclick = () => { if (Boolean(Number(b.dataset.fit)) !== state.fit) toggleFit(); };
   for (const b of bar.querySelectorAll('[data-variant]')) b.onclick = () => go({...r, variant: b.dataset.variant});
   $('maybeChip')?.addEventListener('click', () => go({...r, maybe: r.maybe ? '' : '1', variant: '', check: '', doubt: ''}));
   $('doubtChip')?.addEventListener('click', () => go({...r, doubt: r.doubt ? '' : '1', variant: '', check: '', maybe: ''}));
   if (view.toolbar === 'library') {
     $('search').oninput = e => { clearTimeout(searchTimer); searchTimer = setTimeout(() => { replaceRoute({q: e.target.value.trim()}); reload(true); }, 250); };
-    $('tagButton').onclick = () => { if (r.tag) { replaceRoute({tag: ''}); renderChrome(); reload(true); return; } setMenu(tagMenu, $('tagPopover').hidden); if (!$('tagPopover').hidden) { $('tagSearch').focus(); loadTagOptions(); } };
-    $('charPill')?.addEventListener('click', () => go({...r, char: '', variant: '', maybe: '', check: '', sort: ''}));
+    $('tagButton').onclick = () => { setMenu(tagMenu, $('tagPopover').hidden); if (!$('tagPopover').hidden) { $('tagSearch').focus(); loadTagOptions(); } };
+    $('charPill')?.addEventListener('click', () => go({...r, char: '', variant: '', maybe: '', check: '', doubt: '', sort: ''}));
+    $('workPill')?.addEventListener('click', () => go({...r, work: ''}));
+    $('artistPill')?.addEventListener('click', () => go({...r, artist: ''}));
     $('utagPill')?.addEventListener('click', () => go({...r, utag: ''}));
+    $('wdTagPill')?.addEventListener('click', () => go({...r, tag: ''}));
     $('dayPill')?.addEventListener('click', () => go({...r, day: ''}));
     $('tagSearch').oninput = () => { clearTimeout(pickerTimer); pickerTimer = setTimeout(loadTagOptions, 120); };
     $('tagOptions').onclick = e => {
       const b = e.target.closest('[data-value],[data-utag]'); if (!b) return;
-      if (b.dataset.utag) { go({...r, utag: b.dataset.utag}); return; }
-      replaceRoute({tag: b.dataset.value}); renderChrome(); reload(true);
+      setMenu(tagMenu, false);
+      go(b.dataset.utag ? {...r, utag: b.dataset.utag} : {...r, tag: b.dataset.value});
     };
   }
 }
@@ -181,7 +195,7 @@ async function loadTagOptions() {
 // 角色页的标题：名称、张数、未检查、检查日期，右侧是细分、标为已检查和 ⋯ 菜单。
 function drawCharHeading(h, r, c) {
   const tagOnly = !!c.mascot;   // 只当标签：没有要复核的，所以没有检查、清扫、OC 这些控件
-  const checked = !tagOnly && c.reviewed_at ? ' · ' + t('上次检查 {date}', {date: dateText(c.reviewed_at.slice(0, 4), c.reviewed_at.slice(5, 7), c.reviewed_at.slice(8, 10))}) : '';
+  const checked = !tagOnly && c.reviewed_at ? ' · ' + t('上次检查 {date}', {date: localDate(c.reviewed_at)}) : '';   // 后端存的是 UTC（#386 的 2-15）
   const unchecked = !tagOnly && (c.unchecked || r.check) ? ` · <a class="unchecked-link${r.check ? ' on' : ''}" href="${hashFor({...r, check: r.check ? '' : '1', maybe: ''})}" title="${r.check ? t('显示全部') : t('只看机器识别、还没检查过的图')}">${t('未检查 {n}', {n: number(c.unchecked)})}${r.check ? ' ×' : ''}</a>` : '';
   h.innerHTML = `<div class="heading-main"><h1 class="tag-title" title="${esc(nameTip(c))}">${esc(c.name)}${c.mascot ? '' : workSmall(c)}</h1><p>${c.mascot ? `<span class="oc-badge" title="${c.mascot_origin === 'default' ? t('默认设置：老师、博士、训练员这类没有固定形象的玩家化身和吉祥物，默认只当标签。') : ''}${t('不算角色：不出现在角色列表里，也不算多人图；图上仍挂着这个标签。在「⋯」里可以改回角色')}">${t('只当标签')}</span> ` : ''}${t('{n} 张', {n: number(c.count)})}${unchecked}${checked}${!c.tag && c.kind !== 'oc' && !c.label_only ? ` · <button class="link-button" id="profileNudge" title="${t('关联后自动补中文名、别名和所属作品')}">${t('关联 Danbooru…')}</button>` : ''}</p></div>
       <div class="heading-actions">${c.label_only ? `<button class="quiet" id="splitOcButton" title="${t('把长得像的图分成一组，一组一键设为独立的原创角色')}">${t('按相似细分')}</button>` : ''}${tagOnly ? '' : `<button class="quiet" id="sweepButton" ${c.unchecked ? '' : 'disabled'} title="${t('把剩下的机器识别都记为已检查；以后新识别的图会重新计入未检查')}">${t('标为已检查')}</button>`}<div class="tag-control more-control"><button class="quiet" id="moreButton" title="${t('更多操作')}" aria-label="${t('更多操作')}">⋯</button><div id="morePopover" class="menu menu-drop more-menu" hidden>${c.label_only || tagOnly ? '' : `<button class="menu-item" id="ocButton" title="${t('画师自己的原创角色，不属于任何作品')}">${c.kind === 'oc' ? t('取消原创角色') : t('标为原创角色')}</button>`}${c.label_only ? '' : `<button class="menu-item" id="mascotButton" title="${c.mascot ? t('恢复成角色：出现在角色列表里，同框就算多人图') : t('像佩洛洛这样的吉祥物、玩家化身：不算角色，不算多人图；图上仍挂着这个标签，可以按它筛选')}">${c.mascot ? t('算作角色') : t('不算角色，只当标签')}</button>`}<button class="menu-item" id="profileButton" title="${t('名称、别名、所属作品、Danbooru 关联')}">${t('编辑资料…')}</button><button class="menu-item" id="mergeButton" title="${t('和另一个角色是同一个人：把图和人工结论都并过去（可撤销）')}">${t('合并到另一个角色…')}</button></div></div></div>`;
@@ -198,8 +212,7 @@ export function renderHeading() {
   const r = state.route, h = $('heading'), c = state.char, view = viewOf(r, c);
   if (view.drawHeading) { view.drawHeading(h, r, c); return; }
   const n = state.totalReady ? number(state.total) : '…';
-  const clear = ` <a class="link" href="#/library">${t('清除筛选')}</a>`;
-  const [title, sub, links = ''] = view.heading(r, {n, clear});
+  const [title, sub, links = ''] = view.heading(r, {n});
   h.innerHTML = `<div class="heading-main"><h1>${title}</h1><p>${sub}</p></div>${links}`;
   $('localLinksButton')?.addEventListener('click', openLocalLinks);
   $('sgroupRelate')?.addEventListener('click', async () => openRelate(await api('/api/ids?' + new URLSearchParams({...filters(), limit: 12}))));
@@ -216,23 +229,23 @@ export function wireShell() {
 // 标题（页面名 → [标题, 副标题, 右侧链接]）、计数到达后重画什么、进入前要先读的数据。
 implement({
   character: {drawHeading: drawCharHeading},
-  home: {heading: (r, {n, clear}) => [t('首页'), t('按加入日期分组') + (state.recentCount ? ' · ' + t('最近一次同步新加入 {n} 张', {n: number(state.recentCount)}) : '')]},
-  library: {heading: (r, {n, clear}) => [r.artist ? t('画师 · {name}', {name: esc(artistName(r.artist))}) : r.day ? t('{day} 加入', {day: esc(dayLabel(r.day))}) : r.work ? esc((state.workTree || []).find(w => w.id === r.work)?.name || t('作品筛选')) : r.utag ? '# ' + esc(r.utag) : t('图库'), t('{n} 张', {n}) + (r.work ? ' · ' + t('包含所有子作品') + clear : r.artist ? ' · ' + t('按画作比对找到') + clear : '')]},
-  characters: {heading: (r, {n, clear}) => [t('资料库'), r.section === 'works' ? t('{n} 部作品', {n: number(state.index?.works?.length || 0)}) + (state.index?.watch?.works.length ? ' · ' + t('关注 {n} 部', {n: number(state.index.watch.works.length)}) : '') : t('{n} 位角色 · {works} 部作品', {n: number(state.chars.length), works: number(new Set(state.chars.map(workKey).filter(k => k !== 'oc' && k !== 'other')).size)}), !r.section && state.localLinks?.length ? `<span class="heading-links"><button class="quiet" id="localLinksButton" title="${t('关联后自动补中文名、别名和作品；和已有角色重复的可以合并')}">${t('{n} 个自建角色能对上 Danbooru', {n: number(state.localLinks.length)})}</button></span>` : '']},
-  audit: {heading: (r, {n, clear}) => [t('随机抽查'), t('还剩 {left} / {n} 张 · 鼠标移到角色 tag 上点 ✓ / ✗，或选中多张按 Y / N；打开大图也会问「是 TA 吗？」', {left: number(state.pools.audit || 0), n}) + (state.nsfw ? ` · <b>${t('R18 筛选开着：抽查要看全部才准，按 H 切换')}</b>` : '')]},
-  unmatched: {heading: (r, {n, clear}) => [t('未识别'), t('{n} 张 · 选中后设为角色，或跳过', {n})]},
-  skipped: {heading: (r, {n, clear}) => [t('未识别'), t('已跳过 {n} 张 · 可以恢复到未识别', {n})]},
-  groups: {heading: (r, {n, clear}) => [t('未识别'), t('长得像的图分成一组，一组一组过 · 每确认一组，系统就学会认 TA 的一种样子')]},
-  group: {heading: (r, {n, clear}) => [t('第 {id} 组', {id: esc(r.id)}), t('{n} 张长得像的未识别图', {n}) + (state.groupTraits?.length ? ' · ' + state.groupTraits.map(esc).join(' · ') : ''),
+  home: {heading: (r, {n}) => [t('首页'), t('按加入日期分组') + (state.recentCount ? ' · ' + t('最近一次同步新加入 {n} 张', {n: number(state.recentCount)}) : '')]},
+  library: {heading: (r, {n}) => [r.artist ? t('画师 · {name}', {name: esc(artistName(r.artist))}) : r.day ? t('{day} 加入', {day: esc(dayLabel(r.day))}) : r.work ? esc((state.workTree || []).find(w => w.id === r.work)?.name || t('作品筛选')) : r.utag ? '# ' + esc(r.utag) : t('图库'), t('{n} 张', {n}) + (r.work ? ' · ' + t('包含所有子作品') : r.artist ? ' · ' + t('按画作比对找到') : '')]},
+  characters: {heading: (r, {n}) => [t('资料库'), r.section === 'works' ? t('{n} 部作品', {n: number(state.index?.works?.length || 0)}) + (state.index?.watch?.works.length ? ' · ' + t('关注 {n} 部', {n: number(state.index.watch.works.length)}) : '') : t('{n} 位角色 · {works} 部作品', {n: number(state.chars.length), works: number(new Set(state.chars.map(workKey).filter(k => k !== 'oc' && k !== 'other')).size)}), !r.section && state.localLinks?.length ? `<span class="heading-links"><button class="quiet" id="localLinksButton" title="${t('关联后自动补中文名、别名和作品；和已有角色重复的可以合并')}">${t('{n} 个自建角色能对上 Danbooru', {n: number(state.localLinks.length)})}</button></span>` : '']},
+  audit: {heading: (r, {n}) => [t('随机抽查'), t('还剩 {left} / {n} 张 · 鼠标移到角色 tag 上点 ✓ / ✗，或选中多张按 Y / N；打开大图也会问「是 TA 吗？」', {left: number(state.pools.audit || 0), n}) + (state.nsfw ? ` · <b>${t('R18 筛选开着：抽查要看全部才准，按 H 切换')}</b>` : '')]},
+  unmatched: {heading: (r, {n}) => [t('未识别'), t('选中后设为角色，或跳过')]},
+  skipped: {heading: (r, {n}) => [t('未识别'), t('可以恢复到未识别')]},
+  groups: {heading: (r, {n}) => [t('未识别'), t('长得像的图分成一组，一组一组过 · 每确认一组，系统就学会认 TA 的一种样子')]},
+  group: {heading: (r, {n}) => [t('第 {id} 组', {id: esc(r.id)}), t('{n} 张长得像的未识别图', {n}) + (state.groupTraits?.length ? ' · ' + state.groupTraits.map(esc).join(' · ') : ''),
       `<span class="heading-links">${state.total ? `<button class="quiet" id="groupOc" title="${t('整组都是同一个原创角色：新建一个原创角色，把这组图都设为它')}">${t('整组标为原创角色')}</button>` : ''}${state.groupNear ? `<a class="quiet link" href="#/g/${state.groupNearId}">${esc(state.groupNear)} →</a>` : ''}</span>`]},
-  duplicates: {heading: (r, {n, clear}) => [t('重复'), r.dup ? t('角色不一致 {n} 组 · 对齐角色后自动折叠', {n: number(state.dupInfo.mixed)}) : t('{groups} 组 · {n} 张 · 修改任一份会同步到整组', {groups: number(state.dupInfo.groups), n: number(state.dupInfo.count || 0)})]},
-  similar: {heading: (r, {n, clear}) => [t('重复'), t('画的是同一张、但不是同一个文件 · 只在本机比较')]},
-  'artist-audit': {heading: (r, {n, clear}) => [t('画师抽查'), t('验收「找回画师」：固定的一组随机图，逐张判断机器找到的画师对不对')]},
-  identity: {heading: (r, {n, clear}) => [t('身份整理'), t('{n} 对长得像的角色 · 按涉及图片数排序 · 每一步都可撤销', {n: number(state.identityCount || 0)})]},
-  sgroup: {heading: (r, {n, clear}) => [t('相似组 {id}', {id: esc(r.id)}), t('{n} 张 · 选中两张以上可以判断关系', {n}), state.total >= 2 && state.total <= 12 ? `<span class="heading-links"><button class="quiet" id="sgroupRelate">${t('判断关系')}</button></span>` : '']},
-  excluded: {heading: (r, {n, clear}) => [t('已排除'), t('{n} 张 · 只是标记，不改动原图', {n})]},
-  pending: {heading: (r, {n, clear}) => [t('已排除'), t('待确认 {n} 张 · 像截图但有人物，排除或保留', {n})]},
-  settings: {heading: (r, {n, clear}) => [t('设置'), settingsSection()[2]]},
+  duplicates: {heading: (r, {n}) => [t('重复'), r.dup ? t('对齐角色后自动折叠') : t('{n} 张', {n: number(state.dupInfo.count || 0)}) + ' · ' + t('修改任一份会同步到整组')]},
+  similar: {heading: (r, {n}) => [t('重复'), t('画的是同一张、但不是同一个文件 · 只在本机比较')]},
+  'artist-audit': {heading: (r, {n}) => [t('画师抽查'), t('验收「找回画师」：固定的一组随机图，逐张判断机器找到的画师对不对')]},
+  identity: {heading: (r, {n}) => [t('身份整理'), t('{n} 对长得像的角色 · 按涉及图片数排序 · 每一步都可撤销', {n: number(state.identityCount || 0)})]},
+  sgroup: {heading: (r, {n}) => [t('相似组 {id}', {id: esc(r.id)}), t('{n} 张 · 选中两张以上可以判断关系', {n}), state.total >= 2 && state.total <= 12 ? `<span class="heading-links"><button class="quiet" id="sgroupRelate">${t('判断关系')}</button></span>` : '']},
+  excluded: {heading: (r, {n}) => [t('已排除'), t('只是标记，不改动原图')]},
+  pending: {heading: (r, {n}) => [t('已排除'), t('像截图但有人物，排除或保留')]},
+  settings: {heading: (r, {n}) => [t('设置'), settingsSection()[2]]},
 });
 implement({
   // 图库页不因计数变化重画；资料库只重画目录；设置页重画整页；其余重画标题和工具栏。

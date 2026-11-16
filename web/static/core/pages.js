@@ -22,6 +22,7 @@ import {t} from './i18n.js';
 //   tabs/tab   同一个侧栏入口下的子页签组，以及本页对应哪个页签
 //   toolbar    工具栏组成：'none' 空、'tabs' 只有子页签、'index' 资料库、'library' 图库（搜索和筛选）、'grid' 网格页
 //   sorts      排序下拉的选项
+//   sortPref   改了排序记在哪个偏好里（core/route.js 的 sortKey）；不写就是这页自己的「sort.<页面名>」
 //   pool/params 后端 /api/assets 的 pool 参数，以及该页其余查询参数
 //   bar        选择栏的种类；同时决定 S／X／Y／N 几个快捷键在这页是否生效
 //   card       卡片上额外的角标
@@ -45,17 +46,17 @@ const libraryBase = {
 
 const list = [
   {name: 'home', root: true, area: 'homePage', panel: true, keys: 'shown', click: 'own', nav: 'home', toolbar: 'none'},
-  {name: 'library', ...libraryBase, click: 'browse'},
+  {name: 'library', ...libraryBase, click: 'browse', sortPref: 'sortLibrary'},
   {name: 'characters', sections: true, area: 'charIndex', panel: true, click: 'own', nav: 'characters', toolbar: 'index', directory: true, guideTick: 'look'},
   {name: 'settings', sections: true, area: 'settingsPage', panel: true, click: 'own', nav: 'settings', toolbar: 'none'},
-  {name: 'unmatched', area: 'grid', panel: false, click: 'cleanup', nav: 'unmatched', lead: true, tabs: 'unmatched', tab: 'all',
+  {name: 'unmatched', sortPref: 'sortUnmatched', area: 'grid', panel: false, click: 'cleanup', nav: 'unmatched', lead: true, tabs: 'unmatched', tab: 'all',
     toolbar: 'grid', sorts: ['hinted', ...NEWEST], pool: 'unmatched', bar: 'unmatched', skip: true,
     empty: () => t('全部认出来了 🎉'), hint: () => t('点击或拖动选择 · Space 看大图 · C 设为角色 · S 跳过'), card: {hintMin: 70}},
-  {name: 'skipped', area: 'grid', panel: false, click: 'cleanup', nav: 'unmatched', lead: true, tabs: 'unmatched', tab: 'skipped',
+  {name: 'skipped', sortPref: 'sortUnmatched', area: 'grid', panel: false, click: 'cleanup', nav: 'unmatched', lead: true, tabs: 'unmatched', tab: 'skipped',
     toolbar: 'grid', sorts: ['hinted', ...NEWEST], pool: 'skipped', bar: 'skipped',
     empty: () => t('没有跳过的图片。'), hint: () => t('点击或拖动选择 · Space 看大图')},
   {name: 'groups', area: 'groupsPage', panel: true, click: 'own', nav: 'unmatched', tabs: 'unmatched', tab: 'groups', toolbar: 'tabs'},
-  {name: 'group', prefix: 'g', area: 'grid', panel: false, click: 'cleanup', nav: 'unmatched', lead: true, tabs: 'unmatched', tab: 'groups',
+  {name: 'group', prefix: 'g', sortPref: 'sortUnmatched', area: 'grid', panel: false, click: 'cleanup', nav: 'unmatched', lead: true, tabs: 'unmatched', tab: 'groups',
     toolbar: 'grid', sorts: ['hinted', ...NEWEST], bar: 'unmatched', skip: true,
     pool: 'cluster', params: r => ({cluster: r.id}), empty: () => t('这一组都整理完了。'),
     hint: () => t('点击或拖动选择 · Space 看大图 · C 设为角色 · S 跳过')},
@@ -82,7 +83,7 @@ const list = [
 const RETIRED = {recent: 'home'};
 
 // 角色页：不是 route.page，而是 library 加 char 参数。点击即选择；排序多「可疑优先」；旧地址 #/c/<id>/<皮肤> 改写成它。
-const character = {name: 'character', virtual: true, legacyPrefix: 'c', ...libraryBase, click: 'cleanup', sorts: ['suspicious', ...NEWEST],
+const character = {name: 'character', virtual: true, legacyPrefix: 'c', ...libraryBase, click: 'cleanup', sorts: ['suspicious', ...NEWEST], sortPref: 'sortCharacter',
   empty: r => narrowed(r) ? PAGES.library.empty(r) : t('这个角色已经没有图片了。'),
   hint: () => t('点击或拖动选择 · Space 看大图 · ⌫ 不是 TA · C 换成')};
 
