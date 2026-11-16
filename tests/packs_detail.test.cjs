@@ -1,4 +1,4 @@
-// 运行：node --test tests/wd_extension_detail.test.cjs
+// 运行：node --test tests/packs_detail.test.cjs
 // 详情栏里 WD 角色扩展给出的项（#550）：归属行和「也可能是」的悬停提示写「WD 扩展 0.93」，名字后面常显小字「扩展」
 // （修饰类 .identity.ext、.alt.ext）；没有扩展证据时，详情栏的 HTML 和改动前一样。
 const {test, before} = require('node:test');
@@ -59,4 +59,11 @@ test('没有扩展证据时不出现扩展的类名和小字', async () => {
   assert.doesNotMatch(html, / ext"|<small>扩展|WD 扩展/);
   assert.match(html, /title="机器识别 · 外部索引 \+ 你的标注"/);
   assert.equal(detail.fromExt({sources: ['WD_EXT', 'CCIP']}), false, '和别的来源一起给出的不算只由扩展给出');
+});
+
+test('CCIP 长尾包给出的项：提示写「CCIP 长尾」和三位小数，同样标「扩展」', async () => {
+  const html = await render({memberships: [machine('c1', 'Rare', {sources: ['CCIP_LONGTAIL'], max_score: 0.1234})],
+    alternatives: [{id: 'c2', name: 'Rare2', weak: false, evidence: {sources: ['CCIP_LONGTAIL'], max_score: 0.111, wd: null, ccip: 0.111}}]});
+  assert.match(html, /<div class="identity ext"><span class="dot machine" title="机器识别 · CCIP 长尾 0.123"><\/span><a class="identity-name"[^>]*>Rare<\/a><small>扩展<\/small>/);
+  assert.match(html, /<button class="alt ext" data-alt="0" title="Rare2 · CCIP 长尾 0.111。点击：换成这个；⌥ 点击：也是"><kbd>1<\/kbd>Rare2<small>扩展<\/small><\/button>/);
 });

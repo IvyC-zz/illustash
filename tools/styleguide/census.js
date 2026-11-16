@@ -1,7 +1,7 @@
 // 由 tools/styleguide/census.py 从 web/static/app.css 生成，不要手改。
 window.CENSUS = {
  "source": "web/static/app.css",
- "sha256": "2fa93c391a6438c6e1ec442af06a0ac98c4d1ba92761b1b94cb673bc720f1eb8",
+ "sha256": "8ae939f04acd6658c8eb7daf2761581fce942639a04917492bfef942d63c0db8",
  "lines": 1384,
  "rules": 1223,
  "themeVars": {

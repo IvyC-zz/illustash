@@ -29,15 +29,19 @@ function identityChips(d, compact = false) {
   return `<div class="identities">${chips || `<p class="none-yet">${d.unknown ? t('已跳过，还没有角色') : t('还没有角色')}</p>`}<button class="add-identity" data-also="1" title="${d.memberships.length ? t('追加角色，原有的保留（A）') : t('设为角色（C）')}">＋ ${d.memberships.length ? t('也是…') : t('设为角色…')} <kbd>${d.memberships.length ? 'A' : 'C'}</kbd></button></div>` +
     (alts ? `<div class="alts"><h3>${t('也可能是')}</h3><div class="alt-row">${alts}</div></div>` : '');
 }
-// PROTO = 从用户自己的裁决学到的原型（native/terms/src/research_compute/learn.rs）。WD_EXT = WD 角色扩展的线性头（#550，
-// native/terms/src/app_wd_extension.rs），后面跟它的分数（max_score），和「WD 0.91」并列。
-const SOURCE_NAMES = {CCIP: t('外部索引'), PROTO: t('你的标注'), WD_EXT: t('WD 扩展')};
-const sourceName = (s, e) => s !== 'WD_EXT' ? SOURCE_NAMES[s] || s : SOURCE_NAMES.WD_EXT + (e.max_score != null ? ` ${Number(e.max_score).toFixed(2)}` : '');
-// 归属行和「也可能是」里的项（alternatives 带 wd、ccip 两个键，归属行不带）：WD、外部索引或你的标注的分数，WD 扩展的分数。
-const evidence = e => !e ? '' : [e.wd != null ? `WD ${e.wd.toFixed(2)}` : '', e.ccip != null ? `${e.sources?.includes('PROTO') && !e.sources.includes('CCIP') ? SOURCE_NAMES.PROTO : SOURCE_NAMES.CCIP} ${e.ccip.toFixed(3)}` : '',
-  !('wd' in e) && e.sources?.length ? e.sources.map(s => sourceName(s, e)).join(' + ') : '', 'wd' in e && e.sources?.includes('WD_EXT') ? sourceName('WD_EXT', e) : ''].filter(Boolean).join(' · ');
-// 只由 WD 角色扩展给出的项：名字后面常显小字「扩展」（修饰类 .identity.ext、.alt.ext，#550 待决定 4）。
-export const fromExt = e => !!e?.sources?.length && e.sources.every(s => s === 'WD_EXT');
+// PROTO = 从用户自己的裁决学到的原型（native/terms/src/research_compute/learn.rs）。WD_EXT、CCIP_LONGTAIL 是角色数据包
+// （#550 WD 角色扩展的线性头、#559 CCIP 长尾包的锚点），后面跟它的分数（max_score），和「WD 0.91」并列。
+const SOURCE_NAMES = {CCIP: t('外部索引'), PROTO: t('你的标注'), WD_EXT: t('WD 扩展'), CCIP_LONGTAIL: t('CCIP 长尾')};
+// 数据包的来源和分数的小数位：WD 扩展是概率，CCIP 长尾是和外部索引同一种相似度。
+const PACK_DIGITS = {WD_EXT: 2, CCIP_LONGTAIL: 3};
+const sourceName = (s, e) => !(s in PACK_DIGITS) ? SOURCE_NAMES[s] || s : SOURCE_NAMES[s] + (e.max_score != null ? ` ${Number(e.max_score).toFixed(PACK_DIGITS[s])}` : '');
+// 只由数据包给出的项：名字后面常显小字「扩展」（修饰类 .identity.ext、.alt.ext，#550 待决定 4），提示里只写数据包和它的分数。
+export const fromExt = e => !!e?.sources?.length && e.sources.every(s => s in PACK_DIGITS);
+// 归属行和「也可能是」里的项（alternatives 带 wd、ccip 两个键，归属行不带）：WD、外部索引或你的标注的分数，数据包的分数。
+const evidence = e => !e ? '' : fromExt(e) ? e.sources.map(s => sourceName(s, e)).join(' + ') : [e.wd != null ? `WD ${e.wd.toFixed(2)}` : '',
+  e.ccip != null ? `${e.sources?.includes('PROTO') && !e.sources.includes('CCIP') ? SOURCE_NAMES.PROTO : SOURCE_NAMES.CCIP} ${e.ccip.toFixed(3)}` : '',
+  !('wd' in e) && e.sources?.length ? e.sources.map(s => sourceName(s, e)).join(' + ') : '',
+  'wd' in e ? (e.sources || []).filter(s => s in PACK_DIGITS).map(s => sourceName(s, e)).join(' + ') : ''].filter(Boolean).join(' · ');
 const extMark = e => fromExt(e) ? `<small>${t('扩展')}</small>` : '';
 export const INSP_ICONS = {
   prev: '<svg viewBox="0 0 20 20" aria-hidden="true"><path d="m12 4.5-5.5 5.5 5.5 5.5"/></svg>',
