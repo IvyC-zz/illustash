@@ -15,7 +15,8 @@ import {catalog, forgetActivity, recentOf, loadActivity as readActivity, searchC
 import {$, toast, toastMore, error, readFailure, wireFolds, namesAllowButton, reconcileSections, searchIcon, showArea} from './dom.js';
 import {chooseWork, openDialog} from './dialog.js';
 import {createLayer, openModal} from './overlay.js';
-import {combo, openPicker, toggleMascot} from './palette.js';
+import {openPicker, toggleMascot} from './palette.js';
+import {combo} from './combo.js';
 import {charHash, charRoute, go} from '../core/route.js';
 import {fetchChar, refreshMeta} from '../core/meta.js';
 import {closeInspector} from './detail.js';
@@ -470,54 +471,38 @@ let indexSkip = new Set(), watchDraft = '';
 // 文字）。挑一个就得到一个确切的 tag。
 export function wireWatchAdd(x, add) {
   const token = session.token, input = $('watchAdd'), menu = $('watchMenu'), watched = new Set(x.watch.works);
-  let list = [], index = 0, gen = 0, localTimer = 0, remoteTimer = 0;
-  // 联想菜单是非模态浮层：Esc 只关菜单（由浮层管理器 ui/overlay.js 处理）。
-  const layer = createLayer({kind: 'popover', id: 'watch-menu', el: menu, anchor: input, onDismiss: reason => { show(false, reason); input.setAttribute('aria-expanded', 'false'); }});
-  const show = (on, reason) => { menu.hidden = !on; if (on) layer.open(); else layer.close(reason); };
-  const row = (r, i) => `<button class="menu-item watch-option${i === index ? ' on' : ''}" data-i="${i}" role="option" ${watched.has(r.id) || (r.id && !r.watchable) ? 'disabled' : ''}>
+  const here = () => token === session.token && input === $('watchAdd');
+  const row = (r, i, on) => `<button class="menu-item watch-option${on ? ' on' : ''}" data-i="${i}" role="option" ${watched.has(r.id) || (r.id && !r.watchable) ? 'disabled' : ''}>
     <span class="watch-name">${esc(r.name || workName(r.tag))}</span><small>${esc(r.tag || t('D 站上还没有这个作品'))}</small>
     <em>${watched.has(r.id) ? t('已关注') : [r.count ? t('你有 {n} 张', {n: number(r.count)}) : '', r.posts ? t('D 站 {n}', {n: number(r.posts)}) : ''].filter(Boolean).join(' · ')}</em></button>`;
-  const render = (sections, note = '') => {
-    list = sections.flatMap(sec => sec.items); index = Math.max(0, list.findIndex(r => !watched.has(r.id)));
+  // 每个部分都有标题；说明（可能带「允许查询…」按钮，所以是 HTML）放在最下面。
+  const draw = (sections, index) => {
     let i = 0;
-    menu.innerHTML = sections.filter(sec => sec.items.length).map(sec => `<div class="palette-label">${sec.label}</div>` + sec.items.map(r => row(r, i++)).join('')).join('') + (note ? `<p class="muted-note watch-note">${note}</p>` : '');
-    show(!!menu.innerHTML); input.setAttribute('aria-expanded', String(!menu.hidden));
+    const note = sections.map(sec => sec.note).find(Boolean) || '';
+    return sections.filter(sec => sec.items.length).map(sec => `<div class="palette-label">${sec.label}</div>` + sec.items.map(r => { const at = i++; return row(r, at, at === index); }).join('')).join('')
+      + (note ? `<p class="muted-note watch-note">${note}</p>` : '');
   };
-  const highlight = () => { for (const b of menu.querySelectorAll('[data-i]')) b.classList.toggle('on', Number(b.dataset.i) === index); menu.querySelector('.on')?.scrollIntoView({block: 'nearest'}); };
-  const search = async () => {
-    const q = input.value.trim(), g = ++gen;
-    let local; try { local = await searchWorks(q); } catch (e) { if (g === gen && token === session.token && input === $('watchAdd')) render([], esc(readError(e))); return; }
-    if (g !== gen || token !== session.token || input !== $('watchAdd')) return;
-    if (!q) { render([{label: t('你的图库里还没关注的作品'), items: local.filter(r => !watched.has(r.id)).slice(0, 10)}]); return; }
+  let remoteTimer = 0;
+  const search = async (q, show) => {
+    let local; try { local = await searchWorks(q); } catch (e) { if (here()) show([{label: '', items: [], note: esc(readError(e))}]); return; }
+    if (!here()) return;
+    if (!q) { show([{label: t('你的图库里还没关注的作品'), items: local.filter(r => !watched.has(r.id)).slice(0, 10)}]); return; }
     const mine = local.slice(0, 8);
-    render([{label: t('你的图库里有'), items: mine}], t('正在查 Danbooru…（只发送你输入的文字）'));
+    show([{label: t('你的图库里有'), items: mine, note: t('正在查 Danbooru…（只发送你输入的文字）')}]);
     clearTimeout(remoteTimer);
     remoteTimer = setTimeout(async () => {
       const result = await remoteNames('/api/works?' + new URLSearchParams({q, remote: 1})), remote = result.found;
-      if (g !== gen || token !== session.token || input !== $('watchAdd')) return;
+      if (!here()) return;
       const posts = new Map((remote || []).map(r => [r.tag, r.posts]));
       for (const r of mine) if (posts.has(r.tag)) r.posts = posts.get(r.tag);
       const known = new Set(mine.map(r => r.tag));
       const others = (remote || []).filter(r => !known.has(r.tag));
-      render([{label: t('你的图库里有'), items: mine}, {label: 'Danbooru', items: others}],
-        remote === null ? (result.unauthorized ? esc(remoteNote(result)) + ' ' + namesAllowButton : esc(t('{reason}，可以稍后再试', {reason: remoteNote(result)}))) : !mine.length && !others.length ? t('没有找到这个作品。可以换个写法，比如英文或日文名') : '');
+      show([{label: t('你的图库里有'), items: mine}, {label: 'Danbooru', items: others,
+        note: remote === null ? (result.unauthorized ? esc(remoteNote(result)) + ' ' + namesAllowButton : esc(t('{reason}，可以稍后再试', {reason: remoteNote(result)}))) : !mine.length && !others.length ? t('没有找到这个作品。可以换个写法，比如英文或日文名') : ''}]);
     }, 450);
   };
-  const pick = i => { const r = list[i]; if (!r || watched.has(r.id) || (r.id && !r.watchable)) return; show(false); add(r); };
-  input.onfocus = () => { clearTimeout(localTimer); search(); };
-  input.oninput = e => { watchDraft = e.target.value; clearTimeout(localTimer); localTimer = setTimeout(search, 150); };
-  input.onblur = () => setTimeout(() => { show(false, 'outside'); input.setAttribute('aria-expanded', 'false'); }, 150);
-  input.onkeydown = e => {
-    if (composing(e)) return;
-    if (e.key === 'ArrowDown' || e.key === 'ArrowUp') { e.preventDefault(); if (list.length) { index = (index + (e.key === 'ArrowDown' ? 1 : -1) + list.length) % list.length; highlight(); } }
-    else if (e.key === 'Enter') {
-      e.preventDefault();
-      if (!menu.hidden && list[index] && !watched.has(list[index].id)) pick(index);
-
-    }
-  };
-  menu.onmousedown = e => e.preventDefault();  // 点选项时焦点留在输入框里
-  menu.onclick = e => { const b = e.target.closest('[data-i]'); if (b) pick(Number(b.dataset.i)); };
+  combo(input, menu, search, add, {id: 'watch-menu', delay: 150, draw, first: list => list.findIndex(r => !watched.has(r.id)),
+    allowed: r => !watched.has(r.id) && !(r.id && !r.watchable), typed: value => { watchDraft = value; }});
   if (document.activeElement === input || watchDraft) { input.focus(); input.setSelectionRange(input.value.length, input.value.length); }
 }
 

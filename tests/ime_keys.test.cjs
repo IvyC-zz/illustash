@@ -4,7 +4,7 @@
 const {test, before} = require('node:test');
 const assert = require('node:assert/strict');
 const web = require('./web.cjs');
-let keys, palette, overlay, grid, page;
+let keys, palette, combo, overlay, grid, page;
 
 before(async () => {
   await web.ready();
@@ -16,6 +16,7 @@ before(async () => {
   const store = new Map();
   globalThis.localStorage = {getItem: k => store.has(k) ? store.get(k) : null, setItem: (k, v) => store.set(k, v), removeItem: k => store.delete(k)};
   palette = await web.load('ui/palette.js');
+  combo = await web.load('ui/combo.js');
   overlay = await web.load('ui/overlay.js');
   grid = await web.load('ui/grid.js');
 });
@@ -40,7 +41,7 @@ test('combo 下拉搜索框：组字时回车、方向键不选候选，普通�
   for (const [name, extra, expected] of KINDS) {
     const input = new web.FakeElement('input', 'comboInput'), menu = new web.FakeElement('div', 'comboMenu');
     const picked = [];
-    palette.combo(input, menu, (q, show) => show([{label: '', items: [{label: '甲'}, {label: '乙'}]}]), r => picked.push(r.label));
+    combo.combo(input, menu, (q, show) => show([{label: '', items: [{label: '甲'}, {label: '乙'}]}]), r => picked.push(r.label));
     for (const fn of input.listeners.focus) fn();
     await new Promise(r => setTimeout(r, 220));  // 搜索有 160 ms 的防抖
     assert.equal(menu.hidden, false, name);
