@@ -128,6 +128,29 @@ test('a double click opens one picker and each import or creation carries its ow
   assert.equal(new Set(ids).size, 3, 'a new click is a new request');
 });
 
+// #422：名字框里按 Enter 等于点「创建并打开」；组字中的 Enter 不算，创建进行中再按一次不会另建一个，
+// 「图库已经建好」那一步（不画「创建并打开」）里按 Enter 什么也不做。
+test('Enter in the name box creates the library once', async () => {
+  let finish;
+  const c = page({
+    welcome_pick: () => ({paths: ['/a']}),
+    welcome_inspect: ({paths}) => paths.map(p => ok(p, 2)),
+    welcome_create: () => new Promise(r => { finish = r; }),
+  });
+  await click(c, {pick: 'x'});
+  const enter = (more = {}) => c.nodes.welcome.onkeydown({key: 'Enter', target: {id: 'wname'}, preventDefault() {}, ...more});
+  await enter({isComposing: true});
+  await enter({keyCode: 229});
+  await enter({target: {id: 'other'}});
+  assert.equal(c.calls.filter(([cmd]) => cmd === 'welcome_create').length, 0);
+  const first = enter(); await enter();
+  assert.equal(c.calls.filter(([cmd]) => cmd === 'welcome_create').length, 1, 'a second Enter while creating is ignored');
+  finish({created: '/Users/me/Pictures/Illustash/新图库.pilib', error: '写入失败（合成）'});
+  await first;
+  await enter();
+  assert.equal(c.calls.filter(([cmd]) => cmd === 'welcome_create').length, 1, 'no second library from the "already made" step');
+});
+
 // #173 第 4 阶段：外壳在页面脚本之前注入它的语言和对应的表（desktop/src/i18n.rs），启动页加载图库页的
 // i18n.js，用它们翻译自己的标记和欢迎页。
 test('the start page speaks the language the shell gives it', async () => {

@@ -114,7 +114,9 @@ export function tourStop(id) {
 }
 // 导览是盖满页面的层：Esc 等同"跳过"，由浮层管理器（ui/overlay.js）统一处理。开着时页面的单键快捷键不响应
 // （ui/grid.js 的键盘处理看 #tour 是否显示），焦点留在导览的按钮上（#398）。
-const tourLayer = createLayer({kind: 'overlay', id: 'tour', el: () => $('tour'), onDismiss: () => { closeTour(); guideAction({action: 'skip'}); }});
+// 它盖住的页面和各个固定层设成 inert（#422）。
+const tourLayer = createLayer({kind: 'overlay', id: 'tour', el: () => $('tour'), onDismiss: () => { closeTour(); guideAction({action: 'skip'}); },
+  inert: () => [document.querySelector('.app'), $('selectionBar'), $('taskPanel'), $('viewer'), $('nudge'), $('checklist')]});
 function showTour(at) {
   tourAt = at; drawNudge(); drawChecklist();
   const root = $('tour'); root.hidden = false; tourLayer.open(); requestAnimationFrame(() => root.classList.add('on'));

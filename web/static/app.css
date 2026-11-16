@@ -142,7 +142,7 @@ select{height:var(--h-32);border:1px solid var(--line);background:var(--sheet);c
 
 /* 网格 */
 .viewport{position:relative;overflow:auto;flex:1;min-height:0;overscroll-behavior:contain;scrollbar-width:thin;scrollbar-color:var(--scroll-thumb) transparent}
-.viewport:focus-visible{outline:none}
+.viewport:focus-visible,.viewer:focus-visible,.task-pop:focus-visible{outline:none}
 /* 首页和角色页把条带和吸顶栏铺到页面边缘，还要画卡片阴影：那里的滚动区域横跨页边距，所以没有东西会溢出它（不会多出
    横向滚动条）或被裁掉。这些页面的宽度不变；按视口决定自身尺寸的图片网格不受影响。 */
 .viewport:has(>.home-page:not([hidden])),.viewport:has(>.char-index:not([hidden])){margin:0 calc(-1 * var(--gutter));padding-left:var(--gutter);padding-right:var(--gutter)}

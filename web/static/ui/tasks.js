@@ -113,7 +113,11 @@ export function renderTasks() {
   const pop = $('taskPanel');
   // 任务运行期间会轮询：只在有变化时重画，这样点击绝不会因为按钮被替换而丢失。
   if (pop.dataset.html === html) return;
+  // 焦点在面板里时，重画后放回同一个按钮（按 data-task／data-prov 找），找不到就放在面板上，不掉到页面上（#422）。
+  const had = pop.contains(document.activeElement) ? document.activeElement : null;
+  const key = had && ['task', 'prov'].map(k => had.dataset?.[k] ? `[data-${k}="${had.dataset[k]}"]` : '').find(Boolean);
   pop.dataset.html = html; pop.innerHTML = html; wireFolds(pop);
+  if (had && !pop.contains(document.activeElement)) (key && pop.querySelector(key) || pop).focus({preventScroll: true});
 }
 export async function taskTick() {
   clearTimeout(taskPanel.timer);
@@ -130,7 +134,8 @@ export async function taskTick() {
   taskPanel.timer = setTimeout(taskTick, taskPanel.open ? 3000 : 30000);
 }
 // 任务面板是非模态浮层：Esc、点外关闭由浮层管理器（ui/overlay.js）统一处理；它上面再开对话框时，对话框先关。
-const taskLayer = createLayer({kind: 'popover', id: 'tasks', el: () => $('taskPanel'), anchor: () => $('taskButton'), onDismiss: reason => toggleTasks(false, reason)});
+// 它在页面的最后，Tab 从「任务」按钮走不过去：打开时焦点移到面板上，Esc 或 × 关闭后回到打开它的按钮（#422）。
+const taskLayer = createLayer({kind: 'popover', id: 'tasks', el: () => $('taskPanel'), anchor: () => $('taskButton'), focusIn: 'self', onDismiss: reason => toggleTasks(false, reason)});
 export function toggleTasks(open = !taskPanel.open, reason) {
   taskPanel.open = open; $('taskPanel').hidden = !open;
   $('taskButton').setAttribute('aria-expanded', open); $('taskButton').classList.toggle('on', open);
