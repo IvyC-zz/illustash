@@ -1,4 +1,4 @@
-//! 记住主窗口的位置、大小和是否最大化（#451）。存在外壳自己的配置目录（`app_config_dir()/window.json`），不进图库；
+//! 记住主窗口的位置、大小和是否最大化（#451；macOS 不记最大化，见 `track`）。存在外壳自己的配置目录（`app_config_dir()/window.json`），不进图库；
 //! Pixiv 登录窗口不记。移动、缩放停下来以后存一次，退出时再存一次，所以 App 崩溃也只丢最后一次改动。全屏不记：全屏
 //! 期间不更新，下次按全屏前的大小打开。
 //!
@@ -161,7 +161,8 @@ fn track(main: &WebviewWindow) {
     if hidden || main.is_minimized().unwrap_or(false) || main.is_fullscreen().unwrap_or(false) {
         return;
     }
-    let maximized = main.is_maximized().unwrap_or(false);
+    // macOS 没有真正的最大化：铺满屏幕的窗口也被报成「缩放」，记下来会在下次打开时多缩放一次。那边只记位置和大小。
+    let maximized = cfg!(not(target_os = "macos")) && main.is_maximized().unwrap_or(false);
     let memory = app.state::<Memory>();
     {
         let mut last = memory.last.lock().expect("window memory lock");

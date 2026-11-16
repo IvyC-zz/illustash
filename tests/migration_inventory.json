@@ -183,7 +183,7 @@
 
  "desktop/src/main.rs":"c145f969f6c5adff9b260170373865aa31661613581c2cbb5332116a3b2e5897",
 
- "desktop/src/notify.rs":"3db82f288c6700fa2f96b228fc1a1fe93e2be16fe9fae962926156aa3ad0d5f7",
+ "desktop/src/notify.rs":"9d22270643d502829f409d5164d83abefe30da5b044533551daceba2a66c7891",
 
  "desktop/src/picker.rs":"277e5cdbe688d9c6ac4fe04a741c148feda72d8bf7d82c11a65c7b2860d2595b",
 
@@ -195,7 +195,7 @@
 
  "desktop/src/welcome.rs":"79c4c120ab8e4e6fef3459e8452655c00ecd0b9a328f894df911474cd3a2b80b",
 
- "desktop/src/window_state.rs":"f1839b84b7920e429ffb25cc47434fb96012220d196a801d36b3e978d074e087",
+ "desktop/src/window_state.rs":"541690c997a592620cdbef78789509ed59ae605c8f7fc0cc8be8fcd9fae05f45",
 
  "desktop/tauri.conf.json":"410add1c0dcb1b8f26d28e6970f3a84019c42ce87e27a0599484d2c59d88210a",
 

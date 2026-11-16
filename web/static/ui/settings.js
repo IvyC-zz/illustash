@@ -131,6 +131,8 @@ function patchSettingsPage(html, section) {
   for (const card of template.content.querySelectorAll('.settings-card')) {
     // 这些卡片自己负责渲染、表单和异步生命周期。
     if (OWN_CARDS.includes(card.id)) continue;
+    // 没有内容的卡片隐藏着（如浏览器里的「关闭窗口」）；数据到了以后再显示。
+    $(card.id).hidden = card.hidden;
     setSettingsHTML($(card.id), card.innerHTML);
   }
 }
@@ -308,8 +310,8 @@ export async function renderSettings(fetchMissing = true, refresh = false) {
       ${info ? fold('dataPaths', t('存储位置'), `<table class="settings-table">${[[t('源数据库（识别结果，可以重建）'), info.source], [t('应用数据库（人工整理，不要删）'), info.library], [t('缩略图缓存（可以放心删）'), info.thumbnails]].map(([label, d]) => `<tr><td>${label}</td><td class="mono" title="${esc(d.path)}">${esc(home(d.path))}</td><td>${bytes(d.bytes)}</td></tr>`).join('')}</table>`) : ''}`,
   };
   patchSettingsPage(`<nav class="settings-nav" aria-label="${t('设置')}">${SETTINGS_SECTIONS.map(([id, title]) => `<a href="#/settings/${id}" class="${id === section ? 'on' : ''}"${id === section ? ' aria-current="page"' : ''}>${title}</a>`).join('')}</nav>
-    <div class="settings-main" data-section="${section}">${cards.map(id => [id, body[id] ? body[id]() : '']).filter(([id, html]) => html || !body[id])
-      .map(([id, html]) => `<section class="settings-card" id="${id}">${html}</section>`).join('')}</div>`, section);
+    <div class="settings-main" data-section="${section}">${cards.map(id => [id, body[id] ? body[id]() : ''])
+      .map(([id, html]) => `<section class="settings-card" id="${id}"${body[id] && !html ? ' hidden' : ''}>${html}</section>`).join('')}</div>`, section);
   const page = $('settingsPage');
   renderAbout();
   renderModelsCard();
