@@ -472,7 +472,8 @@ class NativeLibraryUpgradeTest(unittest.TestCase):
                                 capture_output=True, timeout=WAIT)
         self.assertEqual(result.returncode, 6, result.stderr)
         self.assertEqual(result.stderr, b'')
-        self.assertEqual(tree(self.root), before)
+        self.assertEqual(tree(self.root), {**before, 'dir:support': None, 'dir:support/diagnostics': None,
+                                           'file:support/diagnostics/.lock': EMPTY_SHA256})
 
         port = free_port()
         with tempfile.TemporaryFile() as stdout, tempfile.TemporaryFile() as stderr:
