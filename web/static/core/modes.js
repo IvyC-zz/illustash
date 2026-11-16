@@ -88,7 +88,7 @@ export function keyAction(key, {view, char = false, n = 0, item = null}) {
 //   does   做什么、在哪生效
 export const SHORTCUTS = [
   {keys: '⌘K', codes: ['k'], does: () => t('跳转到角色')},
-  {keys: '/', codes: ['/'], does: () => t('搜索图库')},
+  {keys: '/', codes: ['/'], does: () => t('搜索（图库、资料库）')},
   {keys: () => t('拖动 · Shift 点击'), codes: [], does: () => t('连续选择；在空白处拖动可框选')},
   {keys: '⌘A', codes: ['a'], does: () => t('选中全部符合条件的图片')},
   {keys: () => t('方向键'), codes: ['ArrowLeft', 'ArrowRight', 'ArrowUp', 'ArrowDown'],

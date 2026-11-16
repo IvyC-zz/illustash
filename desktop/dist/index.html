@@ -183,7 +183,7 @@ function renderWelcome() {
       <button class="btn" data-pick="${id}">${t('添加文件夹…')}</button></div>`).join('')}</div>
     ${W.notes.map(n => `<p class="w-note">${n}</p>`).join('')}
     ${W.photosOk ? `<label class="w-line"><input type="checkbox" id="wphotos" ${W.photos ? 'checked' : ''}> ${t('同时读取 iCloud 照片（本机「照片」图库，按存图的 App 区分 X 和 Pixiv）')}</label>` : ''}
-    <div class="w-line"><span>${t('名字')}</span><input type="text" id="wname" placeholder="${t('新图库')}" value="${esc(W.name)}"></div>
+    <div class="w-line"><span>${t('名字')}</span><input type="text" id="wname" spellcheck="false" autocorrect="off" autocapitalize="off" placeholder="${t('新图库')}" value="${esc(W.name)}"></div>
     <p class="w-note">${t('保存在 {path}', {path: esc(home(W.home))})}</p>
     ${W.created ? `<div class="w-created"><p>${t('{done}，保存在 {path}，但没能加入最近图库列表：{reason}', {done: `<b>${t('图库已经建好')}</b>`, path: `<bdi>${esc(home(W.created.created))}</bdi>`, reason: esc(tb(W.created.error))})}</p>
       <p class="w-note">${t('打开它会再试一次加入列表；再点创建会另建一个带编号的图库。')}</p>
@@ -239,9 +239,16 @@ async function importArchive(path) {
   catch (err) { W.importing = null; W.error = tb(String(err)); busy(false); renderWelcome(); }
   finally { clearInterval(poll); }
 }
-document.getElementById('welcome').onclick = async e => {
-  const b = e.target.closest('button'); if (!b) return;
-  const d = b.dataset; keepName(); W.error = '';
+document.getElementById('welcome').onclick = e => { const b = e.target.closest('button'); return b ? welcomeAct(b.dataset) : undefined; };
+// 名字框里按 Enter 等于点「创建并打开」（#422）；输入法组字时的 Enter 是上屏，不算。只在那个按钮画着时才算：
+// 导入进行中、或图库已经建好等你选「打开」还是「仍然新建」时不另建一个。
+document.getElementById('welcome').onkeydown = e => {
+  if (e.key !== 'Enter' || e.target.id !== 'wname' || e.isComposing || e.keyCode === 229) return;
+  e.preventDefault();
+  if (W.form && !W.importing && !W.created) return welcomeAct({actW: 'create'});
+};
+async function welcomeAct(d) {
+  keepName(); W.error = '';
   // The shell's own errors are already in the page's language; the core's are Chinese templates for tb().
   const fail = err => { W.error = tb(String(err)); busy(false); renderWelcome(); };
   try {
@@ -269,16 +276,18 @@ document.getElementById('welcome').onclick = async e => {
       const sources = W.seq.map(([preset, path]) => ({kind: 'folder', path, preset}));
       if (W.photos) sources.push({kind: 'photos'});
       if (!sources.length) { fail(t('请至少添加一个文件夹')); return; }
-      busy(true);
+      // 按钮在创建期间是禁用的；名字框里的 Enter 绕过按钮，这里挡住第二次。
+      if (W.creating) return;
+      busy(true); W.creating = true;
       // An empty name is the placeholder's, in the page's language (the core names it 新图库 otherwise).
-      const r = await invoke('welcome_create', {request: requestId(), name: W.name.trim() ? W.name : t('新图库'), sources});
+      let r; try { r = await invoke('welcome_create', {request: requestId(), name: W.name.trim() ? W.name : t('新图库'), sources}); } finally { W.creating = false; }
       // Published but not listed (#97): offer the package instead of making a second, numbered one.
       if (r?.created) { W.created = r; busy(false); renderWelcome(); }
     }
     else if (d.actW === 'open-created') { busy(true); await invoke('welcome_open', {path: W.created.created}); }
     else if (d.actW === 'create-again') { W.created = null; renderWelcome(); }
   } catch (err) { fail(err); }
-};
+}
 // 启动失败、升级确认、抢救确认三组按钮，同时只显示一组。
 const showActs = id => { for (const acts of ['failActs', 'upgradeActs', 'rescueActs']) document.getElementById(acts).hidden = acts !== id; };
 // 外壳在服务启动失败时调用，显示原因和最后几行输出。

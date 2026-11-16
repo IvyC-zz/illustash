@@ -219,6 +219,7 @@
   "可能认错": "Possibly wrong",
   "搜索角色、别名或文件名": "Search characters, aliases or file names",
   "搜索图库": "Search the library",
+  "搜索（图库、资料库）": "Search (library, catalog)",
   "清除角色筛选": "Clear the character filter",
   "角色 · {name}": "Character · {name}",
   "清除标签筛选": "Clear the tag filter",
