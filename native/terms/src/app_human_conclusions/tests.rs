@@ -142,6 +142,7 @@ impl Fixture {
     }
     fn undo(&self, id: i64) -> Result<Json> {
         let context = LibraryContext {
+            examples: None,
             db: self.db.clone(),
             generation: "synthetic".into(),
             library: Some(self.root.clone()),

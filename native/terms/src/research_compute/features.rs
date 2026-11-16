@@ -63,6 +63,11 @@ impl Matrix {
 /// 每个研究进程最多加载一次，所以没有跨调用的缓存（#32）。
 /// 所有读取和校验都在返回矩阵之前完成；任何一行无效都会让加载失败。
 pub fn load(source: &Path, base: &Path) -> Result<Matrix> {
+    let c = crate::sqlite::open_with_flags(source, OpenFlags::SQLITE_OPEN_READ_ONLY)?;
+    load_from(&c, base)
+}
+
+pub(crate) fn load_from(c: &rusqlite::Connection, base: &Path) -> Result<Matrix> {
     let paths = [base.join("full-manifest.csv"), base.join("full-features.npy")];
     let present = paths
         .iter()
@@ -72,7 +77,6 @@ pub fn load(source: &Path, base: &Path) -> Result<Matrix> {
             Err(e) => Err(e),
         })
         .collect::<std::io::Result<Vec<_>>>()?;
-    let c = crate::sqlite::open_with_flags(source, OpenFlags::SQLITE_OPEN_READ_ONLY)?;
     let exists: bool =
         c.query_row("SELECT EXISTS(SELECT 1 FROM sqlite_master WHERE name='embeddings' AND type='table')", [], |r| {
             r.get(0)

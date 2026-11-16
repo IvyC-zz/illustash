@@ -171,9 +171,9 @@ fn digit_extra(c: char) -> bool {
     R.iter().any(|&(a, b)| (a..=b).contains(&(c as u32)))
 }
 /// /api/assets（以及作用于浏览选区的命令）接受的筛选参数。
-const FILTERS: [&str; 15] = [
+const FILTERS: [&str; 17] = [
     "entity", "variant", "status", "q", "tag", "utag", "pool", "order", "nsfw", "dup", "reason", "cluster", "work",
-    "day", "artist",
+    "day", "artist", "like", "like_by",
 ];
 /// 正在构建的浏览选区：针对图片 `a` 的 SQL 子句及其参数，其中可能有一个是聚类或相似组的 id，按整数绑定。
 struct Filter {
@@ -252,10 +252,25 @@ pub(crate) fn selection(
     if !v("utag").is_empty() {
         filter.add("a.uuid IN (SELECT uuid FROM asset_tags WHERE tag=?)", [v("utag").into()]);
     }
-    let order = f.get("order").map(String::as_str).unwrap_or("newest");
-    let ordering = ordering(order, pool, dup, status, &entity)?;
+    let like = crate::http_example_search::Search::parse(f)?;
+    let order = f.get("order").map(String::as_str).unwrap_or(if like.is_some() { "similar" } else { "newest" });
+    let ordering = if like.is_some() {
+        match order {
+            "similar" => "(SELECT rank FROM temp.like_rank WHERE uuid=a.uuid)".into(),
+            "oldest" => "a.added_at ASC,a.uuid".into(),
+            _ => "a.added_at DESC,a.uuid".into(),
+        }
+    } else {
+        ordering(order, pool, dup, status, &entity)?
+    };
     let args = bound(filter.args, filter.numeric_index, v("cluster"))?;
-    Ok((filter.clauses.join(" AND "), args, ordering))
+    let conditions = filter.clauses.join(" AND ");
+    if let Some(like) = like {
+        like.rank(c, context, &conditions, &args)?;
+        // 本事务的全部条件已经应用于临时表，不再执行一次分级或搜索子查询。
+        return Ok(("a.uuid IN (SELECT uuid FROM temp.like_rank)".into(), Vec::new(), ordering));
+    }
+    Ok((conditions, args, ordering))
 }
 /// 角色（及皮肤）筛选：已合并的角色沿合并关系找到它被并入的角色；皮肤则选中它所属的角色，并以该皮肤作为
 /// variant。返回选中的角色（如果有）。
@@ -1236,7 +1251,7 @@ fn assets(c: &Connection, context: &LibraryContext, path: &str, q: &HashMap<Stri
         && order.starts_with("a.added_at ")
         && f.iter().all(|(k, v)| k == "nsfw" || k == "order" || v.is_empty())
         && date_page_pays(c, offset, limit)?;
-    let (total, sql) = if total_needed && !nsfw.is_empty() && !date_page {
+    let (total, sql) = if total_needed && !nsfw.is_empty() && !date_page && !f.contains_key("like") {
         let copy = format!(
             "CREATE TEMP TABLE selected_assets AS
              SELECT a.uuid,a.width,a.height,a.added_at FROM assets a WHERE {where_}"
@@ -1607,6 +1622,7 @@ mod tests {
         }
         drop(c);
         let context = crate::http::LibraryContext {
+            examples: None,
             db: dest.join("library.sqlite"),
             generation: "synthetic".into(),
             library: Some(dest.clone()),

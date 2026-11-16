@@ -205,15 +205,15 @@
 
  "native/terms/src/app_characters.rs":"6c9e9e080970dce30092747ebcf6bdcaee7d99a8463500888e5dab278f4a0cbd",
 
- "native/terms/src/app_commands.rs":"a2adb34bb5e13330ab72668f699b898d7648129109687977a7b3c2146ad0af5f",
+ "native/terms/src/app_commands.rs":"d195cc7500cddc8e10b6696f8e0926a75d3aeae7362d192335e8c39d7e512a3f",
 
- "native/terms/src/app_create.rs":"f884b4587d13c479e6739fdb7439f2bee4342627b0b157f06560dabfede3cbdc",
+ "native/terms/src/app_create.rs":"523b64fc0569c52aa3cb7068aae9713a97a7fa5cb450fb0814bf5157f659411e",
 
  "native/terms/src/app_create_names.sql":"29fb8b712603ad5bfd49a20b82162ead37a45e781f949d5e1c9678bd42fa8f7f",
 
  "native/terms/src/app_create_schema.sql":"f41f751e3f9c2deae935dcb9869cd385a0893a9d20dad2c4b64b7b14d7ef54ae",
 
- "native/terms/src/app_curation.rs":"8f8bc2ff372c97865a941a988d1766c541baa84fc8ca716dd6b55e7758c611cd",
+ "native/terms/src/app_curation.rs":"849dd569bf7fb98738c4edaf0ad73a3e5292afa8b208eb34011e7ec99b8aef76",
 
  "native/terms/src/app_desktop.rs":"6a2d810a15066cfa4d6ff3f41e257a4b29304c6756914da2580fce2a4184b47a",
 
@@ -223,7 +223,7 @@
 
  "native/terms/src/app_folder.rs":"cd148b0a312065b97da3cbea8dc782a596eb0d8e842a1dfcf2d45f259fea6216",
 
- "native/terms/src/app_http.rs":"1f3446f0fbaaee14a6f9bf178466746ccf1c6fa085f64c4f8511dc6825771e3f",
+ "native/terms/src/app_http.rs":"dd28d457604919fd476d736372588680694929c56f953da0fc30b512afb2b93f",
 
  "native/terms/src/app_human_conclusions.rs":"37bd5770a1bce2e3686a3a478b0925ddcfa11eaa81bf1f85023c57ed6cc8126b",
 
@@ -249,7 +249,7 @@
 
  "native/terms/src/app_library.rs":"776cfbe684a3d2341738010c41883cc599afe533604e1a2a788ff1d9cd0d4170",
 
- "native/terms/src/app_local.rs":"297a2b6263f1b0007f8e9918ac3ce16527fb210541de383f683a2fc6cd37da26",
+ "native/terms/src/app_local.rs":"ffbc769f30608a43928dd391cc7868219ad4844b176cf7528abfc4f8b5bfdebf",
 
  "native/terms/src/app_migrate.rs":"c76bdf5d02484adab9901634250b8d194686705aaadc8ef418365a6a1da123b0",
 
@@ -305,7 +305,7 @@
 
  "native/terms/src/app_resources.rs":"d691ec21499b906972a02d49a21790f2a301c34eb4dea0bd9c301675dd9e2c0a",
 
- "native/terms/src/app_service.rs":"9235a0d1605f49e5e8e3e2373af308fd6b8ec164fa2834cb82b208e6227aa3e4",
+ "native/terms/src/app_service.rs":"363a0933500c1529268ae4b1b79178c6c02eff6edfb4e317bc8c40743dec1b1c",
 
  "native/terms/src/app_settings.rs":"20f5eb9c25a3a14920b85b48e75186564c5e01f6129cca02b06b2f63d60b2c41",
 
@@ -321,7 +321,7 @@
 
  "native/terms/src/app_updates.rs":"e7b51e4afd108af07dbf92e76d44251709635984f8387d3e702922190b9834ba",
 
- "native/terms/src/app_upgrade.rs":"de6b529fbb01865fb9adeb78ae45ca4b5a541b14129b9472f58f10ac693ce6cf",
+ "native/terms/src/app_upgrade.rs":"f194c9b72ade8ca5388cd51d66604f7f14485d0cf46f59d76cf6047ab21fc12f",
 
  "native/terms/src/app_wd_extension.rs":"24bf9472036064c71171f526cdd53270eab45bccf67bac022d2d4f876efa4ade",
 
@@ -339,15 +339,23 @@
 
  "native/terms/src/diagnostics/logs/details.rs":"49daaeae10eaaf1275776734b97432d01d14b14855d0cfdcc2ed87a1b97b07d9",
 
- "native/terms/src/http.rs":"806d8b048bc9e2925765986a082d3bc542c8e669bb93fcc745be8508fcc9ec91",
+ "native/terms/src/example_cache.rs":"6f35aea5b6d06ce3418a66f9f5ed4c7031a6affaaefeee3a8e9f43aae3e20416",
+
+ "native/terms/src/example_features.rs":"ac195c61606fc1a0c489d09538edde0586227695ecb03837ed539415da0fa59d",
+
+ "native/terms/src/example_scores.rs":"21d209027a51c59aa6d880d3ff341ccfbbf2ea8748a3cfd9e571ac4af2ee1cd2",
+
+ "native/terms/src/http.rs":"f9d1067f511fb59576b731f4afb2051b6cffd6c14fad47facf1d6aa795820bf0",
 
  "native/terms/src/http_app.rs":"1cdb28245fb1d97ac446313b089c8fe4700ce22027dbb7272bf3a6c04750a984",
 
  "native/terms/src/http_artists.rs":"4fa18a5bbbc5e5cab1954407308ffa9951bc2bf54a1b69a8ef01b2fa307d162b",
 
- "native/terms/src/http_browse.rs":"03ee5b650b7be1ffb3c7ed4a1eb47f29b6f943d768f48ed4f50bde12816a34dd",
+ "native/terms/src/http_browse.rs":"eb85a8cd55dd1a0fc192747aa4cb85a4b36fa31f6c9cf9fc9b385eb7760b9cc5",
 
  "native/terms/src/http_characters.rs":"03e4c82c04a2708b576a26a6c8dbbd49834f7bf4126240f06e17da4827478f9e",
+
+ "native/terms/src/http_example_search.rs":"13e762b9a2b31cb6808707441598b3714e52a724bb902cfb4f54f94d2226585e",
 
  "native/terms/src/http_host_get.rs":"f93d7e18df459adb1d1a67d4b6708ee893876ec70cd7a053d7641084ad57a6e4",
 
@@ -377,11 +385,11 @@
 
  "native/terms/src/index_generation.rs":"940c236d35bee6001cc2225701d64d0be2964a2575a653a897449650535ad2fa",
 
- "native/terms/src/lib.rs":"57552183bbeec284216e818a948c750abe72f1bd2bf464167badb7f1c995a90a",
+ "native/terms/src/lib.rs":"63681023af0cea51e1251325f80e7b8f85c80d8a793ee4d02caa17c4fe212f9e",
 
  "native/terms/src/platform_process.rs":"62046a3cf19fa77c1f3105770d4937a6cd780b24e9219a84106c4014aaf1f500",
 
- "native/terms/src/read_harness.rs":"720ce39b82f47a7f7a874e74dff61c2e9a741153acf7b908b4188c57fe67f48f",
+ "native/terms/src/read_harness.rs":"fe26074e0229a7ce7db5fdec47e7e37d4d599308415c0e4ab6d3d974250d0860",
 
  "native/terms/src/recognition_compute/anchor_snapshot.rs":"8ab8b7bb1fb022fbc3eb02a7c7f6ae6dfe3aaffb3bbade5f73c12e52abb1ff0a",
 
@@ -407,13 +415,13 @@
 
  "native/terms/src/recognition_compute/wd_coreml.rs":"deaed63306945926e57c6b59427383bf0334776abb93de94df4e74332b42b96a",
 
- "native/terms/src/research_compute/discriminate.rs":"4852c91effe24b110e0a4795d022e5e9eabe1096fd013169d80d02ddb0c1ed29",
+ "native/terms/src/research_compute/discriminate.rs":"c6c79e5bd801d232d0c401d2a46ca8ac7c8b40146e8fb5bc71e2be6014135e30",
 
- "native/terms/src/research_compute/features.rs":"b050aa97333d6c38d0e532b4774f44ebfbed69f7a0dc8aa0074960195a08d87b",
+ "native/terms/src/research_compute/features.rs":"f6bfa9043f9ef9d6af8023280540dd55eede23d61e6a67fa7c3f81dc07840ee8",
 
  "native/terms/src/research_compute/groups.rs":"33e7cde9ca859134d56a2ad52bfbb5b8275a64a46598869daaae38dcc9295f39",
 
- "native/terms/src/research_compute/mod.rs":"dc6a92172e93755a7b37fef3a9dc8dc3ba16eeced3d243a9997fba3ec308ee77",
+ "native/terms/src/research_compute/mod.rs":"239fc1b65c16d4081712c0c310e7802e6115f4bb5a2421ddd34c172f5d599720",
 
  "native/terms/src/research_compute/numeric.rs":"1c12b3f6180efa3b45bf3270acaeaa3699e3af9b7a9ad03891dfa908d61c73f5",
 
@@ -529,7 +537,9 @@
  "native/terms/src/app_human_conclusions/hashes.rs":{"policy":"assets","current_runtime":"rust-human-snapshot-lifecycle","storage_domain":"app"},
  "native/terms/src/app_human_conclusions/reports.rs":{"policy":"application","current_runtime":"rust-human-snapshot-lifecycle","storage_domain":"app"},
  "crates/core/src/wd_extension.rs":{"policy":"application","current_runtime":"rust-core-wd-extension-evidence","storage_domain":"app"},
- "native/terms/src/app_wd_extension.rs":{"policy":"result-import","current_runtime":"rust-native-wd-extension","storage_domain":"source-read+app"}
+ "native/terms/src/app_wd_extension.rs":{"policy":"result-import","current_runtime":"rust-native-wd-extension","storage_domain":"source-read+app"},
+ "native/terms/src/example_cache.rs":{"policy":"assets","current_runtime":"rust-native","storage_domain":"source-ro+memory-cache","boundary_notes":{"authorization":"源库以只读连接固定特征快照，事务不会写入源库。"}},
+ "native/terms/src/http_example_search.rs":{"policy":"application","current_runtime":"rust-native","storage_domain":"app-ro+connection-temp","boundary_notes":{"authorization":"#449 现有读路由和筛选写事务的会话临时选集，只写 temp.like_rank。"}}
 },
 "limitations":[
  "审计生产 HTTP/DB/事务/动态执行/启动/CLI；保留研究/测试/生成代码。",
@@ -668,7 +678,9 @@
  "native/terms/src/app_human_conclusions/reports.rs":{"database-write":[[0,2],"INSERT INTO:human_import_reports","INSERT INTO:human_import_report_rows"]},
  "desktop/src/updater.rs":{"entrypoint":["process-start"]},
  "crates/core/src/wd_extension.rs":{"database-write":{"dynamic-or-wrapper":1,"INSERT INTO:memberships":1}},
- "native/terms/src/app_wd_extension.rs":{"database-write":{"dynamic-or-wrapper":3}}
+ "native/terms/src/app_wd_extension.rs":{"database-write":{"dynamic-or-wrapper":3}},
+ "native/terms/src/example_cache.rs":{"database-write":{"dynamic-or-wrapper":1,"COMMIT":1}},
+ "native/terms/src/http_example_search.rs":{"database-write":{"dynamic-or-wrapper":2,"DELETE FROM:temp.like_rank":1,"INSERT INTO:temp.like_rank":1}}
 },
 "policies":{
  "application":{"final_owner":"rust","responsibility":"HTTP 参数/目标、人工命令、正式事务/投影；Python 包装待迁移","acceptance":"合成状态码/原始字节、返回/DB/历史/撤销/事件对照；竞争与注入失败原子回滚","deletion_condition":"Rust 调用链及无 Python 验收后删生产 Python；保留旧对照","stages":["M2","M3"]},
