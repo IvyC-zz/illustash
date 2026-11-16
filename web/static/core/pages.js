@@ -107,7 +107,8 @@ export const poolIs = (route, ...pools) => pools.includes(pageOf(route).pool);
 // ui/ 登记页面的处理函数：{页面名: {render, refresh, heading, ...}}。
 //   render({samePage})   进入本页时画主区；没有的页面是网格页，由 shell 调 reload(true)
 //   prepare(route)       进入本页前要先读的数据；返回 false 表示已经导航走了
-//   heading(r, ctx)      [标题, 副标题, 右侧链接 HTML]；角色页另用 drawHeading
+//   heading(r, ctx)      [标题, 副标题, 右侧链接 HTML]；角色页另用 drawHeading。副标题只放数量、状态和必须一眼看到的警告
+//   help(r), helpHint    标题旁「?」里的说明（一行一句）；helpHint 为真时再接上本页的 hint，一个「·」一行（#527）
 //   onMeta(info)         计数等元数据到达后重画什么；没有的页面重画工具栏
 //   emptyNext(r)         网格空了时空状态下面的去处（链接或 data-empty 按钮的 HTML，#386 的 2-12）；没有的页面只有一句话
 //   refresh(why)         数据变了之后重画面板页：'edit' 改动之后、'undo' 撤销之后、'learned' 确认或撤销后后台学习
