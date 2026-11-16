@@ -514,7 +514,6 @@ fn benchmark_artist_directory() {
     let (_scratch, root, package) = materialize(&load("http_api"), category);
     migrate_fixture_terms(&package, category);
     let binary = Path::new(env!("CARGO_BIN_EXE_illustash-terms"));
-    let (_host, origin, token) = launch(&root, &package, category, false, binary);
     let c = Connection::open(package.join("library.sqlite")).unwrap();
     c.execute_batch(
         "BEGIN;
@@ -558,6 +557,8 @@ fn benchmark_artist_directory() {
          COMMIT;",
     )
     .unwrap();
+    drop(c);
+    let (_host, origin, token) = launch(&root, &package, category, false, binary);
     let page = request_json(&origin, "/api/artist-directory", None, &token);
     assert_eq!(page.0, 200, "{}", page.1);
     let total = page.1["total"].as_u64().unwrap();

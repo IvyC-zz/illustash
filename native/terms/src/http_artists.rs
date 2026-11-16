@@ -173,6 +173,7 @@ pub(crate) fn directory(c: &Connection, library: bool, q: &HashMap<String, Strin
         )
     };
     let sort_name = if sort_by_name { name.as_str() } else { "NULL" };
+    // 从画师词条按 term_projection_term 取投影；不能从全库资产出发扫描每张图的题材投影。
     // 日期相同取 UUID 最小的那张，与图库默认排序一致。LEFT JOIN 让空页仍返回总数。
     let sql = format!(
         "WITH ranked AS (
@@ -180,9 +181,9 @@ pub(crate) fn directory(c: &Connection, library: bool, q: &HashMap<String, Strin
                     count(*) OVER (PARTITION BY t.id) AS count,
                     row_number() OVER (PARTITION BY t.id ORDER BY a.added_at DESC,a.uuid) AS pos
              FROM terms t
-             JOIN term_projection p ON p.term_id=t.id AND p.state IN ('machine','confirmed')
-             JOIN term_assets ta ON ta.id=p.asset_id AND ta.namespace='library' AND ta.removed_at IS NULL
-             JOIN assets a ON a.uuid=ta.key
+             CROSS JOIN term_projection p ON p.term_id=t.id AND p.state IN ('machine','confirmed')
+             CROSS JOIN term_assets ta ON ta.id=p.asset_id AND ta.namespace='library' AND ta.removed_at IS NULL
+             CROSS JOIN assets a ON a.uuid=ta.key
              WHERE t.kind='artist' AND {}{rating} {search}
          ), summary AS (
              SELECT id,key,uuid,last,count FROM ranked WHERE pos=1
