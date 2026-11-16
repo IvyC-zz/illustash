@@ -1710,6 +1710,9 @@ dependencies = [
  "illustash-platform",
  "illustash-terms",
  "libc",
+ "objc2",
+ "objc2-app-kit",
+ "objc2-foundation",
  "serde",
  "serde_json",
  "tauri",
@@ -1717,6 +1720,7 @@ dependencies = [
  "tauri-plugin-dialog",
  "tauri-plugin-updater",
  "tiny_http",
+ "windows",
 ]
 
 [[package]]
