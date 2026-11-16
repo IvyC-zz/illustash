@@ -559,7 +559,7 @@ export function updateActions(u = state.updates, attr = 'data-updates') {
 }
 export function updatesLine() {
   const u = state.updates; if (!u) return `<span>${t('检查更新')}</span>`;
-  const when = u.checked_at ? t('上次检查 {time}', {time: esc(localStamp(Date.parse(u.checked_at) / 1000))}) : t('还没有检查过');
+  const when = u.checked_at ? t('上次检查 {time}', {time: esc(localStamp(Date.parse(u.checked_at) / 1000))}) : t('还没有检查过', {context: 'update'});
   const status = u.newer ? t('有新版本 {version}', {version: esc(u.latest)}) : u.checked_at && !u.error ? t('已是最新版本') : '';
   const hints = [u.newer && updateStatus(u), when, u.error && esc(tb(u.error)), !u.auto && t('自动检查已关闭，可在「设置 › 网络与隐私」里打开')].filter(Boolean);
   const check = updateStarted(u) ? '' : `<button class="quiet small" data-updates-check>${t('检查更新')}</button>`;
