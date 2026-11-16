@@ -107,6 +107,7 @@ export const poolIs = (route, ...pools) => pools.includes(pageOf(route).pool);
 //   prepare(route)       进入本页前要先读的数据；返回 false 表示已经导航走了
 //   heading(r, ctx)      [标题, 副标题, 右侧链接 HTML]；角色页另用 drawHeading
 //   onMeta(info)         计数等元数据到达后重画什么；没有的页面重画工具栏
+//   reveal(uuid)         主区不是网格的页面把这张图滚进视野：详情栏、大图翻页时，和面板页借列表看的大图关掉时（#424）
 //   refresh(why)         数据变了之后重画面板页：'edit' 改动之后、'undo' 撤销之后、'learned' 确认或撤销后后台学习
 //                        收尾之后（#400）、'sync' 同步到新图之后、'nsfw' 切换 R18 之后、'view' 视图选项之后、
 //                        'ask' 「偶尔问一句」开关之后

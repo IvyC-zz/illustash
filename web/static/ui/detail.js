@@ -79,7 +79,7 @@ export async function inspect(ident, quiet = false) {
       ${d.duplicates?.length ? `<section class="inspector-section"><h3 class="section-title">${t('重复副本 · 共 {n} 份', {n: d.duplicates.length + 1})}</h3><div class="dup-list">${d.duplicates.map(x => `<button class="dup-copy" data-copy="${esc(x.uuid)}" title="${t('查看这份副本')}"><img src="/image?id=${encodeURIComponent(x.uuid)}&size=thumb" alt="" loading="lazy"><span><b>${x.pos}/${x.size}</b> ${esc((x.added_at || '').slice(0, 10))}<br><small>${x.names.length ? x.names.map(esc).join(' · ') : t('未识别')}</small></span></button>`).join('')}</div></section>` : ''}
       ${viewOpts.meta ? `<section class="inspector-section"><dl class="facts"><div><dt>${t('尺寸')}</dt><dd class="mono">${number(d.width)} × ${number(d.height)}</dd></div><div><dt>${t('加入')}</dt><dd class="mono">${esc((d.added_at || '').slice(0, 16).replace('T', ' '))}</dd></div><div><dt>${t('文件')}</dt><dd title="${esc(d.filename)}">${esc(d.filename)}</dd></div><div><dt>${t('文件形态')}</dt><dd>${d.src_kind === 'deriv' ? t('本地副本') : t('原图')}</dd></div></dl></section>
       <details class="inspector-section"><summary>${t('画面标签')}</summary><div class="tags">${d.tags.map(x => `<button class="tag" data-tag="${esc(x.value)}" title="${t('按此标签筛选图库 · WD {conf}', {conf: x.conf.toFixed(2)})}">${esc(x.value.replaceAll('_', ' '))}</button>`).join('') || `<p>${t('暂无')}</p>`}</div></details>` : ''}
-      <div class="inspector-actions">${pageOf(state.route).skip && !d.memberships.length ? `<button class="secondary large" id="skipOne">${t('跳过')} <kbd>S</kbd></button>` : ''}${d.unknown ? `<button class="secondary large" id="resumeOne">${t('恢复到未识别')}${viewOf(state.route).bar === 'skipped' ? ' <kbd>S</kbd>' : ''}</button>` : ''}${curate}</div>`;
+      <div class="inspector-actions">${pageOf(state.route).skip && !d.memberships.length && !d.unknown ? `<button class="secondary large" id="skipOne">${t('跳过')} <kbd>S</kbd></button>` : ''}${d.unknown ? `<button class="secondary large" id="resumeOne">${t('恢复到未识别')}${viewOf(state.route).bar === 'skipped' ? ' <kbd>S</kbd>' : ''}</button>` : ''}${curate}</div>`;
     markDetailKeys();
     if (pc) loadCharStats(pc.id, ident, gen);
     $('inspector').querySelector('.preview img').addEventListener('error', e => { e.target.parentElement.innerHTML = `<div class="missing">${esc(unreadableText())}</div>`; }, {once: true});
@@ -256,10 +256,10 @@ async function refreshViewerBar(item, i) {
   for (const b of $('viewerBar').querySelectorAll('[data-vact]')) b.onclick = () => b.dataset.vact === 'info' ? toggleInfo() : singleAction(b.dataset.vact);
 }
 // 大图底栏的「跳过 S」「排除 X」「信息 I」（#424 的 2-1、2-7）：只在这一页按这个键做的就是它时才画。跳过和详情栏的
-// 「跳过 S」一样，只在能跳过的页、图还没有角色时有；已排除的图 X 是恢复收录，不画；信息在有详情栏的页面才有。
+// 「跳过 S」一样，只在能跳过的页、图还没有角色也还没跳过时有（刚跳过、还停在原图时不再显示）；已排除的图 X 是恢复收录，不画；信息在有详情栏的页面才有。
 function viewerActions(d) {
   const r = state.route, b = [], btn = (act, key, label) => `<button class="alt" data-vact="${act}"><kbd>${key}</kbd>${label}</button>`;
-  if (pageOf(r).skip && !d.memberships.length) b.push(btn('skip', 'S', t('跳过')));
+  if (pageOf(r).skip && !d.memberships.length && !d.unknown) b.push(btn('skip', 'S', t('跳过')));
   if (!d.excluded) b.push(btn('exclude', 'X', t('排除')));
   if (keyScope(viewOf(r)) && !previewing()) b.push(btn('info', 'I', t('信息')));
   return b.length ? `<div class="alts"><div class="alt-row">${b.join('')}</div></div>` : '';
@@ -293,8 +293,9 @@ export function wirePeek(root, list) {
   });
   root.addEventListener('pointermove', e => { if (timer && Math.hypot(e.clientX - start[0], e.clientY - start[1]) > 8) cancel(); });
   for (const type of ['pointerup', 'pointercancel', 'pointerleave']) root.addEventListener(type, cancel);
-  // 长按打开了大图：松手时的这次点击不再算「不算在这组里」。
-  root.addEventListener('click', e => { if (fired) { e.preventDefault(); e.stopPropagation(); fired = false; } }, true);
+  // 长按打开了大图：松手时的这次点击不再算「不算在这组里」。松手常落在大图上，这次点击到不了这里，标志留到下一次按下
+  // 才清；所以只吞指针产生的点击（detail > 0），键盘 ↵ 按下按钮产生的点击（detail 为 0）照常。
+  root.addEventListener('click', e => { if (fired && e.detail > 0) { e.preventDefault(); e.stopPropagation(); } fired = false; }, true);
   root.addEventListener('contextmenu', e => { if (fired || timer) e.preventDefault(); });
   root.addEventListener('mouseover', e => { hovered = e.target.closest('[data-peek]'); });
   root.addEventListener('mouseleave', () => { hovered = null; });

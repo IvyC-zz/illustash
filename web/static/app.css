@@ -288,7 +288,7 @@ details[open].inspector-section summary::before{transform:rotate(90deg)}
 .viewer-bar .none-yet{color:#9696a2}
 .viewer-bar .alts{margin:0}
 .viewer-bar .alt{background:#ffffff0d;border-color:#ffffff24;color:#e2e2e8}
-.viewer-bar .alt kbd,.viewer-bar .add-identity kbd{color:#a2a2b0;border-color:#ffffff33}
+.viewer-bar .alt kbd,.viewer-bar .add-identity kbd{color:#a2a2b0;border-color:#ffffff33;border-style:solid;border-width:1px;background:transparent;box-shadow:none}
 
 /* 命令面板与对话框 */
 dialog{width:440px;max-width:calc(100vw - 32px);border:1px solid var(--line);border-radius:var(--radius-14);box-shadow:0 15px 65px #1c1c2324;padding:22px;color:inherit}
