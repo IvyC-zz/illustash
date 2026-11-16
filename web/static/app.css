@@ -113,7 +113,12 @@ main{flex:1;display:flex;flex-direction:column;min-width:0}
 .workspace{flex:1;display:flex;min-height:0;position:relative}
 .content{display:flex;flex-direction:column;flex:1;min-width:0;--gutter:26px;padding:0 var(--gutter)}
 .page-heading{display:flex;align-items:flex-end;justify-content:space-between;padding:26px 0 var(--space-16);gap:var(--space-16)}
-.heading-main{min-width:0}
+.heading-main{min-width:0;position:relative}
+/* 页面说明「?」（#527，ui/dom.js helpTip）：标题后面的小按钮，说明浮层从标题下面展开 */
+.heading-main h1 .icon.small{margin-left:var(--space-4);vertical-align:middle;border-radius:var(--radius-pill);background:var(--soft);color:var(--muted);font-weight:600}
+.heading-main h1 .icon.small.on{background:var(--accent-soft);color:var(--accent-ink)}
+.heading-main>.menu-drop{top:100%;margin-top:var(--space-4)}
+.heading-main>.menu-drop p{margin:0;padding:var(--space-4) var(--space-6);font-size:var(--fs-12);line-height:1.6;color:var(--ink2)}
 h1{font-size:var(--fs-22);letter-spacing:-.6px;font-weight:600;margin:0 0 6px}
 h1.tag-title{font-size:var(--fs-20);font-weight:600;letter-spacing:-.2px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;user-select:all}
 p{margin:0;color:var(--muted);font-size:var(--fs-12);line-height:1.6}
@@ -605,7 +610,7 @@ kbd{font-family:var(--mono);font-size:var(--fs-10);color:var(--muted);background
 .nav.active .nav-icon{background:var(--accent-soft);color:var(--accent)}
 .nav-label{line-height:1.2;white-space:nowrap}
 .nav-count{position:absolute;top:2px;left:calc(50% + 12px);margin:0;font-size:var(--fs-10);font-weight:600;color:var(--faint)}
-.nav-count:empty,#countLibrary,#countCharacters{display:none}
+.nav-count:empty{display:none}
 #countHome{left:calc(50% + 6px);top:1px;min-width:16px;padding:0 var(--space-4);border-radius:var(--radius-8);text-align:center;line-height:16px;background:var(--accent-btn);color:#fff;box-shadow:0 0 0 2px var(--canvas)}
 .section-label{width:24px;height:1px;background:var(--hair);margin:8px 0;padding:0;font-size:0}
 .side-scroll{flex:1}
@@ -629,13 +634,13 @@ h1{font-size:var(--fs-20);font-weight:700;letter-spacing:-.4px;margin:0 0 1px}
 h1.tag-title{font-size:var(--fs-20);font-weight:700;letter-spacing:-.4px}
 p{color:var(--muted)}
 .top-actions{display:flex;align-items:center;gap:var(--space-8);flex-shrink:0}
-.jump{display:inline-flex;align-items:center;gap:var(--space-8);height:var(--h-36);min-width:210px;padding:0 var(--space-8) 0 var(--space-14);border:0;border-radius:var(--radius-pill);background:var(--soft);color:var(--muted);font-size:var(--fs-12)}
+/* 「跳到角色」是按钮，和旁边的圆形按钮同一种底色，不做成输入框的样子（#386 的 2-31） */
+.jump{display:inline-flex;align-items:center;gap:var(--space-8);height:var(--h-36);padding:0 var(--space-12);border:0;border-radius:var(--radius-pill);background:var(--soft);color:var(--ink2);font-size:var(--fs-12);font-weight:500}
 .jump svg{width:15px;height:15px;fill:none;stroke:currentColor;stroke-width:1.7;stroke-linecap:round}
-.jump kbd{margin-left:auto}
-.jump:hover{box-shadow:0 0 0 1px var(--hair)}
-.top-actions .icon,#sidebarToggle{width:var(--h-36);height:var(--h-36);border-radius:var(--radius-pill);background:var(--soft);color:var(--ink2)}
-.top-actions .icon:hover,#sidebarToggle:hover{background:rgba(var(--sh),.09)}
-.top-actions .icon svg,#sidebarToggle svg{width:17px;height:17px;fill:none;stroke:currentColor;stroke-width:1.6;stroke-linecap:round;stroke-linejoin:round}
+.jump:hover{background:rgba(var(--sh),.09)}
+.top-actions .icon,#sidebarToggle,#backButton{width:var(--h-36);height:var(--h-36);border-radius:var(--radius-pill);background:var(--soft);color:var(--ink2)}
+.top-actions .icon:hover,#sidebarToggle:hover,#backButton:hover{background:rgba(var(--sh),.09)}
+.top-actions .icon svg,#sidebarToggle svg,#backButton svg{width:17px;height:17px;fill:none;stroke:currentColor;stroke-width:1.6;stroke-linecap:round;stroke-linejoin:round}
 .icon{border-radius:var(--radius-8);color:var(--ink2)}
 .icon:hover,.quiet:hover{background:var(--soft)}
 button:active:not(:disabled){transform:scale(.97)}
@@ -770,7 +775,7 @@ dialog::backdrop{background:rgba(20,20,30,.22);backdrop-filter:blur(3px)}
   #sidebarToggle{display:inline-flex}
   .workspace{padding:var(--space-6)}
   .content{--gutter:12px;padding:0 var(--gutter)}
-  .jump{min-width:0}.jump span,.jump kbd{display:none}
+  .jump span,.jump kbd{display:none}
 }
 dialog{background:var(--sheet);color:var(--ink)}
 input,textarea{color:inherit}

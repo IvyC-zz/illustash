@@ -6,7 +6,28 @@ import {prefs} from '../core/prefs.js';
 import {session, STALE, onStale, readError} from '../core/session.js';
 import {onLatest} from '../core/edits.js';
 import {workLabel} from '../core/labels.js';
+import {createLayer} from './overlay.js';
 export const $ = id => document.getElementById(id);
+// ---------- 页面说明「?」（#527） ----------
+// 页面标题旁的「?」：这一页是什么、怎么操作，点开（键盘聚焦后 Enter／Space）才显示，标题下面只留数量、状态和
+// 必须一眼看到的警告。说明是非模态浮层，Esc、点外关闭由浮层管理器处理，关了焦点回到按钮。标题重画时元素换掉，
+// 层按 id 找元素。lines 是几行说明（已转义的 HTML），一行一句。返回 [按钮, 浮层]：按钮放进 h1，浮层放在
+// .heading-main 里（标题可能截断溢出，浮层不能放在 h1 里面）。
+const helpLayer = createLayer({kind: 'popover', id: 'page-help', el: () => $('pageHelpPop'), anchor: () => $('pageHelp'), focusIn: 'self',
+  onDismiss: reason => showHelp(false, reason)});
+function showHelp(open, reason) {
+  const pop = $('pageHelpPop'); if (pop) pop.hidden = !open;
+  $('pageHelp')?.setAttribute('aria-expanded', open); $('pageHelp')?.classList.toggle('on', open);
+  if (open) helpLayer.open(); else helpLayer.close(reason);
+}
+export function helpTip(lines) {
+  if (!lines?.length) return ['', ''];
+  const label = t('这一页的说明');
+  return [`<button class="icon small" id="pageHelp" title="${label}" aria-label="${label}" aria-expanded="false" aria-controls="pageHelpPop">?</button>`,
+    `<div id="pageHelpPop" class="menu menu-drop" role="dialog" aria-label="${label}" tabindex="-1" hidden>${lines.map(x => `<p>${x}</p>`).join('')}</div>`];
+}
+// 标题画好之后调一次：给「?」挂上开关。
+export function wireHelpTip() { const b = $('pageHelp'); if (b) b.onclick = () => showHelp($('pageHelpPop').hidden); }
 // 帮助文字和提示用 ⌘ 写；其他系统显示 Ctrl。
 export function platformHints(root, mac = isMac) {
   if (mac) return;

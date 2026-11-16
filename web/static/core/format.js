@@ -20,5 +20,13 @@ export const stamp = t => (t || '').replace('T', ' ').slice(5, 16);
 // Unix 秒数 → 本地时间「MM-DD hh:mm」。
 export const localStamp = sec => { const d = new Date(sec * 1000), p = n => String(n).padStart(2, '0'); return `${p(d.getMonth() + 1)}-${p(d.getDate())} ${p(d.getHours())}:${p(d.getMinutes())}`; };
 export const pct = (n, total) => total ? `${(n / total * 100).toFixed(1)}%` : '—';
+// 后端的 UTC 时间戳（SQLite 的「YYYY-MM-DD hh:mm:ss」，或带时区的 ISO 8601）按本地时区的日期显示；只有日期的
+// （人工结论快照导入的）照原样显示；读不出时返回空。
+export const localDate = utc => {
+  const s = String(utc || ''), day = s.match(/^(\d{4})-(\d\d)-(\d\d)$/);
+  if (day) return dateText(day[1], +day[2], +day[3]);
+  const d = new Date(/(Z|[+-]\d\d:?\d\d)$/i.test(s) ? s : s.replace(' ', 'T') + 'Z');
+  return isNaN(d) ? '' : dateText(d.getFullYear(), d.getMonth() + 1, d.getDate());
+};
 // provenance.sqlite 存的是 SQLite 的 UTC 时间戳。
 export const localTime = utc => { const d = new Date(String(utc || '').replace(' ', 'T') + 'Z'); return isNaN(d) ? '' : `${d.getMonth() + 1}-${String(d.getDate()).padStart(2, '0')} ${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`; };

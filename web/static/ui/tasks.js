@@ -6,7 +6,8 @@ import {esc, number, stamp, localTime} from '../core/format.js';
 import {state} from '../core/state.js';
 import {api, post, shared, readError} from '../core/session.js';
 import {SYNC_ACTIVE, INDEX_ACTIVE, NAMES_ACTIVE, SIMILAR_ACTIVE, PROV_ACTIVE, RUN_STATUS, onJob, syncLine, syncBar, syncDoneText, indexLine, indexEndText, resumeIndex, discardIndex,
-  namesLine, taskSimilar, pollSync, pollIndex, pollNames, loadProvenance, startSync, checkIndex, refreshNames, provenanceAction, PHOTOS_PRIVACY, photosHelp, photosRefused} from '../core/jobs.js';
+  namesLine, taskSimilar, pollSync, pollIndex, pollNames, loadProvenance, startSync, checkIndex, refreshNames, provenanceAction, PHOTOS_PRIVACY, photosHelp, photosRefused,
+  importActive, importLine, cancelImport, pollImports} from '../core/jobs.js';
 import {loadLibraries, setSettings, updatesTick} from '../core/settings.js';
 import {$, toast, error, fold, wireFolds, redraw, setDrawn, busy} from './dom.js';
 import {confirmAction} from './dialog.js';
@@ -73,7 +74,13 @@ export function taskList() {
     active: m.job?.status === 'running', warn: m.job?.status === 'failed', line: modelsLine(m), body: modelsBar(m), action: modelsActions(m, true)});
   if (['running', 'done', 'error'].includes(ex.status)) list.push({key: 'export', name: t('导出图库'), busy: t('导出图库中'), active: ex.status === 'running', warn: ex.status === 'error',
     line: ex.status === 'running' ? t('正在导出…') : ex.status === 'done' ? t('已导出 {mb} MB', {mb: (ex.bytes / 1048576).toFixed(0)}) : t('导出失败：{error}', {error: tb(ex.error || '')}), body: '', action: ''});
-  const diagnoses = {sync: s, index: ix, names: nm, similar: sim, provenance: ps, models: m?.job, export: ex};
+  // 导入（图库归档、识别结果、人工结论共用一个槽；#386 的 2-37）：和导出一样，运行中、结束后都在这里有一行，运行时可以取消。
+  const im = state.importTask;
+  if (['running', 'stopping', 'done', 'error', 'cancelled'].includes(im?.status)) list.push({key: 'import',
+    name: im.kind === 'recognition' ? t('导入识别结果') : im.kind === 'human_conclusions' ? t('导入人工结论') : t('导入图库'), busy: t('导入中'),
+    active: importActive(), warn: im.status === 'error', line: importLine(im), body: '',
+    action: im.status === 'running' ? `<button class="quiet small" data-task="import-cancel">${t('取消导入')}</button>` : ''});
+  const diagnoses = {sync: s, index: ix, names: nm, similar: sim, provenance: ps, models: m?.job, export: ex, import: im};
   for (const task of list) {
     const note = diagnosticLine(diagnoses[task.key]?.diagnostic);
     if (note && task.warn) task.line += ' · ' + note;
@@ -95,6 +102,9 @@ function taskAsks() {
   else if (missing.length && !INDEX_ACTIVE.includes(ix.status)) asks.push(`<div class="task-ask"><span>${t('上次检查发现 {n} 个还没收录的角色', {n: `<b>${number(missing.length)}</b>`})}</span><button class="primary small" data-task="index-add">${t('查看并添加…')}</button></div>`);
   return asks;
 }
+// 自动运行的开关在设置的哪几节（#386 的 2-37）：同步和相似图片在「图库」，检查新角色和角色名称在「角色资料」，
+// 找回画师在「画师」。
+const footLink = (section, label) => `<a class="link" href="#/settings/${section}">${label}</a>`;
 export function renderTasks() {
   const list = taskList(), active = list.filter(t => t.active), warn = list.some(t => t.warn), asks = taskAsks();
   const button = $('taskButton'), badge = $('taskBadge');
@@ -109,7 +119,8 @@ export function renderTasks() {
     <h6>${active.length ? t('进行中与其他任务') : t('全部任务')}</h6><div class="view-group task-group">${order.map(task => `<div class="task-item${task.active ? ' on' : ''}">
       <div class="task-main"><span class="local-dot${task.active ? ' busy' : task.warn ? ' warn' : task.off ? ' off' : ''}"></span><span class="task-text"><b>${task.name}</b><small>${esc(task.line)}</small></span>${task.action}</div>
       ${task.body ? `<div class="task-body">${task.body}</div>` : ''}${task.log ? fold('task-' + task.key, task.log[0], task.log[1]) : ''}</div>`).join('')}</div>
-    <p class="task-foot">${t('各任务是否自动运行，在{link}里改。', {link: `<a class="link" href="#/settings">${t('设置')}</a>`})}</p>`;
+    <p class="task-foot">${t('各任务是否自动运行，在设置的{library}、{characters}、{artists}里改。',
+      {library: footLink('library', t('图库')), characters: footLink('characters', t('角色资料')), artists: footLink('artists', t('画师'))})}</p>`;
   const pop = $('taskPanel');
   // 任务运行期间会轮询：只在有变化时重画，这样点击绝不会因为按钮被替换而丢失。
   // 焦点在面板里时，重画后放回同一个按钮（按 data-task／data-prov 找），找不到就放在面板上，不掉到页面上（#422）。
@@ -126,6 +137,8 @@ export async function taskTick() {
   if (taskPanel.open || !state.models) jobs.push(loadModels());
   // 相似任务的状态随 /api/settings 一起来，它还要测量缓存：只在有人看时才读。
   if (taskPanel.open && Date.now() - taskPanel.settingsAt > (SIMILAR_ACTIVE.includes(state.settings?.tasks?.similar?.status) ? 2500 : 15000)) { taskPanel.settingsAt = Date.now(); jobs.push(shared('/api/settings').then(s => { setSettings(s); }).catch(e => error(readError(e)))); }
+  // 面板开着时发现在别的窗口里启动的导入；运行中的导入有自己的轮询。
+  if (taskPanel.open && !importActive()) jobs.push(pollImports());
   // 面板打开后读一次图库列表（同步任务的名字和导出的进度）。
   if (taskPanel.open && !state.libraries) jobs.push(loadLibraries());
   await Promise.allSettled(jobs);
@@ -174,6 +187,7 @@ export function wireTasks() {
         else if (act === 'index') return await checkIndex(confirmAction);
         else if (act === 'index-resume') { if (!await resumeIndex(confirmAction)) return false; pollIndex(); }
         else if (act === 'index-discard') return await discardIndex(confirmAction);
+        else if (act === 'import-cancel') await cancelImport();
         else if (act === 'names') { await refreshNames(); toast(t('已开始重新获取角色名称')); }
         else if (act === 'similar') { await post('/api/similar', {}); setSettings(await api('/api/settings')); }
       } catch (err) { toast(err.message); }
