@@ -158,7 +158,7 @@ async function choose(i, more = false, explicit = false) {
 }
 export function mergeCharacter(c) {
   openPicker({title: t('把 {name} 合并到…', {name: c.name}), placeholder: t('输入同一个人的另一个角色'), jump: true, exclude: [c.id],
-    sentence: e => t('把 {name} 并入 {target}：图、人工结论、子标签和别名都过去，可撤销', {name: c.name, target: e.name}),
+    sentence: e => t('把 {name} 并入 {target}：图、人工结论、造型和别名都过去，可撤销', {name: c.name, target: e.name}),
     pick: async e => {
       try { const r = await post('/api/merge', {source: c.id, target: e.id}); setLatest(r.undo); toast(tb(r.undo.label), true); await refreshMeta(); go(charRoute(e.id)); }
       catch (err) { toast(err.message); }
