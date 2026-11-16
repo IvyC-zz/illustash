@@ -50,6 +50,7 @@ export async function renderIndexCard(fresh = true) {
   if (!$('indexCard') || !onPage(state.route, 'settings')) return;
   if (fresh || !state.index) { try { const value = await shared('/api/index'); if (route !== state.route || token !== session.token) return; setIndex(value); } catch (e) { if (route === state.route && token === session.token) readFailure($('indexCard'), e); return; } }
   const card = $('indexCard'), x = state.index; if (!x || !card) return;
+  loadCoverage(x, fresh).then(changed => { if (changed && route === state.route && token === session.token) renderIndexCard(false); });
   const s = x.state, active = INDEX_ACTIVE.includes(s.status), watched = x.watch.works.length;
   // 关注哪些作品在「资料库 · 作品」里逐个作品决定；这里只管检查怎么运行。
   if (!setSettingsHTML(card, cardHead(t('检查新角色'), `${t('定期在 Danbooru 上查关注的作品有没有本地还不认识的角色，只发送作品名。')}<span class="hint-more" title="${t('添加角色时每个角色下载约 20 张公开参考图（约 {mb} MB），在本机算好特征后重新扫描图库。', {mb: x.mb_per_character})}">${t('了解详情')}</span>`, 'library') + `
@@ -57,7 +58,7 @@ export async function renderIndexCard(fresh = true) {
     <a class="setting-line set-link" href="#/characters/works"><span>${t('关注的作品')}<small class="line-hint">${t('在资料库的「作品」里逐部开关')}</small></span><span>${watched ? t('{n} 部', {n: number(watched)}) : t('还没有')} ›</span></a>
     <div class="setting-line"><span>${t('只提示图片较多的角色')}<small class="line-hint">${t('Danbooru 上图片少于这个数的角色不提示')}</small></span><span class="num-field"><input id="watchMin" type="number" min="20" max="5000" step="10" value="${x.watch.min_posts}"> ${t('张')}</span></div>
     <p class="set-foot">${t('每次检查前确认联网，只允许本次运行。')}</p>
-    ${coverageFold(x)}
+    ${coverageFold(x, coverage)}
     ${x.history.length ? fold('indexHistory', t('最近添加的角色（{n} 个）', {n: number(x.history.reduce((n, h) => n + h.characters.length, 0))}), `<table class="settings-table">${x.history.flatMap(h => h.characters.map(c => `<tr><td>${esc(stamp(h.at))}</td>
       <td>${c.entity && c.status === 'added' ? `<a class="link" href="${charHash(c.entity.id)}">${esc(c.entity.name)}</a>` : esc(c.tag || c.short_tag)}</td>
       <td>${c.status === 'added' ? t('匹配 {n} 张', {n: number(c.entity?.count ?? c.claims)}) : c.status === 'dropped' ? t('已移除') : t('未添加：{reason}', {reason: esc(tb(c.reason || ''))})}</td>
@@ -71,9 +72,19 @@ export async function renderIndexCard(fresh = true) {
   };
 }
 
-// 上次检查时每个关注作品的情况（#561）：本图库启用的数据包已经覆盖几个、自己补过几个、还缺几个。旧的检查结果没有这一项。
-export function coverageFold(x) {
-  const rows = Object.entries(x?.check?.coverage || {}).filter(([, v]) => v);
+// 上次检查时每个关注作品的情况（#561，GET /api/index/coverage）：本图库启用的数据包已经覆盖几个、自己补过几个、还缺几个。
+// /api/index 的回复冻结，所以另读一次；检查或添加角色之后（检查时间或最近一条历史变了）重新读。
+let coverage = null, coverageKey = '';
+async function loadCoverage(x, fresh) {
+  const key = JSON.stringify([x.check?.checked_at, x.history?.[0]?.at]);
+  if (!fresh && key === coverageKey) return false;
+  coverageKey = key;
+  try { coverage = await shared('/api/index/coverage'); } catch { coverage = null; }
+  return true;
+}
+// 合计写在折叠区标题，每个作品一行。还没检查过、或检查早于这一版（没有 coverage.json）时不显示。
+export function coverageFold(x, c) {
+  const rows = Object.entries(c?.coverage || {}).filter(([, v]) => v);
   if (!rows.length) return '';
   const sum = key => number(rows.reduce((n, [, v]) => n + (v[key] || 0), 0));
   const name = tag => x.works?.find(w => w.tag === tag)?.name || workName(tag);

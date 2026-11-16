@@ -136,7 +136,8 @@ class NativeIndexTest(unittest.TestCase):
         checked=self.check()['check']
         self.assertEqual(checked['missing'],self.remote_rows)
         # 没启用数据包：按作品计数只有还缺的（#561）。
-        self.assertEqual(checked['coverage'],{'example':{'packs':0,'own':0,'missing':2}})
+        self.assertNotIn('coverage',checked) # /api/index 的回复冻结，覆盖情况另开路由
+        self.assertEqual(json.loads(self.request('/api/index/coverage')['body'])['coverage'],{'example':{'packs':0,'own':0,'missing':2}})
         v=self.apply();self.assertEqual(v['state']['status'],'done',v);self.assertEqual((v['state']['status'],v['state']['added'],v['state']['changed']),('done',1,2),v)
         self.assertEqual(v['check']['missing'],[])
         add,rejected=v['history'][0]['characters']; self.assertEqual((add['claims'],add['entity']['count']),(2,2))
@@ -147,7 +148,10 @@ class NativeIndexTest(unittest.TestCase):
             self.assertGreater(c.execute("SELECT count(*) FROM backend_effects WHERE kind LIKE 'names:%'").fetchone()[0],0)
             self.assertEqual(c.execute("SELECT count(*) FROM backend_effects WHERE kind='index_changed' AND status='pending'").fetchone()[0],1)
         # 再检查一次：补进来的算「自己补过」，被拒绝的不计（#561）。
-        self.assertEqual(self.check()['check']['coverage'],{'example':{'packs':0,'own':1,'missing':0}})
+        # 添加以后覆盖情况跟着改：补进来的挪到「自己补过」，没添加成的不再计入还缺。
+        self.assertEqual(json.loads(self.request('/api/index/coverage')['body'])['coverage'],{'example':{'packs':0,'own':1,'missing':0}})
+        self.check()
+        self.assertEqual(json.loads(self.request('/api/index/coverage')['body'])['coverage'],{'example':{'packs':0,'own':1,'missing':0}})
         self.assertEqual(self.index({'action':'watch','works':[self.work,self.work],'min_posts':150})['watch']['works'],[self.work])
         for b in ({'action':'apply','tags':['bogus']},{'action':'drop','char':'alice','reason':'x'},{'action':'watch','works':[self.work],'min_posts':True}):self.assertEqual(self.request('/api/index',b)['status'],400)
         self.index({'action':'drop','char':'carol_example','reason':'  合成放弃  '});v=self.finish();self.assertEqual(v['state']['status'],'done',v)

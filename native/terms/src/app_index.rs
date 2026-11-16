@@ -429,6 +429,10 @@ impl Updater {
         }
         state
     }
+    /// 上次检查时每个关注作品的覆盖情况（#561，GET /api/index/coverage）；还没检查过时为 null。
+    pub fn coverage(&self) -> Json {
+        read_check(&self.dir.join("coverage.json"))
+    }
     pub fn info(&self, lib: &Library) -> Result<Json> {
         let c = crate::app_library::read_connection(&lib.db())?;
         crate::http_read::register_names(&c)?;
@@ -689,6 +693,7 @@ impl Updater {
                     let found = checked["missing"].as_array().expect("candidates always returns a missing array").len();
                     ctx.check()?;
                     write_check(&dir.join("check.json"), &checked)?;
+                    write_json(&dir.join("coverage.json"), &coverage_json(&checked))?;
                     update(&state, json!({"status":"checked","found":found,"finished_at":now()}));
                     pause_after_done();
                     Ok(())
@@ -1515,6 +1520,23 @@ fn record(dir: &Path, id: &str, chars: &[Value], changed: i64, drop: bool) -> Re
             missing.retain(|r| !done.contains(&r["short_tag"]));
         }
         write(&dir.join("check.json"), &check)?;
+        // 覆盖情况跟着改（#561）：添加成功的从还缺挪到自己补过，没添加成的不再计入还缺。
+        let mut coverage = read(&dir.join("coverage.json"), Value::Null);
+        if coverage["coverage"].is_object() {
+            for r in chars {
+                let Some(work) = r["copyright"].as_str().and_then(|cp| coverage["coverage"].get_mut(cp)) else {
+                    continue;
+                };
+                if !work.is_object() {
+                    continue;
+                }
+                work["missing"] = json!((work["missing"].as_i64().unwrap_or(0) - 1).max(0));
+                if r["status"] == "added" {
+                    work["own"] = json!(work["own"].as_i64().unwrap_or(0) + 1);
+                }
+            }
+            write(&dir.join("coverage.json"), &coverage)?;
+        }
     }
     let mut ledger = read(&dir.join("native-history.json"), json!({}));
     let record = if let Some(record) = ledger.get(id) {
@@ -1611,27 +1633,32 @@ fn character_json(v: &Value) -> Json {
 }
 fn check_json(v: &Value) -> Json {
     let mut value = v.clone();
-    value.as_object_mut().map(|o| o.remove("work_order"));
-    let mut out = ordered(&value, &["checked_at", "works", "coverage", "min_posts", "missing"]);
+    // 按作品的覆盖情况（#561）另存在 coverage.json，GET /api/index 的回复保持原样。
+    value.as_object_mut().map(|o| (o.remove("work_order"), o.remove("coverage")));
+    let mut out = ordered(&value, &["checked_at", "works", "min_posts", "missing"]);
     if let Some(order) = v["work_order"].as_array() {
-        for field in ["works", "coverage"] {
-            if !v[field].is_object() {
-                continue;
-            }
-            let by_work = order.iter().filter_map(|key| {
-                let k = key.as_str()?;
-                let x = v[field].get(k)?;
-                Some((
-                    k.to_owned(),
-                    if field == "coverage" { ordered(x, &["packs", "own", "missing"]) } else { Json::from(x.clone()) },
-                ))
-            });
-            out.set(field, Json::Object(by_work.collect()));
-        }
+        out.set("works", by_work(order, &v["works"], |x| Json::from(x.clone())));
     }
     if let Some(rows) = v["missing"].as_array() {
         out.set("missing", Json::Array(rows.iter().map(character_json).collect()));
     }
+    out
+}
+/// 按关注作品的顺序排一个以作品 tag 为键的对象。
+fn by_work(order: &[Value], map: &Value, item: impl Fn(&Value) -> Json) -> Json {
+    Json::Object(
+        order.iter().filter_map(|key| key.as_str().and_then(|k| map.get(k).map(|x| (k.to_owned(), item(x))))).collect(),
+    )
+}
+/// 上次检查时每个关注作品的覆盖情况（#561）：{checked_at, coverage: {作品 tag: {packs, own, missing} 或 null}}，
+/// 按关注作品的顺序。GET /api/index/coverage 原样返回。
+fn coverage_json(v: &Value) -> Json {
+    let mut out = Json::object([("checked_at", Json::from(v["checked_at"].clone()))]);
+    let order = v["work_order"]
+        .as_array()
+        .cloned()
+        .unwrap_or_else(|| v["coverage"].as_object().map(|m| m.keys().map(|k| json!(k)).collect()).unwrap_or_default());
+    out.set("coverage", by_work(&order, &v["coverage"], |x| ordered(x, &["packs", "own", "missing"])));
     out
 }
 fn history_json(v: &Value) -> Json {
@@ -1663,7 +1690,10 @@ fn read_check(path: &Path) -> Json {
     std::fs::read_to_string(path).ok().and_then(|s| serde_json::from_str(&s).ok()).unwrap_or(Json::from(Value::Null))
 }
 fn write_check(path: &Path, v: &Value) -> Result<()> {
-    let out = check_json(v).dump();
+    write_json(path, &check_json(v))
+}
+fn write_json(path: &Path, v: &Json) -> Result<()> {
+    let out = v.dump();
     std::fs::create_dir_all(path.parent().expect("index file path must have a parent"))?;
     let tmp = path.with_extension(format!("{}.tmp", crate::store::new_key()?));
     std::fs::write(&tmp, out)?;
@@ -1745,14 +1775,18 @@ mod tests {
         );
     }
 
-    /// 检查结果按关注作品的顺序存，coverage 每项按 packs、own、missing 排。
+    /// 检查结果按关注作品的顺序存；覆盖情况另存，check.json 的格式不变（GET /api/index 的回复冻结）。
     #[test]
-    fn stored_check_keeps_work_order_for_coverage() {
+    fn stored_check_keeps_work_order_and_coverage_apart() {
         let v = json!({"checked_at": "t", "works": {"b": 1, "a": null}, "coverage": {"a": null, "b": {"missing": 1, "own": 0, "packs": 2}},
             "min_posts": 100, "missing": [], "work_order": ["b", "a"]});
         assert_eq!(
             check_json(&v).dump(),
-            r#"{"checked_at": "t", "works": {"b": 1, "a": null}, "coverage": {"b": {"packs": 2, "own": 0, "missing": 1}, "a": null}, "min_posts": 100, "missing": []}"#
+            r#"{"checked_at": "t", "works": {"b": 1, "a": null}, "min_posts": 100, "missing": []}"#
+        );
+        assert_eq!(
+            coverage_json(&v).dump(),
+            r#"{"checked_at": "t", "coverage": {"b": {"packs": 2, "own": 0, "missing": 1}, "a": null}}"#
         );
     }
 
