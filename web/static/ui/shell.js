@@ -37,7 +37,7 @@ function metaShown({error: e, directory, queue}) {
   navCount('countExcluded', state.pendingCount, t('像截图、等你确认的图'));
   $('navDuplicates').href = state.dupInfo.mixed ? hashFor({page: 'duplicates', dup: 'mixed'}) : '#/duplicates';
   $('navExcluded').href = state.pendingCount ? '#/pending' : '#/excluded';
-  if (queue) { navCount('countIdentity', state.identityCount, t('长得像、可能是同一人或同一人另一形态的角色对')); $('navIdentity').hidden = !state.identityCount && viewOf(state.route).nav !== 'identity'; }
+  if (queue) { navCount('countIdentity', state.identityCount, t('长得像、可能是同一人或同一人另一个造型的角色对')); $('navIdentity').hidden = !state.identityCount && viewOf(state.route).nav !== 'identity'; }
   // 角色还没读到时（state.char 为空）算图库页：这一刻不重画。
   const view = viewOf(state.route, state.char);
   if (view.onMeta) view.onMeta({directory}); else renderChrome();

@@ -8,10 +8,10 @@ import {composing} from '../core/keys.js';
 import {workLabel} from '../core/labels.js';
 import {refreshMeta} from '../core/meta.js';
 import {poolIs} from '../core/pages.js';
-import {prefs} from '../core/prefs.js';
+import {libraryPrefs, prefs} from '../core/prefs.js';
 import {charRoute, go} from '../core/route.js';
 import {api, post, readError} from '../core/session.js';
-import {remoteNames, remoteNote} from '../core/settings.js';
+import {currentLibraryId, remoteNames, remoteNote} from '../core/settings.js';
 import {state} from '../core/state.js';
 import {refreshLocalLinks} from './catalog.js';
 import {$, toast} from './dom.js';
@@ -30,12 +30,18 @@ export const targets = list => list.length > 1 ? {entities: list.map(e => e.id)}
 // 「换成」接受多个角色；只有一个时照以前的方式发送。
 export const newIds = list => list.length > 1 ? list.map(e => e.id) : list[0].id;
 const stageKey = e => e.id || (e.remote ? 'tag:' + e.tag : 'new:' + (e.oc ? 'oc:' : '') + e.create);
+// 最近使用的标签（tagPicks）和角色（picks）按图库分开存（#523）：标签和角色都属于图库，角色 ID 换了图库甚至指向
+// 别的角色。各记最近 8 个。
+const recentIn = async () => libraryPrefs(await currentLibraryId());
+const remember = (store, key, item, same) => store.set(key, [item, ...store.get(key, []).filter(x => !same(x))].slice(0, 8));
+const rememberChar = async entity => remember(await recentIn(), 'picks', {id: entity.id, name: entity.name}, x => x.id === entity.id);
 export async function openPicker(opts) {
-  palette = {...opts, list: [], index: 0, generation: 0, staged: []};
+  const p = palette = {...opts, list: [], index: 0, generation: 0, staged: [], recent: libraryPrefs('')};
   renderStaged();
   $('pickerSearch').value = ''; $('pickerSearch').placeholder = opts.placeholder || t('输入角色 tag 或别名…');
   openModal($('picker'), {backdropClose: true, id: 'picker'}); $('pickerSearch').focus();
-  await paletteSearch();
+  p.recent = await recentIn();
+  if (palette === p) await paletteSearch();
 }
 async function paletteSearch() {
   const p = palette; if (!p) return;
@@ -44,7 +50,7 @@ async function paletteSearch() {
   if (p.tagMode) {
     const low = q.toLowerCase(), mine = state.userTags.filter(x => !q || x.tag.toLowerCase().includes(low));
     if (p.present.size && !q) sections.push({label: t('去掉已有标签'), items: [...p.present.keys()].map(tag => ({tag, name: tag, remove: true, hint: t('所选图片中 {n} 张有', {n: number(p.present.get(tag))}), counted: true}))});
-    const recent = prefs.get('tagPicks', []).filter(tag => !q || tag.toLowerCase().includes(low));
+    const recent = p.recent.get('tagPicks', []).filter(tag => !q || tag.toLowerCase().includes(low));
     if (recent.length) sections.push({label: t('最近使用'), items: recent.map(tag => ({tag, name: tag, hint: t('我的标签')}))});
     const rest = mine.filter(x => !recent.includes(x.tag));
     if (rest.length) sections.push({label: t('我的标签'), items: rest.map(x => ({tag: x.tag, name: x.tag, hint: t('{n} 张', {n: number(x.count)}), counted: true}))});
@@ -84,7 +90,7 @@ async function paletteSearch() {
       if (sug.length) sections.push({label: t('也可能是'), items: sug.filter(e => !(p.exclude || []).includes(e.id)).map(e => ({...e, hint: e.count > 1 ? t('{n} 张的机器候选', {n: number(e.count)}) : t('机器候选'), counted: e.count > 1}))});
     }
     const seen = new Set(sections.flatMap(s => s.items.map(e => e.id)));
-    const recent = prefs.get('picks', []).filter(e => !seen.has(e.id) && !(p.exclude || []).includes(e.id));
+    const recent = p.recent.get('picks', []).filter(e => !seen.has(e.id) && !(p.exclude || []).includes(e.id));
     if (recent.length) sections.push({label: t('最近使用'), items: recent}); recent.forEach(e => seen.add(e.id));
     const top = state.chars.filter(e => !seen.has(e.id) && !(p.exclude || []).includes(e.id)).slice(0, 8);
     if (top.length) sections.push({label: t('常用'), items: top});
@@ -134,9 +140,10 @@ export function stage(e) {
   p.touched = false; renderStaged(); $('pickerSearch').value = ''; $('pickerSearch').focus(); paletteSearch();
 }
 async function resolveEntity(e) {
+  const p = palette;
   const entity = e.remote ? await post('/api/entities', {tag: e.tag, typed: e.typed})
     : e.create ? await post('/api/entities', e.oc ? {name: e.create, kind: 'oc'} : {name: e.create}) : e;
-  if (!palette?.items) prefs.set('picks', [{id: entity.id, name: entity.name}, ...prefs.get('picks', []).filter(x => x.id !== entity.id)].slice(0, 8));
+  if (p && !p.items) remember(p.recent, 'picks', {id: entity.id, name: entity.name}, x => x.id === entity.id);
   return entity;
 }
 async function choose(i, more = false, explicit = false) {
@@ -150,7 +157,7 @@ async function choose(i, more = false, explicit = false) {
   }
   if (!e) return;
   if (p.tagMode) {
-    if (!e.remove) prefs.set('tagPicks', [e.tag, ...prefs.get('tagPicks', []).filter(t => t !== e.tag)].slice(0, 8));
+    if (!e.remove) remember(p.recent, 'tagPicks', e.tag, tag => tag === e.tag);
     palette = null; $('picker').close(); p.pick(e); return;
   }
   let entity; try { entity = await resolveEntity(e); } catch (err) { toast(err.message); return; }
@@ -158,7 +165,7 @@ async function choose(i, more = false, explicit = false) {
 }
 export function mergeCharacter(c) {
   openPicker({title: t('把 {name} 合并到…', {name: c.name}), placeholder: t('输入同一个人的另一个角色'), jump: true, exclude: [c.id],
-    sentence: e => t('把 {name} 并入 {target}：图、人工结论、子标签和别名都过去，可撤销', {name: c.name, target: e.name}),
+    sentence: e => t('把 {name} 并入 {target}：图、人工结论、造型和别名都过去，可撤销', {name: c.name, target: e.name}),
     pick: async e => {
       try { const r = await post('/api/merge', {source: c.id, target: e.id}); setLatest(r.undo); toast(tb(r.undo.label), true); await refreshMeta(); go(charRoute(e.id)); }
       catch (err) { toast(err.message); }
@@ -169,7 +176,7 @@ export function mergeCharacter(c) {
 // 快速标注用共用的那一个「原创角色（未细分）」；一个相似分组（全是同一个人）仍然得到它自己的 OC。
 export async function markOc(body, leaving, separate = false) {
   let entity; try { entity = await post(separate ? '/api/entities' : '/api/oc/shared', {kind: 'oc'}); } catch (err) { toast(err.message); return; }
-  prefs.set('picks', [{id: entity.id, name: entity.name}, ...prefs.get('picks', []).filter(x => x.id !== entity.id)].slice(0, 8));
+  await rememberChar(entity);
   if (await mutate('/api/change', {...body, action: 'confirmed', entity: entity.id}, leaving) && poolIs(state.route, 'cluster') && !state.total) go(charRoute(entity.id));
 }
 // 拆分共用的 OC 标记：按需计算相似分组，每组一次点击归到它自己的 OC（可撤销）。
@@ -360,6 +367,8 @@ export function jumpToCharacter() { openPicker({title: t('跳到角色'), jump: 
 
 // 页面这一部分注册的处理函数。页面启动时调用一次。
 export function wirePalette() {
+  // 0.2.0 及以前不分图库存的最近使用：不知道是哪个图库的，丢掉（#523）。
+  prefs.drop('tagPicks'); prefs.drop('picks');
   $('pickerSearch').addEventListener('input', () => { if (palette) palette.touched = true; clearTimeout(pickerTimer); pickerTimer = setTimeout(paletteSearch, 140); });
   $('pickerSearch').addEventListener('keydown', e => {
     const p = palette; if (!p || composing(e)) return;

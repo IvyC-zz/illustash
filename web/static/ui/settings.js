@@ -26,7 +26,7 @@ import {renderIntegrityLine} from './integrity.js';
 import {renderModelsCard} from './models.js';
 import {openModal} from './overlay.js';
 import {renderHumanBlock, onHumanClick, wireHuman} from './human.js';
-import {loadHuman} from '../core/human.js';
+import {loadHuman, home} from '../core/human.js';
 
 // ---------- 名称：这个图库联网查询名称的授权 ----------
 // 名称的文字查询（只有 tag 和作品名）需要这个图库授权：授权之前，后端以「显示名联网尚未授权」拒绝。其他失败都是真正的
@@ -84,7 +84,7 @@ export async function renderNamesCard(fresh = true) {
   card.innerHTML = cardHead(t('角色名称'), t('从 Bangumi 取角色的中文名，只发送 tag 和作品名。没有中文名时显示日文名，再没有就显示英文名；原始 tag 在悬停提示里。'), 'library') + `
     ${taskLink(namesLine(s) + (s.error ? t('：{reason}', {reason: tb(s.error)}) : ''), active ? 'busy' : s.status === 'error' ? 'warn' : ['off', 'unauthorized'].includes(s.status) ? 'off' : '')}
     ${startupSwitch('names', t('启动时获取'), t('只查新增的角色'))}
-    ${x.counts ? fold('namesStats', t('覆盖率') + (active ? t('（完成后更新）') : '') + (cc ? t('：{p}% 的角色有中文名', {p: Math.round(cc.zh / Math.max(1, cc.total) * 100)}) : ''), `<table class="settings-table"><tr><th></th><th>${t('共')}</th><th>${t('中文名')}</th><th>${t('日文名')}</th><th>${t('英文名')}</th></tr>${row(t('角色'), x.counts.characters)}${row(t('作品'), x.counts.works)}${row(t('皮肤'), x.counts.skins)}</table>`) : ''}`;
+    ${x.counts ? fold('namesStats', t('覆盖率') + (active ? t('（完成后更新）') : '') + (cc ? t('：{p}% 的角色有中文名', {p: Math.round(cc.zh / Math.max(1, cc.total) * 100)}) : ''), `<table class="settings-table"><tr><th></th><th>${t('共')}</th><th>${t('中文名')}</th><th>${t('日文名')}</th><th>${t('英文名')}</th></tr>${row(t('角色'), x.counts.characters)}${row(t('作品'), x.counts.works)}${row(t('造型'), x.counts.skins)}</table>`) : ''}`;
   wireFolds(card);
   renderModelCard();
   if (fresh && active) pollNamesSoon();
@@ -156,9 +156,17 @@ const OWN_CARDS = ['setLibraries', 'setProvenance', 'setAccounts', 'indexCard', 
 export const settingsSection = () => SETTINGS_SECTIONS.find(s => s[0] === state.route.section) || SETTINGS_SECTIONS[0];
 // 只给开发者的入口（测试图库、粘贴 Pixiv cookie）要带 ?dev 打开过一次页面后才显示。
 export const devMode = (() => { try { if (new URLSearchParams(location.search).has('dev')) prefs.set('dev', true); } catch {} return !!prefs.get('dev', false); })();
-// 设置保存在哪里，让用户知道哪些设置会跟着他们跨图库、跨浏览器。
-const SCOPE = {browser: [t('仅本浏览器'), t('保存在这个浏览器里，换浏览器或清除网站数据会恢复默认')], library: [t('本图库'), t('每个图库各自保存')], shared: [t('所有图库共用'), t('保存在这台电脑上，所有图库共用')]};
-const scope = key => `<span class="set-scope" title="${SCOPE[key][1]}">${SCOPE[key][0]}</span>`;
+// 设置保存在哪里，让用户知道哪些设置会跟着他们跨图库、跨浏览器。按浏览器保存的偏好在桌面 App 里存在 App 自己的网页存储里，
+// 标签改说「本 App」（app，#423）。
+const SCOPE = {
+  browser: [t('仅本浏览器'), t('保存在这个浏览器里，换浏览器或清除网站数据会恢复默认')],
+  app: [t('仅本 App'), t('保存在 Illustash App 里；在浏览器里打开图库时，浏览器另存一份')],
+  library: [t('本图库'), t('每个图库各自保存')], shared: [t('所有图库共用'), t('保存在这台电脑上，所有图库共用')],
+};
+// 在桌面 App 里时 /api/updates 带着外壳的安装状态（install 不为 null，core/settings.js）；还没读到时先按浏览器写，
+// 读到后由 onSettings('updates') 补上。
+const scopeKey = key => key === 'browser' && state.updates?.install ? 'app' : key;
+const scope = key => `<span class="set-scope" data-scope="${key}" title="${SCOPE[scopeKey(key)][1]}">${SCOPE[scopeKey(key)][0]}</span>`;
 export const cardHead = (title, note = '', key = '') => `<h2>${title}${key ? scope(key) : ''}</h2>${note ? `<p class="settings-note">${note}</p>` : ''}`;
 // 启动时的开关；本次启动仍以 --no-* 参数为准。
 function startupSwitch(key, name, hint) {
@@ -235,7 +243,7 @@ function networkCard() {
       ${row('artists', t('读取 Pixiv 关注'), 'Pixiv', t('用你在 app 里登录的状态读取关注列表（只读）'), acct?.pixiv?.bound ? t('已登录') : t('未登录，不使用'))}
       ${row('artists', t('查找画师、找 TA 的其他图'), t('Danbooru、画师主页'), t('所选图片的哈希文本；下载画师公开作品的小图，只在本机比对'), t('只在你点按钮时'))}
       ${row('characters', t('在 Danbooru 上搜角色和作品'), 'Danbooru', t('你输入的文字；自建角色的名字（核对能否对上 Danbooru）；「设为…」里 Danbooru 候选的 tag（取一张全年龄小图）'), net && !net.authorized ? names : t('只在你搜索或打开资料库时'))}
-      ${row('artists', t('以图搜图'), 'SauceNAO', '—', acct?.saucenao?.bound ? t('已保存 key，还没有功能使用它') : t('未使用'))}
+      ${acct?.saucenao?.bound ? row('artists', t('以图搜图'), 'SauceNAO', '—', t('已保存 key，还没有功能使用它')) : ''}
       ${state.models?.on_demand ? row('data', t('下载识别模型'), esc(state.models.sources.join(t('、'))), t('一次普通的 HTTPS 下载，取回模型文件；不发送图库里的任何信息'), t('只在你点「下载」时')) : ''}
       ${row('about', t('检查更新'), 'GitHub', t('一次普通的 HTTPS 请求，读取公开的版本列表；不发送图库里的任何信息'), state.updates?.auto ? t('启动时和之后每天自动') : t('只在你点「检查更新」时'))}
       ${state.updates?.install
@@ -291,7 +299,9 @@ export async function renderSettings(fetchMissing = true, refresh = false) {
     setData: () => cardHead(t('备份与存储'), t('这里有两种备份。整库备份是应用数据库（人工整理记录所在的库）的完整副本，只能整份换回；人工结论快照只含人工整理的结论，可以导回这个或别的图库，只补上缺少的部分。要连识别结果和来源一起带到别处，用「设置 › 图库」里的「导出当前图库」。')) + `
       <h3 class="set-sub">${t('整库备份')}</h3>
       <div class="setting-line"><span>${info ? t('共 {n} 份备份', {n: number(info.backup_count)}) + (info.backups?.[0] ? `<small class="line-hint">${t('最近一次 {time}', {time: esc(localStamp(info.backups[0].time))})}</small>` : '') : '…'}</span><button class="quiet small" id="backupNow" ${!info ? 'disabled' : ''}>${t('立即备份')}</button></div>
-      <p class="set-sub-note">${t('数据库升级前会自动备份一次。换回整库备份前先退出 app；备份之后的改动都会丢掉。')}</p>
+      <p class="set-sub-note">${t('上面的份数只算「立即备份」留下的，在图库文件夹的 backups 里。升级图库格式前还会自动另存一份，放在 library-backups 里，内容停在那次升级之前，换回后打开时会再升级一次。换回整库备份前先退出 app；备份之后的改动都会丢掉。')}</p>
+      ${info ? fold('backupFolders', t('备份放在哪里'), `<table class="settings-table">${backupFolder(t('立即备份'), info.package.path, 'backups')}
+        ${backupFolder(t('升级前的备份'), info.package.path, 'library-backups')}</table>`) : ''}
       ${info?.backups?.length ? fold('backupList', t('最近的备份'), `<table class="settings-table">${info.backups.slice(0, 5).map(b => `<tr><td class="mono">${esc(b.name)}</td><td>${bytes(b.bytes)}</td></tr>`).join('')}</table>`) : ''}
       <h3 class="set-sub">${t('人工结论快照')}</h3>
       <div id="humanBlock"></div>
@@ -299,7 +309,7 @@ export async function renderSettings(fetchMissing = true, refresh = false) {
       <p class="set-sub-note">${t('每次打开图库后会在后台检查识别结果数据库，整理记录数据库每 7 天检查一次；上次没有正常关闭时，打开前先检查两个库。')}</p>
       <div class="setting-line" id="integrityLine"></div>
       <div class="setting-line"><span>${t('缩略图缓存')}<small class="line-hint">${info ? t('{n} 个文件，{size}；清除后浏览时会重新生成', {n: number(info.thumbnails.files), size: bytes(info.thumbnails.bytes)}) : ''}</small></span><button class="quiet small" id="clearCache" ${info?.thumbnails.files ? '' : 'disabled'}>${t('清除')}</button></div>
-      ${info ? fold('dataPaths', t('存储位置'), `<table class="settings-table">${[[t('源数据库（识别结果，可以重建）'), info.source], [t('应用数据库（人工整理，不要删）'), info.library], [t('缩略图缓存（可以放心删）'), info.thumbnails]].map(([label, d]) => `<tr><td>${label}</td><td class="mono">${esc(d.path)}</td><td>${bytes(d.bytes)}</td></tr>`).join('')}</table>`) : ''}`,
+      ${info ? fold('dataPaths', t('存储位置'), `<table class="settings-table">${[[t('源数据库（识别结果，可以重建）'), info.source], [t('应用数据库（人工整理，不要删）'), info.library], [t('缩略图缓存（可以放心删）'), info.thumbnails]].map(([label, d]) => `<tr><td>${label}</td><td class="mono" title="${esc(d.path)}">${esc(home(d.path))}</td><td>${bytes(d.bytes)}</td></tr>`).join('')}</table>`) : ''}`,
   };
   patchSettingsPage(`<nav class="settings-nav" aria-label="${t('设置')}">${SETTINGS_SECTIONS.map(([id, title]) => `<a href="#/settings/${id}" class="${id === section ? 'on' : ''}"${id === section ? ' aria-current="page"' : ''}>${title}</a>`).join('')}</nav>
     <div class="settings-main" data-section="${section}">${cards.map(id => `<section class="settings-card" id="${id}">${body[id] ? body[id]() : ''}</section>`).join('')}</div>`, section);
@@ -346,11 +356,17 @@ const ORIGINS = [['pixiv', 'Pixiv'], ['x', 'X'], ['other', t('其他')]];
 export const libForm = {open: false, name: '', folders: {}, photos: false, created: null};
 // 后端列出它知道的出处（#111）；后备值覆盖没有图库信息的旧布局。
 const origins = () => { const list = state.libraries?.info?.origins; return list?.length ? list.map(o => [o.id, tb(o.label)]) : ORIGINS; };
+// 整库备份在图库文件夹里的两处（#517，说法同 #492 的损坏提示）：backups 里是「立即备份」留下的，设置里的份数和清单
+// 只算这些；library-backups 里是升级图库格式前自动留下的。
+export function backupFolder(label, library, name) {
+  const path = library + (library.includes('\\') ? '\\' : '/') + name;
+  return `<tr><td>${label}</td><td class="mono" title="${esc(path)}">${esc(home(path))}</td></tr>`;
+}
 export function renderLibrariesCard() {
   const card = $('setLibraries'); if (!card || !onPage(state.route, 'settings')) return;
   const data = state.libraries;
   if (!data) { card.innerHTML = `<h2>${t('图库')}</h2><p class="muted-note">${t('正在读取…')}</p>`; return; }
-  const home = p => p.replace(/^\/Users\/[^/]+/, '~'), cur = data.info, list = origins();
+  const cur = data.info, list = origins();
   const seg = (attr, value, options) => `<div class="segmented">${options.map(([v, label]) => `<button class="${v === value ? 'on' : ''}" ${attr}="${v}">${label}</button>`).join('')}</div>`;
   const editable = cur && !cur.test, last = cur?.sources.length <= 1;
   const remove = s => editable ? `<button class="quiet small" data-lib-remove="${esc(s.id)}" ${last ? `disabled title="${t('图库至少要保留一个来源')}"` : ''}>${t('移除')}</button>` : '';
@@ -459,9 +475,8 @@ export function renderAccountsCard() {
     <p class="muted-note">${t('用 X 的官方数据归档导入关注列表：X 设置 → 你的账号 → 下载你的数据，收到邮件后下载 zip 导入。只读取其中的关注（数字账号 ID），私信、推文都不会打开。')}</p>
     <div class="setting-line"><span>${x.imported ? `${t('已导入 {n} 个关注', {n: number(x.imported)})}<small class="line-hint">${t('已对应到画师 {resolved} 位 · 待查 {pending} 个', {resolved: number(x.resolved || 0), pending: number(x.pending || 0)})}${x.imported_at ? ' · ' + t('导入于 {time}', {time: esc(String(x.imported_at).slice(0, 16))}) : ''}</small>` : t('尚未导入')}</span>
       <span class="lib-pick"><input class="lib-input" id="acctXPath" placeholder="${t('或粘贴 zip / 解压后文件夹的路径')}"><button class="quiet" data-acct-x>${t('导入归档…')}</button></span></div>
-    <h3 class="acct-h">${t('SauceNAO（以图搜图）')}${scope('shared')}</h3>
-    ${s.bound ? `<div class="setting-line"><span>${t('已保存 API key')}<small class="line-hint">${t('以图搜图还没有上线，现在不会使用')}</small></span><span><button class="quiet" data-acct-unbind="saucenao">${t('移除')}</button></span></div>`
-      : `<div class="setting-line"><span>API key<small class="line-hint">${t('在 saucenao.com 账号页的 search-api 里；以图搜图上线前不会使用')}</small></span><span class="lib-pick"><input class="lib-input" id="acctSauce" type="password" autocomplete="off" placeholder="${t('40 位十六进制')}"><button class="quiet" data-acct-bind="saucenao">${t('保存')}</button></span></div>`}`;
+    ${s.bound ? `<h3 class="acct-h">${t('SauceNAO（以图搜图）')}${scope('shared')}</h3>
+    <div class="setting-line"><span>${t('已保存 API key')}<small class="line-hint">${t('以图搜图还没有上线，现在不会使用')}</small></span><span><button class="quiet" data-acct-unbind="saucenao">${t('移除')}</button></span></div>` : ''}`;
 }
 // Pixiv：在桌面 App 里，用户在它的 Pixiv 窗口里自己登录（docs/PROVENANCE.md 第 8 节）；粘贴 PHPSESSID 作为普通网页版的
 // 开发入口保留。
@@ -500,7 +515,7 @@ export function renderProvenanceCard() {
   const total = cov ? Object.values(cov.pictures || {}).reduce((a, b) => a + b, 0) : 0;
   const html = cardHead(t('找回画师'), t('逐张查图的画师：用像素哈希和 IQDB 签名（只发哈希文本，不发图片）在 Danbooru 查原帖，并比对你关注的画师。结果在详情面板的「画师」里，可以点「不是 TA」纠正。')) + `
     ${cov ? `<div class="prov-stats">${covLine(t('X 的图有画师'), 'x')}${covLine(t('Pixiv 的图有画师'), 'pixiv')}${covLine(t('其他来源有画师'), 'other')}<div class="prov-stat"><b>${pct(cov.with_original_post || 0, total)}</b><span>${t('能对到原帖')}<small>${t('{n} 张', {n: number(cov.with_original_post || 0)})}</small></span></div></div>` : ''}
-    <div class="setting-line set-status"><span><span class="local-dot${busy ? ' busy' : s.status === 'failed' ? ' warn' : ''}"></span>${busy ? t('正在查找…') : s.status === 'failed' && s.reason ? t('上次出错：{reason}', {reason: esc(tb(s.reason))}) : p.runs?.[0] ? t('上次 {time} · 新找到 {n}', {time: esc(localTime(p.runs[0].started_at)), n: number(p.runs[0].found || 0)}) : t('还没有查过')}</span>${busy ? `<button class="quiet small" data-open-tasks>${t('在任务面板查看')}</button>` : `<button class="quiet small" data-open-tasks="provenance">${t('查找画师…')}</button>`}</div>
+    <div class="setting-line set-status"><span><span class="local-dot${busy ? ' busy' : s.status === 'failed' ? ' warn' : ''}"></span>${busy ? t('正在查找…') : s.status === 'failed' && s.reason ? t('上次出错：{reason}', {reason: esc(tb(s.reason))}) : p.runs?.[0] ? t('上次 {time} · 新找到 {n}', {time: esc(localTime(p.runs[0].started_at)), n: number(p.runs[0].found || 0)}) : t('还没有查过')}</span>${busy ? `<button class="quiet small" data-open-tasks>${t('在任务面板查看')}</button>` : `<button class="quiet small" data-open-tasks="provenance">${t('找回全库画师…')}</button>`}</div>
     <label class="switch-line"><span><b>${t('同步后自动查新图')}${scope('library')}</b><small>${p.auto_network ? t('新加入的图做签名识别、查像素哈希、比对新找到的画师；每次最多 {mb} MB', {mb: number(p.budgets?.new || 50)}) : t('新加入的图只在本机做签名识别；要联网查，在任务面板里每次授权')}${p.frozen ? ' · ' + t('测试图库不同步，这个开关不起作用') : ''}</small></span><input type="checkbox" class="switch" id="provAuto" ${p.auto ? 'checked' : ''}></label>
     ${cov ? `<a class="setting-line set-link" href="#/artist-audit"><span>${t('画师抽查')}<small class="line-hint">${t('随机抽 50 张，逐张判断找到的画师对不对')}</small></span><span>›</span></a>` : ''}
     ${state.accounts && !state.accounts.pixiv?.bound ? `<p class="settings-note net-foot">${t('登录 Pixiv 后才能比对 R18 作品（见下方「账号」）。')}</p>` : ''}`;
@@ -559,7 +574,7 @@ export function updateActions(u = state.updates, attr = 'data-updates') {
 }
 export function updatesLine() {
   const u = state.updates; if (!u) return `<span>${t('检查更新')}</span>`;
-  const when = u.checked_at ? t('上次检查 {time}', {time: esc(localStamp(Date.parse(u.checked_at) / 1000))}) : t('还没有检查过');
+  const when = u.checked_at ? t('上次检查 {time}', {time: esc(localStamp(Date.parse(u.checked_at) / 1000))}) : t('还没有检查过', {context: 'update'});
   const status = u.newer ? t('有新版本 {version}', {version: esc(u.latest)}) : u.checked_at && !u.error ? t('已是最新版本') : '';
   const hints = [u.newer && updateStatus(u), when, u.error && esc(tb(u.error)), !u.auto && t('自动检查已关闭，可在「设置 › 网络与隐私」里打开')].filter(Boolean);
   const check = updateStarted(u) ? '' : `<button class="quiet small" data-updates-check>${t('检查更新')}</button>`;
@@ -699,6 +714,7 @@ export function wireSettings() {
     else if (what === 'pixiv') toast(detail.error ? detail.error.message : t('已绑定 Pixiv：{name}', {name: detail.bound.name || detail.bound.user_id}));
     else if (what === 'updates') {
       drawNudge(); drawUpdateButton();
+      for (const el of document.querySelectorAll('.set-scope[data-scope="browser"]')) el.outerHTML = scope('browser');
       if ($('aboutUpdates')) $('aboutUpdates').innerHTML = updatesLine();
       // 显示它的设置页只在有变化时重画，绝不在用户输入时重画；下载进度只改上面那一行。
       const {install: _, ...rest} = state.updates || {};
