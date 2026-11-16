@@ -241,7 +241,7 @@
 
  "native/terms/src/app_imports.rs":"994effa0bb18cd935887414031d60f7146ddb4836874a312677563070a730451",
 
- "native/terms/src/app_index.rs":"8f612b29b90f8c3aae3700ed50eeb2bda58c27b998e9a6425ad4a373b50c3881",
+ "native/terms/src/app_index.rs":"0eeba6252f64df66df9d0f56f720f1f408f0d41d51ec5c18c16cbf0c1e7f5299",
 
  "native/terms/src/app_integrity.rs":"7281f9384bf6a9f390e88b25d6ff509ec3194fa1677c7d5bdddc996581152a19",
 
@@ -323,7 +323,7 @@
 
  "native/terms/src/app_upgrade.rs":"de6b529fbb01865fb9adeb78ae45ca4b5a541b14129b9472f58f10ac693ce6cf",
 
- "native/terms/src/app_wd_extension.rs":"24bf9472036064c71171f526cdd53270eab45bccf67bac022d2d4f876efa4ade",
+ "native/terms/src/app_wd_extension.rs":"b595ac8af54422318a426b21c31c924d42cfaf59e6c27ff7e5874ef8313e9821",
 
  "native/terms/src/bin/illustash-terms.rs":"04ee80bb280034a16f8ddd9fe97e8de0700713259c44f76858f70b8713d4c594",
 
