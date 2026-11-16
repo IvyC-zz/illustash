@@ -39,7 +39,7 @@
   "缩略图大小": "Thumbnail size",
   "图片下方显示角色名": "Character names under pictures",
   "浏览页、格子够大时": "On browsing pages, when cells are large enough",
-  "图上显示副本数与皮肤": "Show copy counts and outfits on pictures",
+  "图上显示副本数与造型": "Show copy counts and forms on pictures",
   "未识别的图上显示「可能是」": "Show “Might be” on unidentified pictures",
   "点一下就设为该角色": "One click assigns that character",
   "侧栏与提示": "Sidebar and hints",
@@ -69,6 +69,8 @@
   "关于": "About",
   "版本、致谢与诊断信息": "Version, credits and diagnostics",
   "仅本浏览器": "This browser only",
+  "仅本 App": "This app only",
+  "保存在 Illustash App 里；在浏览器里打开图库时，浏览器另存一份": "Saved in the Illustash app; a browser that opens the library keeps its own copy",
   "保存在这个浏览器里，换浏览器或清除网站数据会恢复默认": "Saved in this browser; another browser or clearing site data restores the defaults",
   "本图库": "This library",
   "每个图库各自保存": "Saved separately for each library",
@@ -152,7 +154,10 @@
   "授权并开始": "Allow and start",
   "只跑本地（签名识别）": "Local only (signature reading)",
   "取消": "Cancel",
-  "上次检查发现 {n} 个还没收录的角色": "The last check found {n} characters not in the catalog yet",
+  "上次检查发现 {n} 个还没收录的角色": {
+    "one": "The last check found {n} character not in the catalog yet",
+    "other": "The last check found {n} characters not in the catalog yet"
+  },
   "查看并添加…": "Review and add…",
   "{n} 项进行中": "{n} running",
   "{name}：{line}": "{name}: {line}",
@@ -189,7 +194,7 @@
   "随机抽查还剩几张": "Pictures left in the spot check",
   "角色不一致的副本组，对齐后才会折叠": "Copy groups whose characters disagree; they fold once aligned",
   "像截图、等你确认的图": "Pictures that look like screenshots, waiting for you",
-  "长得像、可能是同一人或同一人另一形态的角色对": "Look-alike character pairs that may be the same person or another form of them",
+  "长得像、可能是同一人或同一人另一个造型的角色对": "Look-alike character pairs that may be the same person, or one a form of the other",
   "按组整理": "By group",
   "长得像的未识别图分成一组，一组一组确认": "Look-alike unidentified pictures grouped together, confirmed a group at a time",
   "全部未识别": "All unidentified",
@@ -280,14 +285,20 @@
   "作品筛选": "Series filter",
   "{n} 部作品": "{n} series",
   "关注 {n} 部": "{n} followed",
-  "{n} 位角色 · {works} 部作品": "{n} characters · {works} series",
+  "{n} 位角色 · {works} 部作品": {
+    "one": "{n} character · {works} series",
+    "other": "{n} characters · {works} series"
+  },
   "R18 筛选开着：抽查要看全部才准，按 H 切换": "The R18 filter is on: a spot check is only accurate over everything; press H to switch",
   "第 {id} 组": "Group {id}",
   "{n} 张长得像的未识别图": "{n} look-alike unidentified pictures",
   "画师抽查": "Artist spot check",
   "相似组 {id}": "Similar group {id}",
   "关联后自动补中文名、别名和作品；和已有角色重复的可以合并": "Once linked, Chinese names, aliases and series fill in; duplicates of existing characters can be merged",
-  "{n} 个自建角色能对上 Danbooru": "{n} characters you created match Danbooru",
+  "{n} 个自建角色能对上 Danbooru": {
+    "one": "{n} character you created matches Danbooru",
+    "other": "{n} characters you created match Danbooru"
+  },
   "整组都是同一个原创角色：新建一个原创角色，把这组图都设为它": "The whole group is one original character: create one and assign the group to it",
   "整组标为原创角色": "Mark group as original character",
   "判断关系": "Compare",
@@ -326,8 +337,14 @@
   "机器识别，未检查": "Machine-identified, unchecked",
   "现为 {name}": "Now {name}",
   "机器觉得可能是 {name}，点一下设为 TA（可撤销）": "The machine thinks this may be {name}; click to assign (undoable)",
-  "同一组共 {n} 份副本": "{n} copies in this group",
-  "共 {n} 份相同副本，操作会同步到全部": "{n} identical copies; changes apply to all of them",
+  "同一组共 {n} 份副本": {
+    "one": "{n} copy in this group",
+    "other": "{n} copies in this group"
+  },
+  "共 {n} 份相同副本，操作会同步到全部": {
+    "one": "{n} identical copy; changes apply to it",
+    "other": "{n} identical copies; changes apply to all of them"
+  },
   "、": ", ",
   "{names}，第 {n} 张": "{names}, picture {n}",
   "未识别图片": "Unidentified picture",
@@ -345,7 +362,7 @@
   "再点一次：移出 {n} 张": "Click again: remove {n}",
   "换成…": "Change to…",
   "也是…": "Also…",
-  "子标签": "Sub-tags",
+  "造型": "Forms",
   "选中的图都是角标上的角色": "All selected pictures show the character on their badge",
   "都是": "All yes",
   "选中的图都不是角标上的角色": "None of the selected pictures show the character on their badge",
@@ -387,7 +404,7 @@
   "从 {n} 张去掉标签 {tag}": "Remove tag {tag} from {n}",
   "给 {n} 张加上标签 {tag}": "Add tag {tag} to {n}",
   "从所选图片去掉": "Remove from the selected pictures",
-  "筛选子标签": "Filter sub-tags",
+  "筛选造型": "Filter forms",
   "从 {n} 张去掉 {name}": "Remove {name} from {n}",
   "已撤销 · {label}": "Undone · {label}",
   "输入角色 tag 或别名…": "Type a character tag or alias…",
@@ -422,7 +439,7 @@
   "多选": "select several",
   "把 {name} 合并到…": "Merge {name} into…",
   "输入同一个人的另一个角色": "Type the other character for the same person",
-  "把 {name} 并入 {target}：图、人工结论、子标签和别名都过去，可撤销": "Merge {name} into {target}: pictures, your decisions, sub-tags and aliases move over; undoable",
+  "把 {name} 并入 {target}：图、人工结论、造型和别名都过去，可撤销": "Merge {name} into {target}: pictures, your decisions, forms and aliases move over; undoable",
   "按相似细分 · {name}": "Split by similarity · {name}",
   "正在比较长相…只在本机计算": "Comparing looks… on this computer only",
   "{n} 张里有 {groups} 组长得像（共 {grouped} 张）；其余的不像任何一张，留在这里。": "{groups} look-alike groups among {n} pictures ({grouped} pictures); the rest look like none of the others and stay here.",
@@ -439,7 +456,10 @@
   "没有关联 Danbooru 时需要一个名称": "A name is needed without a Danbooru link",
   "别名": "Aliases",
   "输入别名后按回车，搜索时都能找到": "Type an alias and press Return; searches find every alias",
-  "另有 {n} 个来自 Danbooru 等来源的别名，会自动更新": "{n} more aliases from Danbooru and other sources, updated automatically",
+  "另有 {n} 个来自 Danbooru 等来源的别名，会自动更新": {
+    "one": "{n} more alias from Danbooru and other sources, updated automatically",
+    "other": "{n} more aliases from Danbooru and other sources, updated automatically"
+  },
   "所属作品": "Series",
   "原创角色不属于任何作品": "Original characters belong to no series",
   "搜索作品，找不到可以新建": "Search series, or create one if it's missing",
@@ -468,13 +488,25 @@
   "{name} 不再标为原创角色": "{name} is no longer an original character",
   "{name} 不再算角色，只当标签": "{name} is now a tag, not a character",
   "{name} 已恢复成角色": "{name} counts as a character again",
-  "{n} 张图的关系": "How {n} pictures relate",
+  "{n} 张图的关系": {
+    "one": "How {n} picture relates",
+    "other": "How {n} pictures relate"
+  },
   "正在逐对比较…只在本机计算": "Comparing pair by pair… on this computer only",
   "第 {list} 张是同一张图": "Pictures {list} are the same picture",
-  "{n} 张读不到原图（可能还在 iCloud），没有比较": "{n} originals could not be read (maybe still in iCloud) and were not compared",
+  "{n} 张读不到原图（可能还在 iCloud），没有比较": {
+    "one": "{n} original could not be read (maybe still in iCloud) and was not compared",
+    "other": "{n} originals could not be read (maybe still in iCloud) and were not compared"
+  },
   "；": "; ",
-  "另外 {n} 对是不同的图": "{n} more pairs are different pictures",
-  "{n} 对是不同的图": "{n} pairs are different pictures",
+  "另外 {n} 对是不同的图": {
+    "one": "{n} more pair is different pictures",
+    "other": "{n} more pairs are different pictures"
+  },
+  "{n} 对是不同的图": {
+    "one": "{n} pair is different pictures",
+    "other": "{n} pairs are different pictures"
+  },
   "红框：两张不一样的地方；蓝色虚线：小图在大图里的位置。逐像素比较得出，只在本机计算，结果不保存。": "Red boxes: where the two differ; dashed blue: where the smaller picture sits in the larger. Compared pixel by pixel on this computer only; nothing is saved.",
   "打开 {name}": "Open {name}",
   "相簿": "album",
@@ -483,7 +515,7 @@
   "追加角色，原有的保留（A）": "Add a character, keeping the ones already there (A)",
   "设为角色（C）": "Assign a character (C)",
   "不是 TA（⌫）": "Not them (⌫)",
-  "去掉子标签": "Remove sub-tag",
+  "去掉造型": "Remove form",
   "弱线索（中档相似，不算归属）": "Weak hint (moderately similar, not assigned)",
   "{evidence}。点击：换成这个；⌥ 点击：也是": "{evidence}. Click: change to this; ⌥-click: also this",
   "已跳过，还没有角色": "Skipped, no character yet",
@@ -527,7 +559,7 @@
   "更正角色": "Correct character",
   "图片暂不可读，请检查来源文件夹，或 iCloud 照片的下载状态与访问权限": "Picture unreadable for now; check the source folder, or the download state and access permission of iCloud Photos",
   "图片暂不可读，请检查来源文件夹是否还在、外接硬盘是否接上": "Picture unreadable for now; check that the source folder still exists and the external drive is connected",
-  "加子标签": "Add sub-tag",
+  "加造型": "Add form",
   "给这张加上 {name}": "Add {name} to this one",
   "这张也是…": "This is also…",
   "这张是…": "This is…",
@@ -548,9 +580,10 @@
   "点角色，在图库里只看 TA": "Click a character to show only them in the library",
   "其他": "Other",
   "未命名作品": "Untitled series",
-  "{n} 个皮肤": {
-    "one": "{n} outfit",
-    "other": "{n} outfits"
+  "皮肤": "Forms",
+  "{n} 个造型": {
+    "one": "{n} form",
+    "other": "{n} forms"
   },
   "主力": "Mainstays",
   "20 张以上 · {n} 位": "20 or more pictures · {n}",
@@ -570,9 +603,15 @@
   "你最常看的": "Your most saved",
   "按收藏张数": "by pictures saved",
   "最近 30 天在收": "Saved in the last 30 days",
-  "{n} 位角色有新图": "{n} characters with new pictures",
+  "{n} 位角色有新图": {
+    "one": "{n} character with new pictures",
+    "other": "{n} characters with new pictures"
+  },
   "{n} 部 · 按张数": "{n} series · by pictures",
-  "{n} 位 · {images} 张": "{n} characters · {images} pictures",
+  "{n} 位 · {images} 张": {
+    "one": "{n} character · {images} pictures",
+    "other": "{n} characters · {images} pictures"
+  },
   "按新增张数": "by new pictures",
   "近 30 天 +{n}": "+{n} in 30 days",
   "最近 30 天没有新图。": "No new pictures in the last 30 days.",
@@ -586,7 +625,6 @@
   "张数": "Pictures",
   "近 30 天": "Last 30 days",
   "最后收藏": "Last saved",
-  "皮肤": "Outfits",
   "再显示 300 位（共 {n} 位）": "Show 300 more ({n} in all)",
   "不算角色、只当标签：": "Tags, not characters: ",
   "点作品名看它的角色 · 检查关注作品的新角色前会确认联网": "Click a series to see its characters · checking followed series for new characters asks before going online",
@@ -598,11 +636,17 @@
   "未关联 Danbooru": "Not linked to Danbooru",
   "正在读取作品…": "Loading series…",
   "待处理": "To do",
-  "{n} 个以前关注的 Danbooru 作品还没对应到本地作品，对应后才会检查它们的新角色": "{n} Danbooru series you followed before are not matched to local series yet; they are checked for new characters once matched",
+  "{n} 个以前关注的 Danbooru 作品还没对应到本地作品，对应后才会检查它们的新角色": {
+    "one": "{n} Danbooru series you followed before is not matched to a local series yet; it is checked for new characters once matched",
+    "other": "{n} Danbooru series you followed before are not matched to local series yet; they are checked for new characters once matched"
+  },
   "对应到作品…": "Match to a series…",
   "看这部作品的角色": "See this series' characters",
   "Danbooru 上有、本地索引还没有的角色": "Characters on Danbooru that the local index does not have yet",
-  "+{n} 个新角色": "+{n} new characters",
+  "+{n} 个新角色": {
+    "one": "+{n} new character",
+    "other": "+{n} new characters"
+  },
   "编辑…": "Edit…",
   "已关注": "Following",
   "关注 Danbooru 上的作品…": "Follow a series on Danbooru…",
@@ -622,7 +666,10 @@
   "D 站图数": "On Danbooru",
   "添加 {n} 个（约 {mb} MB）": "Add {n} (about {mb} MB)",
   "下载量超过 500 MB，网络不方便时可以分几次添加": "Over 500 MB to download; add them in several rounds on a slow connection",
-  "开始添加 {n} 个角色，进度在任务面板里": "Adding {n} characters; progress is in the task panel",
+  "开始添加 {n} 个角色，进度在任务面板里": {
+    "one": "Adding {n} character; progress is in the task panel",
+    "other": "Adding {n} characters; progress is in the task panel"
+  },
   "今天": "Today",
   "昨天": "Yesterday",
   "点图片看详情 · 点角色名只看 TA": "Click a picture for details · click a name to show only them",
@@ -655,17 +702,29 @@
   "外观相似：第 {n} 组": "Similar look: group {n}",
   "可能和第 {n} 组是同一人": "May be the same person as group {n}",
   "点一下图片：不算在这组里 · 组头的按钮对整组生效，都可以撤销": "Click a picture to leave it out of the group · the buttons on a group act on the whole group, all undoable",
-  "{n} 组 · 共 {images} 张": "{n} groups · {images} pictures",
-  "{n} 组能直接确认是谁": "{n} groups can be confirmed directly",
+  "{n} 组 · 共 {images} 张": {
+    "one": "{n} group · {images} pictures",
+    "other": "{n} groups · {images} pictures"
+  },
+  "{n} 组能直接确认是谁": {
+    "one": "{n} group can be confirmed directly",
+    "other": "{n} groups can be confirmed directly"
+  },
   "分组于 {time}": "grouped {time}",
   "正在学习…": "Learning…",
   "没成组的 {n} 张": "{n} ungrouped",
   "用当前的未识别图重新分组": "Regroup the current unidentified pictures",
   "重新分组": "Regroup",
   "没有成组的未识别图。可以点「重新分组」。": "No grouped unidentified pictures. Click “Regroup”.",
-  "再显示 {n} 组": "Show {n} more groups",
+  "再显示 {n} 组": {
+    "one": "Show {n} more group",
+    "other": "Show {n} more groups"
+  },
   "正在重新分组…": "Regrouping…",
-  "{n} 张的线索都指向 TA": "the hints of {n} pictures point to them",
+  "{n} 张的线索都指向 TA": {
+    "one": "the hints of {n} picture point to them",
+    "other": "the hints of {n} pictures point to them"
+  },
   "是别人…": "Someone else…",
   "还不知道是谁": "Not known yet",
   "设为…": "Assign…",
@@ -698,52 +757,74 @@
   "没有找到相似的图。": "No similar pictures found.",
   "{source}：同一个 tag 的别名": "{source}: aliases of the same tag",
   "外部资料": "External data",
-  "{source}：「{subject}」是「{object}」的一种形态": "{source}: “{subject}” is a form of “{object}”",
+  "{source}：「{subject}」是「{object}」的一个造型": "{source}: “{subject}” is a form of “{object}”",
   "参考图外观距离 {d}": "Reference look distance {d}",
   "（几乎分不开）": " (nearly indistinguishable)",
   "参考图外观很接近": "Reference pictures look very close",
   "没有可显示的图": "No pictures to show",
-  "其实是同一个人：合并显示，图和人工结论都不搬动，可撤销": "Actually the same person: shown merged; pictures and your decisions stay put; undoable",
-  "B 是 A 的一种形态": "B is a form of A",
-  "B 挂到 A 下面作为子标签（服装、异格、另一形态）": "B goes under A as a sub-tag (outfit, alternate version, another form)",
-  "A 是 B 的一种形态": "A is a form of B",
-  "A 挂到 B 下面作为子标签": "A goes under B as a sub-tag",
+  "记为同一角色（不搬图）": "Mark as the same character (pictures stay)",
+  "把两个角色合在一起显示，图和人工结论留在原处": "Show the two characters as one; pictures and your decisions stay where they are",
+  "B 是 A 的一个造型": "B is a form of A",
+  "B 挂到 A 下面作为造型（服装、异格、变身等）": "B goes under A as a form (outfit, alternate version, transformation and so on)",
+  "A 是 B 的一个造型": "A is a form of B",
+  "A 挂到 B 下面作为造型": "A goes under B as a form",
   "不同角色": "Different characters",
   "只是长得像、经常同框，或是 TA 的吉祥物、宠物：记下来，以后不再问": "They only look alike, often appear together, or one is the other's mascot or pet: noted, never asked again",
   "暂不判断": "Decide later",
   "先放一边，队列里不再出现（可撤销）": "Set aside; it leaves the queue (undoable)",
   "点角色名看全部图 · 高亮的是外部资料建议的做法": "Click a name to see all its pictures · the highlighted choice is what external data suggests",
-  "{n} 对待判断": "{n} pairs to decide",
+  "{n} 对待判断": {
+    "one": "{n} pair to decide",
+    "other": "{n} pairs to decide"
+  },
   "没有需要判断的角色了。": "No characters left to decide.",
   "再显示一些": "Show more",
   "已暂不判断": "Set aside",
-  "已把 {a} 并入 {b}": "Merged {a} into {b}",
-  "{a} 已作为 {b} 的一种形态": "{a} is now a form of {b}",
+  "已把 {a} 和 {b} 记为同一角色": "Marked {a} and {b} as the same character",
+  "{a} 已作为 {b} 的一个造型": "{a} is now a form of {b}",
   "已记下 {a} 和 {b} 是不同角色": "Noted that {a} and {b} are different characters",
   "正在检查来源…": "Checking sources…",
   "正在检查文件 {done}/{total}": "Checking files {done}/{total}",
   "正在导入…": "Importing…",
-  "正在校验识别结果（{n} 张）…": "Verifying recognition results ({n} pictures)…",
+  "正在校验识别结果（{n} 张）…": {
+    "one": "Verifying recognition results ({n} picture)…",
+    "other": "Verifying recognition results ({n} pictures)…"
+  },
   "正在导入识别结果 {done}/{total}": "Importing recognition results {done}/{total}",
-  "正在加载识别模型（共 {n} 张）…": "Loading recognition models ({n} pictures)…",
+  "正在加载识别模型（共 {n} 张）…": {
+    "one": "Loading recognition models ({n} picture)…",
+    "other": "Loading recognition models ({n} pictures)…"
+  },
   "正在准备识别图片 {done}/{total}": "Preparing pictures for recognition {done}/{total}",
   "{n} 张无法识别": "{n} could not be recognized",
   "约 {n} 分钟": "about {n} min",
   "约 {n} 小时": "about {n} h",
   "已导入 {n}": "{n} imported",
   "正在识别新图片 {done}/{total}": "Recognizing new pictures {done}/{total}",
-  "{n} 处暂时读不到，已有图片保留不动": "{n} places unreadable for now; their pictures are kept",
-  "{n} 张暂时无法识别，下次同步重试": "{n} pictures could not be recognized yet; retried at the next sync",
+  "{n} 处暂时读不到，已有图片保留不动": {
+    "one": "{n} place unreadable for now; its pictures are kept",
+    "other": "{n} places unreadable for now; their pictures are kept"
+  },
+  "{n} 张暂时无法识别，下次同步重试": {
+    "one": "{n} picture could not be recognized yet; retried at the next sync",
+    "other": "{n} pictures could not be recognized yet; retried at the next sync"
+  },
   "{n} 张已损坏或格式不支持，未识别": "{n} damaged or in an unsupported format, not recognized",
   "上次同步：{time}": "Last sync: {time}",
-  "有 {n} 张图等待识别（识别服务未启动）": "{n} pictures wait for recognition (the recognition service is not running)",
+  "有 {n} 张图等待识别（识别服务未启动）": {
+    "one": "{n} picture waits for recognition (the recognition service is not running)",
+    "other": "{n} pictures wait for recognition (the recognition service is not running)"
+  },
   "同步已中断（{reason}），可重新扫描": "Sync was interrupted ({reason}); you can scan again",
   "同步已中断，可重新扫描": "Sync was interrupted; you can scan again",
   "同步失败": "Sync failed",
   "同步失败：没有访问照片图库的权限": "Sync failed: no access to the Photos library",
   "本地图库": "Local library",
   "另有 {n} 张未列出。": "{n} more not listed.",
-  "{n} 张图片已损坏或格式不支持": "{n} pictures damaged or in an unsupported format",
+  "{n} 张图片已损坏或格式不支持": {
+    "one": "{n} picture damaged or in an unsupported format",
+    "other": "{n} pictures damaged or in an unsupported format"
+  },
   "这些文件读得到，但不是能打开的图片：已经加入图库，图上显示「无法打开」，不参与识别。修好或换成正常的图片后，下次同步会重新识别。": "These files can be read but are not pictures that open: they are in the library, show “Cannot open” and are not recognized. Once repaired or replaced with working pictures, the next sync recognizes them.",
   "同步完成：新加入 {n} 张": "Sync done: {n} new",
   "蔚蓝档案": "Blue Archive",
@@ -762,7 +843,10 @@
   "正在重新扫描图库": "Rescanning the library",
   "正在导入图库": "Importing into the library",
   "检查失败：{reason}": "Check failed: {reason}",
-  "上次检查：{time} · 待添加 {n} 个角色": "Last check: {time} · {n} characters to add",
+  "上次检查：{time} · 待添加 {n} 个角色": {
+    "one": "Last check: {time} · {n} character to add",
+    "other": "Last check: {time} · {n} characters to add"
+  },
   "尚未检查": "Not checked yet",
   "定期在 Danbooru 上查关注的作品有没有本地还不认识的角色，只发送作品名。": "Regularly checks Danbooru for characters of followed series that are not known locally, sending only series names.",
   "添加角色时每个角色下载约 20 张公开参考图（约 {mb} MB），在本机算好特征后重新扫描图库。": "Adding a character downloads about 20 public reference pictures (about {mb} MB), computes features on this computer and rescans the library.",
@@ -786,9 +870,18 @@
   "你的图库里有": "In your library",
   "{reason}，可以稍后再试": "{reason}; try again later",
   "没有找到这个作品。可以换个写法，比如英文或日文名": "Series not found. Try another spelling, such as the English or Japanese name",
-  "已移除，{n} 张图片已重新识别": "Removed; {n} pictures recognized again",
-  "已添加 {added} 个角色，{n} 张图片的识别结果已更新": "{added} characters added; recognition of {n} pictures updated",
-  "发现 {n} 个可添加的角色，在任务面板里添加": "Found {n} characters to add; add them in the task panel",
+  "已移除，{n} 张图片已重新识别": {
+    "one": "Removed; {n} picture recognized again",
+    "other": "Removed; {n} pictures recognized again"
+  },
+  "已添加 {added} 个角色，{n} 张图片的识别结果已更新": {
+    "one": "{added} characters added; recognition of {n} picture updated",
+    "other": "{added} characters added; recognition of {n} pictures updated"
+  },
+  "发现 {n} 个可添加的角色，在任务面板里添加": {
+    "one": "Found {n} character to add; add it in the task panel",
+    "other": "Found {n} characters to add; add them in the task panel"
+  },
   "未发现新角色": "No new characters found",
   "角色索引更新失败：{reason}": "Character index update failed: {reason}",
   "当前未启用": "Off",
@@ -897,7 +990,6 @@
   "只在你搜索或打开资料库时": "Only when you search or open the catalog",
   "以图搜图": "Reverse image search",
   "已保存 key，还没有功能使用它": "Key saved; nothing uses it yet",
-  "未使用": "Not used",
   "名称联网查询": "Online name lookups",
   "角色名称和 Danbooru 搜索共用这一项授权，只发送文字": "Character names and Danbooru search share this permission and send only text",
   "允许…": "Allow…",
@@ -908,7 +1000,10 @@
   "只读读取来源里的图片，新增的导入并在本机识别；来源里删掉的图会从图库移除，人工整理记录保留。同步不联网。": "Reads the pictures in your sources without changing them; new ones are imported and recognized on this computer; pictures deleted from a source leave the library while your organizing is kept. Sync stays offline.",
   "启动时同步": "Sync at launch",
   "检查来源里新增和删除的图": "Checks sources for added and deleted pictures",
-  "iCloud 照片按存图的 App 统计（{n} 个 App）": "iCloud Photos by the app that saved them ({n} apps)",
+  "iCloud 照片按存图的 App 统计（{n} 个 App）": {
+    "one": "iCloud Photos by the app that saved them ({n} app)",
+    "other": "iCloud Photos by the app that saved them ({n} apps)"
+  },
   "iCloud 照片里只导入 X 和 Pixiv 存下的图。": "Only pictures saved by X and Pixiv are imported from iCloud Photos.",
   "照片里": "In Photos",
   "已导入": "Imported",
@@ -921,21 +1016,33 @@
   "启动时检测相似图片": "Detect similar pictures at launch",
   "只比较新导入的图": "Compares only newly imported pictures",
   "备份与存储": "Backups and storage",
-  "共 {n} 份备份": "{n} backups",
+  "共 {n} 份备份": {
+    "one": "{n} backup",
+    "other": "{n} backups"
+  },
   "最近一次 {time}": "latest {time}",
   "立即备份": "Back up now",
   "缩略图缓存": "Thumbnail cache",
-  "{n} 个文件，{size}；清除后浏览时会重新生成": "{n} files, {size}; regenerated while browsing after clearing",
+  "{n} 个文件，{size}；清除后浏览时会重新生成": {
+    "one": "{n} file, {size}; regenerated while browsing after clearing",
+    "other": "{n} files, {size}; regenerated while browsing after clearing"
+  },
   "清除": "Clear",
   "最近的备份": "Recent backups",
   "存储位置": "Storage locations",
   "源数据库（识别结果，可以重建）": "Source database (recognition results, can be rebuilt)",
   "应用数据库（人工整理，不要删）": "App database (your organizing, do not delete)",
   "缩略图缓存（可以放心删）": "Thumbnail cache (safe to delete)",
-  "已更新，「重复」页现在有 {n} 组": "Updated; the “Duplicates” page now has {n} groups",
+  "已更新，「重复」页现在有 {n} 组": {
+    "one": "Updated; the “Duplicates” page now has {n} group",
+    "other": "Updated; the “Duplicates” page now has {n} groups"
+  },
   "已保存，下次启动时生效": "Saved; takes effect at the next launch",
   "备份完成：{name}": "Backup done: {name}",
-  "已清除 {n} 个缩略图": "{n} thumbnails cleared",
+  "已清除 {n} 个缩略图": {
+    "one": "{n} thumbnail cleared",
+    "other": "{n} thumbnails cleared"
+  },
   "图库至少要保留一个来源": "A library needs at least one source",
   "添加文件夹…": "Add folder…",
   "iCloud 照片": "iCloud Photos",
@@ -1003,19 +1110,31 @@
   "确认": "Confirm",
   "这台电脑上没有文件夹选择窗口，请输入文件夹路径：": "No folder picker on this computer; type the folder path:",
   "请至少添加一个文件夹": "Add at least one folder",
-  "已添加 {n} 个文件夹": "{n} folders added",
+  "已添加 {n} 个文件夹": {
+    "one": "{n} folder added",
+    "other": "{n} folders added"
+  },
   "，正在同步": "; syncing",
   "已添加 iCloud 照片": "iCloud Photos added",
-  "这个来源的 {n} 张图会从图库移除。人工整理记录会保留，重新添加同一个文件夹可以恢复。确定移除吗？": "This source's {n} pictures will leave the library. Your organizing is kept, and adding the same folder again brings them back. Remove it?",
+  "这个来源的 {n} 张图会从图库移除。人工整理记录会保留，重新添加同一个文件夹可以恢复。确定移除吗？": {
+    "one": "This source's {n} picture will leave the library. Your organizing is kept, and adding the same folder again brings it back. Remove it?",
+    "other": "This source's {n} pictures will leave the library. Your organizing is kept, and adding the same folder again brings them back. Remove it?"
+  },
   "移除来源": "Remove source",
-  "已移除来源（{n} 张图）": "Source removed ({n} pictures)",
+  "已移除来源（{n} 张图）": {
+    "one": "Source removed ({n} picture)",
+    "other": "Source removed ({n} pictures)"
+  },
   "出处已更新": "Origin updated",
   "正在打开「{name}」…": "Opening “{name}”…",
   "切换图库超时：请检查启动终端，然后刷新页面。": "Switching libraries timed out: check the terminal it was started from, then refresh the page.",
   "账号": "Accounts",
   "找回画师会读你的关注列表，把关注的人记为候选画师；在详情面板点「找 TA 的其他图」时，才拉这位画师公开作品的小图，在本机逐张比对。只读，不点赞、不关注、不发任何内容。": "Finding artists reads your following list and records the people you follow as candidate artists; small pictures of an artist's public works are fetched and compared on this computer only when you click “Find more of their pictures” in the details panel. Read only: nothing is liked, followed or posted.",
   "用 X 的官方数据归档导入关注列表：X 设置 → 你的账号 → 下载你的数据，收到邮件后下载 zip 导入。只读取其中的关注（数字账号 ID），私信、推文都不会打开。": "Import your following list from X's official data archive: X settings → Your account → Download an archive of your data, then download the zip from the email and import it. Only the follows (numeric account IDs) are read; messages and posts are never opened.",
-  "已导入 {n} 个关注": "{n} follows imported",
+  "已导入 {n} 个关注": {
+    "one": "{n} follow imported",
+    "other": "{n} follows imported"
+  },
   "已对应到画师 {resolved} 位 · 待查 {pending} 个": "{resolved} matched to artists · {pending} to look up",
   "导入于 {time}": "imported {time}",
   "尚未导入": "Not imported yet",
@@ -1024,8 +1143,6 @@
   "SauceNAO（以图搜图）": "SauceNAO (reverse image search)",
   "已保存 API key": "API key saved",
   "以图搜图还没有上线，现在不会使用": "Reverse image search is not live yet and won't use it now",
-  "在 saucenao.com 账号页的 search-api 里；以图搜图上线前不会使用": "Under search-api on your saucenao.com account page; not used until reverse image search goes live",
-  "40 位十六进制": "40 hex digits",
   "开发用入口": "for development",
   "网页版（开发用）：在浏览器里登录 pixiv.net，打开开发者工具（{keys}）→ Application（Safari 为「存储空间」）→ Cookie → pixiv.net，复制 {cookie} 的值粘贴到这里。": "Web page (for development): sign in to pixiv.net in your browser, open the developer tools ({keys}) → Application (“Storage” in Safari) → Cookies → pixiv.net, and paste the value of {cookie} here.",
   "请从 Illustash 桌面 app 打开设置，在它的 Pixiv 窗口里登录。": "Open Settings from the Illustash desktop app and sign in in its Pixiv window.",
@@ -1059,7 +1176,10 @@
   "Pixiv 登录有效：{name}": "Pixiv sign-in valid: {name}",
   "Pixiv 登录已过期，请重新登录": "Pixiv sign-in expired; sign in again",
   "已解绑": "Unlinked",
-  "新导入 {n} 个关注": "{n} new follows imported",
+  "新导入 {n} 个关注": {
+    "one": "{n} new follow imported",
+    "other": "{n} new follows imported"
+  },
   "进度": "Progress",
   "对上 {n}": "{n} matched",
   "只有图库包能找回画师。": "Only library packages can find artists.",
@@ -1069,7 +1189,7 @@
   "其他来源有画师": "Other sources with an artist",
   "能对到原帖": "Matched to an original post",
   "正在查找…": "Searching…",
-  "查找画师…": "Find artists…",
+  "找回全库画师…": "Find artists across the library…",
   "同步后自动查新图": "Check new pictures after sync",
   "新加入的图做签名识别、查像素哈希、比对新找到的画师；每次最多 {mb} MB": "New pictures get signature reading, pixel hash lookups and comparison with newly found artists; at most {mb} MB each time",
   "新加入的图只在本机做签名识别；要联网查，在任务面板里每次授权": "New pictures only get signature reading on this computer; to look them up online, allow it each time in the task panel",
@@ -1102,10 +1222,16 @@
   "从 {pool} 张有画师的图里按固定的随机顺序取前 {n} 张，每次打开都是同一批。判断会写进图库（「不对」的画师这张图就不再显示），和详情面板里的「是 TA / 不是」一样可以撤销。": "The first {n} of {pool} pictures with an artist, in a fixed random order, so every visit shows the same set. Judgments are written to the library (a “wrong” artist no longer shows on that picture) and can be undone like “Yes / No” in the details panel.",
   "再加 10 张": "Add 10 more",
   "查找画师会把所选图片的像素哈希和 IQDB 签名（一串文本，不是图片）发给 Danbooru，按结果显示画师和原帖。\n「找 TA 的其他图」会下载这位画师公开作品的小缩略图，只在本机比对；缩略图比完就删，只留比对用的签名。\n\n以后点这两个按钮不再提示。继续吗？": "Find artist sends the pixel hashes and IQDB signatures of the selected pictures (text strings, not pictures) to Danbooru and shows the artists and posts found.\n“Find more of their pictures” downloads small thumbnails of the artist's public works, compares them on this computer only, then deletes them and keeps only the signatures used for matching.\n\nYou won't be asked again for these two buttons. Continue?",
-  "找到 {n} 张图的画师": "Found artists for {n} pictures",
+  "找到 {n} 张图的画师": {
+    "one": "Found artists for {n} picture",
+    "other": "Found artists for {n} pictures"
+  },
   "没有找到新的画师": "No new artists found",
   "查找没有完成：{reason}": "The search did not finish: {reason}",
-  "正在查找 {n} 张图的画师…": "Looking up artists for {n} pictures…",
+  "正在查找 {n} 张图的画师…": {
+    "one": "Looking up artists for {n} picture…",
+    "other": "Looking up artists for {n} pictures…"
+  },
   "正在查找画师…": "Looking up the artist…",
   "正在找 {name} 的其他图…": "Looking for more pictures by {name}…",
   "这位画师": "this artist",
@@ -1142,7 +1268,10 @@
   "再同步一次": "Sync again",
   "没有访问照片图库的权限。到「系统设置 › 隐私与安全性 › 照片」里打开 Illustash，退出并重新打开后再同步。": "Illustash has no access to the Photos library. Turn Illustash on in System Settings › Privacy & Security › Photos, then quit and reopen it and sync again.",
   "打开系统设置": "Open System Settings",
-  "已经有 {n} 张图，认出了 {chars} 个角色。": "{n} pictures so far, {chars} characters identified.",
+  "已经有 {n} 张图，认出了 {chars} 个角色。": {
+    "one": "{n} picture so far, {chars} characters identified.",
+    "other": "{n} pictures so far, {chars} characters identified."
+  },
   "图库建好了": "Your library is ready",
   "正在读取并识别你的图片，全部在这台电脑上完成，图片不会发出去。花一分钟认识一下界面？": "Your pictures are being read and recognized, all on this computer; nothing is sent anywhere. Take a minute to get to know the interface?",
   "带我看看": "Show me",
@@ -1162,7 +1291,10 @@
   "开始用吧": "Let's start",
   "上一步": "Back",
   "下一步": "Next",
-  "认出了 {n} 个角色。要联网查它们的中文名吗？": "{n} characters identified. Look up their Chinese names online?",
+  "认出了 {n} 个角色。要联网查它们的中文名吗？": {
+    "one": "{n} character identified. Look up its Chinese and Japanese names online?",
+    "other": "{n} characters identified. Look up their Chinese and Japanese names online?"
+  },
   "只发送角色的 tag 和作品名，不发送图片。允许后对这个图库一直有效，可以在「设置 › 网络与隐私」里撤销。": "Only character tags and series names are sent, never pictures. Once allowed, it stays on for this library; revoke it in “Settings › Network and privacy”.",
   "暂不": "Not now",
   "允许": "Allow",
@@ -1174,7 +1306,10 @@
   "边用边学：做过的会自动打勾": "Learn as you go: done items tick themselves",
   "不再显示": "Don't show again",
   "已关注「{work}」，可以在任务面板里检查它的新角色": "Following “{work}”; check it for new characters in the task panel",
-  "正在整理 {n} 张图…": "Arranging {n} pictures…",
+  "正在整理 {n} 张图…": {
+    "one": "Arranging {n} picture…",
+    "other": "Arranging {n} pictures…"
+  },
   "启动失败：{reason}。请检查启动终端，然后刷新页面。": "Startup failed: {reason}. Check the terminal it was started from, then refresh the page.",
   "未归类 / 无上级": "Unsorted / no parent",
   "准备好了": "Ready",
@@ -1194,7 +1329,7 @@
   "不是这个角色：有选中时作用于选中的图（角色页移出，图库、重复等页选「不是…」），没有选中时移除当前这张的角色": "Not this character: with a selection, for the selected pictures (removed from the character on its page, “Not…” on Library, Duplicates and similar pages); without one, remove a character from the current picture",
   "换成别的角色：图上已有角色时换掉它（角色页换掉本页的角色），还没有角色时设为角色": "Change to another character: replaces the one on the picture (on a character page, that character), or assigns one if it has none",
   "追加角色，原有的角色保留": "Add another character, keeping the ones already there",
-  "子标签（角色页，选中图片时）": "Sub-tags (on a character page, with pictures selected)",
+  "造型（角色页，选中图片时）": "Forms (on a character page, with pictures selected)",
   "跳过（「全部未识别」和各组；没有选中时跳过当前这张）；在「已跳过」页为恢复到未识别": "Skip (“All unidentified” and its groups; without a selection, skips the current picture); on Skipped, back to unidentified",
   "选详情栏或大图里「也可能是」的第几项；按住 ⌥（Alt）改为追加": "Pick that “Might also be” in the details or the large view; hold ⌥ (Alt) to add it instead",
   "回答「是 TA 吗？」：随机抽查页回答选中的图，详情栏或大图里回答问题条": "Answer “Is this them?”: for the selected pictures on Spot check, or the question in the details or the large view",
@@ -1224,7 +1359,7 @@
   "身份 {key} 不在词条核心里": "Identity {key} is not in the term core",
   "缺少历史文案": "The history label is missing",
   "未知操作": "Unknown action",
-  "请选择子标签": "Choose a sub-tag",
+  "请选择子标签": "Choose a form",
   "请先恢复该图片的父角色归属": "Restore the picture's parent character first",
   "已将 {n} 张设为 {name}": {
     "one": "Set {n} picture to {name}",
@@ -1291,11 +1426,11 @@
   "候选来源只能是 WD / CCIP：{other}": "A candidate's source can only be WD / CCIP: {other}",
   "候选的身份 {entity} 不在词条核心里": "The candidate's identity {entity} is not in the term core",
   "关系端点不存在": "An end of the relation does not exist",
-  "变体不能与其人物重复": "An outfit cannot be a duplicate of its character",
-  "变体已有另一个父人物，需先撤销旧关系": "The outfit already has another parent character; undo the old relation first",
+  "变体不能与其人物重复": "A form cannot be a duplicate of its character",
+  "变体已有另一个父人物，需先撤销旧关系": "The form already has another parent character; undo the old relation first",
   "确认不同与重复等价组冲突": "“Confirmed different” conflicts with a duplicate group",
-  "人物—变体关系存在环": "The character–outfit relations form a cycle",
-  "确认不同与人物—变体关系冲突": "“Confirmed different” conflicts with a character–outfit relation",
+  "人物—变体关系存在环": "The character–form relations make a cycle",
+  "确认不同与人物—变体关系冲突": "“Confirmed different” conflicts with a character–form relation",
   "身份范围应为数组": "The identity scope must be an array",
   "身份范围应为字符串": "The identity scope must be a string",
   "关系候选不存在": "The relation candidate does not exist",
@@ -1319,11 +1454,11 @@
   "早期应用版本与 hybrid 标记不兼容": "An early app version is incompatible with the hybrid marker",
   "学习批次格式不正确": "The learning batch is not in the right format",
   "人工确认重复": "Confirmed duplicate",
-  "请选择两个不同的角色（不能是子标签）": "Choose two different characters (not sub-tags)",
+  "请选择两个不同的角色（不能是子标签）": "Choose two different characters (not forms)",
   "已合并": "Merged",
   "已将 {left} 合并到 {right}（{moved} 条人工结论）": "Merged {left} into {right} ({moved} of your decisions)",
   "名称来源或语言不正确": "The name's source or language is not valid",
-  "请编辑角色本身，子标签跟随角色": "Edit the character itself; sub-tags follow the character",
+  "请编辑角色本身，子标签跟随角色": "Edit the character itself; forms follow the character",
   "名称最多 120 个字符": "A name can be at most 120 characters",
   "没有关联 Danbooru 的角色需要一个名称": "A character not linked to Danbooru needs a name",
   "别名最多 50 个，每个 1–120 个字符": "At most 50 aliases, each 1–120 characters",
@@ -1344,10 +1479,10 @@
   "缺少名字的语言": "The name's language is missing",
   "请选择 Danbooru 角色 tag": "Choose a Danbooru character tag",
   "原创角色（未细分）": "Original character (unsplit)",
-  "只能标记角色本身，不能标记子标签": "Only the character itself can be marked, not a sub-tag",
+  "只能标记角色本身，不能标记子标签": "Only the character itself can be marked, not a form",
   "未细分的原创角色只能是原创角色": "An unsplit original character can only be an original character",
   "参数不正确": "Invalid parameters",
-  "皮肤跟随角色的作品": "An outfit follows its character's series",
+  "皮肤跟随角色的作品": "A form follows its character's series",
   "请输入 1–120 字的作品名": "Enter a series name of 1–120 characters",
   "请输入有效的 Danbooru 作品 tag": "Enter a valid Danbooru series tag",
   "此 tag 已链接到其他身份，不能自动合并": "This tag is linked to another identity and cannot be merged automatically",
@@ -1957,7 +2092,7 @@
   "日期不正确": "The date is not valid",
   "分页参数不正确": "The page parameters are not valid",
   "这个图库还没有画师数据": "This library has no artist data yet",
-  "子标签不属于该角色": "The sub-tag does not belong to this character",
+  "子标签不属于该角色": "The form does not belong to this character",
   "请指定分组": "Choose a group",
   "请指定相似组": "Choose a similar group",
   "未知图片池": "Unknown picture pool",
@@ -2007,8 +2142,8 @@
   "索引plan不正确": "The index plan is not valid",
   "索引参考posts不正确": "The index reference posts are not valid",
   "索引参考向量与posts长度不匹配": "The index reference vectors do not match the posts in length",
-  "与已有角色 {id} 几乎相同（距离 {distance}）：多为其伴生物或皮肤": "Almost the same as existing character {id} (distance {distance}): usually a companion or an outfit of it",
-  "与补充角色 {id} 是同一人（距离 {distance}）：变身前后、本体与皮肤等，并入其别名": "The same person as added character {id} (distance {distance}): before and after a transformation, or a body and its outfit; kept as its alias",
+  "与已有角色 {id} 几乎相同（距离 {distance}）：多为其伴生物或皮肤": "Almost the same as existing character {id} (distance {distance}): usually a companion or a form of it",
+  "与补充角色 {id} 是同一人（距离 {distance}）：变身前后、本体与皮肤等，并入其别名": "The same person as added character {id} (distance {distance}): before and after a transformation, or a character and one of its forms; kept as its alias",
   "参考图没有一致的主体": "The reference pictures have no consistent subject",
   "清洗核心缺失": "The cleaning core is missing",
   "索引元数据不是对象": "The index metadata is not an object",
@@ -2109,6 +2244,10 @@
   "缺少 library_id": "library_id is missing",
   "识别 identity: {e}": "Recognition identity: {e}",
   "原生识别 {context}: {error}": "Native recognition {context}: {error}",
+  "此构建没有 WD Core ML 执行文件清单": "This build has no manifest for the WD Core ML file",
+  "WD 原始模型与 Core ML 执行文件版本不匹配，继续使用原始模型 CPU": "The WD model and its Core ML file are different versions, so the original model keeps running on the CPU",
+  "WD 模型路径缺少父目录": "The WD model path has no parent folder",
+  "WD 加速文件缺失或损坏；在设置的识别模型中重新下载或导入加速文件": "The WD acceleration file is missing or damaged; download or import it again under Recognition models in Settings",
   "运行库 {path}": "Runtime library {path}",
   "无法加载 {path}（需要 ONNX Runtime >=1.22，含 OrtGetApiBase）": "Cannot load {path} (needs ONNX Runtime >=1.22 with OrtGetApiBase)",
   "ORT_DISABLE_TELEMETRY 不是 1，拒绝加载 ONNX Runtime（会默认开启微软遥测）": "ORT_DISABLE_TELEMETRY is not 1; refusing to load ONNX Runtime (it would turn on Microsoft telemetry by default)",
@@ -2267,6 +2406,7 @@
   "自动检查更新": "Check for updates automatically",
   "启动时和之后每天查一次 GitHub 上有没有新版本，有新版本时提示你，不会自己下载或安装": "Asks GitHub for a new version at launch and once a day after that, and tells you when there is one; nothing is downloaded or installed on its own",
   "还没有检查过": "never",
+  "update\u0004还没有检查过": "Not checked yet",
   "有新版本 {version}": "Version {version} is available",
   "已是最新版本": "You have the latest version",
   "自动检查已关闭，可在「设置 › 网络与隐私」里打开": "Automatic checks are off; turn them on in Settings › Network and privacy",
@@ -2591,6 +2731,27 @@
   "人工结论快照": "Human conclusion snapshots",
   "和这个图库已有的结论冲突，保留了已有的": "Conflicts with this library's conclusions; kept this library's",
   "角色或作品": "Character or series",
+  "从这份快照恢复时，缺摘要的图上的结论认不回来，会在报告里列出；其余的图不受影响。": " When restoring from this snapshot, the conclusions on pictures without a fingerprint can't be matched and are listed in the report; other pictures are not affected.",
+  "最近一份快照里有 {n} 张图还没有内容摘要，正在后台读取这些图补算。": {
+    "one": "In the latest snapshot, {n} picture has no content fingerprint yet. It is being read in the background to fill it in.",
+    "other": "In the latest snapshot, {n} pictures have no content fingerprint yet. They are being read in the background to fill them in."
+  },
+  "最近一份快照里有 {n} 张图还没有内容摘要，已经补算好，马上会再存一份快照。": {
+    "one": "In the latest snapshot, {n} picture had no content fingerprint yet. It has been filled in, and another snapshot will be saved shortly.",
+    "other": "In the latest snapshot, {n} pictures had no content fingerprint yet. They have been filled in, and another snapshot will be saved shortly."
+  },
+  "最近一份快照里有 {n} 张图还没有内容摘要，已经补算好，下一份快照会补上。": {
+    "one": "In the latest snapshot, {n} picture had no content fingerprint yet. It has been filled in and will be in the next snapshot.",
+    "other": "In the latest snapshot, {n} pictures had no content fingerprint yet. They have been filled in and will be in the next snapshot."
+  },
+  "最近一份快照里有 {n} 张图还没有内容摘要。": {
+    "one": "In the latest snapshot, {n} picture has no content fingerprint yet.",
+    "other": "In the latest snapshot, {n} pictures have no content fingerprint yet."
+  },
+  "其中 {n} 张图现在读不到，补不上；其余的已经补算好，下一份快照会补上。": {
+    "one": " {n} of them can't be read now, so it can't be filled in; the rest have been filled in and will be in the next snapshot.",
+    "other": " {n} of them can't be read now, so they can't be filled in; the rest have been filled in and will be in the next snapshot."
+  },
   "最近一份快照里有 {n} 张图当时读不到，没能记下内容摘要：从它恢复时，不论是原图库还是换了位置的图库，这些图上的结论都认不回来，会在报告里列出；其余的图不受影响。": {
     "one": "In the latest snapshot, {n} picture couldn't be read, so its content fingerprint is missing. When restoring from it, into this library or one that has moved, the conclusions on that picture can't be matched and are listed in the report; other pictures are not affected.",
     "other": "In the latest snapshot, {n} pictures couldn't be read, so their content fingerprints are missing. When restoring from it, into this library or one that has moved, the conclusions on those pictures can't be matched and are listed in the report; other pictures are not affected."
@@ -2646,7 +2807,9 @@
     "other": "Recent automatic snapshots ({n})"
   },
   "这份快照已经不在了，或没有通过完整性检查；图库没有改动。": "This snapshot is gone or failed its integrity check. Nothing was changed.",
-  "数据库升级前会自动备份一次。换回整库备份前先退出 app；备份之后的改动都会丢掉。": "A backup is made automatically before each database upgrade. Quit the app before swapping a full backup back in; changes made after the backup are lost.",
+  "上面的份数只算「立即备份」留下的，在图库文件夹的 backups 里。升级图库格式前还会自动另存一份，放在 library-backups 里，内容停在那次升级之前，换回后打开时会再升级一次。换回整库备份前先退出 app；备份之后的改动都会丢掉。": "The count above covers only backups made with “Back up now”, kept in the backups folder inside the library folder. Before the library format is upgraded, another backup is saved automatically in library-backups; it stops just before that upgrade, and Illustash asks you to upgrade again when you open it. Quit the app before swapping in a full backup; changes made after the backup are lost.",
+  "备份放在哪里": "Where backups are kept",
+  "升级前的备份": "Backup from before an upgrade",
   "已经写进这个图库。可以整步撤销：点下面的「撤销这次导入」，或用顶栏的撤销按钮。": "Written to this library. You can undo it as one step: click Undo this import below, or use the undo button in the toolbar.",
   "{label}（{n}）": "{label} ({n})",
   "已导入人工结论": "Imported human conclusions",

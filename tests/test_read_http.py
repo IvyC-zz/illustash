@@ -67,7 +67,8 @@ def wait_human_backup(test, origin):
         last = json.loads(response['body'])['automatic']
         test.assertIsNone(last['last_error'], last)
         # 恢复既有快照但数据库尚未记下修订时，protected_revision 可以为空；首轮补算已结束即可取样。
-        return bool(last['snapshots']) and last['last_success'] is not None and not last['running']
+        # 补算把缺的摘要全部补齐时（refill），后台马上再出一份快照，等它写完再取样（#516）。
+        return bool(last['snapshots']) and last['last_success'] is not None and not last['running'] and not last['refill']
 
     try:
         wait_until(ready)
