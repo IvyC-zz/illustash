@@ -144,7 +144,7 @@ fn number(n: i64) -> String {
     let digits = n.unsigned_abs().to_string();
     let mut out = String::new();
     for (i, c) in digits.chars().enumerate() {
-        if i > 0 && (digits.len() - i) % 3 == 0 {
+        if i > 0 && (digits.len() - i).is_multiple_of(3) {
             out.push(',');
         }
         out.push(c);
@@ -170,6 +170,17 @@ pub fn close_requested(app: &AppHandle) -> bool {
     #[cfg(windows)]
     tray::show(app);
     true
+}
+
+/// 宿主停了（换图库重启，或者出错退出）：它报过的任务都不算了。`reveal` 时窗口隐藏着就拿出来。
+pub fn host_gone(app: &AppHandle, reveal_window: bool) {
+    let state = app.state::<Background>();
+    state.busy.lock().expect("background busy lock").clear();
+    state.epoch.fetch_add(1, Ordering::SeqCst);
+    notify::keep_awake(app, false);
+    if reveal_window && state.hidden.load(Ordering::SeqCst) {
+        reveal(app);
+    }
 }
 
 /// 回到窗口：点 Dock 图标、托盘图标或通知时。
@@ -221,6 +232,7 @@ fn stay_in(text: Option<&str>) -> bool {
 }
 
 /// 托盘图标的提示文字：「Illustash：同步中」，多项时「Illustash：2 项进行中」。
+#[cfg(any(windows, test))]
 pub fn summary(busy: &[Busy]) -> String {
     let line = match busy {
         [] => return "Illustash".into(),
@@ -332,7 +344,10 @@ mod tests {
         assert_eq!(describe(&recognised), Some(("同步完成".into(), "已识别 12 张".into())));
         let failed = Ended { reason: "来源文件夹不见了".into(), ..ended("sync", "error", 0) };
         assert_eq!(describe(&failed), Some(("同步失败".into(), "来源文件夹不见了".into())));
-        assert_eq!(describe(&ended("provenance", "done", 3)), Some(("找回画师完成".into(), "新找到 3 张图的画师".into())));
+        assert_eq!(
+            describe(&ended("provenance", "done", 3)),
+            Some(("找回画师完成".into(), "新找到 3 张图的画师".into()))
+        );
         let model = Ended { variant: "import".into(), ..ended("models", "done", 0) };
         assert_eq!(describe(&model).map(|m| m.0), Some("识别模型已导入".into()));
     }

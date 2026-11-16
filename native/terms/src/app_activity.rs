@@ -176,7 +176,9 @@ impl Watcher {
         let busy: Vec<Value> = now
             .iter()
             .filter(|t| t.active)
-            .map(|t| json!({"kind": t.kind, "status": t.status, "variant": t.variant, "done": t.done, "total": t.total}))
+            .map(
+                |t| json!({"kind": t.kind, "status": t.status, "variant": t.variant, "done": t.done, "total": t.total}),
+            )
             .collect();
         self.last = Some((generation, now));
         let state = json!({"busy": busy});

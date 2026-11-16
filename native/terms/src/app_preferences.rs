@@ -147,7 +147,9 @@ pub(crate) fn set_json(body: &str, locales: &[Locale]) -> Result<()> {
     let Json::Object(changes) = crate::http_json::parse_request(body)? else {
         return Err(Error::Invalid("未知设置".into()));
     };
-    if changes.is_empty() || changes.iter().any(|(key, _)| !["language", "acceleration", AFTER_TASKS].contains(&key.as_str())) {
+    if changes.is_empty()
+        || changes.iter().any(|(key, _)| !["language", "acceleration", AFTER_TASKS].contains(&key.as_str()))
+    {
         return Err(Error::Invalid("未知设置".into()));
     }
     let mut validated = Vec::new();

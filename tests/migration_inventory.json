@@ -173,7 +173,7 @@
 
  "desktop/build.rs":"ba1c3b9097208d998ecbebb7b5ab044ceef97999132afb8f1a55a1a61b077034",
 
- "desktop/src/background.rs":"580ab7c749c9a38e08b11630422db08025694bcdbe515a66a9d0b6b34927e442",
+ "desktop/src/background.rs":"2a158d1f9ef281c0456971bf4817ce31655fc21cce9d54fe0066ef98731bb0e8",
 
  "desktop/src/bridge.rs":"2ee649580dd829fd887c016df32c4d689685269d6b7aee96d10032861ac67edf",
 
@@ -189,13 +189,13 @@
 
  "desktop/src/pixiv.rs":"511b8003b2068c801f336d96a6c130a6796ed1866d1102e64678760d3a906c65",
 
- "desktop/src/server.rs":"4ba6ebfe8a0ff505027d469c9363bb32bc4f2d370882cce5da267ad676b455ff",
+ "desktop/src/server.rs":"f730c004eaf6ceff7b2386d683e8c50e60069f65f8035be0b016a3ac870ae66f",
 
  "desktop/src/updater.rs":"eb5c53f5025e9db4e1179988de11d276d9395da2841d79da2c6278fd77929fb9",
 
  "desktop/src/welcome.rs":"79c4c120ab8e4e6fef3459e8452655c00ecd0b9a328f894df911474cd3a2b80b",
 
- "desktop/src/window_state.rs":"0042d212e5de25d4e835ba563559f4ef2ea3aaf89e3ead550d605264703a3040",
+ "desktop/src/window_state.rs":"f1839b84b7920e429ffb25cc47434fb96012220d196a801d36b3e978d074e087",
 
  "desktop/tauri.conf.json":"410add1c0dcb1b8f26d28e6970f3a84019c42ce87e27a0599484d2c59d88210a",
 
@@ -207,7 +207,7 @@
 
  "native/terms/src/app_accounts.rs":"22ef4d58e65652276a92a0eb89a475cd86ea2f22a7fe80be57b0ac502b22bdeb",
 
- "native/terms/src/app_activity.rs":"228a92a0b27b26ba1a8f8e9882a10ea6ce2b39f1d4a0566fdc058b4dcf9ff255",
+ "native/terms/src/app_activity.rs":"bb314441e92fe2ea801d28a478f3c14f1f5b6fd36586fc4c4e73c0482846aa07",
 
  "native/terms/src/app_archives.rs":"a9a0735559c82df2283d06564d8f889b07d3a01cb00d8d310631f1b85e1b48eb",
 
@@ -293,7 +293,7 @@
 
  "native/terms/src/app_platform.rs":"42a41370b59fe5d1282f40c890215e0dd3e183a1ac8f29de420decc4f13b591b",
 
- "native/terms/src/app_preferences.rs":"0ae7c868f1612e8867145bc78e6253b0148dd20220a8850201e9ec0fd6340ca7",
+ "native/terms/src/app_preferences.rs":"da1fa9dfa9c487d164ae55757481c6dbdcc05b74feb00207ebc3e31a01f16303",
 
  "native/terms/src/app_profiles.rs":"34b2f5ab3486b4d88b01aebad9cf82f45a3fbfd286123b479733a3434f04abae",
 

@@ -175,7 +175,8 @@ fn track(main: &WebviewWindow) {
             *last = Some(Saved { x: position.x, y: position.y, width: size.width, height: size.height, maximized });
         }
     }
-    if let Some(sender) = memory.save.lock().expect("window memory sender lock").as_ref() {
+    let sender = memory.save.lock().expect("window memory sender lock").clone();
+    if let Some(sender) = sender {
         let _ = sender.send(());
     }
 }
