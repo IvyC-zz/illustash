@@ -1,7 +1,7 @@
 // 由 tools/styleguide/census.py 从 web/static/app.css 生成，不要手改。
 window.CENSUS = {
  "source": "web/static/app.css",
- "sha256": "f0885d0e11a028595d4b481c731d5f3764d76a089ad72f5d11eb17acc1dfe007",
+ "sha256": "d69986bda790d52680a5555f4cd38a6cd931203c0735bbcd8b86ec11cc0c01ee",
  "lines": 1499,
  "rules": 1345,
  "themeVars": {
@@ -795,7 +795,7 @@ window.CENSUS = {
     "value": "#a2a2b0",
     "uses": 2,
     "examples": [
-     ".viewer-bar .alt kbd",
+     ".viewer-bar .alt kbd,.viewer-bar .add-identity kbd",
      ".ask-bar.on-dark .ask-q small"
     ]
    },
@@ -860,7 +860,7 @@ window.CENSUS = {
     "uses": 2,
     "examples": [
      ".toast-undo:hover",
-     ".viewer-bar .alt kbd"
+     ".viewer-bar .alt kbd,.viewer-bar .add-identity kbd"
     ]
    },
    {
@@ -2109,7 +2109,7 @@ window.CENSUS = {
     "value": "height: 34px",
     "uses": 1,
     "examples": [
-     ".palette-item img,.palette-glyph"
+     ".palette-item img,.palette-glyph,#pickerSubject img"
     ]
    },
    {

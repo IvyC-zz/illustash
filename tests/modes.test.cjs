@@ -436,13 +436,14 @@ test('C 换成、A 追加：单图（#399）', async () => {
   keydown('c'); await settle();
   assert.equal(pickerSays(), '↵ 把这张从 C1 换成 C2⇧↵ 多选');
   closePicker();
+  // A 和详情栏的「＋ 也是…」是同一个面板，能多选（#424 的 2-24）
   keydown('a'); await settle();
-  assert.equal(pickerSays(), '↵ 给这张加上 C2');
+  assert.equal(pickerSays(), '↵ 给这张加上 C2⇧↵ 多选');
   closePicker();
   // 还没有角色：C、A 都是设为
   reset({route: {page: 'library'}, focused: 'a', cursor: 0});
   keydown('c'); await settle();
-  assert.equal(pickerSays(), '↵ 把这张设为 C2');
+  assert.equal(pickerSays(), '↵ 把这张设为 C2⇧↵ 多选');
   closePicker();
   globalThis.fetch = undefined; state.chars = [];
 });

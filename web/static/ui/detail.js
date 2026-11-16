@@ -5,12 +5,12 @@ import {t} from '../core/i18n.js';
 import {REASONS, nameWithWork} from '../core/labels.js';
 import {fetchChar} from '../core/meta.js';
 import {detailAfterViewer, shownUuid} from '../core/modes.js';
-import {pageOf, poolIs, viewOf} from '../core/pages.js';
+import {keyScope, pageOf, poolIs, viewOf} from '../core/pages.js';
 import {charHash, cleanup, go} from '../core/route.js';
 import {api} from '../core/session.js';
 import {state} from '../core/state.js';
 import {$, readFailure, workSmall} from './dom.js';
-import {PAGE, currentItem, kept, loadPage, markDetailKeys, mutate, openTagPicker, renderGrid, rowHeight, rowOf, rowTop, setCursor, syncCards, viewOpts} from './grid.js';
+import {PAGE, currentItem, endPreview, kept, loadPage, markDetailKeys, mutate, openTagPicker, previewList, previewing, renderGrid, rowHeight, rowOf, rowTop, setCursor, syncCards, toggleInfo, viewOpts} from './grid.js';
 import {newIds, openPicker, stage, targets} from './palette.js';
 import {artistSection, findArtistWorks, findArtists} from './artists.js';
 import {markHomeFocus} from './home.js';
@@ -26,7 +26,7 @@ function identityChips(d, compact = false) {
   const chips = d.memberships.map(m => `<div class="identity"><span class="dot ${m.status}" title="${m.status === 'machine' ? t('机器识别') : m.origin === 'album' ? t('相簿') : t('人工确认')} · ${esc(evidence(m.evidence))}"></span><a class="identity-name" href="${charHash(m.id)}" title="${esc(nameWithWork(m))}">${esc(m.name)}</a><span class="identity-actions"><button class="icon small" data-swap="${esc(m.id)}" title="${m === primary ? t('换成…（C）') : t('换成…')}">⇄</button><button class="icon small" data-not="${esc(m.id)}" title="${t('不是 TA（⌫）')}">×</button></span>
     ${compact ? '' : `<div class="variant-row">${(m.variants || []).map(v => `<span class="variant-chip">${esc(v.name)}<button data-unvariant="${esc(v.id)}" title="${t('去掉子标签')}">×</button></span>`).join('')}${(state.charMap.get(m.id)?.variants || []).some(v => !(m.variants || []).some(x => x.id === v.id)) ? `<button class="variant-add" data-addvariant="${esc(m.id)}">＋ ${t('子标签')}</button>` : ''}</div>`}</div>`).join('');
   const alts = (d.alternatives || []).slice(0, 9).map((a, i) => `<button class="alt${a.weak ? ' weak' : ''}" data-alt="${i}" title="${esc(nameWithWork(a))} · ${a.weak ? t('弱线索（中档相似，不算归属）') + ' · ' : ''}${t('{evidence}。点击：换成这个；⌥ 点击：也是', {evidence: esc(evidence(a.evidence))})}"><kbd>${i + 1}</kbd>${esc(a.name)}</button>`).join('');
-  return `<div class="identities">${chips || `<p class="none-yet">${d.unknown ? t('已跳过，还没有角色') : t('还没有角色')}</p>`}<button class="add-identity" data-also="1" title="${d.memberships.length ? t('追加角色，原有的保留（A）') : t('设为角色（C）')}">＋ ${d.memberships.length ? t('也是…') : t('设为角色…')}</button></div>` +
+  return `<div class="identities">${chips || `<p class="none-yet">${d.unknown ? t('已跳过，还没有角色') : t('还没有角色')}</p>`}<button class="add-identity" data-also="1" title="${d.memberships.length ? t('追加角色，原有的保留（A）') : t('设为角色（C）')}">＋ ${d.memberships.length ? t('也是…') : t('设为角色…')} <kbd>${d.memberships.length ? 'A' : 'C'}</kbd></button></div>` +
     (alts ? `<div class="alts"><h3>${t('也可能是')}</h3><div class="alt-row">${alts}</div></div>` : '');
 }
 // PROTO = 从用户自己的裁决学到的原型（native/terms/src/research_compute/learn.rs）。
@@ -79,10 +79,9 @@ export async function inspect(ident, quiet = false) {
       ${d.duplicates?.length ? `<section class="inspector-section"><h3 class="section-title">${t('重复副本 · 共 {n} 份', {n: d.duplicates.length + 1})}</h3><div class="dup-list">${d.duplicates.map(x => `<button class="dup-copy" data-copy="${esc(x.uuid)}" title="${t('查看这份副本')}"><img src="/image?id=${encodeURIComponent(x.uuid)}&size=thumb" alt="" loading="lazy"><span><b>${x.pos}/${x.size}</b> ${esc((x.added_at || '').slice(0, 10))}<br><small>${x.names.length ? x.names.map(esc).join(' · ') : t('未识别')}</small></span></button>`).join('')}</div></section>` : ''}
       ${viewOpts.meta ? `<section class="inspector-section"><dl class="facts"><div><dt>${t('尺寸')}</dt><dd class="mono">${number(d.width)} × ${number(d.height)}</dd></div><div><dt>${t('加入')}</dt><dd class="mono">${esc((d.added_at || '').slice(0, 16).replace('T', ' '))}</dd></div><div><dt>${t('文件')}</dt><dd title="${esc(d.filename)}">${esc(d.filename)}</dd></div><div><dt>${t('文件形态')}</dt><dd>${d.src_kind === 'deriv' ? t('本地副本') : t('原图')}</dd></div></dl></section>
       <details class="inspector-section"><summary>${t('画面标签')}</summary><div class="tags">${d.tags.map(x => `<button class="tag" data-tag="${esc(x.value)}" title="${t('按此标签筛选图库 · WD {conf}', {conf: x.conf.toFixed(2)})}">${esc(x.value.replaceAll('_', ' '))}</button>`).join('') || `<p>${t('暂无')}</p>`}</div></details>` : ''}
-      <div class="inspector-actions">${d.memberships.length ? `<button class="primary large" id="fixChar">${t('更正角色')} <kbd>C</kbd></button>` : `<button class="primary large" data-also="1">${t('设为角色…')} <kbd>C</kbd></button>`}${pageOf(state.route).skip && !d.memberships.length ? `<button class="secondary large" id="skipOne">${t('跳过')} <kbd>S</kbd></button>` : ''}${d.unknown ? `<button class="secondary large" id="resumeOne">${t('恢复到未识别')}${viewOf(state.route).bar === 'skipped' ? ' <kbd>S</kbd>' : ''}</button>` : ''}${curate}</div>`;
+      <div class="inspector-actions">${pageOf(state.route).skip && !d.memberships.length ? `<button class="secondary large" id="skipOne">${t('跳过')} <kbd>S</kbd></button>` : ''}${d.unknown ? `<button class="secondary large" id="resumeOne">${t('恢复到未识别')}${viewOf(state.route).bar === 'skipped' ? ' <kbd>S</kbd>' : ''}</button>` : ''}${curate}</div>`;
     markDetailKeys();
     if (pc) loadCharStats(pc.id, ident, gen);
-    $('fixChar')?.addEventListener('click', () => swapOne(d, ident, primary.id));
     $('inspector').querySelector('.preview img').addEventListener('error', e => { e.target.parentElement.innerHTML = `<div class="missing">${esc(unreadableText())}</div>`; }, {once: true});
     $('closeInspector').onclick = closeInspector;
     $('expand').onclick = $('previewButton').onclick = () => openViewer(indexOf(ident));
@@ -112,10 +111,14 @@ function bindIdentity(root, d, ident) {
     const epoch = state.readEpoch, mode = state.nsfw;
     const c = await fetchChar(b.dataset.addvariant);
     if (!c || epoch !== state.readEpoch || mode !== state.nsfw || (state.focused !== ident && state.viewerItem?.uuid !== ident)) return;
-    openPicker({title: t('加子标签'), items: c.variants.map(v => ({id: v.id, name: v.name, hint: t('{n} 张', {n: number(v.count)}), counted: true})), placeholder: t('筛选子标签'), sentence: e => t('给这张加上 {name}', {name: e.name}), pick: e => mutate('/api/change', {ids: [ident], action: 'add_variant', entity: e.id}, false)});
+    openPicker({title: t('加子标签'), subject: [ident], items: c.variants.map(v => ({id: v.id, name: v.name, hint: t('{n} 张', {n: number(v.count)}), counted: true})), placeholder: t('筛选子标签'), sentence: e => t('给这张加上 {name}', {name: e.name}), pick: e => mutate('/api/change', {ids: [ident], action: 'add_variant', entity: e.id}, false)});
   };
   for (const b of root.querySelectorAll('[data-alt]')) b.onclick = e => pickAlternative(d, ident, Number(b.dataset.alt), e.altKey);
-  for (const b of root.querySelectorAll('[data-also]')) b.onclick = () => openPicker({title: d.memberships.length ? t('这张也是…') : t('这张是…'), sentence: e => d.memberships.length ? t('给这张加上 {name}', {name: e.name}) : t('把这张设为 {name}', {name: e.name}), exclude: d.memberships.map(m => m.id), suggest: {ids: [ident]}, multi: true,
+  for (const b of root.querySelectorAll('[data-also]')) b.onclick = () => addOne(d, ident);
+}
+// 给一张图追加角色（还没有角色时是设为）：详情栏、大图的「＋」和 C、A 是同一个面板，都能多选（#424 的 2-24）。
+function addOne(d, ident) {
+  openPicker({title: d.memberships.length ? t('这张也是…') : t('这张是…'), sentence: e => d.memberships.length ? t('给这张加上 {name}', {name: e.name}) : t('把这张设为 {name}', {name: e.name}), exclude: d.memberships.map(m => m.id), suggest: {ids: [ident]}, multi: true,
     pick: list => mutate('/api/change', {ids: [ident], action: 'confirmed', ...targets(list)}, pageOf(state.route).lead)});
 }
 // ---------- 主动提问：偶尔问一句「是 TA 吗？」 ----------
@@ -171,19 +174,19 @@ export async function singleAction(kind) {
   if (kind === 'remove') {
     if (r.char) mutate('/api/change', {ids: [item.uuid], action: 'rejected', entity: r.char}, true);
     else if (item.memberships.length === 1) mutate('/api/change', {ids: [item.uuid], action: 'rejected', entity: item.memberships[0].id}, false);
-    else if (item.memberships.length) openPicker({title: t('这张不是…'), items: item.memberships, sentence: e => t('把 {name} 从这张移出', {name: e.name}), pick: e => mutate('/api/change', {ids: [item.uuid], action: 'rejected', entity: e.id}, false)});
+    else if (item.memberships.length) openPicker({title: t('这张不是…'), items: item.memberships, subject: [item.uuid], sentence: e => t('把 {name} 从这张移出', {name: e.name}), pick: e => mutate('/api/change', {ids: [item.uuid], action: 'rejected', entity: e.id}, false)});
   } else if (kind === 'tag') {
     const d = state.detail?.uuid === item.uuid ? state.detail : null;
     openTagPicker(() => ({ids: [item.uuid]}), 1, [{...item, user_tags: d?.user_tags || item.user_tags}], () => false);
-  } else if (kind === 'skip' && pageOf(r).skip) mutate('/api/change', {ids: [item.uuid], action: 'unknown'}, true);
+  // 大图里跳过、排除之后到下一张，和随机抽查回答之后一样（用户 2026-11-14 定，#424 的 2-1）；改角色仍停在原图。
+  } else if (kind === 'skip' && pageOf(r).skip) mutate('/api/change', {ids: [item.uuid], action: 'unknown'}, true, {advance: state.viewer >= 0});
   else if (kind === 'resume') mutate('/api/change', {ids: [item.uuid], action: 'resume'}, poolIs(r, 'skipped'));
-  else if (kind === 'exclude' || kind === 'include') mutate('/api/curate', {ids: [item.uuid], action: kind}, true);
+  else if (kind === 'exclude' || kind === 'include') mutate('/api/curate', {ids: [item.uuid], action: kind}, true, {advance: kind === 'exclude' && state.viewer >= 0});
   else if (kind === 'swap' || kind === 'also') {
     const d = state.detail?.uuid === item.uuid ? state.detail : await api('/api/detail?id=' + encodeURIComponent(item.uuid));
     const from = primaryOf(d);
     if (kind === 'swap' && from) swapOne(d, item.uuid, from.id);
-    else openPicker({title: from ? t('这张也是…') : t('这张是…'), sentence: e => from ? t('给这张加上 {name}', {name: e.name}) : t('把这张设为 {name}', {name: e.name}), exclude: d.memberships.map(m => m.id), suggest: {ids: [item.uuid]},
-      pick: e => mutate('/api/change', {ids: [item.uuid], action: 'confirmed', entity: e.id}, pageOf(r).lead)});
+    else addOne(d, item.uuid);
   }
 }
 export const indexOf = uuid => state.items.findIndex(x => x?.uuid === uuid);
@@ -202,9 +205,10 @@ export async function step(delta) {
   setCursor(n); ensureVisible(n);
   if (state.viewer >= 0) showViewer(n); else inspect(state.items[n].uuid);
 }
-// 把网格滚到第 i 张可见。主区不是网格的页面（首页从详情栏、大图翻页）不按网格的行去滚。
+// 把网格滚到第 i 张可见。主区不是网格的页面（首页从详情栏、大图翻页，按组整理看大图）不按网格的行去滚，交给页面登记的
+// reveal 把那张图滚进视野（#424 的 2-11）。
 export function ensureVisible(i) {
-  if (viewOf(state.route).area !== 'grid') return;
+  if (viewOf(state.route).area !== 'grid') { reveal(state.items[i]?.uuid); return; }
   const v = $('viewport'), row = rowOf(i), top = rowTop(row), height = rowHeight(row);
   if (top < v.scrollTop) v.scrollTop = top; else if (top + height > v.scrollTop + v.clientHeight) v.scrollTop = top + height - v.clientHeight;
   syncCards();
@@ -219,10 +223,13 @@ const viewerLayer = createLayer({kind: 'overlay', id: 'viewer', el: () => $('vie
 export function openViewer(i) { if (i < 0 || !state.items[i]) return; state.viewer = i; $('viewer').hidden = false; viewerLayer.open(); document.body.classList.add('viewing'); showViewer(i); }
 // 详情栏开着时，关大图后它跟到大图里最后看的那张（core/modes.js 的 detailAfterViewer，#399）：光标已经在那张，
 // 不跟的话快捷键改的是详情栏里的旧图，Space、方向键却从光标那张走。
+// 面板页借列表看的大图（previewList）关掉时把列表还回去，光标和详情栏都不动，只把最后看的那张滚进视野。
 export function closeViewer(reason) {
   viewerLayer.close(reason); if (state.viewer < 0) return;
-  const follow = detailAfterViewer();
-  kept.hold = null; state.viewerItem = null; setCursor(state.viewer); $('viewer').hidden = true; document.body.classList.remove('viewing'); state.viewer = -1; ensureVisible(state.cursor);
+  const follow = detailAfterViewer(), last = state.viewerItem?.uuid;
+  kept.hold = null; state.viewerItem = null; $('viewer').hidden = true; document.body.classList.remove('viewing');
+  if (endPreview()) { state.viewer = -1; reveal(last); markDetailKeys(); return; }
+  setCursor(state.viewer); state.viewer = -1; ensureVisible(state.cursor);
   if (follow) inspect(follow, true); else markDetailKeys();   // 选择栏又不被盖住了：详情栏的键标跟着它
 }
 export async function showViewer(i, held = null) {
@@ -244,8 +251,18 @@ export async function showViewer(i, held = null) {
 async function refreshViewerBar(item, i) {
   let d; try { d = await api('/api/detail?id=' + encodeURIComponent(item.uuid)); } catch (e) { if (state.viewerItem?.uuid === item.uuid) readFailure($('viewerBar'), e); return; }
   if (!d || state.viewerItem?.uuid !== item.uuid) return;
-  state.detail = d; $('viewerBar').innerHTML = (shouldAsk(d, item.uuid) ? askHTML(d.question, true) : '') + identityChips(d, true);
+  state.detail = d; $('viewerBar').innerHTML = (shouldAsk(d, item.uuid) ? askHTML(d.question, true) : '') + identityChips(d, true) + viewerActions(d);
   bindIdentity($('viewerBar'), d, item.uuid); bindAsk($('viewerBar'), d, item.uuid);
+  for (const b of $('viewerBar').querySelectorAll('[data-vact]')) b.onclick = () => b.dataset.vact === 'info' ? toggleInfo() : singleAction(b.dataset.vact);
+}
+// 大图底栏的「跳过 S」「排除 X」「信息 I」（#424 的 2-1、2-7）：只在这一页按这个键做的就是它时才画。跳过和详情栏的
+// 「跳过 S」一样，只在能跳过的页、图还没有角色时有；已排除的图 X 是恢复收录，不画；信息在有详情栏的页面才有。
+function viewerActions(d) {
+  const r = state.route, b = [], btn = (act, key, label) => `<button class="alt" data-vact="${act}"><kbd>${key}</kbd>${label}</button>`;
+  if (pageOf(r).skip && !d.memberships.length) b.push(btn('skip', 'S', t('跳过')));
+  if (!d.excluded) b.push(btn('exclude', 'X', t('排除')));
+  if (keyScope(viewOf(r)) && !previewing()) b.push(btn('info', 'I', t('信息')));
+  return b.length ? `<div class="alts"><div class="alt-row">${b.join('')}</div></div>` : '';
 }
 function applyView() { $('viewerImg').style.transform = `translate(${view.x}px,${view.y}px) scale(${view.scale})`; $('viewerStage').classList.toggle('zoomed', view.scale > 1.01); }
 export function zoomView(factor, cx, cy) {
@@ -255,6 +272,44 @@ export function zoomView(factor, cx, cy) {
   view.x = px - (px - view.x) * k; view.y = py - (py - view.y) * k; view.scale = next;
   if (next === 1) { view.x = 0; view.y = 0; } applyView();
 }
+// 主区不是网格的页面把一张图滚进视野：页面在注册表里登记 reveal(uuid)（首页、按组整理）。
+const reveal = uuid => { if (uuid) pageOf(state.route).reveal?.(uuid); };
+
+// ---------- 面板页看大图（#424 的 2-2、2-34） ----------
+// 按组整理的缩略图、首页「认一认」的图，点一下是「不算」或「不是 TA」，看大图用长按，或焦点在图上、鼠标停在图上时按
+// Space（grid.js 的键盘处理调 peek）；身份整理的样图、画师抽查的图点一下就看大图（页面自己调 peekAt）。这样的图带
+// data-peek（uuid），所在的区域用 wirePeek 登记，list(el) 返回它那一组的 uuid：大图里翻的就是这一组（grid.js 的 previewList）。
+const LONG_PRESS = 450, peeks = [];
+let hovered = null;
+export function wirePeek(root, list) {
+  peeks.push({root, list});
+  let timer = 0, fired = false, start = [0, 0];
+  const cancel = () => { clearTimeout(timer); timer = 0; };
+  root.addEventListener('pointerdown', e => {
+    fired = false; cancel();
+    const el = e.target.closest('[data-peek]'); if (!el || e.button !== 0) return;
+    start = [e.clientX, e.clientY];
+    timer = setTimeout(() => { timer = 0; fired = peekAt(el); }, LONG_PRESS);
+  });
+  root.addEventListener('pointermove', e => { if (timer && Math.hypot(e.clientX - start[0], e.clientY - start[1]) > 8) cancel(); });
+  for (const type of ['pointerup', 'pointercancel', 'pointerleave']) root.addEventListener(type, cancel);
+  // 长按打开了大图：松手时的这次点击不再算「不算在这组里」。
+  root.addEventListener('click', e => { if (fired) { e.preventDefault(); e.stopPropagation(); fired = false; } }, true);
+  root.addEventListener('contextmenu', e => { if (fired || timer) e.preventDefault(); });
+  root.addEventListener('mouseover', e => { hovered = e.target.closest('[data-peek]'); });
+  root.addEventListener('mouseleave', () => { hovered = null; });
+}
+// Space：焦点所在的图，否则鼠标停着的那张（还在页面上、看得见）。打开了返回 true。
+export function peek(target) {
+  const el = target?.closest?.('[data-peek]') || (hovered?.isConnected && hovered.offsetParent ? hovered : null);
+  return el ? peekAt(el) : false;
+}
+export function peekAt(el) {
+  const p = peeks.find(x => x.root.contains(el)), ids = p?.list(el) || [], i = ids.indexOf(el.dataset.peek);
+  if (i < 0) return false;
+  previewList(ids, i); return true;
+}
+
 let viewGesture = 1;
 let pan = null;
 
