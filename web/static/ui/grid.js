@@ -455,7 +455,7 @@ export function renderSelection() {
     buttons = `<button class="primary${arm('isme')}" data-act="isme">${state.armed === 'isme' ? t('再点一次：{n} 张设为 {name}', {n: number(n), name: esc(name)}) : t('是 {name}', {name: esc(name)})}</button><button class="quiet${arm('remove')}" data-act="remove">${state.armed === 'remove' ? t('再点一次：{n} 张不是', {n: number(n)}) : t('不是 TA')} <kbd>⌫</kbd></button>`;
   } else if (r.char) {
     const name = state.char?.name || t('该角色');
-    buttons = `<button class="primary${arm('remove')}" data-act="remove">${state.armed === 'remove' ? t('再点一次：移出 {n} 张', {n: number(n)}) : t('不是 {name}', {name: esc(short(name))})} <kbd>⌫</kbd></button><button class="quiet" data-act="swap">${t('换成…')} <kbd>C</kbd></button><button class="quiet" data-act="also">${t('也是…')} <kbd>A</kbd></button>${state.char?.variants?.length ? `<button class="quiet" data-act="variant">${t('子标签')} <kbd>T</kbd></button>` : ''}`;
+    buttons = `<button class="primary${arm('remove')}" data-act="remove">${state.armed === 'remove' ? t('再点一次：移出 {n} 张', {n: number(n)}) : t('不是 {name}', {name: esc(short(name))})} <kbd>⌫</kbd></button><button class="quiet" data-act="swap">${t('换成…')} <kbd>C</kbd></button><button class="quiet" data-act="also">${t('也是…')} <kbd>A</kbd></button>${state.char?.variants?.length ? `<button class="quiet" data-act="variant">${t('造型')} <kbd>T</kbd></button>` : ''}`;
   } else if (kind === 'audit') {
     // 随机抽查：每张图问的是它自己的角色（深色角标）；可以一次回答整个选择。
     buttons = `<button class="primary" data-act="audit_yes" title="${t('选中的图都是角标上的角色')}">${t('都是')} <kbd>Y</kbd></button><button class="quiet" data-act="audit_no" title="${t('选中的图都不是角标上的角色')}">${t('都不是')} <kbd>N</kbd></button>`;
@@ -548,8 +548,13 @@ function runBarAction(act) {
   }
   else if (act === 'also') openPicker({title: t('这 {n} 张也是…', {n: number(n)}), sentence: e => t('给 {n} 张加上 {name}', {n: number(n), name: e.name}), exclude: [r.char], suggest: selectionPayload(), multi: true,
     pick: list => mutate('/api/change', {...payload(), action: 'confirmed', ...targets(list)}, false)});
-  else if (act === 'assign') openPicker({title: browsing() ? t('给 {n} 张加角色', {n: number(n)}) : t('把 {n} 张设为…', {n: number(n)}), sentence: e => t('把 {n} 张设为 {name}', {n: number(n), name: e.name}), suggest: selectionPayload(), multi: true,
-    pick: list => mutate('/api/change', {...payload(), action: 'confirmed', ...targets(list)}, !browsing())});
+  else if (act === 'assign') {
+    // 默认选择栏（图库、重复、相似组）里选中的图已有角色时，按钮是「加角色…」，原有的角色保留；否则是给还没有角色的图设角色（#423）。
+    const chars = viewOf(r).bar === 'default' ? selectedChars() : {all: new Map()}, adding = !chars || chars.all.size > 0;
+    openPicker({title: adding ? t('给 {n} 张加角色', {n: number(n)}) : t('把 {n} 张设为…', {n: number(n)}),
+      sentence: e => adding ? t('给 {n} 张加上 {name}', {n: number(n), name: e.name}) : t('把 {n} 张设为 {name}', {n: number(n), name: e.name}), suggest: selectionPayload(), multi: true,
+      pick: list => mutate('/api/change', {...payload(), action: 'confirmed', ...targets(list)}, !browsing())});
+  }
   else if (act === 'oc') markOc(payload(), true);
   else if (act === 'relate') openRelate([...state.sel.ids]);
   else if (act === 'variant') openVariantMenu(payload);
@@ -573,7 +578,7 @@ function openVariantMenu(payload) {
   const r = state.route, n = selCount(), items = [];
   if (r.variant) { const v = state.char.variants.find(v => v.id === r.variant); if (v) items.push({id: v.id, name: v.name, remove: true, hint: t('从所选图片去掉')}); }
   for (const v of state.char.variants) if (v.id !== r.variant) items.push({id: v.id, name: v.name, hint: t('{n} 张', {n: number(v.count)}), counted: true});
-  openPicker({title: t('子标签'), items, placeholder: t('筛选子标签'), sentence: e => e.remove ? t('从 {n} 张去掉 {name}', {n: number(n), name: e.name}) : t('给 {n} 张加上 {name}', {n: number(n), name: e.name}),
+  openPicker({title: t('造型'), items, placeholder: t('筛选造型'), sentence: e => e.remove ? t('从 {n} 张去掉 {name}', {n: number(n), name: e.name}) : t('给 {n} 张加上 {name}', {n: number(n), name: e.name}),
     pick: e => mutate('/api/change', {...payload(), action: e.remove ? 'remove_variant' : 'add_variant', entity: e.id}, !!e.remove)});
 }
 
@@ -683,7 +688,7 @@ export function renderViewPop() {
     </div>` : '') + (grid ? `<h6>${t('图片网格')}</h6><div class="view-group">
       <label class="view-row"><span>${t('缩略图大小')}</span><input type="range" id="zoom" min="0" max="100" step="1" value="${sizeToSlider(state.size)}" aria-label="${t('缩略图大小')}"></label>
       ${viewSwitch('captions', t('图片下方显示角色名'), t('浏览页、格子够大时'))}
-      ${viewSwitch('marks', t('图上显示副本数与皮肤'))}
+      ${viewSwitch('marks', t('图上显示副本数与造型'))}
       ${viewSwitch('hints', t('未识别的图上显示「可能是」'), t('点一下就设为该角色'))}
     </div>` : '') + `<h6>${t('侧栏与提示')}</h6><div class="view-group">
       ${viewSwitch('railCount', t('侧栏显示数量'))}
