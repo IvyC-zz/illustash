@@ -170,8 +170,11 @@ pub(crate) fn fill_unassigned(c: &Connection, scoped: bool) -> Result<()> {
         (
             "identity_nodes n ON n.id=v.entity",
             "n.character_id",
-            "NOT EXISTS(SELECT 1 FROM effective_assertions s
-                WHERE s.uuid=v.uuid AND s.character_id=n.character_id AND s.variant_id IS NULL AND s.status='rejected')
+            // 图库里没有 effective_assertions 视图（它只在旧 Python 迁移 SQL 里），这里按它的定义直接查：
+            // 人工否定落在这个角色本身（不是造型），且这条否定没有被挂起。
+            "NOT EXISTS(SELECT 1 FROM assertions s JOIN identity_nodes x ON x.id=s.entity
+                WHERE s.uuid=v.uuid AND x.character_id=n.character_id AND x.variant_id IS NULL AND s.status='rejected'
+                  AND NOT EXISTS(SELECT 1 FROM identity_suspended h WHERE h.uuid=s.uuid AND h.entity=s.entity))
              AND NOT EXISTS(SELECT 1 FROM identity_uncertain u WHERE u.uuid=v.uuid)
              AND NOT EXISTS(SELECT 1 FROM identity_suspended h WHERE h.uuid=v.uuid)",
         )
