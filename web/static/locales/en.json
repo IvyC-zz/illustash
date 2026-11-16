@@ -2759,5 +2759,7 @@
   "高亮的按钮是外部资料建议的做法。": "The highlighted button is what external sources suggest.",
   "选中两张以上可以判断它们的关系。": "Select two or more to decide how they relate.",
   "排除只做标记，不改动原图文件。": "Excluding only marks pictures; the original files are not changed.",
-  "像截图，但画面里有人物，规则拿不准。": "They look like screenshots but have people in them, so the rules can’t decide."
+  "像截图，但画面里有人物，规则拿不准。": "They look like screenshots but have people in them, so the rules can’t decide.",
+  "后退（{key}）": "Back ({key})",
+  "后退、前进（只在这个图库的页面之间；鼠标侧键、标题左边的 ‹ 也可以）": "Back and forward (within this library’s pages; the mouse side buttons and the ‹ left of the title work too)"
 }

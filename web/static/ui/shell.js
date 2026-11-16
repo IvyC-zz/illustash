@@ -1,13 +1,13 @@
 // 页面的框架（桌面布局，#199）：按地址切到对应页面、侧栏的计数、每个页面的标题和工具栏。页面在哪由 core/route.js
 // 负责；计数的数据由 core/meta.js 负责。
 import {workKey} from '../core/catalog.js';
-import {esc, localDate, number, shortcut} from '../core/format.js';
+import {esc, isMac, localDate, number, shortcut} from '../core/format.js';
 import {t} from '../core/i18n.js';
 import {REASONS, nameTip} from '../core/labels.js';
 import {fetchChar, onMeta, setChar} from '../core/meta.js';
 import {prefs} from '../core/prefs.js';
 import {implement, pageOf, viewOf} from '../core/pages.js';
-import {cleanup, defaultSort, go, hashFor, noteHistory, parseHash, replaceRoute, setRoute, sortKey} from '../core/route.js';
+import {canGoBack, cleanup, defaultSort, go, hashFor, historyEntry, noteHistory, parseHash, replaceRoute, setRoute, sortKey, stepHistory} from '../core/route.js';
 import {api, readError} from '../core/session.js';
 import {state} from '../core/state.js';
 import {cast, createWork, drawCast, drawShelf, openTagged, renderIndexBody, searchIndex, shelf} from './catalog.js';
@@ -45,7 +45,10 @@ function metaShown({error: e, directory, queue}) {
 export async function applyRoute() {
   const route = parseHash(); route.sort = route.sort || defaultSort(route);
   const legacy = route.legacy; delete route.legacy;
-  noteHistory(legacy ? hashFor(route) : undefined);   // 旧地址就地改成新的；这一条记下序号，后退不退出页面
+  // 要离开的是自己渲染的页面（首页、资料库、设置……）：按历史记录的序号记下它滚到哪里，后退、前进回到这一条时恢复（#526）。
+  if (pageOf(state.route).render) panelScroll.set(historyEntry(), $('viewport').scrollTop);
+  const traversed = noteHistory(legacy ? hashFor(route) : undefined);   // 旧地址就地改成新的；这一条记下序号，后退不退出页面
+  $('backButton').hidden = !canGoBack();
   const samePage = state.route.page === route.page && state.route.id === route.id && state.route.char === route.char;   // 切换子视图仍是同一页
   // 换页（含同一页换子视图、换参数）：大图关掉，因为它下面的列表要重读、序号不再对得上；选择和光标复位；
   // 详情栏只在换了页面或角色时关。大图是被换页关掉的，不动焦点。
@@ -70,11 +73,19 @@ export async function applyRoute() {
   $('homePage').hidden = page.area !== 'homePage';
   if (page.guideTick) guideTick(page.guideTick);
   renderChrome();
-  // 自己渲染的页面（首页、资料库、设置、按组整理……）不记位置：换到别的页面时从顶部开始，不沿用上一页的滚动位置。
-  // 同一页换子视图、刷新时由页面自己决定留在哪里。网格页由 reload 定位（回到记过的地址时恢复，否则回顶部）。
+  // 自己渲染的页面（首页、资料库、设置、按组整理……）换到时从顶部开始，不沿用上一页的滚动位置；后退、前进回到记过
+  // 位置的那一条时，画完再滚回去（restore 让首页按上次读到的天数读，见 ui/home.js）。同一页换子视图、刷新时由页面自己
+  // 决定留在哪里。网格页由 reload 定位（回到记过的地址时恢复，否则回顶部）。
+  const saved = traversed ? panelScroll.get(historyEntry()) : undefined;
   if (page.render && !samePage) $('viewport').scrollTop = 0;
-  if (page.render) page.render({samePage}); else await reload(true, placeFor(route));   // 没有自己渲染入口的页面是网格页
+  if (!page.render) { await reload(true, placeFor(route)); return; }   // 没有自己渲染入口的页面是网格页
+  const drawn = page.render({samePage, restore: saved !== undefined});
+  if (saved === undefined) return;
+  await drawn;
+  if (state.route === route) $('viewport').scrollTop = saved;
 }
+// 自己渲染的页面在各条历史记录里停在哪里：{序号: scrollTop}。
+const panelScroll = new Map();
 // ---------- 外框：标题、工具栏 ----------
 // 同一个侧栏入口的子视图在它的标题下显示成标签页，而不是塞在角落里的链接。
 function subTabs(r) {
@@ -227,6 +238,12 @@ export function renderHeading() {
 // 页面这一部分注册的处理函数。页面启动时调用一次。
 export function wireShell() {
   onMeta(metaShown);
+  // 后退（#526）：标题左边的「‹」（只在能后退时显示）、Alt+← 或 ⌘[（键盘处理在 ui/grid.js）、鼠标侧键，都走
+  // core/route.js 的 stepHistory，只在这个图库的页面之间走。鼠标侧键在 mouseup 时拦下浏览器自己的后退，否则
+  // 它会退出图库页面。
+  $('backButton').onclick = () => stepHistory(-1);
+  $('backButton').title = t('后退（{key}）', {key: isMac ? '⌘[' : 'Alt+←'});
+  window.addEventListener('mouseup', e => { if (e.button === 3 || e.button === 4) { e.preventDefault(); stepHistory(e.button === 3 ? -1 : 1); } });
   $('empty').addEventListener('click', e => {
     const act = e.target.closest('[data-empty]')?.dataset.empty;
     if (act === 'nsfw') setNsfw('');

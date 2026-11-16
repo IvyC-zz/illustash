@@ -638,9 +638,9 @@ p{color:var(--muted)}
 .jump{display:inline-flex;align-items:center;gap:var(--space-8);height:var(--h-36);padding:0 var(--space-12);border:0;border-radius:var(--radius-pill);background:var(--soft);color:var(--ink2);font-size:var(--fs-12);font-weight:500}
 .jump svg{width:15px;height:15px;fill:none;stroke:currentColor;stroke-width:1.7;stroke-linecap:round}
 .jump:hover{background:rgba(var(--sh),.09)}
-.top-actions .icon,#sidebarToggle{width:var(--h-36);height:var(--h-36);border-radius:var(--radius-pill);background:var(--soft);color:var(--ink2)}
-.top-actions .icon:hover,#sidebarToggle:hover{background:rgba(var(--sh),.09)}
-.top-actions .icon svg,#sidebarToggle svg{width:17px;height:17px;fill:none;stroke:currentColor;stroke-width:1.6;stroke-linecap:round;stroke-linejoin:round}
+.top-actions .icon,#sidebarToggle,#backButton{width:var(--h-36);height:var(--h-36);border-radius:var(--radius-pill);background:var(--soft);color:var(--ink2)}
+.top-actions .icon:hover,#sidebarToggle:hover,#backButton:hover{background:rgba(var(--sh),.09)}
+.top-actions .icon svg,#sidebarToggle svg,#backButton svg{width:17px;height:17px;fill:none;stroke:currentColor;stroke-width:1.6;stroke-linecap:round;stroke-linejoin:round}
 .icon{border-radius:var(--radius-8);color:var(--ink2)}
 .icon:hover,.quiet:hover{background:var(--soft)}
 button:active:not(:disabled){transform:scale(.97)}
