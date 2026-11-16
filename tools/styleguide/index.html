@@ -178,7 +178,7 @@
       <div class="sg-pair"><button class="primary" disabled>保存</button><i>:disabled</i></div>
       <div class="sg-pair"><button class="primary small">授权并开始</button><i>.primary.small</i></div>
     </div>
-    <p class="sg-note"><b>一种写法：</b>主要操作只有 <code>.primary</code>（原来并行的 <code>.btn.pri</code> 已并入，详情栏底部用 <code>.primary.large</code>）。它在 CSS 里仍被定义了两次：app.css 上半是黑底方角版（<code>background:var(--ink)</code>），“redesign layer”一节整体改写成强调色圆角版；第一版里的 <code>.primary kbd</code>、<code>.primary.armed</code> 也各有两份，是 #317 之后的清理项。</p>
+    <p class="sg-note"><b>一种写法：</b>主要操作只有 <code>.primary</code>（原来并行的 <code>.btn.pri</code> 已并入，详情栏底部用 <code>.primary.large</code>）。它在 CSS 里仍分两处写：app.css 上半的基础层只剩改版层没设的属性，颜色、圆角、内边距都在“改版层”一节；原来的黑底方角版声明在 #430 删掉了。<code>.primary kbd</code>、<code>.primary.armed</code> 同样分两处，两处设置的属性不重叠。</p>
   </div>
 
   <div class="sg-item" id="b-secondary"><header><h3>次要按钮（灰底）</h3><span class="sg-tag hand">手写</span><span class="sg-cls"><code>.secondary</code><code>.secondary.large</code><code>.primary.large</code></span></header>
@@ -284,7 +284,7 @@
       <div class="sg-pair"><div class="view-group" style="width:300px"><button class="view-opt" role="switch" aria-checked="true"><span>侧栏显示数量</span><i class="view-sw on"></i></button><button class="view-opt" role="switch" aria-checked="false"><span>底部状态栏<small>已加载张数与操作提示</small></span><i class="view-sw"></i></button></div><i>.view-opt + .view-sw（34×20，开=accent-btn，滑块白色）</i></div>
       <div class="sg-pair"><span class="shelf-watch"><input type="checkbox" class="switch" checked> 关注</span><input type="checkbox" class="switch" disabled style="opacity:.45"><i>.shelf-watch .switch（资料库作品行）；:disabled</i></div>
     </div>
-    <p class="sg-note"><b>差别：</b>尺寸 32×18 / 34×20；滑块位移 14 px 两者相同；<code>.switch</code> 开启色是 <code>--accent-btn</code>（后一版覆盖了 <code>--accent</code>），关闭色暗色里要单独覆盖（<code>:root[data-theme=dark] .switch:not(:checked)</code>、<code>.view-sw</code>）。</p>
+    <p class="sg-note"><b>差别：</b>尺寸 32×18 / 34×20；滑块位移 14 px 两者相同；<code>.switch</code> 开启色是 <code>--accent-btn</code>，关闭色暗色里要单独覆盖（<code>:root[data-theme=dark] .switch:not(:checked)</code>、<code>.view-sw</code>）。</p>
   </div>
 
   <div class="sg-item"><header><h3>分段控件</h3><span class="sg-tag hand">手写</span><span class="sg-tag dup">三套</span><span class="sg-cls"><code>.segmented</code><code>.icon-seg</code></span></header>
@@ -600,7 +600,7 @@
   <div class="sg-item"><div class="sg-stage col"><table class="sg-table">
     <tr><th>概念</th><th>并行的写法</th><th>本页</th></tr>
     <tr><td>次要 / 主要按钮</td><td class="ex"><code>.quiet</code> + <code>.primary</code> · <code>.secondary</code>（#319 起 <code>.btn</code> 已并入 <code>.primary</code> / <code>.secondary</code>）· <code>.ask-b</code>(.yes) · <code>.aa-b</code>(.yes) · <code>button.small</code></td><td><a class="link" href="#c-buttons">按钮</a></td></tr>
-    <tr><td>主按钮的两版</td><td class="ex"><code>.primary</code> 在 app.css 里定义两次（黑底方角 + redesign 层的强调色圆角），<code>.segmented</code>、<code>.quiet</code>、<code>.chip-filter</code>、<code>.card</code>、<code>.switch</code>、<code>dialog</code> 同样都是“先一版，后面再整体改一版”</td><td><a class="link" href="#b-primary">主按钮</a></td></tr>
+    <tr><td>分两处写的选择器</td><td class="ex"><code>.primary</code>、<code>.segmented</code>、<code>.quiet</code>、<code>.chip-filter</code>、<code>.card</code>、<code>dialog</code> 等在 app.css 里分基础层、改版层两处写。#430 删掉了被改版层盖掉的声明，两处设置的属性不再重叠；还没并成一块的原因见附录</td><td><a class="link" href="#b-primary">主按钮</a></td></tr>
     <tr><td>开关</td><td class="ex"><code>input.switch</code> · <code>.view-sw</code></td><td><a class="link" href="#c-forms">输入与开关</a></td></tr>
     <tr><td>分段 / 标签切换</td><td class="ex"><code>.segmented</code>(button / a) · <code>.icon-seg</code> · <code>.chip-filter</code> · <code>.cast-tab</code> · <code>.cast-buckets button</code> · <code>.settings-nav a</code></td><td><a class="link" href="#c-forms">输入与开关</a></td></tr>
     <tr><td>文本输入</td><td class="ex"><code>.search-wrap input</code> · <code>.menu-drop input</code> · <code>.modal .field input</code> · <code>.lib-input</code> · <code>.watch-add input</code> · <code>.num-field input</code> · <code>.form-grid input</code> · <code>#pickerSearch</code> · <code>#watchAdd</code> · <code>#watchMin</code></td><td><a class="link" href="#c-forms">输入与开关</a></td></tr>
@@ -610,7 +610,7 @@
     <tr><td>弹出面板</td><td class="ex"><code>.menu</code> + <code>.menu-drop</code> / <code>.view-pop</code> / <code>.cast-pop</code> / <code>.task-pop</code> · <code>.combo-menu</code>（未并入），各自关闭逻辑</td><td><a class="link" href="#s-pops">浮层菜单</a></td></tr>
     <tr><td>一列可点选项</td><td class="ex"><code>.menu-item</code> · <code>.watch-option</code> · <code>.palette-item</code> · <code>.cast-wrow</code> · <code>.view-opt</code> · <code>.link-row</code></td><td><a class="link" href="#s-pops">浮层菜单</a></td></tr>
     <tr><td>进度条</td><td class="ex"><code>.progress</code> · <code>.prov-bar</code> · <code>#splash .sp-track</code> · <code>.cast-bar i</code></td><td><a class="link" href="#s-tasks">任务面板</a></td></tr>
-    <tr><td>卡片轮廓</td><td class="ex"><code>box-shadow:0 0 0 1px var(--hair)</code>（后期）与 <code>border:1px solid var(--line)</code>（早期）并存，如 <code>.settings-card</code>、<code>.pair-card</code>、<code>.group-card</code> 先写后覆盖</td><td>各节</td></tr>
+    <tr><td>卡片轮廓</td><td class="ex"><code>.settings-card</code>、<code>.pair-card</code>、<code>.group-card</code> 的轮廓只剩 <code>box-shadow:0 0 0 1px var(--hair)</code>（改版层）；早期的 <code>border:1px solid var(--line)</code> 写法在 #430 删掉了</td><td>各节</td></tr>
     <tr><td>文字链接</td><td class="ex"><code>.link-button</code> · <code>a.link</code> · <code>.add-identity</code> · <code>.variant-add</code> · <code>.artist-more</code> · <code>.home-all</code></td><td><a class="link" href="#b-link">链接按钮</a></td></tr>
     <tr><td>表格</td><td class="ex"><code>.settings-table</code>(+ <code>.index-table</code> <code>.net-table</code>) · <code>.cast-table</code> · <code>.prov-stats</code></td><td><a class="link" href="#s-tasks">任务面板</a></td></tr>
     <tr><td>折叠</td><td class="ex"><code>details.more</code>（fold()）· <code>details.inspector-section</code> · <code>details.shelf-todo</code></td><td><a class="link" href="#s-tasks">任务面板</a></td></tr>
@@ -623,7 +623,7 @@
   <div class="sg-item"><div class="sg-stage col">
     <p style="line-height:2.1"><span class="sg-tag">k-crop</span> <span class="sg-tag">k-duplicate</span> <span class="sg-tag">k-edit</span> <span class="sg-tag">k-identical</span> <span class="sg-tag">k-subtle</span> <span class="sg-tag">k-variant</span> <span class="sg-tag">s-hide</span> <span class="sg-tag">s-only</span> <span class="sg-tag">cast-shelf</span></p>
     <p class="sg-cap">2026-11-16（#430）删掉了 29 个没人用的类和它们的规则：旧角色索引（<code>.char-*</code>、<code>.skin-*</code>、<code>.work-*</code>、<code>.pin</code>）、旧侧栏（<code>.entity-link</code>、<code>.entity-name</code>、<code>.side-hint</code>、<code>.nav-group</code>、<code>.sync-text</code>）、旧设置行（<code>.task-row</code>、<code>.task-name</code>、<code>.task-line</code>、<code>.watch-row</code>、<code>.watch-chip</code>、<code>.settings-sub</code>）以及 <code>.breadcrumb</code>、<code>.nsfw-dot</code>、<code>.shut</code>、<code>.tag-link</code>、<code>.lib-groups</code>、<code>.prov-live</code>；同时删了导航已是 <code>&lt;a&gt;</code> 之后不再命中的 <code>.settings-nav button</code>。</p>
-    <p class="sg-cap">另：同一个选择器在 app.css 里写两遍以上、后面整体覆盖前面的有 <code>.primary</code>、<code>.segmented</code>、<code>.quiet</code>、<code>.settings-card</code>、<code>dialog</code> 等（基础层和改版层，#430 第 3 步合并）；<code>.aa-card</code> 引用了从未定义的 <code>--panel</code>。</p>
+    <p class="sg-cap">另：#430 删掉了 211 条被后写的同一选择器盖掉的声明，同一选择器、同一上下文里一个属性只在一处设置。仍有 91 个选择器分写在基础层和改版层两处（属性互不重叠），没有并成一块：把一处的声明挪到另一处，会越过中间特异性相同、设置同类属性的规则（如 <code>.sidebar</code> 与 <code>.nav-icon</code> 都设 <code>width</code>），两者落在同一元素上时谁赢会变，从样式表本身证明不了它们不会落在同一元素上。<code>.aa-card</code> 引用了从未定义的 <code>--panel</code>。</p>
   </div></div>
   <p class="sg-note" style="padding-left:0">本页还<b>没有收录</b>：作品树行 <code>.shelf-row</code>、身份整理卡 <code>.pair-card</code>、画师抽查卡 <code>.aa-card</code>、按组整理 <code>.gsec</code>、首页日期头 <code>.home-dh</code>/条带 <code>.home-strip</code>、角色页榜单 <code>.cast-board</code>/<code>.cast-fan</code>/<code>.cast-rc</code>、角色列表 <code>.cast-table</code>、splash、tour 的镂空 <code>.tour-hole</code>——都是单页的版面，不是跨页复用的组件；第一轮先收可复用的，需要时再补。</p>
 </section>
