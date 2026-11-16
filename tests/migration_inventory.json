@@ -207,7 +207,7 @@
 
  "native/terms/src/app_archives.rs":"a9a0735559c82df2283d06564d8f889b07d3a01cb00d8d310631f1b85e1b48eb",
 
- "native/terms/src/app_ccip_longtail.rs":"8a23390d50975714927eae6acb1c92f134226e6653a14460ddf178f48c01a67e",
+ "native/terms/src/app_ccip_longtail.rs":"515a3a30faea05ceb8f35ce4a57209c33aa429fcd5e22fdbe94bd6fdaca082ba",
 
  "native/terms/src/app_characters.rs":"6c9e9e080970dce30092747ebcf6bdcaee7d99a8463500888e5dab278f4a0cbd",
 
@@ -245,7 +245,7 @@
 
  "native/terms/src/app_identity.rs":"715d41ff00ae564d109fd8c6dde75f3e89e447360832bb2ab16c960bc473da38",
 
- "native/terms/src/app_imports.rs":"dcb2be1936cc85c8583dbbb927bd1a243762d7039f257860f2a3f8330a7707d1",
+ "native/terms/src/app_imports.rs":"531396f3b34f591acba53935d0b0581826794bfcad0ff83bd03e4d24119dc20d",
 
  "native/terms/src/app_index.rs":"8f612b29b90f8c3aae3700ed50eeb2bda58c27b998e9a6425ad4a373b50c3881",
 
@@ -279,7 +279,7 @@
 
  "native/terms/src/app_migration_sql/provenance.sql":"a780f1f8837dd2c90a556539c114d56cdaa513b057fb667bf0c5c9d604f75934",
 
- "native/terms/src/app_models.rs":"9bd2a3eae8e0022dc234f13d87d198803fd1250f133e9c8ff9ed11ef7cb33648",
+ "native/terms/src/app_models.rs":"4e322fee98e0adb840b1b2f22df046592a17c2f9e925b83307257081cc41a3e3",
 
  "native/terms/src/app_name_sources.rs":"a9d895621405e92c2bdacd7f547f28feec7f294f307d628ea25d5e2bf27f9515",
 
@@ -303,7 +303,7 @@
 
  "native/terms/src/app_provenance_sources.rs":"b5b95d67aa5753245bcbac3a32d36da0094d27650df1760db62d150d5168f868",
 
- "native/terms/src/app_recognition.rs":"3796cf7b45247b7c27f0fd4aea69e49daefc3ead67dc24faf5200786d8e47004",
+ "native/terms/src/app_recognition.rs":"1d215db82be5d866dd2a5ac33314ed612eabe8fb27c0591140eb2bf113be764c",
 
  "native/terms/src/app_rescue.rs":"08915aa36490c06b4d43fb0ff6337d4a548b451bc15c090928b0d37e6af4456d",
 
@@ -355,9 +355,9 @@
 
  "native/terms/src/http_characters.rs":"03e4c82c04a2708b576a26a6c8dbbd49834f7bf4126240f06e17da4827478f9e",
 
- "native/terms/src/http_host_get.rs":"c27328c3b9718208332bbccf7dbdbac7db1db4e32ee501608a3a1ab5ae068fa2",
+ "native/terms/src/http_host_get.rs":"cf1fee8d1ef7f268d46ead4805210efb681ae74686426498498bcd9b90fec7b5",
 
- "native/terms/src/http_host_post.rs":"f590730a641b1b5ec8e057f78658097ab5d6b56d53d26a8f7482b077d6b44861",
+ "native/terms/src/http_host_post.rs":"cc16fb80618d1bd20f4c92b9f514afd2b21c7be97acc513118269f5bca07c0f1",
 
  "native/terms/src/http_json.rs":"42ec65687fad69e430186543d3ef27b8141030e6694b07f683ee91f678478d6b",
 
@@ -625,7 +625,7 @@
  "crates/core/src/names_commands.rs":{"database-write":{"INSERT OR IGNORE INTO:term_key_names":1,"dynamic-or-wrapper":8,"DELETE FROM:term_names":4,"DELETE FROM:term_key_names":1,"DELETE FROM:term_key_aliases":1,"INSERT INTO:term_key_aliases":1}},
  "native/terms/src/app_profiles.rs":{"http-branch":[[23,8],[16,5],[17,7],[44,3],[83,3],[242,4],[98,3]],"database-write":[[3,3],0]},
  "crates/core/src/character_import.rs":{"database-write":{"INSERT OR IGNORE INTO:term_links":1,"dynamic-or-wrapper":15,"UPDATE:term_tree":3,"UPDATE:terms":1,"INSERT INTO:term_batches":1,"INSERT OR IGNORE INTO:assertions":1,"INSERT INTO:imported":1,"DELETE FROM:auto_rules":1,"INSERT OR IGNORE INTO:auto_rules":4,"INSERT INTO:excluded":1,"DELETE FROM:excluded":1,"DELETE FROM:touched":1,"INSERT OR IGNORE INTO:touched":1,"INSERT INTO:assets":1,"DELETE FROM:duplicates":1,"INSERT INTO:duplicates":1,"INSERT OR REPLACE INTO:meta":2,"DELETE FROM:assets":1,"DELETE FROM:candidates":1,"REINDEX":3,"INSERT OR REPLACE INTO:sync_added":1}},
- "native/terms/src/http_host_post.rs":{"http-branch":[[303,2],[282,2],[275,2],[280,2],[279,2],[274,2],[294,2],264,295,"/api/diagnostics/open-logs",305,"/api/human-conclusions/",[307,2],[308,2],[309,2],"/api/human-conclusions/restore",265,"/api/human-conclusions/import|/api/human-conclusions/restore",266,267,[41,2],268,270,292,247,231,74,88,24,23,16,17,44,83,242,98,80,79,76,269,100,37,95,40,42,293,[230,2],39,43,271,272,273,276,278,281,296,[26,2],277,[330,2]]},
+ "native/terms/src/http_host_post.rs":{"http-branch":[[303,2],[282,2],[275,2],[280,2],[279,2],[274,2],[294,2],264,295,"/api/diagnostics/open-logs",305,"/api/human-conclusions/",[307,2],[308,2],[309,2],"/api/human-conclusions/restore",265,"/api/human-conclusions/import|/api/human-conclusions/restore",266,267,[41,2],268,270,292,247,231,74,88,24,23,16,17,44,83,242,98,80,79,76,269,100,37,95,40,42,293,[230,2],39,43,271,272,273,276,278,281,296,[26,2],277,"/api/ccip-longtail/package","/api/ccip-longtail/enable|/api/ccip-longtail/withdraw","/api/ccip-longtail/cancel"]},
  "native/terms/src/app_provenance.rs":{"database-write":{"INSERT OR IGNORE INTO:pending_runs":3,"UPDATE:runs":3,"INSERT OR IGNORE INTO:native_meta":2,"dynamic-or-wrapper":4,"UPDATE:native_meta":1,"COMMIT":2,"INSERT INTO:runs":1,"DELETE FROM:pending_runs":1,"ATTACH":2,"PRAGMA:c.execute_batch(\"pragma defer_foreign_keys":1,"INSERT INTO:leads|UPDATE:set":1,"INSERT INTO:native_delivery":1},"entrypoint":{"process-start":1}},
  "crates/core/src/character_sql/evidence_default.sql":{"database-write":[196]},
  "native/terms/src/app_migration_sql/artists.sql":{"database-write":["CREATE TABLE IF NOT EXISTS:artist_verdicts","CREATE INDEX IF NOT EXISTS:artist_verdicts_artist"]},
@@ -679,7 +679,7 @@
  "native/terms/src/app_wd_extension.rs":{"database-write":{"dynamic-or-wrapper":3}},
  "crates/core/src/ccip_longtail.rs":{"database-write":{"INSERT OR REPLACE INTO:meta":1,"DELETE FROM:meta":1}},
  "crates/core/src/character_extension.rs":{"database-write":{"dynamic-or-wrapper":1,"INSERT INTO:memberships":1}},
- "native/terms/src/app_ccip_longtail.rs":{"database-write":{"dynamic-or-wrapper":5,"COMMIT":1,"INSERT OR REPLACE INTO:meta":2,"DELETE FROM:meta":2}}
+ "native/terms/src/app_ccip_longtail.rs":{"database-write":{"dynamic-or-wrapper":6,"COMMIT":1,"INSERT OR REPLACE INTO:meta":2,"INSERT INTO:meta":1,"UPDATE:set":1,"DELETE FROM:meta":3}}
 },
 "policies":{
  "application":{"final_owner":"rust","responsibility":"HTTP 参数/目标、人工命令、正式事务/投影；Python 包装待迁移","acceptance":"合成状态码/原始字节、返回/DB/历史/撤销/事件对照；竞争与注入失败原子回滚","deletion_condition":"Rust 调用链及无 Python 验收后删生产 Python；保留旧对照","stages":["M2","M3"]},

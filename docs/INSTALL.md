@@ -104,7 +104,7 @@ $cli = '<安装目录>\compute\bin\illustash-terms.exe'
 
 对当前图库运行 `ccip-longtail --library <图库.pilib> --root <应用资源目录> --package <参考包>` 启用并重扫已保存的 768 维 CCIP 向量。命令报告缺少向量和向量不兼容的张数。启用后的新图沿用识别时生成的向量。已有基础归属和 WD 扩展归属优先，包只为没有主归属的图提供机器归属。基础角色索引更新后，重新运行命令。用 `ccip-longtail --library <图库.pilib> --withdraw` 撤回。
 
-冻结包为 `A-longtail-p75.zip`（1,273,692 B，54 个角色），SHA-256 为 `d36eeab8768e30cc36e2ba5b2788f00a5f608ecad0df264a2830a44c14407fb9`。用兼容的基础角色索引和 CCIP 模型。只有相同摘要的文件才会接受，来源与许可见[第三方组件与许可](THIRD_PARTY.md#模型与数据)。维护者用 `python3.12 tools/build_ccip_longtail.py <冻结成员目录> <输出目录>` 复封并校验同一 ZIP。
+冻结包为 `A-longtail-p75.zip`（1,273,692 B，54 个角色），SHA-256 为 `d36eeab8768e30cc36e2ba5b2788f00a5f608ecad0df264a2830a44c14407fb9`。下载地址见 [模型 Release](https://github.com/shio-vinyl/illustash/releases/tag/ccip-longtail-v1)。安装后所有图库共用这个文件，每个图库分别启用。启用需要兼容的基础角色索引和 CCIP 模型。来源与许可见[第三方组件与许可](THIRD_PARTY.md#模型与数据)。维护者用 `python3.12 tools/build_ccip_longtail.py <冻结成员目录> <输出目录>` 复封并校验同一 ZIP。
 
 ## Windows
 

@@ -11,22 +11,45 @@ use rusqlite::{Connection, OpenFlags, OptionalExtension, TransactionBehavior};
 use serde::Deserialize;
 use serde_json::{json, Value};
 use std::{
-    collections::HashSet,
+    collections::{HashMap, HashSet},
     fs,
     io::{Cursor, Read, Write},
     path::{Path, PathBuf},
+    sync::{Mutex, OnceLock},
     time::Instant,
 };
 
 pub(crate) const PACKAGE_SHA256: &str = "d36eeab8768e30cc36e2ba5b2788f00a5f608ecad0df264a2830a44c14407fb9";
 pub(crate) const PACKAGE_BYTES: u64 = 1_273_692;
 pub(crate) const PACKAGE_NAME: &str = "A-longtail-p75.zip";
+pub(crate) const PACKAGE_VERSION: &str = "ccip-longtail-v1";
 const CCIP_SHA256: &str = "4ea118d16496274f4f6e08d3afc768cc592389e8f7f32f8732ce2215c228ac5f";
 const DIMENSION: usize = 768;
 const DELIVERY_ERROR: &str = "ccip_longtail_delivery_error";
 const INDEX_GENERATION: &str = "ccip_longtail_index_generation";
 const LAST_SCAN: &str = "ccip_longtail_last_scan";
 const ROLES: usize = 54;
+type AutoHistory = HashMap<(PathBuf, String), Value>;
+static AUTO_HISTORY: OnceLock<Mutex<AutoHistory>> = OnceLock::new();
+
+fn auto_key(library: &Library) -> (PathBuf, String) {
+    (library.instance_path().to_owned(), library.id().into())
+}
+
+pub(crate) fn auto_task(library: &Library) -> Option<Value> {
+    crate::app_tasks::lock_ignoring_poison(AUTO_HISTORY.get_or_init(Mutex::default)).get(&auto_key(library)).cloned()
+}
+
+pub(crate) fn clear_auto_task(library: &Library) {
+    crate::app_tasks::lock_ignoring_poison(AUTO_HISTORY.get_or_init(Mutex::default)).remove(&auto_key(library));
+}
+
+pub(crate) fn note_auto_task(library: &Library, task: Option<Value>) {
+    if let Some(task) = task {
+        crate::app_tasks::lock_ignoring_poison(AUTO_HISTORY.get_or_init(Mutex::default))
+            .insert(auto_key(library), task);
+    }
+}
 
 struct Package {
     bytes: Vec<u8>,
@@ -131,11 +154,11 @@ impl Package {
         Ok(Self { bytes, references })
     }
 
-    fn remember(&self, library: &Library) -> Result<()> {
-        let destination = local_package(library);
-        if matches!(crate::app_recognition::file(&destination, PACKAGE_BYTES), Ok(previous) if previous == self.bytes) {
+    fn remember(&self, destination: &Path) -> Result<()> {
+        if matches!(crate::app_recognition::file(destination, PACKAGE_BYTES), Ok(previous) if previous == self.bytes) {
             return Ok(());
         }
+        fs::create_dir_all(destination.parent().expect("参考包有存放目录"))?;
         let tmp = destination.with_extension(format!("{}.tmp", crate::store::new_key()?));
         let result = (|| {
             let mut file = fs::OpenOptions::new().write(true).create_new(true).open(&tmp)?;
@@ -152,8 +175,8 @@ impl Package {
     }
 }
 
-pub(crate) fn local_package(library: &Library) -> PathBuf {
-    library.instance_path().join(PACKAGE_NAME)
+pub(crate) fn package_path(shared: &Path) -> PathBuf {
+    shared.join("extensions").join(PACKAGE_VERSION).join(PACKAGE_NAME)
 }
 
 fn writable(library: &Library) -> Result<()> {
@@ -284,7 +307,7 @@ pub(crate) fn apply(
     }
     crate::app_recognition::require_published_inputs(&app, &source)?;
     check()?;
-    package.remember(library)?;
+    package.remember(&package_path(&shared))?;
     let tx = app.transaction_with_behavior(TransactionBehavior::Immediate)?;
     crate::schema::begin_writing(&tx)?;
     let changed = ccip_longtail::apply(&tx, PACKAGE_SHA256, &hits)?;
@@ -318,10 +341,21 @@ pub(crate) fn withdraw(library: &Library, observer: &dyn Observer) -> Result<Val
     Ok(json!({"changed":changed}))
 }
 
+pub(crate) fn stored_vectors(library: &Library) -> Result<i64> {
+    let source = crate::app_library::read_connection(&library.source())?;
+    Ok(source.query_row(
+        "SELECT count(*) FROM embeddings v JOIN assets a ON a.uuid=v.uuid
+         WHERE v.model='ccip' AND a.in_scope=1 AND coalesce(a.trashed,0)=0",
+        [],
+        |r| r.get(0),
+    )?)
+}
+
 pub(crate) fn status(library: &Library, root: &Path) -> Result<Value> {
     let app = crate::app_library::read_connection(&library.db())?;
     let enabled = ccip_longtail::enabled_package(&app)?;
-    let available = local_package(library).try_exists()?;
+    let shared = crate::app_resources::shared_path(root)?;
+    let available = package_path(&shared).try_exists()?;
     let candidates: i64 =
         app.query_row("SELECT count(DISTINCT uuid) FROM candidates WHERE source='CCIP_LONGTAIL'", [], |r| r.get(0))?;
     let memberships: i64 =
@@ -336,17 +370,10 @@ pub(crate) fn status(library: &Library, root: &Path) -> Result<Value> {
         )
         .optional()?
         .unwrap_or_default();
-    let source = crate::app_library::read_connection(&library.source())?;
-    let vectors: i64 = source.query_row(
-        "SELECT count(*) FROM embeddings v JOIN assets a ON a.uuid=v.uuid
-         WHERE v.model='ccip' AND a.in_scope=1 AND coalesce(a.trashed,0)=0",
-        [],
-        |r| r.get(0),
-    )?;
+    let vectors = stored_vectors(library)?;
     let needs_scan = if enabled.is_some() {
         let prior: Option<String> =
             app.query_row("SELECT value FROM meta WHERE key=?1", [INDEX_GENERATION], |r| r.get(0)).optional()?;
-        let shared = crate::app_resources::shared_path(root)?;
         let generation = crate::index_generation::current(&shared)?;
         prior.as_deref() != Some(generation.to_string().as_str())
     } else {
@@ -358,18 +385,16 @@ pub(crate) fn status(library: &Library, root: &Path) -> Result<Value> {
 }
 
 fn delivery_snapshot(
-    library: &Library,
     shared: &Path,
     app: &Connection,
     source: &Connection,
     check: &dyn Fn() -> Result<()>,
 ) -> Result<Option<LongtailSnapshot>> {
-    if ccip_longtail::enabled_package(app)?.as_deref() != Some(PACKAGE_SHA256)
-        || !local_package(library).try_exists()?
-    {
+    let path = package_path(shared);
+    if ccip_longtail::enabled_package(app)?.as_deref() != Some(PACKAGE_SHA256) || !path.try_exists()? {
         return Ok(None);
     }
-    let package = Package::load(&local_package(library))?;
+    let package = Package::load(&path)?;
     LongtailSnapshot::load(shared, source, &package.references, check).map(Some)
 }
 
@@ -382,7 +407,7 @@ pub(crate) fn prepare_delivery(
 ) -> Result<Option<LongtailSnapshot>> {
     let app = crate::app_library::read_connection(&library.db())?;
     let source = crate::app_library::read_connection(&library.source())?;
-    let snapshot = delivery_snapshot(library, shared, &app, &source, check)?;
+    let snapshot = delivery_snapshot(shared, &app, &source, check)?;
     if snapshot.as_ref().is_some_and(|snap| &snap.anchors.fingerprint != expected) {
         return Err(Error::Conflict("准备识别时基础角色索引已更新".into()));
     }
@@ -413,7 +438,6 @@ pub(crate) fn score_prepared(
 
 /// 独立结果包或中断后恢复，从当前仍有效的来源向量重建评分。
 pub(crate) fn score_delivery(
-    library: &Library,
     root: &Path,
     app: &Connection,
     source: &Connection,
@@ -424,7 +448,7 @@ pub(crate) fn score_delivery(
         return Ok(None);
     }
     let shared = crate::app_resources::shared_path(root)?;
-    let Some(snapshot) = delivery_snapshot(library, &shared, app, source, check)? else {
+    let Some(snapshot) = delivery_snapshot(&shared, app, source, check)? else {
         return Ok(None);
     };
     let rows = read_rows(source, Some(ids), check)?;
@@ -432,16 +456,33 @@ pub(crate) fn score_delivery(
 }
 
 /// 可选包损坏、缺少基础索引时仍提交原识别结果，在长尾包的状态中记下具体失败。
-pub(crate) fn publish_delivery(app: &Connection, ids: &[String], result: Result<Option<Vec<Hit>>>) -> Result<()> {
-    match result {
+pub(crate) fn publish_delivery(
+    app: &Connection,
+    digest: &str,
+    ids: &[String],
+    result: Result<Option<Vec<Hit>>>,
+) -> Result<Option<Value>> {
+    if ccip_longtail::enabled_package(app)?.is_none() {
+        return Ok(None);
+    }
+    let task = match result {
         Ok(Some(hits)) => {
-            ccip_longtail::refresh(app, PACKAGE_SHA256, ids, &hits)?;
+            let changed = ccip_longtail::refresh(app, PACKAGE_SHA256, ids, &hits)?;
+            app.execute("DELETE FROM meta WHERE key=?1", [DELIVERY_ERROR])?;
+            json!({"id":digest,"kind":"auto","phase":"write","status":"done","result":{"changed":changed}})
         }
-        Ok(None) => (),
+        Ok(None) => return Ok(None),
         Err(error) => {
             let message = error.reason().chars().take(300).collect::<String>();
             app.execute("INSERT OR REPLACE INTO meta(key,value) VALUES (?1,?2)", [DELIVERY_ERROR, &message])?;
+            let diagnostic = crate::diagnostics::failure(
+                crate::diagnostics::Operation::Recognition,
+                crate::diagnostics::stage("scoring"),
+                &error,
+                crate::diagnostics::Publication::NotCommitted,
+            );
+            json!({"id":digest,"kind":"auto","phase":"scan","status":"failed","message":message,"diagnostic":diagnostic.value()})
         }
-    }
-    Ok(())
+    };
+    Ok(Some(task))
 }
