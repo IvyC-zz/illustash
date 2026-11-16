@@ -38,6 +38,15 @@ pub fn load(source: &Connection, base: &Path, space: Space) -> Result<Matrix> {
 }
 
 fn tags(source: &Connection) -> Result<Matrix> {
+    // 旧库可以缺少来源列。无法确认是 WD v3 的历史标签不进入这个特征空间。
+    let has_source: bool =
+        source.query_row("SELECT EXISTS(SELECT 1 FROM pragma_table_info('labels') WHERE name='source')", [], |r| {
+            r.get(0)
+        })?;
+    if !has_source {
+        let vectors = Vectors::Tags(Tags { width: 0, offsets: vec![0], entries: Vec::new() });
+        return Ok(Matrix { uuids: Vec::new(), vectors });
+    }
     // 先按资产主键走，再用标签主键查每张图的 general 范围，不对整张概率表做临时排序。
     let mut stmt = source.prepare(
         "SELECT a.uuid,l.value,l.conf

@@ -504,3 +504,7 @@ fn benchmark_release_host() {
     }
     assert!(!root.join("python-launched").exists());
 }
+
+#[cfg(unix)]
+#[path = "contracts/examples_bench.rs"]
+mod examples_bench;

@@ -146,7 +146,7 @@ fn example_search_ranks_filtered_candidates_and_reuses_the_selection_for_writes(
     let expected: Vec<_> = (0..500).map(|i| format!("ELIGIBLE{i:03}")).collect();
     assert_eq!(f.ids(&examples, &format!("{filter}&limit=500")), expected);
     let (count, status) = f.read("/api/assets/count", &examples, filter);
-    assert_eq!((count.dump(), status), (r#"{"total":500}"#.into(), 200));
+    assert_eq!((count.dump(), status), (r#"{"total": 500}"#.into(), 200));
     let (page, status) = f.read("/api/assets", &examples, &format!("{filter}&offset=4&limit=2"));
     let page: serde_json::Value = serde_json::from_str(&page.dump()).unwrap();
     assert_eq!(status, 200);
@@ -204,6 +204,9 @@ fn example_search_observes_wd_and_ccip_updates_and_base_file_changes() {
     assert_eq!(f.ids(&["A"], "like_by=ccip"), ["B", "C"]);
     f.base(&[("A", 1), ("B", 0), ("C", 1), ("D", 1)]);
     assert_eq!(f.ids(&["A"], "like_by=ccip"), ["C", "D", "B"]);
+    source.execute("ALTER TABLE labels RENAME COLUMN source TO unknown_producer", []).unwrap();
+    assert_eq!(f.read("/api/assets", &["B"], "").1, 400);
+    assert_eq!(f.ids(&["A"], "like_by=ccip"), ["C", "D", "B"]);
 }
 
 #[test]
@@ -247,73 +250,4 @@ fn example_search_shared_scorers_support_centroid_max_and_balanced_linear_logits
     let result = example_scores::score(&fused, &train, &Scorer::Linear { l2: 1.0 / 0.3 });
     assert_eq!(fused.uuid(result[0].0), "C");
     assert!(result[0].1 > 0.0 && result[0].1 > result[1].1);
-}
-
-#[test]
-#[ignore = "只在 collab_run.py timing 下运行合成图库计时"]
-fn benchmark_example_search() {
-    assert!(!cfg!(debug_assertions), "bench requires a release binary");
-    let f = Fixture::new();
-    let mut db = f.db();
-    let mut source = f.source();
-    let app = db.transaction().unwrap();
-    let input = source.transaction().unwrap();
-    let mut add =
-        input.prepare("INSERT INTO labels(uuid,dim,value,source,conf) VALUES (?,'general',?,'wd_v3',?)").unwrap();
-    let vocabulary: Vec<_> = (0..8000).map(|i| format!("tag{i:04}")).collect();
-    let ids: Vec<_> = (0..50_000).map(|i| format!("IMAGE-{i:05}")).collect();
-    let mut base_rows = Vec::new();
-    for (i, id) in ids.iter().enumerate() {
-        let group = i % 40;
-        let date = if i % 3 == 0 { "2026-04-01" } else { "2026-05-01" };
-        let name = if i % 7 == 0 { "cluster-a" } else { "cluster-b" };
-        Fixture::asset(&app, &input, id, name, date, &[]);
-        for tag in 0..200 {
-            let column = if tag < 15 { group * 16 + tag } else { 640 + (tag * 13 + i * 43) % 7360 };
-            let probability = if tag < 15 { 0.9 - tag as f64 * 0.025 } else { 0.08 / (1.0 + tag as f64 / 200.0) };
-            add.execute(params![id, vocabulary[column], probability]).unwrap();
-        }
-        base_rows.push((id.as_str(), group));
-    }
-    drop(add);
-    app.commit().unwrap();
-    input.commit().unwrap();
-    drop(db);
-    drop(source);
-    f.base(&base_rows);
-    let rss = || {
-        std::process::Command::new("ps")
-            .args(["-o", "rss=", "-p", &std::process::id().to_string()])
-            .output()
-            .ok()
-            .and_then(|o| String::from_utf8(o.stdout).ok()?.trim().parse::<i64>().ok())
-    };
-    let before = rss();
-    let one = [ids[0].as_str()];
-    let five = [ids[0].as_str(), ids[40].as_str(), ids[80].as_str(), ids[120].as_str(), ids[160].as_str()];
-    let run = |name: &str, path: &str, examples: &[&str], params: &str, rounds| {
-        let mut times: Vec<_> = (0..rounds)
-            .map(|_| {
-                let start = std::time::Instant::now();
-                let (body, status) = f.read(path, examples, params);
-                let elapsed = start.elapsed().as_secs_f64() * 1000.0;
-                assert_eq!(status, 200, "{}", body.dump());
-                elapsed
-            })
-            .collect();
-        times.sort_unstable_by(f64::total_cmp);
-        eprintln!("{name}: {:.1} ms (n={rounds})", times[times.len() / 2]);
-    };
-    run("WD cold", "/api/assets", &one, "", 1);
-    eprintln!("WD RSS delta KiB: {:?}", before.zip(rss()).map(|(a, b)| b - a));
-    run("WD first page", "/api/assets", &one, "", 7);
-    run("WD third page", "/api/assets", &one, "offset=200", 7);
-    run("WD count", "/api/assets/count", &one, "", 7);
-    run("WD IDs", "/api/ids", &one, "limit=500", 7);
-    run("WD three conditions", "/api/assets", &one, "day=2026-04-01&nsfw=hide&q=cluster-a", 7);
-    run("WD five examples", "/api/assets", &five, "", 7);
-    let before_ccip = rss();
-    run("CCIP cold", "/api/assets", &one, "like_by=ccip", 1);
-    eprintln!("CCIP RSS delta KiB: {:?}", before_ccip.zip(rss()).map(|(a, b)| b - a));
-    run("CCIP first page", "/api/assets", &one, "like_by=ccip", 7);
 }

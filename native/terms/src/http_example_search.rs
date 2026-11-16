@@ -55,6 +55,14 @@ impl Search {
         args: &[Value],
     ) -> Result<()> {
         let missing = || Error::invalid("这张图还没有特征，识别完成后再试");
+        let examples = serde_json::to_string(&self.ids).expect("a list of UUID strings serializes");
+        let existing = c
+            .prepare("SELECT uuid FROM assets WHERE uuid IN (SELECT value FROM json_each(?)) ORDER BY uuid")?
+            .query_map([&examples], |r| r.get::<_, String>(0))?
+            .collect::<rusqlite::Result<Vec<_>>>()?;
+        if existing.is_empty() {
+            return Err(missing());
+        }
         let source = context.source.as_ref().ok_or_else(missing)?;
         let root = context.library.as_deref().or_else(|| source.parent()).ok_or_else(missing)?;
         let base = root.join("features");
@@ -64,12 +72,7 @@ impl Search {
             let reader = crate::app_library::read_connection(source)?;
             Arc::new(example_features::load(&reader, &base, self.space)?)
         };
-        let examples = serde_json::to_string(&self.ids).expect("a list of UUID strings serializes");
-        let positives = c
-            .prepare("SELECT uuid FROM assets WHERE uuid IN (SELECT value FROM json_each(?)) ORDER BY uuid")?
-            .query_map([&examples], |r| r.get::<_, String>(0))?
-            .filter_map(|result| result.map(|id| matrix.row(&id)).transpose())
-            .collect::<rusqlite::Result<Vec<_>>>()?;
+        let positives: Vec<_> = existing.iter().filter_map(|id| matrix.row(id)).collect();
         if positives.is_empty() {
             return Err(missing());
         }
