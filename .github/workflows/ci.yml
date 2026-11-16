@@ -118,6 +118,9 @@ jobs:
         run: python tools/check_frontend.py --strict-stale
       - name: Style guide sync
         run: python tools/check_styleguide.py
+      # 这两条测试读 web/static 的原文，界面级 PR 只跑 node --test 时覆盖不到（2026-11-16）。
+      - name: Frontend checker tests
+        run: python -m unittest tests.test_frontend_architecture tests.test_styleguide_sync
       # cargo test 由本机全量覆盖，macos-full.yml 可手动运行（#501）；这里只查格式、clippy（含测试目标）和编译。
       - name: Core fmt/clippy/build
         run: |

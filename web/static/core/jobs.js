@@ -235,7 +235,7 @@ function importSummary(job) {
   if (job.status !== 'done') return '';
   const r = job.result || {};
   // 已发布但没有登记（#111）：打开它就会登记；再导入会另建一个带编号的图库。
-  if (job.kind === 'archive' && r.listed === false) return t('已导入「{name}」，保存在 {path}，但没能加入最近图库列表：{reason}。打开它会再试一次加入列表；再导入会另建一个带编号的图库。模型接口与名称联网授权需重新设置。', {name: r.name, path: String(r.path).replace(/^\/Users\/[^/]+/, '~'), reason: tb(r.error)});
+  if (job.kind === 'archive' && r.listed === false) return t('已导入「{name}」，保存在 {path}，但没能加入最近图库列表：{reason}。打开它会再试一次加入列表；再导入会另建一个带编号的图库。模型接口与名称联网授权需重新设置。', {name: r.name, path: String(r.path).replace(/^(?:\/Users\/[^/]+|[A-Za-z]:[\\/]Users[\\/][^\\/]+)(?=[\\/]|$)/i, '~'), reason: tb(r.error)});
   if (job.kind === 'archive') return t('已导入「{name}」，模型接口与名称联网授权需重新设置。', {name: r.name});
   if (r.status === 'pending') return t('识别结果已导入，后续处理尚未完成（{reason}）。', {reason: tb(r.error) || t('可稍后恢复')});
   return r.duplicate ? t('这份识别结果之前已经导入过。') : t('识别结果已导入。');
