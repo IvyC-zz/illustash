@@ -20,12 +20,19 @@ import {createLayer} from './overlay.js';
 import {listNav} from './combo.js';
 import {editProfile, markOc, mergeCharacter, openLocalLinks, openRelate, splitOc, toggleMascot, toggleOc} from './palette.js';
 
-// 画师筛选的标题和胶囊里显示的画师名：第一次用到时去读，读到后重画标题。
+// 画师筛选的标题和胶囊里显示的画师名：第一次用到时去读，读到后重画标题，胶囊只换文字（整条工具栏重画会打断正在
+// 输入的搜索框）。
 const artistNames = {};
+const artistPillText = id => t('画师 · {name}', {name: short(artistName(id))});
 function artistName(id) {
   if (!(id in artistNames)) {
     artistNames[id] = '…';
-    api('/api/artist?' + new URLSearchParams({id})).then(r => { artistNames[id] = r.name || t('未知画师'); if (state.route.artist === id) renderHeading(); }).catch(e => error(readError(e)));
+    api('/api/artist?' + new URLSearchParams({id})).then(r => {
+      artistNames[id] = r.name || t('未知画师');
+      if (state.route.artist !== id) return;
+      renderHeading();
+      const pill = $('artistPill'); if (pill) pill.textContent = artistPillText(id) + ' ×';
+    }).catch(e => error(readError(e)));
   }
   return artistNames[id];
 }
@@ -149,7 +156,7 @@ export function renderChrome() {
   const filtersHTML = view.toolbar === 'library' ? `<div class="search-wrap">${searchIcon()}<input type="search" id="search" spellcheck="false" autocorrect="off" autocapitalize="off" placeholder="${t('搜索角色、别名或文件名')}" aria-label="${t('搜索图库')}" value="${esc(r.q)}"><kbd>/</kbd></div>` +
     (r.char ? pill('charPill', t('角色 · {name}', {name: esc(short(state.char?.name || ''))}), t('清除角色筛选')) : '') +
     (r.work ? pill('workPill', t('作品 · {name}', {name: esc(short(workName))}), t('清除作品筛选')) : '') +
-    (r.artist ? pill('artistPill', t('画师 · {name}', {name: esc(short(artistName(r.artist)))}), t('清除画师筛选')) : '') +
+    (r.artist ? pill('artistPill', esc(artistPillText(r.artist)), t('清除画师筛选')) : '') +
     (r.utag ? pill('utagPill', `# ${esc(r.utag)}`, t('清除标签筛选')) : '') +
     (r.tag ? pill('wdTagPill', t('标签 · {tag}', {tag: esc(r.tag.replaceAll('_', ' '))}), t('清除标签筛选')) : '') +
     (r.day ? pill('dayPill', t('{day} 加入', {day: esc(dayLabel(r.day))}), t('清除日期筛选')) : '') +
