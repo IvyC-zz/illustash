@@ -18,6 +18,7 @@ mod app_desktop;
 mod app_effects;
 mod app_files;
 mod app_folder;
+mod app_galleries;
 mod app_http;
 pub mod app_human_conclusions;
 mod app_identity;

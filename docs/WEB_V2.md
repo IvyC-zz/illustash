@@ -131,6 +131,9 @@
 - `GET /api/characters?q=&min=0`：父角色数组，字段 `id,name,work,count,unchecked,cover,variants`；每个子标签含 `id,name,count,parent_id`。`unchecked` 为当前机器归属数。
 - `GET /api/assets`：`entity,variant,q,tag,pool,status,order,offset,limit`。`status=all|confirmed|machine|unknown`；`order=suspicious|newest|oldest|hinted`（`hinted`：有未被否定的机器线索的图排前面，强证据先于弱线索、分数高的在前，其余按最新）；每项带 `hint`：尚无归属的图给出最强未否定线索 `{id,name}`，否则为 `null`；`pool=unmatched`。`variant` 使用实体 ID；也兼容把变体 ID 作为 entity 传入。分页上限 200。 `count=0` 可跳过总数统计，此时 `total` 为 `null`，图片字段与排序不变；前端仅在同一列表读取周期内复用总数，重新加载时重新统计。
 - `GET /api/assets/count`：使用图库相同筛选参数（搜索使用 `q`，不接收分页参数），仅返回 `{total}`，不加载图片附属信息。
+- 组合筛选（#445）在原筛选上叠加 `has`、`not`、`from` 和 `to`。`has` 与 `not` 是 URL 编码的 JSON 字符串数组，分别要求全部满足和全部排除。可用 `char:<id>`、`work:<id>`、`artist:<key>`、`tag:<WD 标签>`、`utag:<我的标签>`、`source:pixiv|x|other` 和 `fav`。条件只按首个冒号分隔，重复项去重，合计至多 20 条，每条至多 160 字符。日期区间沿用加入日期，两端包含，可只提供一端。无出处的图归入 `other`。列表、计数、ID、按筛选选图的写入及画廊封面使用同一选区。
+- `GET /api/user-tags?limit=` 可指定 1–1,000 条，默认 60 条。
+- `GET /api/galleries?nsfw=` 按保存的顺序返回 `id,name,params,cover,cover_manual`。手动封面仍在当前选区时使用它，否则取排序第一张。空选区或失效的保存条件返回空封面，打开图片列表时沿用筛选错误响应。
 - `GET /api/identity/count?nsfw=...`：复用身份待判断队列的筛选、去重与跳过规则，仅返回 `{total}`，不排序或加载展示名称、样例图。
 - 每张图片返回 `memberships`，每个父角色包含 `status,origin,evidence:{sources,max_score},variants`。状态区分 `confirmed` 与 `machine`；`confirmed` 数组为前端兼容字段。
 - `GET /api/detail?id=` 另返回 `ownership`，包含有效归属与 `rejected` 父角色记录，每项带 origin 和证据。原始 assertions/candidates 继续返回，保留历史人工结论和逐来源证据。
@@ -157,6 +160,8 @@ change/reassign 的选择方式二选一：
 `POST /api/sweep {"entity":"父角色 ID"}` 检查该角色全部机器归属，不受当前前端分页/筛选影响。`POST /api/undo {"id":123}` 撤销最近未撤销 action；跨重启保留。写接口继续要求同源与 CSRF token。
 
 `POST /api/favorite` 沿用 `/api/tag` 的 `ids` 或 `filter` 选图、`exclude` 与 `confirm` 规则。默认收藏，`add:false` 取消。对选中的重复组写入全部副本，提示张数按组计。回复 `{"undo":…}`，在从未建立收藏词条的库里直接取消会返回 `{"undo":null}`。人工裁决与快照规则见 [词条数据模型](TERMS_SCHEMA.md#人工标记447)。
+
+画廊将当前筛选保存到图库。对 `POST /api/galleries` 传 `action=create` 和 `params`，可带 `name`，省略时由条件生成。传 `action=update`、`id` 和待改字段 `name,params,cover,position`，其中 `cover:null` 恢复自动封面。传 `action=delete` 与 `id` 可删除。每次操作随 `undo` 返回一步历史，创建和更新另返回 `gallery`，写入回复中的封面按隐藏 R18 解析。现行存储和备份口径见 [词条 schema](TERMS_SCHEMA.md#画廊445)。
 
 ## 阶段 1.5–3（2026-09-23，Claude 直接实现）
 

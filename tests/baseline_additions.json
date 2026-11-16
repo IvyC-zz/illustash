@@ -2,6 +2,14 @@
   "reference_terms_version": 7,
   "tables": [
     {
+      "name": "galleries",
+      "introduced_in": 10,
+      "checks": [
+        "native/terms/tests/contracts.rs::combined_gallery_http_contract",
+        "native/terms/src/app_archives.rs::gallery_roundtrips_in_exported_library"
+      ]
+    },
+    {
       "name": "human_state_marks",
       "introduced_in": 9,
       "checks": [

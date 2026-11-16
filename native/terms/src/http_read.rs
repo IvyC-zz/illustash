@@ -18,6 +18,7 @@ pub const CORE_ROUTES: &[&str] = &[
     "/api/ids",
     "/api/detail",
     "/api/home",
+    "/api/galleries",
     "/api/fold",
     "/api/review-pools",
     "/api/characters",
@@ -545,10 +546,11 @@ pub(crate) fn tag_vocabulary(context: &LibraryContext) -> Result<Arc<Vec<String>
 const BROWSE_ROUTES: [&str; 7] =
     ["/api/assets", "/api/assets/count", "/api/ids", "/api/detail", "/api/home", "/api/fold", "/api/review-pools"];
 /// 会渲染名字的模块读取。计数、ID 以及原始的身份和偏好读取不渲染；它们的查询路径保持在本地。
-const NAMED_ROUTES: [&str; 8] = [
+const NAMED_ROUTES: [&str; 9] = [
     "/api/assets",
     "/api/detail",
     "/api/home",
+    "/api/galleries",
     "/api/characters",
     "/api/tagged",
     "/api/character/profile",
@@ -569,7 +571,7 @@ pub fn read(context: &LibraryContext, url: &str) -> Result<Option<(Json, u16)>> 
         Err(message) => return Ok(refused(message)),
     };
     let local = crate::http_local::ROUTES.contains(&path);
-    let browse = BROWSE_ROUTES.contains(&path);
+    let browse = BROWSE_ROUTES.contains(&path) || path == "/api/galleries";
     let characters = crate::http_characters::ROUTES.contains(&path);
     let validation = if browse {
         crate::http_browse::validate(path, &q)
@@ -670,6 +672,11 @@ fn read_library(
     let library = context.library.is_some();
     Ok(match path {
         "/api/user-tags" => {
+            let limit =
+                q.get("limit").map(|value| python_int(value).map_err(Error::Invalid)).transpose()?.unwrap_or(60);
+            if !(1..=1000).contains(&limit) {
+                return Err(Error::invalid("分页参数不正确"));
+            }
             let sql = format!(
                 "SELECT tag,count(*) AS count
                  FROM asset_tags m
@@ -677,7 +684,7 @@ fn read_library(
                  WHERE {visible} AND tag LIKE ? ESCAPE '\\'
                  GROUP BY tag
                  ORDER BY count DESC,tag
-                 LIMIT 60",
+                 LIMIT {limit}",
                 visible = visible("m")
             );
             Json::Array(rows(c, &sql, &[&like(&cut(trim(value("q")), 60))])?)

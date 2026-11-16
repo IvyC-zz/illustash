@@ -665,6 +665,61 @@ mod tests {
     }
 
     #[test]
+    fn gallery_roundtrips_in_exported_library() {
+        let work = Stage(
+            std::env::temp_dir().join(format!("illustash-gallery-archive-{}", crate::store::new_key().unwrap())),
+            false,
+        );
+        fs::create_dir_all(work.0.join("folder")).unwrap();
+        let status = std::process::Command::new(std::env::current_exe().unwrap())
+            .args(["--ignored", "--exact", "app_archives::tests::gallery_archive_fixture"])
+            .env("ILLUSTASH_ARCHIVE_FIXTURE", &work.0)
+            .env("HOME", &work.0)
+            .env("USERPROFILE", &work.0)
+            .env("ILLUSTASH_APP_SUPPORT", work.0.join("support"))
+            .env("ILLUSTASH_SHARED", work.0.join("absent-reference"))
+            .env("ILLUSTASH_NO_KEYCHAIN", "1")
+            .status()
+            .unwrap();
+        assert!(status.success());
+    }
+
+    #[test]
+    #[ignore = "只在隔离的画廊归档测试中运行"]
+    fn gallery_archive_fixture() {
+        let root = PathBuf::from(std::env::var_os("ILLUSTASH_ARCHIVE_FIXTURE").expect("隔离测试目录"));
+        let package = root.join("synthetic.pilib");
+        crate::app_create::create_folder(&package, &root.join("folder"), Some("合成原图库"), None, None).unwrap();
+        let library = Library::open(&package).unwrap();
+        let params = r#"{"has":"[\"fav\"]","order":"oldest"}"#;
+        crate::open(&library.db()).unwrap().execute(
+            "INSERT INTO galleries VALUES (12,'合成收藏',?,'synthetic-cover',2,'2026-11-01 00:00:00','2026-11-02 00:00:00')",
+            [params],
+        ).unwrap();
+        let cancel = Arc::new(AtomicBool::new(false));
+        let archive = export(&library, &root.join("export.pilib.zip"), &cancel).unwrap();
+        let (restored, _) = import(&archive, &cancel, &crate::app_imports::Silent).unwrap();
+        let c = crate::open(&restored.join("library.sqlite")).unwrap();
+        let result: (i64, String, String, String, i64, String, String) = c
+            .query_row("SELECT id,name,params,cover,position,created_at,updated_at FROM galleries", [], |r| {
+                Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?, r.get(4)?, r.get(5)?, r.get(6)?))
+            })
+            .unwrap();
+        assert_eq!(
+            result,
+            (
+                12,
+                "合成收藏".into(),
+                params.into(),
+                "synthetic-cover".into(),
+                2,
+                "2026-11-01 00:00:00".into(),
+                "2026-11-02 00:00:00".into()
+            )
+        );
+    }
+
+    #[test]
     fn exported_databases_are_one_snapshot_while_both_keep_changing() {
         let root =
             std::env::temp_dir().join(format!("illustash-archive-snapshot-{}", crate::store::new_key().unwrap()));
