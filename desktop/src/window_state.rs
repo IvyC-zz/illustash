@@ -129,6 +129,16 @@ pub fn restore(main: &WebviewWindow, min: (f64, f64)) {
         }
         None => {
             let _ = main.center();
+            // 先记下默认的位置和大小：窗口一次都没动过，退出时也存一份。
+            if let (Ok(position), Ok(size)) = (main.outer_position(), main.inner_size()) {
+                *app.state::<Memory>().last.lock().expect("window memory lock") = Some(Saved {
+                    x: position.x,
+                    y: position.y,
+                    width: size.width,
+                    height: size.height,
+                    maximized: false,
+                });
+            }
         }
     }
     let (sender, receiver) = channel::<()>();
