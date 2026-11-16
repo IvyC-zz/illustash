@@ -243,9 +243,18 @@ fn candidates(lib: &Library, shared: &Path, dir: &Path, net: &crate::app_name_so
     } else {
         BTreeSet::new()
     };
-    let suffix = regex::Regex::new(r"_\([^()]*\)$").expect("constant index suffix regex is valid");
+    let covered = package_covered(&app, shared)?;
+    let own = |id: &str| shared.join("char-index").join(format!("{id}.json")).exists();
+    let local = Local {
+        known: &known,
+        covered: &covered,
+        rejected: &rejected,
+        own: &own,
+        min_posts: w["min_posts"].as_i64().unwrap_or(100),
+    };
     let mut rows = vec![];
     let mut counts = serde_json::Map::new();
+    let mut coverage = serde_json::Map::new();
     let mut seen = BTreeSet::new();
     let work_order = tags.clone();
     for cp in tags {
@@ -259,32 +268,78 @@ fn candidates(lib: &Library, shared: &Path, dir: &Path, net: &crate::app_name_so
             None,
         )?;
         let related = rel["related_tags"].as_array().ok_or_else(|| Error::Network("索引查询响应不正确".into()))?;
-        let mut n = 0;
-        for r in related {
-            let Some(tag) = r["tag"]["name"].as_str() else { return invalid("索引角色 tag 不正确") };
-            let id = short(tag);
-            let posts = r["tag"]["post_count"].as_i64().unwrap_or(0);
-            let overlap = r["overlap_coefficient"].as_f64().unwrap_or(0.0);
-            if !safe(&id)
-                || overlap < 0.5
-                || posts < w["min_posts"].as_i64().unwrap_or(100)
-                || known.contains(tag)
-                || known.contains(&id)
-                || seen.contains(tag)
-                || shared.join("char-index").join(format!("{id}.json")).exists()
-                || rejected.contains(&id)
-                || suffix.is_match(&suffix.replace(tag, ""))
-            {
-                continue;
-            }
-            seen.insert(tag.to_owned());
+        if related.is_empty() {
+            coverage.insert(cp.clone(), Value::Null);
+            counts.insert(cp, Value::Null);
+            continue;
+        }
+        let tally = tally(&cp, related, &local, &mut seen, &mut rows)?;
+        counts.insert(cp.clone(), tally["missing"].clone());
+        coverage.insert(cp, tally);
+    }
+    Ok(
+        json!({"checked_at":now(),"works":counts,"coverage":coverage,"min_posts":w["min_posts"],"missing":rows,"work_order":work_order}),
+    )
+}
+/// 检查新角色认为本地已有的角色（#561）：WD 自带和精选索引里的（来源库的 characters，也含自己补过的）、自己补过的
+/// （共享目录的 char-index 里有）、本图库启用的数据包覆盖的，以及用户移除过、以后不再提示的。
+struct Local<'a> {
+    known: &'a BTreeSet<String>,
+    covered: &'a BTreeSet<String>,
+    rejected: &'a BTreeSet<String>,
+    own: &'a dyn Fn(&str) -> bool,
+    min_posts: i64,
+}
+/// 一个作品在 Danbooru 上的相关角色：还缺的追加到 `rows`，返回这个作品的计数 {packs, own, missing}。`seen` 跨作品
+/// 共用，每个角色只算进第一个列出它的作品。自己补过的先算（它们也在 characters 里），然后跳过 WD 自带和精选索引里已有的
+/// （不计数），再算数据包覆盖的，跳过用户移除过的；剩下的才是还缺的。
+fn tally(
+    cp: &str,
+    related: &[Value],
+    local: &Local,
+    seen: &mut BTreeSet<String>,
+    rows: &mut Vec<Value>,
+) -> Result<Value> {
+    static SUFFIX: OnceLock<regex::Regex> = OnceLock::new();
+    let suffix =
+        SUFFIX.get_or_init(|| regex::Regex::new(r"_\([^()]*\)$").expect("constant index suffix regex is valid"));
+    let (mut missing, mut own, mut packs) = (0, 0, 0);
+    for r in related {
+        let Some(tag) = r["tag"]["name"].as_str() else { return invalid("索引角色 tag 不正确") };
+        let id = short(tag);
+        let posts = r["tag"]["post_count"].as_i64().unwrap_or(0);
+        let overlap = r["overlap_coefficient"].as_f64().unwrap_or(0.0);
+        if !safe(&id)
+            || overlap < 0.5
+            || posts < local.min_posts
+            || seen.contains(tag)
+            || suffix.is_match(&suffix.replace(tag, ""))
+        {
+            continue;
+        }
+        if (local.own)(&id) {
+            own += 1;
+        } else if local.known.contains(tag) || local.known.contains(&id) {
+            continue;
+        } else if local.covered.contains(tag) {
+            packs += 1;
+        } else if local.rejected.contains(&id) {
+            continue;
+        } else {
             let overlap = (overlap * 1000.0).round() / 1000.0;
             rows.push(json!({"tag":tag,"short_tag":id,"copyright":cp,"post_count":posts,"overlap":overlap}));
-            n += 1;
+            missing += 1;
         }
-        counts.insert(cp, if related.is_empty() { Value::Null } else { json!(n) });
+        seen.insert(tag.to_owned());
     }
-    Ok(json!({"checked_at":now(),"works":counts,"min_posts":w["min_posts"],"missing":rows,"work_order":work_order}))
+    Ok(json!({"packs":packs,"own":own,"missing":missing}))
+}
+/// 本图库启用的数据包能认出的角色标签（#561）：检查新角色把它们算作已有，按作品计数。现在只有 WD 角色扩展
+/// （app_wd_extension 读启用状态和包里的标签表）；CCIP 长尾包（#559）合入后，在这里并进它启用的包的角色标签。
+fn package_covered(app: &Connection, shared: &Path) -> Result<BTreeSet<String>> {
+    let mut covered = BTreeSet::new();
+    covered.extend(crate::app_wd_extension::covered_labels(app, shared)?);
+    Ok(covered)
 }
 
 pub(crate) struct Updater {
@@ -1557,19 +1612,22 @@ fn character_json(v: &Value) -> Json {
 fn check_json(v: &Value) -> Json {
     let mut value = v.clone();
     value.as_object_mut().map(|o| o.remove("work_order"));
-    let mut out = ordered(&value, &["checked_at", "works", "min_posts", "missing"]);
+    let mut out = ordered(&value, &["checked_at", "works", "coverage", "min_posts", "missing"]);
     if let Some(order) = v["work_order"].as_array() {
-        out.set(
-            "works",
-            Json::Object(
-                order
-                    .iter()
-                    .filter_map(|key| {
-                        key.as_str().and_then(|k| v["works"].get(k).map(|x| (k.to_owned(), Json::from(x.clone()))))
-                    })
-                    .collect(),
-            ),
-        );
+        for field in ["works", "coverage"] {
+            if !v[field].is_object() {
+                continue;
+            }
+            let by_work = order.iter().filter_map(|key| {
+                let k = key.as_str()?;
+                let x = v[field].get(k)?;
+                Some((
+                    k.to_owned(),
+                    if field == "coverage" { ordered(x, &["packs", "own", "missing"]) } else { Json::from(x.clone()) },
+                ))
+            });
+            out.set(field, Json::Object(by_work.collect()));
+        }
     }
     if let Some(rows) = v["missing"].as_array() {
         out.set("missing", Json::Array(rows.iter().map(character_json).collect()));
@@ -1638,6 +1696,65 @@ fn state_and_history(state: &Mutex<State>, dir: &Path) -> (Value, Vec<Value>) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn related(tag: &str, posts: i64, overlap: f64) -> Value {
+        json!({"tag": {"name": tag, "post_count": posts}, "overlap_coefficient": overlap})
+    }
+
+    /// 按作品计数（#561）：自己补过、数据包覆盖、还缺三类，WD 自带的和移除过的不计；每个角色只算进第一个作品；
+    /// 数据包覆盖的不再列为还缺。没启用数据包时，还缺的列表和以前一样。
+    #[test]
+    fn check_counts_packs_own_and_missing_per_work() {
+        let set = |tags: &[&str]| tags.iter().map(|t| t.to_string()).collect::<BTreeSet<_>>();
+        let known = set(&["base_(work_a)", "mine_(work_a)"]);
+        let rejected = set(&["dropped_work_a"]);
+        let own = |id: &str| id == "mine_work_a";
+        let work_a = [
+            related("base_(work_a)", 500, 0.9),
+            related("mine_(work_a)", 500, 0.9),
+            related("ext_one_(work_a)", 500, 0.9),
+            related("ext_two_(work_a)", 500, 0.9),
+            related("dropped_(work_a)", 500, 0.9),
+            related("new_(work_a)", 500, 0.9),
+            related("few_(work_a)", 10, 0.9),
+            related("loose_(work_a)", 500, 0.2),
+            related("shared_(work_a)", 500, 0.9),
+        ];
+        let work_b = [
+            related("shared_(work_a)", 500, 0.9),
+            related("ext_one_(work_a)", 500, 0.9),
+            related("other_(work_b)", 300, 0.7),
+        ];
+        let run = |covered: &BTreeSet<String>| {
+            let local = Local { known: &known, covered, rejected: &rejected, own: &own, min_posts: 100 };
+            let (mut seen, mut rows) = (BTreeSet::new(), vec![]);
+            let a = tally("work_a", &work_a, &local, &mut seen, &mut rows).unwrap();
+            let b = tally("work_b", &work_b, &local, &mut seen, &mut rows).unwrap();
+            (a, b, rows.iter().map(|r| r["tag"].as_str().unwrap().to_owned()).collect::<Vec<_>>())
+        };
+        let (a, b, missing) = run(&set(&["ext_one_(work_a)", "ext_two_(work_a)", "not_listed"]));
+        assert_eq!(a, json!({"packs": 2, "own": 1, "missing": 2}));
+        assert_eq!(b, json!({"packs": 0, "own": 0, "missing": 1}));
+        assert_eq!(missing, ["new_(work_a)", "shared_(work_a)", "other_(work_b)"]);
+        let (a, b, without) = run(&BTreeSet::new());
+        assert_eq!(a, json!({"packs": 0, "own": 1, "missing": 4}));
+        assert_eq!(b, json!({"packs": 0, "own": 0, "missing": 1}));
+        assert_eq!(
+            without,
+            ["ext_one_(work_a)", "ext_two_(work_a)", "new_(work_a)", "shared_(work_a)", "other_(work_b)"]
+        );
+    }
+
+    /// 检查结果按关注作品的顺序存，coverage 每项按 packs、own、missing 排。
+    #[test]
+    fn stored_check_keeps_work_order_for_coverage() {
+        let v = json!({"checked_at": "t", "works": {"b": 1, "a": null}, "coverage": {"a": null, "b": {"missing": 1, "own": 0, "packs": 2}},
+            "min_posts": 100, "missing": [], "work_order": ["b", "a"]});
+        assert_eq!(
+            check_json(&v).dump(),
+            r#"{"checked_at": "t", "works": {"b": 1, "a": null}, "coverage": {"b": {"packs": 2, "own": 0, "missing": 1}, "a": null}, "min_posts": 100, "missing": []}"#
+        );
+    }
 
     #[test]
     fn recognition_publication_gates_index_snapshot_source_commit_and_replay() {

@@ -2926,5 +2926,9 @@
   "选中两张以上可以判断它们的关系。": "Select two or more to decide how they relate.",
   "像截图，但有人物。": "They look like screenshots but have people.",
   "后退（{key}）": "Back ({key})",
-  "后退、前进（只在这个图库的页面之间；鼠标侧键、标题左边的 ‹ 也可以）": "Back and forward (within this library’s pages; the mouse side buttons and the ‹ left of the title work too)"
+  "后退、前进（只在这个图库的页面之间；鼠标侧键、标题左边的 ‹ 也可以）": "Back and forward (within this library’s pages; the mouse side buttons and the ‹ left of the title work too)",
+  "数据包覆盖": "In data packs",
+  "自己补过": "Added by you",
+  "还缺": "Missing",
+  "数据包覆盖 {packs} 个 · 自己补过 {own} 个 · 还缺 {missing} 个": "In data packs {packs} · added by you {own} · missing {missing}"
 }

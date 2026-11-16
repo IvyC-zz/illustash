@@ -27,6 +27,7 @@ import {renderModelsCard} from './models.js';
 import {openModal} from './overlay.js';
 import {renderHumanBlock, onHumanClick, wireHuman} from './human.js';
 import {loadHuman, home} from '../core/human.js';
+import {workName} from '../core/catalog.js';
 
 // ---------- 名称：这个图库联网查询名称的授权 ----------
 // 名称的文字查询（只有 tag 和作品名）需要这个图库授权：授权之前，后端以「显示名联网尚未授权」拒绝。其他失败都是真正的
@@ -56,6 +57,7 @@ export async function renderIndexCard(fresh = true) {
     <a class="setting-line set-link" href="#/characters/works"><span>${t('关注的作品')}<small class="line-hint">${t('在资料库的「作品」里逐部开关')}</small></span><span>${watched ? t('{n} 部', {n: number(watched)}) : t('还没有')} ›</span></a>
     <div class="setting-line"><span>${t('只提示图片较多的角色')}<small class="line-hint">${t('Danbooru 上图片少于这个数的角色不提示')}</small></span><span class="num-field"><input id="watchMin" type="number" min="20" max="5000" step="10" value="${x.watch.min_posts}"> ${t('张')}</span></div>
     <p class="set-foot">${t('每次检查前确认联网，只允许本次运行。')}</p>
+    ${coverageFold(x)}
     ${x.history.length ? fold('indexHistory', t('最近添加的角色（{n} 个）', {n: number(x.history.reduce((n, h) => n + h.characters.length, 0))}), `<table class="settings-table">${x.history.flatMap(h => h.characters.map(c => `<tr><td>${esc(stamp(h.at))}</td>
       <td>${c.entity && c.status === 'added' ? `<a class="link" href="${charHash(c.entity.id)}">${esc(c.entity.name)}</a>` : esc(c.tag || c.short_tag)}</td>
       <td>${c.status === 'added' ? t('匹配 {n} 张', {n: number(c.entity?.count ?? c.claims)}) : c.status === 'dropped' ? t('已移除') : t('未添加：{reason}', {reason: esc(tb(c.reason || ''))})}</td>
@@ -67,6 +69,18 @@ export async function renderIndexCard(fresh = true) {
     if (indexArmed !== b.dataset.drop) { indexArmed = b.dataset.drop; renderIndexCard(false); setTimeout(() => { if (indexArmed === b.dataset.drop) { indexArmed = null; renderIndexCard(false); } }, 4000); return; }
     indexArmed = null; act({action: 'drop', char: b.dataset.drop, reason: '在设置中手动移除'});
   };
+}
+
+// 上次检查时每个关注作品的情况（#561）：本图库启用的数据包已经覆盖几个、自己补过几个、还缺几个。旧的检查结果没有这一项。
+export function coverageFold(x) {
+  const rows = Object.entries(x?.check?.coverage || {}).filter(([, v]) => v);
+  if (!rows.length) return '';
+  const sum = key => number(rows.reduce((n, [, v]) => n + (v[key] || 0), 0));
+  const name = tag => x.works?.find(w => w.tag === tag)?.name || workName(tag);
+  const head = `<tr><th>${t('作品')}</th><th>${t('数据包覆盖')}</th><th>${t('自己补过')}</th><th>${t('还缺')}</th></tr>`;
+  const body = rows.map(([tag, v]) => `<tr><td>${esc(name(tag))}</td><td>${number(v.packs)}</td><td>${number(v.own)}</td><td>${number(v.missing)}</td></tr>`).join('');
+  return fold('indexCoverage', t('数据包覆盖 {packs} 个 · 自己补过 {own} 个 · 还缺 {missing} 个', {packs: sum('packs'), own: sum('own'), missing: sum('missing')}),
+    `<table class="settings-table">${head}${body}</table>`);
 }
 
 // ---------- 显示名 ----------
