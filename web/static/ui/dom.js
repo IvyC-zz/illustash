@@ -46,6 +46,28 @@ export function wireFolds(root) {
     d.ontoggle = () => { const o = prefs.get('settingsOpen', {}); if (d.open) o[d.dataset.foldKey] = true; else delete o[d.dataset.foldKey]; prefs.set('settingsOpen', o); };
   }
 }
+// 内容变了才重画（#429）：记下每个元素上次由这里写进去的 HTML，相同就不动 DOM。轮询期间按钮不会在按下的那一刻被
+// 换掉，展开的折叠块和滚动位置也不丢。keepInput：焦点在元素里的输入框上时也不重画，免得抹掉正在填的内容。
+// 返回是否重画了。按钮的忙碌状态不归这里管，用下面的 busy()。
+const drawn = new WeakMap();
+export function redraw(el, html, {keepInput = false} = {}) {
+  if (drawn.get(el) === html) return false;
+  const active = document.activeElement;
+  if (keepInput && active && el.contains(active) && active.matches?.('input,textarea,select')) return false;
+  el.innerHTML = html; drawn.set(el, html);
+  return true;
+}
+// 元素被别处整个改写过：传 html 时记下它现在的内容，不传时忘掉，下一次 redraw 一定重画。
+export function setDrawn(el, html = null) { if (html === null) drawn.delete(el); else drawn.set(el, html); }
+// 上次记下的 HTML；还没画过是 undefined。要在重画前后做别的事（如换场动画）时用。
+export const drawnHTML = el => drawn.get(el);
+// 按钮忙碌（#429）：等待期间禁用，结束后一定恢复，不管是成功、取消（关掉系统选择框或确认框）还是失败。不能靠重画来
+// 恢复：内容没变时 redraw 不会重画，按钮就一直是灰的。等待中按钮被重画换掉的，恢复的是已经不在页面上的旧按钮。
+export async function busy(buttons, run) {
+  const list = [buttons].flat();
+  for (const b of list) b.disabled = true;
+  try { return await run(); } finally { for (const b of list) b.disabled = false; }
+}
 // 只替换 HTML 变了的部分，没变的封面不会重新加载。
 export function reconcileSections(container, sections, empty = t('没有匹配的角色')) {
   if (!sections.length) { container.innerHTML = `<p class="empty">${empty}</p>`; return; }

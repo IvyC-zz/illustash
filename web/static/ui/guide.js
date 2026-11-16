@@ -9,7 +9,7 @@ import {go} from '../core/route.js';
 import {api, post, session} from '../core/session.js';
 import {allowNames, updatesPost, updatesTick} from '../core/settings.js';
 import {state} from '../core/state.js';
-import {$, toast} from './dom.js';
+import {$, toast, redraw, setDrawn, drawnHTML, busy} from './dom.js';
 import {drawUpdateButton, openRelease, selfUpdate, updateAct, updateActions, updateBar, updateStarted, updateStatus} from './settings.js';
 import {taskList} from './tasks.js';
 import {createLayer} from './overlay.js';
@@ -82,8 +82,7 @@ export function drawGuideNotice() {
   const models = modelsNotice();
   if (models || el.dataset.models) {
     el.dataset.models = models ? '1' : '';
-    if (models) { el.hidden = false; if (el.dataset.html !== models) { el.dataset.html = models; el.innerHTML = models; } return; }
-    el.dataset.html = '';
+    if (models) { el.hidden = false; redraw(el, models); return; }
   }
   const c = g?.capability, check = c?.check || {};
   if (guideOn() && c?.recognition && !modelsWaiting() && check.status === 'idle' && !guideChecked) { guideChecked = true; guideAction({action: 'check'}).then(() => setTimeout(() => guideRefresh(true), 1500)); }
@@ -92,9 +91,9 @@ export function drawGuideNotice() {
     : check.status === 'failed' ? t('识别组件没能启动（{reason}）。图片仍会加入图库；可以重新检查，或重新安装完整版。', {reason: esc(tb(check.message || ''))}) : '';
   const trouble = guideOn() && !problem ? syncTrouble() : '';
   el.hidden = !problem && !trouble;
-  el.innerHTML = problem ? `<span>${problem}</span>${c.recognition ? `<button class="quiet small" data-guide-check>${t('重新检查')}</button>` : ''}`
+  redraw(el, problem ? `<span>${problem}</span>${c.recognition ? `<button class="quiet small" data-guide-check>${t('重新检查')}</button>` : ''}`
     : trouble ? `<span>${trouble}</span>${photosRefused(state.sync) ? `<button class="quiet small" data-guide-photos>${t('打开系统设置')}</button>`
-      : `<button class="quiet small" data-guide-sync>${t('再同步一次')}</button>`}` : '';
+      : `<button class="quiet small" data-guide-sync>${t('再同步一次')}</button>`}` : '');
 }
 // ----- 导览：一次点亮一个真实元素 -----
 export function tourStop(id) {
@@ -140,9 +139,9 @@ async function placeTour(moved) {
       ${stop.skip || tourAt === TOUR.length - 1 ? '' : `<button class="quiet small" data-tour="skip">${t('跳过')}</button>`}${stop.skip ? `<button class="quiet small" data-tour="skip">${stop.skip}</button>` : ''}
       ${tourAt && tourAt < TOUR.length - 1 ? `<button class="quiet small" data-tour="back">${t('上一步')}</button>` : ''}
       <button class="primary small" data-tour="${tourAt === TOUR.length - 1 ? 'done' : 'next'}">${stop.next || t('下一步')}</button></div>`;
-  if (bubble.dataset.stop !== id || moved && bubble.dataset.html !== html) {
-    if (moved && bubble.dataset.html) { bubble.classList.add('swap'); await new Promise(done => setTimeout(done, 120)); }
-    bubble.innerHTML = html; bubble.dataset.html = html; bubble.dataset.stop = id; bubble.classList.remove('swap');
+  if (bubble.dataset.stop !== id || moved && drawnHTML(bubble) !== html) {
+    if (moved && drawnHTML(bubble)) { bubble.classList.add('swap'); await new Promise(done => setTimeout(done, 120)); }
+    setDrawn(bubble); redraw(bubble, html); bubble.dataset.stop = id; bubble.classList.remove('swap');
   }
   // 换了一步（按钮重建过）或刚打开：焦点放到主按钮上，Enter 就是「下一步」，Tab 在导览的按钮之间转（#398）。
   if (moved) bubble.querySelector('.primary')?.focus({preventScroll: true});
@@ -198,10 +197,11 @@ export function drawNudge() {
       <div class="nudge-acts"><button class="quiet small" data-nudge="later">${t('暂不')}</button><button class="primary small" data-nudge="allow">${t('允许')}</button></div>`
     : `<div><b>${t('你的图里《{work}》最多（{n} 张）', {work: esc(guideWorkName(n.w)), n: number(n.w.count)})}</b><small>${t('关注它，就能从 Danbooru 补充这部作品里本地还不认识的角色，让它们也能按长相认出来。检查时会再问一次联网。')}</small></div>
       <div class="nudge-acts"><button class="quiet small" data-nudge="later">${t('暂不')}</button><button class="primary small" data-nudge="follow">${t('关注')}</button></div>`;
-  if (el.dataset.html === html) return;
-  el.dataset.html = html; el.dataset.key = n?.key || '';
-  if (!html) { el.classList.remove('on'); setTimeout(() => { if (!el.dataset.html) el.hidden = true; }, 260); return; }
-  el.innerHTML = html; el.hidden = false; requestAnimationFrame(() => el.classList.add('on'));
+  if (drawnHTML(el) === html) return;
+  el.dataset.key = n?.key || '';
+  // 收起时不清空内容，留给淡出动画；记下空串，260 毫秒后还是空的才隐藏。
+  if (!html) { setDrawn(el, ''); el.classList.remove('on'); setTimeout(() => { if (!drawnHTML(el)) el.hidden = true; }, 260); return; }
+  redraw(el, html); el.hidden = false; requestAnimationFrame(() => el.classList.add('on'));
 }
 // ----- 清单：事情做完就自己打勾 -----
 export function guideTick(item) {
@@ -253,6 +253,30 @@ export async function replayGuide() {
   showTour(0);
 }
 
+// 回答横条上的问题。按钮在回答期间禁用，回答完（不管成败）由 busy() 恢复（#429）。
+async function answerNudge(key, act) {
+  // 不是向导提示：回答的是更新选择或这个版本，由后端全应用保存。
+  if (key === 'update' && act !== 'open' && act !== 'later') {
+    await updateAct(act);
+    setDrawn($('nudge')); drawNudge(); drawUpdateButton();
+    return;
+  }
+  if (key === 'update' || key === 'updates') {
+    if (key === 'update' && act === 'open') openRelease();
+    try { await updatesPost(key === 'update' ? {action: 'dismiss'} : {action: 'auto', allow: act === 'allow'}); } catch (err) { toast(err.message); }
+    if (key === 'updates' && act === 'allow') { toast(t('已打开自动检查更新')); updatesTick(); }
+    drawGuide(); drawNudge();
+    return;
+  }
+  if (act === 'allow') {
+    try { await allowNames(true); toast(t('已允许这个图库联网查询名称')); }
+    catch (err) { toast(err.message); }
+  }
+  if (act === 'follow') { const w = nextNudge()?.w; if (w) await guideWatch(w); }
+  await guideAction({action: 'seen', key});
+  drawGuide();
+}
+
 // 页面这一部分注册的处理函数。页面启动时调用一次。
 export function wireGuide() {
   // 模型刚到：检查识别是否开始，和打开新图库时一样。
@@ -284,28 +308,7 @@ export function wireGuide() {
 
   $('nudge').addEventListener('click', async e => {
     const act = e.target.closest('[data-nudge]')?.dataset.nudge, key = $('nudge').dataset.key; if (!act || !key) return;
-    for (const b of $('nudge').querySelectorAll('button')) b.disabled = true;
-    // 不是向导提示：回答的是更新选择或这个版本，由后端全应用保存。
-    if (key === 'update' && act !== 'open' && act !== 'later') {
-      await updateAct(act);
-      for (const b of $('nudge').querySelectorAll('button')) b.disabled = false;
-      $('nudge').dataset.html = ''; drawNudge(); drawUpdateButton();
-      return;
-    }
-    if (key === 'update' || key === 'updates') {
-      if (key === 'update' && act === 'open') openRelease();
-      try { await updatesPost(key === 'update' ? {action: 'dismiss'} : {action: 'auto', allow: act === 'allow'}); } catch (err) { toast(err.message); }
-      if (key === 'updates' && act === 'allow') { toast(t('已打开自动检查更新')); updatesTick(); }
-      drawGuide(); drawNudge();
-      return;
-    }
-    if (act === 'allow') {
-      try { await allowNames(true); toast(t('已允许这个图库联网查询名称')); }
-      catch (err) { toast(err.message); }
-    }
-    if (act === 'follow') { const w = nextNudge()?.w; if (w) await guideWatch(w); }
-    await guideAction({action: 'seen', key});
-    drawGuide();
+    await busy([...$('nudge').querySelectorAll('button')], () => answerNudge(key, act));
   });
 
   $('checklist').addEventListener('click', async e => {

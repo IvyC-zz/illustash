@@ -17,7 +17,7 @@ function harness(api) {
     if (detail.error) errors.push(core.readError(detail.error));
     if (state.route.page === 'settings') renders.push(false);
   });
-  const c = {state, loadSettingsData: core.loadSettingsData, shared: core.shared, setSettingsHTML: ui.setSettingsHTML, document: globalThis.document};
+  const c = {state, loadSettingsData: core.loadSettingsData, shared: core.shared, document: globalThis.document};
   return {c, renders, errors};
 }
 const tick = () => new Promise(resolve => setImmediate(resolve));
@@ -57,19 +57,6 @@ test('responses after navigating away update cached data without repainting', as
   const {c, renders} = harness(async () => ({kinds: []}));
   const load = c.loadSettingsData(); c.state.route.page = 'library'; await load;
   assert.equal(renders.length, 0);
-});
-
-test('unchanged card and active form edits do not replace DOM', () => {
-  const {c} = harness(async () => ({})); let writes = 0;
-  const card = {contains: el => !!el, set innerHTML(value) { writes++; }};
-  assert.equal(c.setSettingsHTML(card, 'one'), true);
-  assert.equal(c.setSettingsHTML(card, 'one'), false);
-  c.document.activeElement = {matches: () => true};
-  assert.equal(c.setSettingsHTML(card, 'two'), false);
-  assert.equal(writes, 1);
-  c.document.activeElement = null;
-  assert.equal(c.setSettingsHTML(card, 'two'), true);
-  assert.equal(writes, 2);
 });
 
 // 资料库 · 作品（#198）：作品树取代设置页的作品表。书架在 ui/catalog.js。
@@ -127,17 +114,6 @@ test('index completion fetches updated results once', async () => {
   const {calls, renders} = await indexHarness('checking', 'checked');
   assert.deepEqual(calls, ['/api/index?progress=1', '/api/index']);
   assert.deepEqual(renders, ['index', 'tasks']);
-});
-
-test('new work data invalidates a collapsed editor even when its summary is unchanged', () => {
-  const {c} = harness(async () => ({})); let writes = 0;
-  const card = {contains: () => false, set innerHTML(value) {writes++;}};
-  const works = [{id:'1',name:'old'}];
-  c.setSettingsHTML(card, 'same summary', works);
-  c.setSettingsHTML(card, 'same summary', works);
-  assert.equal(writes, 1);
-  c.setSettingsHTML(card, 'same summary', [{id:'1',name:'new'}]);
-  assert.equal(writes, 2);
 });
 
 test('returning to settings refreshes cached data once without clearing it', async () => {

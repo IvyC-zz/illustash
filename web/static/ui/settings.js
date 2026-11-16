@@ -14,7 +14,7 @@ import {SYNC_ACTIVE, INDEX_ACTIVE, NAMES_ACTIVE, PROV_ACTIVE, syncLine, indexLin
 import {onSettings, allowNames, loadSettingsData, saveStartup, saveFold, backupNow, clearCache, saveLanguage, loadAbout, saveModelApi, testModelApi,
   loadLibraries, libraryRequest, pollExport, chooseFolders, openLibraryRequest, libraryOpened, loadAccounts, accountRequest,
   waitPixivLogin, stopPixivLogin, checkUpdates, updatesPost, updatesTick} from '../core/settings.js';
-import {$, toast, error, readFailure, fold, wireFolds} from './dom.js';
+import {$, toast, error, readFailure, fold, wireFolds, redraw, setDrawn, busy} from './dom.js';
 import {confirmAction} from './dialog.js';
 import {openTasks, taskList} from './tasks.js';
 import {charHash} from '../core/route.js';
@@ -116,22 +116,14 @@ export function renderModelCard() {
     if ($('modelTest')) $('modelTest').disabled = false;
   };
 }
-const settingsMarkup = new WeakMap();
-export function setSettingsHTML(card, html, version = null) {
-  const previous = settingsMarkup.get(card);
-  if (previous?.html === html && previous.version === version) return false;
-  // 后台的元数据更新不能抹掉正在编辑的表单。
-  if (card.contains(document.activeElement) && document.activeElement?.matches('input,textarea,select')) return false;
-  card.innerHTML = html;
-  settingsMarkup.set(card, {html, version});
-  return true;
-}
+// 设置卡片：内容变了才重画，后台的元数据更新不能抹掉正在编辑的表单。返回是否重画了。
+const setSettingsHTML = (card, html) => redraw(card, html, {keepInput: true});
 function patchSettingsPage(html, section) {
   const page = $('settingsPage');
   // 另一节就是另一页：整个替换。同一节则逐张卡片修补，保留正在填的表单。
   if (page.querySelector('.settings-main')?.dataset.section !== section) {
     page.innerHTML = html;
-    for (const card of page.querySelectorAll('.settings-card')) settingsMarkup.set(card, {html: card.innerHTML, version: null});
+    for (const card of page.querySelectorAll('.settings-card')) setDrawn(card, card.innerHTML);
     $('viewport').scrollTop = 0;
     return;
   }
@@ -489,24 +481,22 @@ async function accountAction(action, body = {}) {
 }
 
 // ---------- 找回画师（docs/PROVENANCE.md 第 8 节）：设置卡片；运行的轮询在 core/jobs.js ----------
-const provenanceDrawn = new WeakMap();
 export function renderProvenanceCard() {
   const card = $('setProvenance'); if (!card || !onPage(state.route, 'settings')) return;
   const p = state.provenance;
-  if (!p) { card.innerHTML = `<h2>${t('找回画师')}</h2><p class="muted-note">${t('正在读取…')}</p>`; return; }
-  if (!p.available) { card.innerHTML = `<h2>${t('找回画师')}</h2><p class="muted-note">${t('只有图库包能找回画师。')}</p>`; return; }
-  const s = p.state || {}, busy = PROV_ACTIVE.includes(s.status), cov = p.coverage;
+  if (!p) { redraw(card, `<h2>${t('找回画师')}</h2><p class="muted-note">${t('正在读取…')}</p>`); return; }
+  if (!p.available) { redraw(card, `<h2>${t('找回画师')}</h2><p class="muted-note">${t('只有图库包能找回画师。')}</p>`); return; }
+  const s = p.state || {}, working = PROV_ACTIVE.includes(s.status), cov = p.coverage;
   const covLine = (label, key) => cov?.pictures?.[key] ? `<div class="prov-stat"><b>${pct(cov.with_artist?.[key] || 0, cov.pictures[key])}</b><span>${label}<small>${t('{done}/{total} 张', {done: number(cov.with_artist?.[key] || 0), total: number(cov.pictures[key])})}</small></span></div>` : '';
   const total = cov ? Object.values(cov.pictures || {}).reduce((a, b) => a + b, 0) : 0;
   const html = cardHead(t('找回画师'), t('逐张查图的画师：用像素哈希和 IQDB 签名（只发哈希文本，不发图片）在 Danbooru 查原帖，并比对你关注的画师。结果在详情面板的「画师」里，可以点「不是 TA」纠正。')) + `
     ${cov ? `<div class="prov-stats">${covLine(t('X 的图有画师'), 'x')}${covLine(t('Pixiv 的图有画师'), 'pixiv')}${covLine(t('其他来源有画师'), 'other')}<div class="prov-stat"><b>${pct(cov.with_original_post || 0, total)}</b><span>${t('能对到原帖')}<small>${t('{n} 张', {n: number(cov.with_original_post || 0)})}</small></span></div></div>` : ''}
-    <div class="setting-line set-status"><span><span class="local-dot${busy ? ' busy' : s.status === 'failed' ? ' warn' : ''}"></span>${busy ? t('正在查找…') : s.status === 'failed' && s.reason ? t('上次出错：{reason}', {reason: esc(tb(s.reason))}) : p.runs?.[0] ? t('上次 {time} · 新找到 {n}', {time: esc(localTime(p.runs[0].started_at)), n: number(p.runs[0].found || 0)}) : t('还没有查过')}</span>${busy ? `<button class="quiet small" data-open-tasks>${t('在任务面板查看')}</button>` : `<button class="quiet small" data-open-tasks="provenance">${t('查找画师…')}</button>`}</div>
+    <div class="setting-line set-status"><span><span class="local-dot${working ? ' busy' : s.status === 'failed' ? ' warn' : ''}"></span>${working ? t('正在查找…') : s.status === 'failed' && s.reason ? t('上次出错：{reason}', {reason: esc(tb(s.reason))}) : p.runs?.[0] ? t('上次 {time} · 新找到 {n}', {time: esc(localTime(p.runs[0].started_at)), n: number(p.runs[0].found || 0)}) : t('还没有查过')}</span>${working ? `<button class="quiet small" data-open-tasks>${t('在任务面板查看')}</button>` : `<button class="quiet small" data-open-tasks="provenance">${t('查找画师…')}</button>`}</div>
     <label class="switch-line"><span><b>${t('同步后自动查新图')}${scope('library')}</b><small>${p.auto_network ? t('新加入的图做签名识别、查像素哈希、比对新找到的画师；每次最多 {mb} MB', {mb: number(p.budgets?.new || 50)}) : t('新加入的图只在本机做签名识别；要联网查，在任务面板里每次授权')}${p.frozen ? ' · ' + t('测试图库不同步，这个开关不起作用') : ''}</small></span><input type="checkbox" class="switch" id="provAuto" ${p.auto ? 'checked' : ''}></label>
     ${cov ? `<a class="setting-line set-link" href="#/artist-audit"><span>${t('画师抽查')}<small class="line-hint">${t('随机抽 50 张，逐张判断找到的画师对不对')}</small></span><span>›</span></a>` : ''}
     ${state.accounts && !state.accounts.pixiv?.bound ? `<p class="settings-note net-foot">${t('登录 Pixiv 后才能比对 R18 作品（见下方「账号」）。')}</p>` : ''}`;
   // 运行期间会轮询：只在有变化时重画，这样点击绝不会因为按钮被替换而丢失。
-  if (provenanceDrawn.get(card) === html) return;
-  provenanceDrawn.set(card, html); card.innerHTML = html;
+  if (!redraw(card, html)) return;
   wireFolds(card);
 }
 
@@ -668,7 +658,7 @@ export async function onLibrariesClick(e) {
   }
   else if (d.forgetLibrary) { if (await libraryAction('forget', {path: d.forgetLibrary})) loadLibraries(); }
   else if ('libExport' in d) { if (await libraryAction('export')) { await loadLibraries(); pollExport(); } }
-  else if ('importCancel' in d) { btn.disabled = true; try { await cancelImport(); } catch (err) { toast(err.message); } }
+  else if ('importCancel' in d) await busy(btn, () => cancelImport().catch(err => toast(err.message)));
 }
 
 // 设置各页的处理函数，以及读取或更改它们的数据之后要做的事。页面启动时调用一次。
