@@ -302,6 +302,12 @@ python3 -m tools.ui_walk list                      # 流程和它们拦的 #386 
 
 2026-10-15 起，在 Mac 上启动 App 的实机测试都在 [Tart](https://tart.run) 虚拟机里做（用户决定见 [AGENTS.md](../AGENTS.md#约定)「Mac 实机测试」一条）。虚拟机有自己的用户目录、应用数据和钥匙串，碰不到本机正式版的数据；本机只被占用磁盘，以及运行时的 CPU 和内存。
 
+**集中走查**（2026-11-16 用户定，见 [AGENTS.md](../AGENTS.md#约定)「Mac 实机测试」一条）：多个会话并行时，本机虚拟机（macOS Tart、Windows ARM UTM）的走查只由一个「虚拟机验收」会话做。这个会话由 Lead 指定，可以是 CC 的，也可以是 Codex 的。其他会话不自己开虚拟机，把走查请求交给它。
+- **请求写明**：请求方是谁、PR 号和要测的 head、平台、要验证的点和步骤、预期结果、要不要合成图库或模型。
+- **送达**：和虚拟机验收会话在同一个工具里的会话，直接发消息给它（CC 用 SendMessage）。另一个工具的会话，在 PR 里发一条以 `<!-- vm-walk-request -->` 开头的评论，内容同上，再报给自己的 Lead；由用户转给负责虚拟机验收的那一边的 Lead，交给虚拟机验收会话。
+- **虚拟机验收会话**：只测不改代码；能合并的请求合并，开一次虚拟机依次测几个 PR，不测时关机；结果写进同一个 PR 的评论，并回复请求方；发现问题同时报给 Lead。
+- 隔离宿主里的浏览器走查和远程的 Windows x64 验收机（`--slot windows`）不在此列，各会话照旧自己做。
+
 **母版与副本**：本机保留一台母版 `illustash-master`，来自 `ghcr.io/cirruslabs/macos-tahoe-base`（macOS 26），约 30 GB。镜像默认关闭 SIP，母版已在恢复模式里用 `csrutil enable` 打开 SIP；Gatekeeper 保持开启，母版里从没装过 Illustash。每次测试用 `tart clone illustash-master <名字>` 复制一份（APFS 写时复制，几乎不占额外空间），测完 `tart stop` 后 `tart delete` 删掉副本。母版只在用户明确同意时才修改或删除。镜像下载约 27 GB，大文件不经本机代理下载。
 
 **启动与操作**：
