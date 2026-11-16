@@ -29,7 +29,7 @@ mod mac {
         define_class, msg_send,
         rc::Retained,
         runtime::{NSObject, NSObjectProtocol, ProtocolObject},
-        MainThreadMarker, MainThreadOnly,
+        AnyThread, MainThreadMarker, MainThreadOnly,
     };
     use objc2_app_kit::{
         NSApplication, NSDragOperation, NSDraggingContext, NSDraggingItem, NSDraggingSession, NSDraggingSource,
