@@ -33,6 +33,7 @@ impl Observer for Silent {}
 pub(crate) enum Kind {
     Archive,
     Recognition,
+    CcipLongtail,
     HumanConclusions,
     HumanExport,
 }
@@ -41,6 +42,7 @@ impl Kind {
         match self {
             Kind::Archive => "archive",
             Kind::Recognition => "recognition",
+            Kind::CcipLongtail => "ccip_longtail",
             Kind::HumanConclusions => "human_conclusions",
             Kind::HumanExport => "human_export",
         }
@@ -167,7 +169,7 @@ impl Imports {
             return Err(Error::Invalid("服务正在退出".into()));
         }
         if current.as_ref().is_some_and(|c| c.task.running()) {
-            if matches!(kind, Kind::HumanConclusions | Kind::HumanExport) {
+            if matches!(kind, Kind::HumanConclusions | Kind::HumanExport | Kind::CcipLongtail) {
                 return Err(Error::Conflict("已有任务正在进行，请等它结束或取消后再试".into()));
             }
             return Err(Error::Invalid("已有导入正在进行，请等它结束或取消后再试".into()));
@@ -190,7 +192,7 @@ impl Imports {
             let result = work(&progress);
             let stopped = context.cancellation().load(Ordering::SeqCst) || crate::platform_process::stopping();
             let mut state = lock_ignoring_poison(&shared);
-            if matches!(kind, Kind::HumanConclusions | Kind::HumanExport) {
+            if matches!(kind, Kind::HumanConclusions | Kind::HumanExport | Kind::CcipLongtail) {
                 state.set("committed", progress.published.load(Ordering::SeqCst).into());
             }
             match result {
@@ -202,7 +204,11 @@ impl Imports {
                         use crate::diagnostics::{self, Operation, Publication};
                         let reason = Error::Invalid(value.get("error").map(Json::text).unwrap_or("").to_owned());
                         let d = diagnostics::failure(
-                            if kind == Kind::Recognition { Operation::Recognition } else { Operation::Archive },
+                            if matches!(kind, Kind::Recognition | Kind::CcipLongtail) {
+                                Operation::Recognition
+                            } else {
+                                Operation::Archive
+                            },
                             diagnostics::stage(state.get("stage").map(Json::text).unwrap_or("")),
                             &reason,
                             Publication::Committed,
@@ -223,7 +229,11 @@ impl Imports {
                 Err(error) => {
                     use crate::diagnostics::{self, Operation, Publication};
                     let d = diagnostics::failure(
-                        if kind == Kind::Recognition { Operation::Recognition } else { Operation::Archive },
+                        if matches!(kind, Kind::Recognition | Kind::CcipLongtail) {
+                            Operation::Recognition
+                        } else {
+                            Operation::Archive
+                        },
                         diagnostics::stage(state.get("stage").map(Json::text).unwrap_or("")),
                         &error,
                         if progress.published.load(Ordering::SeqCst) {
@@ -246,9 +256,9 @@ impl Imports {
     }
     /// 这个会话的识别导入已被接受或正在运行：同步和索引写入要等它。
     pub(crate) fn recognition_running(&self, generation: u64) -> bool {
-        lock_ignoring_poison(&self.current)
-            .as_ref()
-            .is_some_and(|c| c.kind == Kind::Recognition && c.generation == generation && c.task.running())
+        lock_ignoring_poison(&self.current).as_ref().is_some_and(|c| {
+            matches!(c.kind, Kind::Recognition | Kind::CcipLongtail) && c.generation == generation && c.task.running()
+        })
     }
     /// 请正在运行的导入停下，回答那一刻的状态；页面轮询直到结束。
     pub(crate) fn cancel(&self, reason: &'static str) -> Json {

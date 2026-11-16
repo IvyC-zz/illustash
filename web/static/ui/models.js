@@ -3,7 +3,8 @@
 import {t, tb} from '../core/i18n.js';
 import {esc, bytes, number} from '../core/format.js';
 import {state} from '../core/state.js';
-import {SYNC_ACTIVE, INDEX_ACTIVE, startSync, pollSync, onJob} from '../core/jobs.js';
+import {SYNC_ACTIVE, INDEX_ACTIVE, startSync, pollSync, onJob, importActive, importStarted} from '../core/jobs.js';
+import {api} from '../core/session.js';
 import {loadModels, modelsPost, modelsWaiting, modelsFinished, modelsArrived, onModels, saveAcceleration, fallbacks} from '../core/models.js';
 import {$, toast, redraw, busy} from './dom.js';
 import {confirmAction} from './dialog.js';
@@ -110,6 +111,38 @@ const mirrorNote = m => {
     ? t('原始模型先从这个地址下载，不行再换 ModelScope。填 {hf} 就是直连 Hugging Face。WD 加速文件从项目的 GitHub Release 下载。', hf)
     : t('先从这个地址下载，不行再换 ModelScope。填 {hf} 就是直连 Hugging Face。', hf);
 };
+function longtailCard(pack) {
+  if (!pack) return '';
+  const working = !pack.writable || importActive() || SYNC_ACTIVE.includes(state.sync?.status)
+    || INDEX_ACTIVE.includes(state.index?.state?.status);
+  const action = pack.available ? 'enable' : 'import';
+  const label = !pack.available ? t('从文件导入…') : pack.enabled ? t('重新检查') : t('启用…');
+  const status = pack.enabled
+    ? t('已启用，{n} 张图有候选，{assigned} 张由参考包补归属', {n: number(pack.candidates), assigned: number(pack.assigned)})
+    : t('本图库未启用');
+  return `<div class="setting-line"><span><b>${t('CCIP 长尾角色参考包')}</b>
+    <small class="line-hint" title="SHA-256 ${esc(pack.package_sha256)}">${t('这个图库')} · ${t('{n} 个角色', {n: number(pack.roles)})}</small></span></div>
+    <p class="settings-note">${esc(status)}${pack.enabled && !pack.available ? ' ' + t('参考包文件缺失') : ''}</p>
+    ${pack.needs_scan ? `<p class="muted-note">${t('基础角色索引已更新，请重新检查。')}</p>` : ''}
+    ${pack.error ? `<p class="muted-note">${esc(tb(pack.error))}</p>` : ''}
+    <div class="models-acts">
+      <button class="quiet small" data-models="longtail-${action}" ${working ? 'disabled' : ''}>${label}</button>
+      ${pack.enabled ? `<button class="quiet small" data-models="longtail-withdraw" ${working ? 'disabled' : ''}>${t('撤回…')}</button>` : ''}
+    </div>`;
+}
+async function longtailAction(action) {
+  const title = t('CCIP 长尾角色参考包');
+  if (action === 'withdraw') {
+    const note = t('撤回参考包提供的机器候选和归属？');
+    if (!await confirmAction(note, title, t('撤回'))) return;
+  } else if (!state.models?.longtail?.enabled) {
+    const note = t('启用参考包并重扫本图库已保存的 CCIP 向量？');
+    if (!await confirmAction(note, title, t('启用'))) return;
+  }
+  const result = await api('/api/ccip-longtail', {method: 'POST', body: JSON.stringify({action})});
+  if (result.started && result.task) importStarted(result.task);
+}
+
 // 设置 › 数据：状态、存放位置、镜像，以及同样的按钮。
 export function renderModelsCard() {
   const card = $('setModels'), m = state.models; if (!card) return;
@@ -119,6 +152,7 @@ export function renderModelsCard() {
     <div class="setting-line"><span>${esc(modelsLine(m))}${m.status === 'ready' && extra(m) !== 'download' ? '' : `<small class="line-hint">${manualLink(m)}</small>`}</span></div>
     ${modelsBar(m)}${modelsFailures(m)}${importSummary(m.job)}<div class="models-acts">${modelsActions(m)}</div>${deleteButton(m)}
     ${accelerationLine(m)}
+    ${longtailCard(m.longtail)}
     ${m.on_demand ? `<div class="form-grid"><label for="modelMirror">${t('Hugging Face 镜像')}</label><input id="modelMirror" value="${esc(m.mirror)}" placeholder="${esc(m.mirror_default)}" spellcheck="false" autocomplete="off"></div>
     <p class="settings-note">${mirrorNote(m)}</p>
     <div class="sync-now form-actions"><div class="spacer"></div>
@@ -131,7 +165,8 @@ export function renderModelsCard() {
 
 async function act(what) {
   try {
-    if (what === 'download') await modelsPost({action: 'download'});
+    if (what.startsWith('longtail-')) await longtailAction(what.slice('longtail-'.length));
+    else if (what === 'download') await modelsPost({action: 'download'});
     else if (what === 'cancel') await modelsPost({action: 'cancel'});
     else if (what === 'import') { const r = await modelsPost({action: 'import'}); if (r.cancelled) return; }
     else if (what === 'delete') {
@@ -172,6 +207,9 @@ export function wireModels() {
     if (arrived && !SYNC_ACTIVE.includes(state.sync?.status) && state.sync?.status !== 'off') startSync().then(pollSync).catch(e => toast(e.message));
   });
   // 一次同步结束：重新读取模型状态，卡片上的加速回退原因跟着最近一次识别变，不用等打开任务面板。
-  onJob((job, change) => { if (job === 'sync' && change.ended) loadModels().catch(() => {}); });
+  onJob((job, change) => {
+    if ((job === 'sync' || job === 'import') && change.ended) loadModels().catch(() => {});
+    if (job === 'import' && state.importTask?.kind === 'ccip_longtail') renderModels();
+  });
   loadModels().catch(() => {});
 }

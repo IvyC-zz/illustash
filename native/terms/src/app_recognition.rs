@@ -363,6 +363,7 @@ pub(crate) struct WorkerInputs {
     identity: crate::app_tasks::TaskIdentity,
     snapshot: crate::recognition_compute::anchor_snapshot::Snapshot,
     models: Value,
+    longtail: Result<Option<crate::recognition_compute::anchor_snapshot::LongtailSnapshot>>,
     root: std::path::PathBuf,
     shared: std::path::PathBuf,
 }
@@ -382,7 +383,10 @@ impl WorkerInputs {
         let shared = crate::app_resources::shared_path(root)?;
         let snapshot =
             crate::recognition_compute::anchor_snapshot::Snapshot::load_checked(&shared, &library.source(), &check)?;
-        Ok(Self { identity: identity.clone(), snapshot, models, root: root.to_owned(), shared })
+
+        let longtail = crate::app_ccip_longtail::prepare_delivery(library, &shared, &snapshot.fingerprint, &check);
+        check()?;
+        Ok(Self { identity: identity.clone(), snapshot, models, longtail, root: root.to_owned(), shared })
     }
 }
 /// 完整预校验的回执凭证，绝不是第二份特征或锚点缓存。
@@ -391,6 +395,7 @@ pub(crate) struct PreparedWorkerPackage {
     sidecar: std::path::PathBuf,
     digest: String,
     sidecar_digest: String,
+    longtail: Result<Option<Vec<illustash_core::ccip_longtail::Hit>>>,
 }
 pub(crate) fn prepare_worker_package(
     library: &Library,
@@ -410,11 +415,21 @@ pub(crate) fn prepare_worker_package(
     claims.validate(&inputs.identity, &pkg.ids, &inputs.models, &inputs.snapshot, &pkg.ccip, &|| {
         crate::app_sync::check(cancel)
     })?;
+    let check = || crate::app_sync::check(cancel);
+    let longtail = match &inputs.longtail {
+        Ok(Some(snapshot)) => {
+            crate::app_ccip_longtail::score_prepared(snapshot, &pkg.ids, &pkg.ccip, &inputs.models, &check).map(Some)
+        }
+        Ok(None) => Ok(None),
+        Err(error) => Err(Error::Invalid(error.reason())),
+    };
+    check()?;
     Ok(PreparedWorkerPackage {
         package: path.to_owned(),
         sidecar: sidecar.to_owned(),
         digest: pkg.digest,
         sidecar_digest: sha(&bytes),
+        longtail,
     })
 }
 /// 调用方持有任务回执。源库事务里只做线性的权威复核。
@@ -456,6 +471,7 @@ fn import_internal(
     let tx = c.transaction_with_behavior(TransactionBehavior::Immediate)?;
     // 源库租约冻结了权威的角色元数据。这里复核字节、身份和版本，
     // 绝不重建任务的 O(A²) 别名索引，也不重新计算批次的认领。
+    let prepared_longtail = claims.map(|(prepared, inputs)| (&prepared.longtail, &inputs.snapshot.fingerprint));
     let claims = if let Some((prepared, inputs)) = claims {
         let check = || crate::app_sync::check(cancel);
         check()?;
@@ -610,7 +626,12 @@ fn import_internal(
     drop(tx);
     drop(c);
     observer.stage("projecting");
-    let mut result = resume(library, cancel, dispatch)?;
+    let replay = prepared_longtail.map(|(hits, fingerprint)| PreparedLongtail {
+        delivery: delivery.as_deref().unwrap_or(&pkg.digest),
+        hits,
+        fingerprint,
+    });
+    let mut result = resume_scored(library, root, cancel, dispatch, replay)?;
     result["digest"] = json!(pkg.digest);
     result["duplicate"] = json!(duplicate);
     Ok(result)
@@ -708,10 +729,32 @@ pub(crate) fn retire_unverifiable(library: &Library, cancel: &AtomicBool) -> Res
     Ok(())
 }
 /// 源库已提交的记录在应用或副作用失败后仍保留；投影标记和事件一起提交。
-pub fn resume(
+#[cfg(test)]
+fn resume(library: &Library, cancel: &AtomicBool, dispatch: &dyn Fn(&Library, &str) -> Result<()>) -> Result<Value> {
+    resume_at(library, &crate::app_resources::default_root(), cancel, dispatch)
+}
+
+pub(crate) fn resume_at(
     library: &Library,
+    root: &Path,
     cancel: &AtomicBool,
     dispatch: &dyn Fn(&Library, &str) -> Result<()>,
+) -> Result<Value> {
+    resume_scored(library, root, cancel, dispatch, None)
+}
+
+struct PreparedLongtail<'a> {
+    delivery: &'a str,
+    hits: &'a Result<Option<Vec<illustash_core::ccip_longtail::Hit>>>,
+    fingerprint: &'a crate::recognition_compute::anchor_snapshot::Fingerprint,
+}
+
+fn resume_scored(
+    library: &Library,
+    root: &Path,
+    cancel: &AtomicBool,
+    dispatch: &dyn Fn(&Library, &str) -> Result<()>,
+    prepared: Option<PreparedLongtail<'_>>,
 ) -> Result<Value> {
     if library.frozen() {
         return Err(Error::Conflict("图库只读".into()));
@@ -767,10 +810,32 @@ pub fn resume(
                 }
                 crate::app_migrate::deliver_wd(&mut app, &library.source(), library.id(), Some(&ids), true)?;
                 let src = crate::app_library::read_connection(&library.source())?;
+                let check = || crate::app_sync::check(cancel);
+                let longtail = if let Some(ready) = prepared.as_ref().filter(|r| r.delivery == digest) {
+                    match ready.hits {
+                        Ok(Some(hits)) => (|| {
+                            let shared = crate::app_resources::shared_path(root)?;
+                            if &crate::recognition_compute::anchor_snapshot::Snapshot::fingerprint(
+                                &shared, &tx, &check,
+                            )? != ready.fingerprint
+                            {
+                                return Err(Error::Conflict("识别交付前基础角色索引已更新".into()));
+                            }
+                            let live = ids.iter().collect::<std::collections::HashSet<_>>();
+                            Ok(Some(hits.iter().filter(|hit| live.contains(&hit.uuid)).cloned().collect()))
+                        })(),
+                        Ok(None) => Ok(None),
+                        Err(error) => Err(Error::Invalid(error.reason())),
+                    }
+                } else {
+                    crate::app_ccip_longtail::score_delivery(library, root, &app, &src, &ids, &check)
+                };
+                check()?;
                 let app_tx = app.transaction_with_behavior(TransactionBehavior::Immediate)?;
                 crate::schema::begin_writing(&app_tx)?;
                 if !ids.is_empty() {
                     import_changes(&app_tx, &src, library, &ids)?;
+                    crate::app_ccip_longtail::publish_delivery(&app_tx, &ids, longtail)?;
                 }
                 app_tx.execute("INSERT INTO backend_effects(kind) VALUES ('imported')", [])?;
                 let event = app_tx.last_insert_rowid().to_string();
@@ -902,6 +967,7 @@ pub(crate) fn realistic(app: &Connection, src: &Connection, publishing: &[String
 }
 fn import_changes(app: &Connection, src: &Connection, library: &Library, ids: &[String]) -> Result<()> {
     illustash_core::wd_extension::invalidate(app, ids)?;
+    illustash_core::ccip_longtail::invalidate(app, ids)?;
     let list = serde_json::to_string(ids).expect("internal JSON value is serializable").replace('\'', "''");
     let scope = format!("uuid IN (SELECT value FROM json_each('{list}'))");
     let rows=source_rows(src,"SELECT uuid,filename,src_path,width,height,added_at,src_kind FROM assets WHERE in_scope=1 AND coalesce(trashed,0)=0 AND uuid IN ({})",ids)?;

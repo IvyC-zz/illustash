@@ -171,6 +171,9 @@ fn read(request: &Request, host: &Host, session: &Session, path: &str) -> Result
         // 全应用范围（#191）：检查更新的选项和上次结果，不属于图库。
         "/api/updates" => crate::app_updates::info().map(|p| Some((p, 200))),
         // 全应用范围（#168）：识别模型是否就位，以及正在进行的下载或导入。
+        "/api/ccip-longtail" => {
+            crate::app_ccip_longtail::status(&session.library, &host.root).map(|value| Some((value.into(), 200)))
+        }
         "/api/models" => crate::app_models::info(&host.root).map(|p| Some((p, 200))),
         "/api/onboarding" => {
             let works = crate::http_read::query(request.url()).get("works").is_some_and(|v| v == "1");

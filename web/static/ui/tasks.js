@@ -77,9 +77,12 @@ export function taskList() {
   // 导入（图库归档、识别结果、人工结论共用一个槽；#386 的 2-37）：和导出一样，运行中、结束后都在这里有一行，运行时可以取消。
   const im = state.importTask;
   if (['running', 'stopping', 'done', 'error', 'cancelled'].includes(im?.status)) list.push({key: 'import',
-    name: im.kind === 'recognition' ? t('导入识别结果') : im.kind === 'human_conclusions' ? t('导入人工结论') : t('导入图库'), busy: t('导入中'),
+    name: im.kind === 'ccip_longtail' ? t('CCIP 长尾角色参考包')
+      : im.kind === 'recognition' ? t('导入识别结果') : im.kind === 'human_conclusions' ? t('导入人工结论') : t('导入图库'),
+    busy: im.kind === 'ccip_longtail' ? t('正在检查图片') : t('导入中'),
     active: importActive(), warn: im.status === 'error', line: importLine(im), body: '',
-    action: im.status === 'running' ? `<button class="quiet small" data-task="import-cancel">${t('取消导入')}</button>` : ''});
+    action: im.status === 'running' && !(im.kind === 'ccip_longtail' && im.stage === 'committing')
+      ? `<button class="quiet small" data-task="import-cancel">${im.kind === 'ccip_longtail' ? t('取消') : t('取消导入')}</button>` : ''});
   const diagnoses = {sync: s, index: ix, names: nm, similar: sim, provenance: ps, models: m?.job, export: ex, import: im};
   for (const task of list) {
     const note = diagnosticLine(diagnoses[task.key]?.diagnostic);

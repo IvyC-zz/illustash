@@ -58,6 +58,17 @@ pub(super) fn handle(request: Request, host: &Host, received: u64, text: &str, b
             Picked::Failed(e) => return failure(request, e, true),
         }
     }
+    if request.url() == "/api/ccip-longtail"
+        && body.get("action").map(Json::text) == Some("import")
+        && body.get("path").is_none()
+    {
+        match pick_file(host, received, &translate, "models") {
+            Picked::Path(path) => body.set("path", path),
+            Picked::Cancelled => return cancelled(request),
+            Picked::Switched => return expired(request),
+            Picked::Failed(e) => return failure(request, e, true),
+        }
+    }
     let mut session = host.session.write().expect("http_host_post session lock poisoned");
     if !host.accepts(&session, received) || header(&request, "X-CSRF-Token") != Some(session.token.as_str()) {
         return expired(request);
@@ -97,6 +108,11 @@ pub(super) fn handle(request: Request, host: &Host, received: u64, text: &str, b
         "/api/relate" => return relate(request, host, received, session, &body),
         // 导入是后台任务（#26、#88）：请求做完校验、启动任务后立即应答；页面轮询 GET /api/imports，可以取消。
         // 识别结果导入始终绑定在开始时的图库上。取消、切换图库或退出，都会让两种导入在发布点之前停下。
+        "/api/ccip-longtail" => {
+            let started = longtail(host, &session, &body);
+            drop(session);
+            return reply(request, started.map(started_task), true);
+        }
         "/api/recognition/import" => {
             let started = recognition_import(host, &session, &body);
             drop(session);
@@ -250,6 +266,41 @@ fn relate(request: Request, host: &Host, received: u64, mut session: RwLockWrite
     drop(session);
     reply_if_current(request, host, received, waited(result), true);
 }
+fn longtail(host: &Host, session: &Session, body: &Json) -> Result<Json> {
+    use crate::app_ccip_longtail;
+    if session.syncer.running() || session.index.writing() {
+        return Err(Error::Conflict("正在同步或更新角色索引，请稍后重试".into()));
+    }
+    let path = match body.get("action").map(Json::text) {
+        Some("import") => {
+            let path = body
+                .get("path")
+                .map(Json::text)
+                .filter(|p| !p.is_empty())
+                .ok_or_else(|| Error::invalid("请选择本机参考包文件"))?;
+            Some(PathBuf::from(path))
+        }
+        Some("enable") => Some(app_ccip_longtail::local_package(&session.library)),
+        Some("withdraw") => None,
+        _ => return Err(Error::invalid("参考包操作不正确")),
+    };
+    let identity = crate::app_tasks::TaskIdentity::new(&session.library, session.generation, &session.token)?;
+    let (library, root) = (session.library.clone(), host.root.clone());
+    host.imports.start(identity, crate::app_imports::Kind::CcipLongtail, "", move |progress| {
+        let value = match path {
+            Some(path) => app_ccip_longtail::apply(
+                &library,
+                &root,
+                &path,
+                &|| crate::app_sync::check(progress.cancellation()),
+                progress,
+            )?,
+            None => app_ccip_longtail::withdraw(&library, progress)?,
+        };
+        Ok(value.into())
+    })
+}
+
 fn recognition_import(host: &Host, session: &Session, body: &Json) -> Result<Json> {
     let resume = matches!(body.get("resume"), Some(Json::Scalar(serde_json::Value::Bool(true))));
     let path = match body.get("path") {
@@ -284,7 +335,7 @@ fn recognition_import(host: &Host, session: &Session, body: &Json) -> Result<Jso
             )?,
             None => {
                 progress.stage("projecting");
-                crate::app_recognition::resume(&library, cancel, &crate::app_research::dispatch)?
+                crate::app_recognition::resume_at(&library, &root, cancel, &crate::app_research::dispatch)?
             }
         };
         // 保持旧版响应的插入顺序（digest、duplicate、status、error）。

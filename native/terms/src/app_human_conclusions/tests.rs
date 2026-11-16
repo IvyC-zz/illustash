@@ -282,7 +282,39 @@ fn independent_evidence_keeps_imported_definition_and_rolls_back_entire_undo() {
 
 #[test]
 fn withdrawn_wd_extension_keeps_history_and_allows_import_undo() {
-    use illustash_core::{character_entities, wd_extension};
+    use illustash_core::wd_extension;
+    withdrawn_extension_keeps_history_and_allows_import_undo(
+        |tx, tag| {
+            wd_extension::apply(
+                tx,
+                "synthetic",
+                &[wd_extension::Hit { uuid: "image".into(), tag: tag.into(), probability: 0.95 }],
+            )
+        },
+        wd_extension::withdraw,
+    );
+}
+
+#[test]
+fn withdrawn_ccip_longtail_keeps_history_and_allows_import_undo() {
+    use illustash_core::ccip_longtail;
+    withdrawn_extension_keeps_history_and_allows_import_undo(
+        |tx, tag| {
+            ccip_longtail::apply(
+                tx,
+                "synthetic",
+                &[ccip_longtail::Hit { uuid: "image".into(), tag: tag.into(), score: 0.95 }],
+            )
+        },
+        ccip_longtail::withdraw,
+    );
+}
+
+fn withdrawn_extension_keeps_history_and_allows_import_undo(
+    apply: impl Fn(&Connection, &str) -> crate::Result<usize>,
+    withdraw: impl Fn(&Connection) -> crate::Result<usize>,
+) {
+    use illustash_core::character_entities;
 
     let source = Fixture::new("source-library");
     let tag = "synthetic_character";
@@ -309,8 +341,7 @@ fn withdrawn_wd_extension_keeps_history_and_allows_import_undo() {
     let mut c = crate::open(&target.db).unwrap();
     let tx = c.transaction().unwrap();
     crate::schema::begin_writing(&tx).unwrap();
-    let hit = wd_extension::Hit { uuid: "image".into(), tag: tag.into(), probability: 0.95 };
-    assert_eq!(wd_extension::apply(&tx, "synthetic", &[hit]).unwrap(), 1);
+    assert_eq!(apply(&tx, tag).unwrap(), 1);
     crate::schema::commit_writing(tx).unwrap();
     assert_eq!(target.count("SELECT term_id FROM term_current_evidence"), first);
     assert!(matches!(target.undo(action), Err(Error::Conflict(_))));
@@ -318,7 +349,7 @@ fn withdrawn_wd_extension_keeps_history_and_allows_import_undo() {
 
     let tx = c.transaction().unwrap();
     crate::schema::begin_writing(&tx).unwrap();
-    assert_eq!(wd_extension::withdraw(&tx).unwrap(), 1);
+    assert_eq!(withdraw(&tx).unwrap(), 1);
     crate::schema::commit_writing(tx).unwrap();
     target.undo(action).unwrap();
     for table in ["terms", "term_links", "term_current_evidence", "candidates", "memberships"] {

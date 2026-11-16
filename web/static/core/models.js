@@ -1,13 +1,13 @@
 // 不带识别模型的安装包在第一次使用时下载的模型（#168，native/terms/src/app_models.rs）。和更新检查一样全应用共用：
 // 每个图库、每个窗口里状态相同，切换图库时下载照常继续。不碰 DOM。onModels(before, start) 在每次读取或改动后通知，带上改动前的
 // 状态，以及正在运行或刚结束的任务开始时模型是否已就位（readyWhenStarted）。
-import {api} from './session.js';
+import {api, session} from './session.js';
 import {state} from './state.js';
 import {listeners} from './events.js';
 const changed = listeners();
 export const onModels = changed.on;
 
-let timer = 0, reading = null, started = null;
+let timer = 0, reading = null, started = null, readingToken = null;
 const adopt = async value => {
   const before = state.models, start = started;
   state.models = value;
@@ -19,13 +19,19 @@ const adopt = async value => {
   return value;
 };
 export function loadModels() {
-  reading ||= api('/api/models').then(adopt).finally(() => { reading = null; });
-  return reading;
+  const token = session.token;
+  if (reading && readingToken === token) return reading;
+  readingToken = token;
+  const request = Promise.all([api('/api/models'), api('/api/ccip-longtail').catch(() => null)])
+    .then(([value, longtail]) => token === session.token ? adopt({...value, longtail}) : value)
+    .finally(() => { if (reading === request) reading = null; });
+  reading = request;
+  return request;
 }
 // download、cancel、discard、mirror；不带路径的 import 先打开系统的选择框（关掉时返回 {cancelled}）。
 export async function modelsPost(body) {
   const value = await api('/api/models', {method: 'POST', body: JSON.stringify(body)});
-  return value.cancelled ? value : adopt(value);
+  return value.cancelled ? value : adopt({...value, longtail: state.models?.longtail});
 }
 // 「使用 GPU 加速识别」（#270），全应用共用，存在 preferences.json；模型状态里带着它，所以要重新读取。
 export async function saveAcceleration(on) {
