@@ -259,7 +259,14 @@ async function act(key, what) {
       if (!await confirmAction(withdrawMessage(key), t('撤回 {name}', {name}), t('撤回'))) return;
       await withdrawPack(key);
     } else if (what === 'withdraw-retry') await withdrawPack(key);
-    else if (what === 'cancel') await cancelPack(key);
+    else if (what === 'cancel') {
+      // 取消晚了一步、任务已经进了写入阶段：后端回 409。这是个事实，不是故障，不带错误编号（#559 走查）。
+      try { await cancelPack(key); } catch (e) {
+        if (e.status !== 409) throw e;
+        toast(t('已经开始写入，没能取消'));
+        loadPack(key).catch(() => {});
+      }
+    }
   } catch (e) { toast(e.message); }
 }
 // 处理函数。页面启动时调用一次。按钮在设置页的卡片和任务面板里，监听挂在这两处，不挂在 document 上。

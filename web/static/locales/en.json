@@ -3131,5 +3131,7 @@
     "one": "Remove all candidates from the {name} in this library and the {n} machine assignment it added. ",
     "other": "Remove all candidates from the {name} in this library and the {n} machine assignments it added. "
   },
-  "去掉本图库里 {name}给出的全部候选。": "Remove all candidates from the {name} in this library. "
+  "去掉本图库里 {name}给出的全部候选。": "Remove all candidates from the {name} in this library. ",
+  "已经开始写入，没能取消": "Writing had already started; it could not be cancelled",
+  "选择 CCIP 长尾参考包（.zip）": "Choose the CCIP long-tail reference pack (.zip)"
 }

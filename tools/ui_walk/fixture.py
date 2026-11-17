@@ -283,19 +283,15 @@ def npy_rows(data: bytes) -> tuple[int, bytes]:
     return start, data[start:]
 
 
-def ccip_longtail_walk(fixture: Fixture, directory: Path, shared: Path, origin: str) -> Path:
+def ccip_longtail_spec(directory: Path, shared: Path, roles: list[tuple[str, bytes]], origin: str) -> Path:
     """合成 CCIP 长尾参考包（#559）和它的下载清单；包的格式照 native/terms/src/app_ccip_longtail.rs 的 Package::load。
 
-    三个长尾角色的锚点取自三张图的 CCIP 向量，分别命中：没有角色的一组相近图（补上归属）、WD 认出的角色、人工确认的
-    角色（后两种只多出候选）。阈值 p75 = 0.2（余弦距离），组内的图都在阈值内，别的组远在阈值外。长尾包要叠在基础角色
-    索引上，走查图库没有，所以在共享目录写一个只有一个锚点的基础索引；它没有元数据，阈值为零，不认领任何图。"""
-    names = [('longone_(synthetic)', 'group-2-01'), ('longtwo_(synthetic)', 'dahlia-02'), ('longthree_(synthetic)', 'aster-02')]
-    _, data = npy_rows((fixture.root / 'recognition' / 'ccip.npy').read_bytes())
-    order = {name: i for i, name in enumerate(fixture.names.values())}
-    row = CCIP_DIM * 4
-    anchors = b''.join(data[order[photo] * row:(order[photo] + 1) * row] for _, photo in names)
+    roles 是（角色 tag，768 维小端 float32 锚点）。阈值 p75 = 0.2（余弦距离）。CCIP 模型摘要用合成识别结果里的
+    sha256(b'synthetic CCIP')。长尾包要叠在基础角色索引上，合成图库没有，所以在共享目录写一个只有一个锚点的基础索引；
+    它没有元数据，阈值为零，不认领任何图。"""
+    anchors = b''.join(vector for _, vector in roles)
     metadata = json.dumps([{'id': tag, 'tag': tag, 'skin': False, 'post_count': 20, 'gender_conf': 0.5,
-                            'p50': 0.1, 'p75': 0.2, 'p90': 0.3} for tag, _ in names]).encode()
+                            'p50': 0.1, 'p75': 0.2, 'p90': 0.3} for tag, _ in roles]).encode()
     model = sha(b'synthetic CCIP')
     provenance = json.dumps({'format': 'illustash-557-ccip-offline/1', 'ccip_sha256': model,
                              'files': {'A-metadata.json': sha(metadata), 'A-anchors.f32': sha(anchors)}}).encode()
@@ -314,11 +310,22 @@ def ccip_longtail_walk(fixture: Fixture, directory: Path, shared: Path, origin: 
     (shared / 'char-anchors.npy').write_bytes(b'\x93NUMPY\x01\x00' + struct.pack('<H', len(header)) + header.encode()
                                               + struct.pack(f'<{CCIP_DIM}f', *(x / norm for x in base)))
     (shared / 'char-anchors.txt').write_text('base_synthetic\n', encoding='utf-8')
-    spec = {'sha256': sha(contents), 'size': len(contents), 'ccip_sha256': model, 'roles': len(names),
+    spec = {'sha256': sha(contents), 'size': len(contents), 'ccip_sha256': model, 'roles': len(roles),
             'url': f'{origin}/{path.name}'}
     manifest = directory / 'ccip-longtail.json'
     manifest.write_text(json.dumps(spec), encoding='utf-8')
     return manifest
+
+
+def ccip_longtail_walk(fixture: Fixture, directory: Path, shared: Path, origin: str) -> Path:
+    """走查图库用的长尾包：三个长尾角色的锚点取自三张图的 CCIP 向量，分别命中没有角色的一组相近图（补上归属）、
+    WD 认出的角色、人工确认的角色（后两种只多出候选）。组内的图都在阈值内，别的组远在阈值外。"""
+    names = [('longone_(synthetic)', 'group-2-01'), ('longtwo_(synthetic)', 'dahlia-02'), ('longthree_(synthetic)', 'aster-02')]
+    _, data = npy_rows((fixture.root / 'recognition' / 'ccip.npy').read_bytes())
+    order = {name: i for i, name in enumerate(fixture.names.values())}
+    row = CCIP_DIM * 4
+    roles = [(tag, data[order[photo] * row:(order[photo] + 1) * row]) for tag, photo in names]
+    return ccip_longtail_spec(directory, shared, roles, origin)
 
 
 def fake_resources(dest: Path) -> Path:

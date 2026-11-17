@@ -46,10 +46,10 @@ pub fn choose(
         }
         return Ok(selection(kind, paths, multiple));
     }
-    let title = translate(if matches!(kind, "wd-extension" | "ccip-longtail") {
-        "从文件导入…"
-    } else {
-        choice_kind.title()
+    let title = translate(match kind {
+        "wd-extension" => "从文件导入…",
+        "ccip-longtail" => "选择 CCIP 长尾参考包（.zip）",
+        _ => choice_kind.title(),
     });
     let choice = illustash_platform::picker::choose(choice_kind, &title, multiple, stopping, Duration::from_secs(600))?;
     let paths = match choice {

@@ -280,6 +280,17 @@ test('各个 POST 的路由和请求体', async () => {
   assert.equal(c.state.packs.wd, x);
 });
 
+test('取消晚了一步（写入阶段回 409）：提示事实，不带错误编号，再读一次状态', async () => {
+  const page = web.fakePage();
+  c.wirePacks();
+  c.state.packs = {wd: ext({package: READY, task: {id: 't1', kind: 'enable', status: 'running', phase: 'scan', done: 1, total: 9}}), ccip: null};
+  const calls = server([{status: 409, body: {error: '正在写入图库，无法取消'}}, {body: ext({package: READY, library: ENABLED})}]);
+  for (const fn of page.el('settingsPage').listeners.click) fn({target: {closest: () => ({dataset: {pack: 'wd:cancel'}, disabled: false})}});
+  await new Promise(resolve => setTimeout(resolve, 10));
+  assert.equal(page.el('toastText').textContent, '已经开始写入，没能取消');
+  assert.deepEqual(calls.map(x => x[1]), ['/api/wd-extension/cancel', '/api/wd-extension']);
+});
+
 test('409（扩展包没就位、图库忙）原样抛出后端的原文', async () => {
   server([{status: 409, body: {error: '已有任务在运行'}}]);
   await assert.rejects(c.enablePack('wd'), {message: '已有任务在运行', status: 409});
