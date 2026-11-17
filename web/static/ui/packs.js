@@ -77,6 +77,8 @@ export function packLine(key, x = current(key)) {
   if (packRunning(x)) {
     if (task.kind === 'withdraw') return t('正在撤回…');
     if (task.phase === 'write') return t('正在写入…');
+    // 刚开始、还没数出要检查几张时（total 为 0）不写「0 / 0」。
+    if (!task.total) return t('正在检查…');
     return t('正在检查 {done} / {total} 张', {done: number(task.done || 0), total: number(task.total || 0)});
   }
   if (packDownloading(x)) {
@@ -152,10 +154,12 @@ export function packFailures(key, x = current(key)) {
   const d = x?.download, list = d?.status === 'failed' ? d.failures || [] : [];
   return list.length ? `<ul class="models-results">${list.map(f => `<li class="mismatch">${esc(t('{source}：{why}', {source: f.source, why: tb(f.why)}))}</li>`).join('')}</ul>` : '';
 }
-// 导入对所选的每个文件做了什么。
+// 导入对所选的每个文件做了什么。只在这个页面发起的导入结束后列出：WD 扩展包整个 App 一份，导入结果也是，换了图库
+// （页面重新载入）或别的窗口导入的不列。按包记。
+const importedHere = new Set();
 const RESULT = {accepted: () => t('已接收'), mismatch: () => t('SHA-256 不符，已拒绝'), already: () => t('已经有了')};
 export function packImportSummary(key, x = current(key)) {
-  const d = x?.download; if (d?.kind !== 'import' || !d.results?.length || packDownloading(x)) return '';
+  const d = x?.download; if (!importedHere.has(key) || d?.kind !== 'import' || !d.results?.length || packDownloading(x)) return '';
   const what = r => r.result === 'unknown' ? ui(key).unknown() : RESULT[r.result]?.() || esc(r.result);
   return `<ul class="models-results">${d.results.map(r => `<li class="${esc(r.result)}"><bdi>${esc(r.name)}</bdi> · ${what(r)}</li>`).join('')}</ul>`;
 }
@@ -224,8 +228,8 @@ export function withdrawMessage(key, x = current(key)) {
 async function act(key, what) {
   const u = ui(key), name = u.name();
   try {
-    if (what === 'download') await packageAction(key, 'download');
-    else if (what === 'import') await packageAction(key, 'import');
+    if (what === 'download') { importedHere.delete(key); await packageAction(key, 'download'); }
+    else if (what === 'import') { const r = await packageAction(key, 'import'); if (!r?.cancelled) importedHere.add(key); }
     else if (what === 'package-cancel') await packageAction(key, 'cancel');
     else if (what === 'discard') {
       if (!await confirmAction(t('删除已经下载但还没完成的部分？下次要从头下载。'), t('删除未完成的部分'), t('删除'))) return;

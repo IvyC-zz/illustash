@@ -76,15 +76,29 @@ test('下载失败：原因、每个来源的失败、重试；已取消', () =>
   assert.deepEqual(task.diagnostic, {id: 'd1'});
 });
 
-test('导入后逐个列出所选文件的结果', () => {
+test('这个页面导入以后逐个列出所选文件的结果；别处的导入（换了图库、别的窗口）不列', async () => {
   const download = {kind: 'import', status: 'done', results: [{name: 'wd-extension-v1.zip/wd-extension-v1.bin', result: 'accepted'},
     {name: 'edited.bin', result: 'mismatch'}, {name: 'notes.txt', result: 'unknown'}, {name: 'again.bin', result: 'already'}]};
-  const html = c.packImportSummary('wd', ext({package: READY, download}));
+  const imported = ext({package: READY, download});
+  assert.equal(c.packImportSummary('wd', imported), '', '页面刚载入，结果是别处导入留下的');
+  const page = web.fakePage();
+  c.wirePacks();
+  server([{body: {cancelled: true}}, {body: imported}]);
+  // 监听不返回 promise：点完等请求和回调都走完。
+  const click = async act => {
+    for (const fn of page.el('settingsPage').listeners.click) fn({target: {closest: () => ({dataset: {pack: 'wd:' + act}, disabled: false})}});
+    await new Promise(resolve => setTimeout(resolve, 10));
+  };
+  await click('import');
+  assert.equal(c.packImportSummary('wd', imported), '', '关掉选择框不算导入');
+  await click('import');
+  const html = c.packImportSummary('wd', imported);
   assert.match(html, /wd-extension-v1.zip\/wd-extension-v1.bin<\/bdi> · 已接收/);
   assert.match(html, /edited.bin<\/bdi> · SHA-256 不符，已拒绝/);
   assert.match(html, /notes.txt<\/bdi> · 不是扩展包/);
   assert.match(html, /again.bin<\/bdi> · 已经有了/);
   assert.equal(c.packImportSummary('wd', ext({download: {kind: 'download', status: 'done', results: []}})), '');
+  assert.equal(c.packImportSummary('ccip', imported), '', '按包记：另一个包没导入过');
 });
 
 test('已下载、本图库未启用：启用…；不能启用时按钮禁用，提示写原因', () => {
@@ -113,6 +127,7 @@ test('启用中：扫描阶段报进度、可以取消；写入阶段不报百�
   assert.equal(c.packDot('wd', x), 'busy');
   assert.match(c.packBar('wd', x), /width:25.0%/);
   assert.deepEqual(buttons(c.packActions('wd', x)).map(b => [b.act, b.attrs]), [['cancel', '']]);
+  assert.equal(c.packLine('wd', ext({package: READY, task: {...task, done: 0, total: 0}})), '正在检查…', '还没数出张数时不写 0 / 0');
   task.phase = 'write';
   assert.equal(c.packLine('wd', x), '正在写入…');
   assert.equal(c.packBar('wd', x), '');
@@ -303,11 +318,20 @@ test('CCIP 长尾包：不能下载，只能从文件导入；导入是主按钮
   assert.equal(c.packNote('ccip', x), '多认 54 个图片较少、WD 和精选索引都没有的角色。');
   // 存放位置写「本图库」；导入结果里不认识的文件写「不是参考包」。
   assert.match(c.packInfo('ccip', ccip({package: {status: 'ready'}})), /\/synthetic\/library.pilib\/instance · 本图库/);
-  assert.match(c.packImportSummary('ccip', ccip({download: {kind: 'import', status: 'done', results: [{name: 'x.zip', result: 'unknown'}]}})), /x.zip<\/bdi> · 不是参考包/);
   // 没有 CCIP 向量的图库：启用按钮的提示写 CCIP。
   assert.match(c.packActions('ccip', ccip({package: {status: 'ready'}, library: {blocked: 'no_vectors'}})), /disabled title="这个图库还没有 CCIP 识别结果"/);
   assert.equal(c.packTask('ccip', ccip({download: {kind: 'import', status: 'running', done: 1, total: 2}})).busy, '导入 CCIP 长尾包中');
   assert.equal(c.packTask('ccip', ccip({package: {status: 'ready'}, task: {id: 'c', kind: 'enable', status: 'running', phase: 'scan', done: 1, total: 9}})).key, 'pack-ccip');
+});
+
+test('CCIP 长尾包：导入结果里不认识的文件写「不是参考包」', async () => {
+  const page = web.fakePage();
+  c.wirePacks();
+  const imported = ccip({download: {kind: 'import', status: 'done', results: [{name: 'x.zip', result: 'unknown'}]}});
+  server([{body: imported}]);
+  for (const fn of page.el('settingsPage').listeners.click) fn({target: {closest: () => ({dataset: {pack: 'ccip:import'}, disabled: false})}});
+  await new Promise(resolve => setTimeout(resolve, 10));
+  assert.match(c.packImportSummary('ccip', imported), /x.zip<\/bdi> · 不是参考包/);
 });
 
 test('CCIP 长尾包：索引更新过要重新检查，自动检查的错误写在状态行下面', () => {
