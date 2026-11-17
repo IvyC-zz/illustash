@@ -93,10 +93,11 @@ export const CHARACTER = character;
 // 路由里的页面名没登记时（只有测试会这样）按没有特殊性质的网格页处理。
 const UNKNOWN = {name: '', area: 'grid', panel: false, click: 'own', nav: '', toolbar: 'grid', sorts: NEWEST, bar: 'default'};
 export const pageOf = route => PAGES[route.page] || UNKNOWN;
+// 主区的全部种类（index.html 里各有一个元素），ui/dom.js 的 showArea 按它切换。
+export const AREAS = [...new Set(list.map(p => p.area))];
 // 屏幕上看到的那一页：角色筛选下是角色页，否则就是 route.page。char 默认取路由的 char；渲染标题和元数据重画时
 // 要看角色有没有读到，传 state.char。
 export const viewOf = (route, char = route.char) => char ? CHARACTER : pageOf(route);
-export const pageNames = () => list.map(p => p.name);
 // 单图快捷键在这页的范围（见上面的 keys 字段）：'grid'、'shown' 或 ''。
 export const keyScope = view => view.keys || (view.area === 'grid' ? 'grid' : '');
 // 本页的后端 pool 是不是这几个之一（条目离开本页的判断：设为角色之后离开未识别、排除之后离开已排除……）。
@@ -111,6 +112,7 @@ export const poolIs = (route, ...pools) => pools.includes(pageOf(route).pool);
 //   help(r), helpHint    标题旁「?」里的说明（一行一句）；helpHint 为真时再接上本页的 hint，一个「·」一行（#527）
 //   onMeta(info)         计数等元数据到达后重画什么；没有的页面重画工具栏
 //   emptyNext(r)         网格空了时空状态下面的去处（链接或 data-empty 按钮的 HTML，#386 的 2-12）；没有的页面只有一句话
+//   emptyAct(act)        点了 emptyNext 里的 data-empty 按钮（「显示全部」由 shell 自己处理）
 //   reveal(uuid)         主区不是网格的页面把这张图滚进视野：详情栏、大图翻页时，和面板页借列表看的大图关掉时（#424）
 //   refresh(why)         数据变了之后重画面板页：'edit' 改动之后、'undo' 撤销之后、'learned' 确认或撤销后后台学习
 //                        收尾之后（#400）、'sync' 同步到新图之后、'nsfw' 切换 R18 之后、'view' 视图选项之后、

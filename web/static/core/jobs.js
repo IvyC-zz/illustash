@@ -4,7 +4,7 @@
 // 这里的 setIndex、setNames（#344）。相似图片的状态随 settings 一起来，settings 由 core/settings.js 写。任务运行期间轮询会自己重新排上；重叠的轮询绝不会让状态倒退（#34）。
 import {diagnosticLine} from './diagnostics.js';
 import {t, tb} from './i18n.js';
-import {isMac, number, stamp} from './format.js';
+import {home, isMac, megabytes, number, stamp} from './format.js';
 import {session, api, post, shared} from './session.js';
 import {state} from './state.js';
 import {listeners} from './events.js';
@@ -205,6 +205,7 @@ export async function provenanceAction(body) {
 }
 
 // ---------- 导入（#88）：归档或识别结果，一次一个 ----------
+// 和其余 *_ACTIVE 一样保留 export：native/terms 的 app_activity 测试按 `export const X = [...]` 这一行核对后端的进行中状态。
 export const IMPORT_ACTIVE = ['running', 'stopping'];
 export const importActive = () => IMPORT_ACTIVE.includes(state.importTask?.status);
 export const IMPORT_STAGES = {
@@ -212,10 +213,9 @@ export const IMPORT_STAGES = {
   human_conclusions: {reading: t('正在读取文件'), matching: t('正在核对图片'), validating: t('正在校验'), committing: t('正在提交')},
   recognition: {models: t('正在核对模型指纹'), reading: t('正在读取结果包'), verifying: t('正在校验识别结果'), writing: t('正在写入识别结果'), committing: t('正在提交'), projecting: t('正在更新图库索引')},
 };
-export const mib = n => (n / 1048576).toFixed(n < 10485760 ? 1 : 0);
 export function importCount(job) {
   if (job.done == null || !job.total) return '';
-  if (job.stage === 'unpacking') return ` ${mib(job.done)}/${mib(job.total)} MB`;
+  if (job.stage === 'unpacking') return ` ${megabytes(job.done)}/${megabytes(job.total)} MB`;
   if (job.stage === 'reading') return t('（第 {n}/{total} 个文件）', {n: Math.min(job.done + 1, job.total), total: job.total});
   return ' ' + t('{done}/{total} 张', {done: number(job.done), total: number(job.total)});
 }
@@ -235,7 +235,7 @@ function importSummary(job) {
   if (job.status !== 'done') return '';
   const r = job.result || {};
   // 已发布但没有登记（#111）：打开它就会登记；再导入会另建一个带编号的图库。
-  if (job.kind === 'archive' && r.listed === false) return t('已导入「{name}」，保存在 {path}，但没能加入最近图库列表：{reason}。打开它会再试一次加入列表；再导入会另建一个带编号的图库。模型接口与名称联网授权需重新设置。', {name: r.name, path: String(r.path).replace(/^(?:\/Users\/[^/]+|[A-Za-z]:[\\/]Users[\\/][^\\/]+)(?=[\\/]|$)/i, '~'), reason: tb(r.error)});
+  if (job.kind === 'archive' && r.listed === false) return t('已导入「{name}」，保存在 {path}，但没能加入最近图库列表：{reason}。打开它会再试一次加入列表；再导入会另建一个带编号的图库。模型接口与名称联网授权需重新设置。', {name: r.name, path: home(r.path), reason: tb(r.error)});
   if (job.kind === 'archive') return t('已导入「{name}」，模型接口与名称联网授权需重新设置。', {name: r.name});
   if (r.status === 'pending') return t('识别结果已导入，后续处理尚未完成（{reason}）。', {reason: tb(r.error) || t('可稍后恢复')});
   return r.duplicate ? t('这份识别结果之前已经导入过。') : t('识别结果已导入。');

@@ -1,14 +1,14 @@
 // 「设置 › 数据 › 备份与存储」里的人工结论快照（#502）：自动快照的状态和清单、导出、从文件导入、从自动快照恢复，以及完成后
 // 的报告对话框和撤销。数据、请求和文字在 core/human.js；导入的进度和取消沿用 core/jobs.js 的导入槽。
 import {t, tb} from '../core/i18n.js';
-import {esc, number, localStamp} from '../core/format.js';
+import {esc, home, number, localStamp} from '../core/format.js';
 import {state} from '../core/state.js';
 import {edits} from '../core/edits.js';
 import {onPage} from '../core/pages.js';
 import {refreshMeta} from '../core/meta.js';
 import {readError} from '../core/session.js';
 import {IMPORT_STAGES, importActive, importCount, importLine, cancelImport} from '../core/jobs.js';
-import {HUMAN_IMPORT, exportActive, home, rfcSeconds, loadHuman, onHuman, startExport, cancelExport, startHumanImport, restoreSnapshot, isRestore,
+import {HUMAN_IMPORT, exportActive, rfcSeconds, loadHuman, onHuman, startExport, cancelExport, startHumanImport, restoreSnapshot, isRestore,
   readReport, REPORT_PAGE, adoptUndo, humanError, COUNT_GROUPS, resultText, kindText, reasonText, fieldText, conflictCount} from '../core/human.js';
 import {$, toast, error, fold, wireFolds} from './dom.js';
 import {openDialog, confirmAction} from './dialog.js';
@@ -155,7 +155,7 @@ export function reportDetails(page, total) {
       <button type="button" class="quiet small" data-page="${to}" ${to < total ? '' : 'disabled'}>${t('下一页')}</button></div>`;
 }
 // 导入或恢复完成后的报告。只读，点背景可以关。
-export function openReport(r, restore = false) {
+function openReport(r, restore = false) {
   if (!r) return null;
   const undoable = r.committed && r.undo != null && edits.latest?.id === r.undo;
   const d = openDialog({title: restore ? t('从自动快照恢复：结果') : t('导入人工结论：结果'), backdropClose: true,

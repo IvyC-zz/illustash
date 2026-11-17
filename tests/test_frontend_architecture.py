@@ -173,7 +173,9 @@ class FrontendArchitectureTest(unittest.TestCase):
                  "document.documentElement.addEventListener('keydown', e => {});",
                  "document.addEventListener('pointerdown', e => {});",
                  "document.addEventListener('mousedown', e => {});",
-                 "document.addEventListener('keyup', e => {});"]
+                 "document.addEventListener('keyup', e => {});",
+                 "document.addEventListener('change', e => {});",   # #431 ③-12
+                 "document.onchange = () => {};"]
         for text in cases:
             with self.subTest(text=text), Tree() as tree:
                 tree.append('ui/artists.js', '\n' + text + '\n')
@@ -187,7 +189,8 @@ class FrontendArchitectureTest(unittest.TestCase):
 
     def test_other_events_and_element_listeners_are_fine(self):
         with Tree() as tree:
-            tree.append('ui/artists.js', "\ndocument.addEventListener('change', e => {});\n"
+            # change 从 #431 起也算（见 test_body_and_more_events_count_too），这里换成 input。
+            tree.append('ui/artists.js', "\ndocument.addEventListener('input', e => {});\n"
                                          "document.addEventListener('pointermove', e => {});\n"
                                          "button.addEventListener('keydown', e => { if (composing(e)) return; });\n"
                                          "// document.addEventListener('keydown', e => {});\n")

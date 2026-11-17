@@ -4,7 +4,7 @@
 // 本文件是入口：把各模块连起来（一次写入或一个任务的回应会改动页面别处的什么），按顺序挂好，然后启动页面。
 // 模块地图见 docs/WEB_V2.md「前端模块」。
 import {t} from './core/i18n.js';
-import {number} from './core/format.js';
+import {home, number} from './core/format.js';
 import {prefs} from './core/prefs.js';
 import {state} from './core/state.js';
 import {adoptToken, onPost, api} from './core/session.js';
@@ -28,7 +28,6 @@ import {wireReview} from './ui/review.js';
 import {guideAfterBoot, guideOnOpen, wireGuide} from './ui/guide.js';
 import {afterWrite, afterJob} from './ui/effects.js';
 import {pollIntegrity} from './core/integrity.js';
-import {home} from './core/human.js';
 import {wireModels} from './ui/models.js';
 import {wireIntegrity} from './ui/integrity.js';
 platformHints(document.body);

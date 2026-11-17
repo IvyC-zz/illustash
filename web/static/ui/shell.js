@@ -1,7 +1,7 @@
 // 页面的框架（桌面布局，#199）：按地址切到对应页面、侧栏的计数、每个页面的标题和工具栏。页面在哪由 core/route.js
 // 负责；计数的数据由 core/meta.js 负责。
 import {workKey} from '../core/catalog.js';
-import {esc, isMac, localDate, number, shortcut} from '../core/format.js';
+import {dayLabel, esc, isMac, localDate, number, shortcut} from '../core/format.js';
 import {t} from '../core/i18n.js';
 import {REASONS, nameTip} from '../core/labels.js';
 import {fetchChar, onMeta, setChar} from '../core/meta.js';
@@ -11,17 +11,30 @@ import {canGoBack, cleanup, defaultSort, go, hashFor, historyEntry, noteHistory,
 import {api, readError} from '../core/session.js';
 import {state} from '../core/state.js';
 import {cast, createWork, drawCast, drawShelf, openTagged, renderIndexBody, searchIndex, shelf} from './catalog.js';
-import {$, error, helpTip, searchIcon, wireHelpTip, workSmall} from './dom.js';
+import {$, emptyLink, error, helpTip, searchIcon, showArea, wireHelpTip, workSmall} from './dom.js';
 import {renderSettings, settingsSection} from './settings.js';
-import {artistName} from './artists.js';
 import {closeInspector, closeViewer} from './detail.js';
 import {filters, markSelectButton, placeFor, rememberPlace, reload, resetForRoute, selectAll, setNsfw, short, sweep, toggleFit, toggleSelecting} from './grid.js';
 import {guideTick} from './guide.js';
 import {createLayer} from './overlay.js';
-import {dayLabel} from './home.js';
 import {editProfile, markOc, mergeCharacter, openLocalLinks, openRelate, splitOc, toggleMascot, toggleOc} from './palette.js';
-import {groupOrder, nearText} from './review.js';
 
+// 画师筛选的标题和胶囊里显示的画师名：第一次用到时去读，读到后重画标题，胶囊只换文字（整条工具栏重画会打断正在
+// 输入的搜索框）。
+const artistNames = {};
+const artistPillText = id => t('画师 · {name}', {name: short(artistName(id))});
+function artistName(id) {
+  if (!(id in artistNames)) {
+    artistNames[id] = '…';
+    api('/api/artist?' + new URLSearchParams({id})).then(r => {
+      artistNames[id] = r.name || t('未知画师');
+      if (state.route.artist !== id) return;
+      renderHeading();
+      const pill = $('artistPill'); if (pill) pill.textContent = artistPillText(id) + ' ×';
+    }).catch(e => error(readError(e)));
+  }
+  return artistNames[id];
+}
 // 搜索框和标签菜单的防抖。
 let searchTimer = 0, pickerTimer = 0;
 export const navCount = (id, n, title = '') => { $(id).textContent = n ? number(n) : ''; $(id).title = title; };
@@ -63,14 +76,13 @@ export async function applyRoute() {
   for (const a of document.querySelectorAll('.nav')) a.classList.toggle('active', a.dataset.page === page.nav);
   $('settingsLink').classList.toggle('active', page.nav === 'settings');
   setChar(null);
-  state.groupNear = null;
   if (page.prepare && await page.prepare(route) === false) return;
   if (route.char) {
     let character; try { character = await fetchChar(route.char); } catch (e) { if (state.route === route) error(readError(e)); return; }
     if (state.route !== route) return;
     setChar(character || {id: route.char, name: t('角色'), work: '', count: 0, unchecked: 0, variants: []});
   }
-  $('homePage').hidden = page.area !== 'homePage';
+  showArea(page.area);
   if (page.guideTick) guideTick(page.guideTick);
   renderChrome();
   // 自己渲染的页面（首页、资料库、设置、按组整理……）换到时从顶部开始，不沿用上一页的滚动位置；后退、前进回到记过
@@ -143,7 +155,7 @@ export function renderChrome() {
   const filtersHTML = view.toolbar === 'library' ? `<div class="search-wrap">${searchIcon()}<input type="search" id="search" spellcheck="false" autocorrect="off" autocapitalize="off" placeholder="${t('搜索角色、别名或文件名')}" aria-label="${t('搜索图库')}" value="${esc(r.q)}"><kbd>/</kbd></div>` +
     (r.char ? pill('charPill', t('角色 · {name}', {name: esc(short(state.char?.name || ''))}), t('清除角色筛选')) : '') +
     (r.work ? pill('workPill', t('作品 · {name}', {name: esc(short(workName))}), t('清除作品筛选')) : '') +
-    (r.artist ? pill('artistPill', t('画师 · {name}', {name: esc(short(artistName(r.artist)))}), t('清除画师筛选')) : '') +
+    (r.artist ? pill('artistPill', esc(artistPillText(r.artist)), t('清除画师筛选')) : '') +
     (r.utag ? pill('utagPill', `# ${esc(r.utag)}`, t('清除标签筛选')) : '') +
     (r.tag ? pill('wdTagPill', t('标签 · {tag}', {tag: esc(r.tag.replaceAll('_', ' '))}), t('清除标签筛选')) : '') +
     (r.day ? pill('dayPill', t('{day} 加入', {day: esc(dayLabel(r.day))}), t('清除日期筛选')) : '') +
@@ -247,7 +259,7 @@ export function wireShell() {
   $('empty').addEventListener('click', e => {
     const act = e.target.closest('[data-empty]')?.dataset.empty;
     if (act === 'nsfw') setNsfw('');
-    else if (act === 'next-group') nextGroup();
+    else if (act) viewOf(state.route).emptyAct?.(act);
   });
   window.addEventListener('hashchange', applyRoute);
 }
@@ -298,31 +310,13 @@ implement({
   library: {onMeta: () => {}},
   characters: {onMeta: ({directory}) => { if (directory && (state.route.section || !$('charSearch')?.value)) renderIndexBody(state.chars); }},
   settings: {onMeta: () => renderSettings()},
-  // 一组图的页面要先读分组：相近的一组和这组的特征。
-  group: {prepare: async route => {
-    let result; try { result = await api('/api/clusters?nsfw=' + state.nsfw); } catch (e) { if (state.route === route) error(readError(e)); return false; }
-    if (state.route !== route) return false;  // 分组加载期间已经导航走了：这个回应不属于任何页面
-    const g = result.clusters.find(x => String(x.cid) === route.id);
-    state.groupNear = g?.near ? nearText(g) : null; state.groupNearId = g?.near || null; state.groupTraits = g?.traits || [];
-    state.groupOrder = groupOrder(result.clusters).map(x => String(x.cid));
-  }},
 });
-// 网格空了时的去处（#386 的 2-12、2-16）：一组整理完了去下一组或回到按组整理；待确认、已跳过清空了回到同一入口的
-// 主页签；「只看 R18」时图库空了给「显示全部」。按钮由 wireShell 里 #empty 的点击处理。
-const emptyLink = (href, label) => `<a class="quiet link" href="${href}">${label}</a>`;
+// 网格空了时的去处（#386 的 2-12、2-16）：待确认、已跳过清空了回到同一入口的主页签；「只看 R18」时图库空了给「显示全部」。
+// 一组整理完了的去处由 ui/review.js 登记。按钮由 wireShell 里 #empty 的点击处理。
 const showAll = r => state.nsfw === 'only' ? `<button class="quiet" data-empty="nsfw">${t('显示全部')}</button>` : '';
 implement({
   library: {emptyNext: showAll},
   character: {emptyNext: showAll},
-  group: {emptyNext: r => (state.groupOrder.some(id => id !== r.id) ? `<button class="quiet" data-empty="next-group">${t('下一组')} →</button>` : '') + emptyLink('#/groups', t('回到按组整理'))},
   skipped: {emptyNext: () => emptyLink('#/groups', t('回到按组整理'))},
   pending: {emptyNext: () => emptyLink('#/excluded', t('回到已排除'))},
 });
-// 「下一组」：重读分组，取原来排在这组后面、还在的第一组；后面都没了就取最前面那组；一组都没了回到按组整理。
-async function nextGroup() {
-  const at = state.route.id, order = state.groupOrder, from = order.indexOf(at);
-  let result; try { result = await api('/api/clusters?nsfw=' + state.nsfw); } catch (e) { error(readError(e)); return; }
-  const left = new Set(result.clusters.map(x => String(x.cid))); left.delete(at);
-  const pick = order.slice(from + 1).find(id => left.has(id)) || groupOrder(result.clusters).map(x => String(x.cid)).find(id => id !== at);
-  location.hash = pick ? '#/g/' + encodeURIComponent(pick) : '#/groups';
-}

@@ -2,7 +2,7 @@
 // core/jobs.js）。
 import {t, tb, said, I18N} from '../core/i18n.js';
 import {composing} from '../core/keys.js';
-import {esc, isMac, number, bytes, stamp, localStamp, pct, localTime} from '../core/format.js';
+import {esc, home, isMac, megabytes, number, bytes, stamp, localStamp, pct, localTime} from '../core/format.js';
 import {implement, onPage} from '../core/pages.js';
 import {prefs} from '../core/prefs.js';
 import {diagnosticReport, diagnosticText, diagnosticLine, downloadDiagnostic, openDiagnosticLogs} from '../core/diagnostics.js';
@@ -14,7 +14,7 @@ import {SYNC_ACTIVE, INDEX_ACTIVE, NAMES_ACTIVE, PROV_ACTIVE, syncLine, indexLin
 import {onSettings, allowNames, loadSettingsData, saveStartup, saveFold, backupNow, clearCache, saveLanguage, saveAfterTasks, loadAbout, saveModelApi, testModelApi,
   loadLibraries, libraryRequest, pollExport, chooseFolders, openLibraryRequest, libraryOpened, loadAccounts, accountRequest,
   waitPixivLogin, stopPixivLogin, checkUpdates, updatesPost, updatesTick} from '../core/settings.js';
-import {$, toast, error, readFailure, fold, wireFolds, redraw, setDrawn, busy} from './dom.js';
+import {$, toast, error, readFailure, fold, wireFolds, redraw, setDrawn, busy, showArea} from './dom.js';
 import {confirmAction} from './dialog.js';
 import {openTasks, taskList} from './tasks.js';
 import {charHash} from '../core/route.js';
@@ -26,14 +26,13 @@ import {renderIntegrityLine} from './integrity.js';
 import {renderModelsCard} from './models.js';
 import {openModal} from './overlay.js';
 import {renderHumanBlock, onHumanClick, wireHuman} from './human.js';
-import {loadHuman, home} from '../core/human.js';
+import {loadHuman} from '../core/human.js';
 import {workName} from '../core/catalog.js';
 
 // ---------- 名称：这个图库联网查询名称的授权 ----------
 // 名称的文字查询（只有 tag 和作品名）需要这个图库授权：授权之前，后端以「显示名联网尚未授权」拒绝。其他失败都是真正的
 // 网络或服务错误。
 const NAMES_NOTE = t('允许这个图库联网查询名称吗？\n\n会把你输入的角色名、作品名，以及图库里角色的 Danbooru tag 和作品名发给 Danbooru 和 Bangumi，用来搜索角色、作品和补全中文名。不会发送图片。\n\n允许后对这个图库一直有效，可以在「设置 › 网络与隐私」里随时撤销。');
-export const namesAllowButton = `<button type="button" class="link-button" data-names-allow>${t('允许查询…')}</button>`;
 export async function setNamesNetwork(allow) {
   if (allow && !await confirmAction(NAMES_NOTE, t('允许联网查询名称'))) return false;
   try {
@@ -174,7 +173,7 @@ const SETTINGS_SECTIONS = [
 const OWN_CARDS = ['setLibraries', 'setProvenance', 'setAccounts', 'indexCard', 'namesCard', 'modelCard', 'setAbout', 'setModels'];
 export const settingsSection = () => SETTINGS_SECTIONS.find(s => s[0] === state.route.section) || SETTINGS_SECTIONS[0];
 // 只给开发者的入口（测试图库、粘贴 Pixiv cookie）要带 ?dev 打开过一次页面后才显示。
-export const devMode = (() => { try { if (new URLSearchParams(location.search).has('dev')) prefs.set('dev', true); } catch {} return !!prefs.get('dev', false); })();
+const devMode = (() => { try { if (new URLSearchParams(location.search).has('dev')) prefs.set('dev', true); } catch {} return !!prefs.get('dev', false); })();
 // 设置保存在哪里，让用户知道哪些设置会跟着他们跨图库、跨浏览器。按浏览器保存的偏好在桌面 App 里存在 App 自己的网页存储里，
 // 标签改说「本 App」（app，#423）。
 const SCOPE = {
@@ -276,7 +275,7 @@ function networkCard() {
 }
 export async function renderSettings(fetchMissing = true, refresh = false) {
   if (!onPage(state.route, 'settings')) return;
-  $('grid').hidden = true; $('empty').hidden = true; $('charIndex').hidden = true; $('groupsPage').hidden = true; $('settingsPage').hidden = false;
+  showArea();
   closeInspector(); $('selectionBar').hidden = true; $('resultCount').textContent = ''; $('hint').textContent = '';
   if (fetchMissing) loadSettingsData(refresh);
   const [section, , , cards] = settingsSection();
@@ -412,7 +411,7 @@ export function renderLibrariesCard() {
     <span class="lib-src"><button class="quiet small" data-open-library="${esc(l.path)}" data-name="${esc(l.name)}">${t('打开')}</button><button class="quiet small" data-forget-library="${esc(l.path)}" title="${t('只从列表里移除，不删除图库')}">${t('移出列表')}</button></span></div>`;
   const ex = data.export || {};
   const exportLine = ex.status === 'running' ? `<p class="muted-note">${t('正在导出到 {path}…', {path: esc(home(ex.path))})}</p>`
-    : ex.status === 'done' ? `<p class="muted-note">${t('已导出：{path}（{mb} MB）。', {path: esc(home(ex.path)), mb: (ex.bytes / 1048576).toFixed(0)})}${EXPORT_LEAVES_OUT}</p>`
+    : ex.status === 'done' ? `<p class="muted-note">${t('已导出：{path}（{mb} MB）。', {path: esc(home(ex.path)), mb: megabytes(ex.bytes)})}${EXPORT_LEAVES_OUT}</p>`
     : ex.status === 'error' ? `<p class="muted-note">${t('导出失败：{reason}', {reason: esc(tb(ex.error))})}</p>` : '';
   const f = libForm;
   const form = !f.open ? '' : `<div class="lib-form">
@@ -488,7 +487,7 @@ export async function openLibrary(path, name, agreed = null) {
 }
 
 // ---------- 绑定的账号（docs/PROVENANCE.md 第 8 节）：所有图库共用；密钥存在钥匙串里 ----------
-export function renderAccountsCard() {
+function renderAccountsCard() {
   const card = $('setAccounts'); if (!card || !onPage(state.route, 'settings')) return;
   const a = state.accounts;
   if (!a) { card.innerHTML = `<h2>${t('账号')}</h2><p class="muted-note">${t('正在读取…')}</p>`; return; }
@@ -806,7 +805,7 @@ export function wireSettings() {
     if ($('aboutUpdates')) $('aboutUpdates').innerHTML = updatesLine();
     drawNudge(); drawUpdateButton();
   });
-  document.addEventListener('change', async e => {
+  $('settingsPage').addEventListener('change', async e => {
     const box = e.target.closest('[data-updates-auto]'); if (!box) return;
     try { await updatesPost({action: 'auto', allow: box.checked}); toast(box.checked ? t('已打开自动检查更新') : t('已关闭自动检查更新')); }
     catch (err) { toast(err.message); box.checked = !box.checked; }
