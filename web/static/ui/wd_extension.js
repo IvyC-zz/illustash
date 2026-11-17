@@ -38,6 +38,8 @@ export function extLine(x = state.wdExtension) {
   if (extRunning(x)) {
     if (task.kind === 'withdraw') return t('正在撤回…');
     if (task.phase === 'write') return t('正在写入…');
+    // 刚开始、还没数出要检查几张时（total 为 0）不写「0 / 0」。
+    if (!task.total) return t('正在检查…');
     return t('正在检查 {done} / {total} 张', {done: number(task.done || 0), total: number(task.total || 0)});
   }
   if (extDownloading(x)) {
@@ -107,10 +109,12 @@ export function extFailures(x = state.wdExtension) {
   const d = x?.download, list = d?.status === 'failed' ? d.failures || [] : [];
   return list.length ? `<ul class="models-results">${list.map(f => `<li class="mismatch">${esc(t('{source}：{why}', {source: f.source, why: tb(f.why)}))}</li>`).join('')}</ul>` : '';
 }
-// 导入对所选的每个文件做了什么。
+// 导入对所选的每个文件做了什么。扩展包整个 App 一份，导入任务的结果也是；只在这个页面发起的导入结束后列出，换了图库
+// （页面重新载入）或别的窗口导入的不列。
+let importedHere = false;
 const RESULT = {accepted: () => t('已接收'), mismatch: () => t('SHA-256 不符，已拒绝'), unknown: () => t('不是扩展包'), already: () => t('已经有了')};
 export function extImportSummary(x = state.wdExtension) {
-  const d = x?.download; if (d?.kind !== 'import' || !d.results?.length || extDownloading(x)) return '';
+  const d = x?.download; if (!importedHere || d?.kind !== 'import' || !d.results?.length || extDownloading(x)) return '';
   return `<ul class="models-results">${d.results.map(r => `<li class="${esc(r.result)}"><bdi>${esc(r.name)}</bdi> · ${RESULT[r.result]?.() || esc(r.result)}</li>`).join('')}</ul>`;
 }
 // 折叠区「扩展包」：存放位置（所有图库共用）、文件、版本和许可；已就位时可以删除。
@@ -177,8 +181,8 @@ export const DELETE_MESSAGE = () => t('删除扩展包？已启用的图库保�
 
 async function act(what) {
   try {
-    if (what === 'download') await packageAction('download');
-    else if (what === 'import') await packageAction('import');
+    if (what === 'download') { importedHere = false; await packageAction('download'); }
+    else if (what === 'import') { const r = await packageAction('import'); if (!r?.cancelled) importedHere = true; }
     else if (what === 'package-cancel') await packageAction('cancel');
     else if (what === 'discard') {
       if (!await confirmAction(t('删除已经下载但还没完成的部分？下次要从头下载。'), t('删除未完成的部分'), t('删除'))) return;

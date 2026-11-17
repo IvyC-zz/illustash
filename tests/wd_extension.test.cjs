@@ -75,10 +75,19 @@ test('下载失败：原因、每个来源的失败、重试；已取消', () =>
   assert.deepEqual(task.diagnostic, {id: 'd1'});
 });
 
-test('导入后逐个列出所选文件的结果', () => {
+test('这个页面导入以后逐个列出所选文件的结果；别处的导入（换了图库、别的窗口）不列', async () => {
   const download = {kind: 'import', status: 'done', results: [{name: 'wd-extension-v1.zip/wd-extension-v1.bin', result: 'accepted'},
     {name: 'edited.bin', result: 'mismatch'}, {name: 'notes.txt', result: 'unknown'}, {name: 'again.bin', result: 'already'}]};
-  const html = c.extImportSummary(ext({package: READY, download}));
+  const imported = ext({package: READY, download});
+  assert.equal(c.extImportSummary(imported), '', '页面刚载入，结果是别处导入留下的');
+  const page = web.fakePage();
+  c.wireWdExtension();
+  server([{body: {cancelled: true}}, {body: imported}]);
+  const click = async act => { for (const fn of page.el('settingsPage').listeners.click) await fn({target: {closest: () => ({dataset: {wdx: act}, disabled: false})}}); };
+  await click('import');
+  assert.equal(c.extImportSummary(imported), '', '关掉选择框不算导入');
+  await click('import');
+  const html = c.extImportSummary(imported);
   assert.match(html, /wd-extension-v1.zip\/wd-extension-v1.bin<\/bdi> · 已接收/);
   assert.match(html, /edited.bin<\/bdi> · SHA-256 不符，已拒绝/);
   assert.match(html, /notes.txt<\/bdi> · 不是扩展包/);
@@ -112,6 +121,7 @@ test('启用中：扫描阶段报进度、可以取消；写入阶段不报百�
   assert.equal(c.extDot(x), 'busy');
   assert.match(c.extBar(x), /width:25.0%/);
   assert.deepEqual(buttons(c.extActions(x)).map(b => [b.act, b.attrs]), [['cancel', '']]);
+  assert.equal(c.extLine(ext({package: READY, task: {...task, done: 0, total: 0}})), '正在检查…', '还没数出张数时不写 0 / 0');
   task.phase = 'write';
   assert.equal(c.extLine(x), '正在写入…');
   assert.equal(c.extBar(x), '');
