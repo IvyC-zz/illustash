@@ -11,6 +11,8 @@ use rusqlite::{params, params_from_iter, types::ValueRef, Connection, OpenFlags,
 use std::{cell::RefCell, collections::HashMap, sync::Arc};
 use unicode_normalization::UnicodeNormalization;
 
+const ARTIST_DIRECTORY: &str = "/api/artist-directory";
+
 #[cfg(test)]
 pub const CORE_ROUTES: &[&str] = &[
     "/api/assets",
@@ -32,6 +34,7 @@ pub const CORE_ROUTES: &[&str] = &[
     "/api/user-tags",
     "/api/general-tags",
     "/api/artists",
+    ARTIST_DIRECTORY,
     "/api/artist",
     "/api/artist-audit",
     "/api/entities",
@@ -608,9 +611,16 @@ pub fn read(context: &LibraryContext, url: &str) -> Result<Option<(Json, u16)>> 
     }
     attach_provenance(&tx, context, path)?;
     if !(characters || browse || local || path == "/api/bootstrap") {
-        let result = read_library(&tx, context, path, &q, audit_n)?;
-        tx.commit()?;
-        return Ok(Some((result, 200)));
+        // 新读接口可拒绝参数。库中其他接口保留原来的错误处理。
+        let result = read_library(&tx, context, path, &q, audit_n);
+        return match result {
+            Ok(payload) => {
+                tx.commit()?;
+                Ok(Some((payload, 200)))
+            }
+            Err(Error::Invalid(m)) if path == ARTIST_DIRECTORY => Ok(refused(m)),
+            Err(e) => Err(e),
+        };
     }
     // Store.connect 在交出连接之前会探查名字开关，即使没有名字渲染器也一样。
     flag(&tx, "terms_names")?;
@@ -697,6 +707,7 @@ fn read_library(
             );
             Json::Array(rows(c, &sql, &[&like(&cut(trim(value("q")), 60))])?)
         }
+        ARTIST_DIRECTORY => crate::http_artists::directory(c, library, q)?,
         "/api/artists" => {
             let sql = format!(
                 "SELECT artist,count(*) AS characters

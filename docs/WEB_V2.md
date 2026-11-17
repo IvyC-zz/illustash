@@ -355,6 +355,18 @@ change/reassign 的选择方式二选一：
   4. 每组显示最有辨识度的最多 4 个特征（占 ≥ 50% 的标签，按稀有程度排序），卡片和单组页标题都有。
 - `cluster_info` 增加 `near_kind`（`look` / `trait`）和 `traits`；`schema_version` 升为 15。真实库重新分组：156 组，其中 143 组有特征；提示 56 条「可能是同一人」、1 条「外观相似」。
 
+## 画师目录
+
+`GET /api/artist-directory` 返回 `{items, total, offset}`，每项有画师的 `id`、`name`、`homes`，
+以及可见图数 `count`、最近收图日期 `last` 和这张图的 UUID `cover`。日期相同时用 UUID 最小的图作封面。
+目录只读图库里的画师核心投影。机器认定和人工确认计入图数，候选、人工否定、已移除、排除和折叠的图片均不计入。
+画师按词条 key 统计，继续沿用 [画师词条](TERMS_ARTISTS.md) 的归属口径。
+
+`nsfw=hide` 或 `nsfw=only` 同时影响图数、封面和入选的画师；不传时显示所有分级。
+`q` 最多取 80 字，对显示名、X 账号、Pixiv ID 和 Danbooru tag 做 Unicode 大小写折叠后的子串匹配。
+`order` 可取 `count`（默认）、`recent` 或 `name`（按大小写折叠后的显示名排序），同序时按 key 排定。
+`offset` 默认 0，`limit` 默认 60（1–200）；空页仍返回查询对应的总画师数。
+
 ## 画师 OC（2026-09-24）
 
 相似分组里有不少组是同一个画师反复画的原创角色（OC）。这些图不属于任何作品，以前只能跳过。现在可以把它们标成「画师 OC」：
