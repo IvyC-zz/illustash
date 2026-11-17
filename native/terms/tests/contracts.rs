@@ -248,6 +248,22 @@ fn prepare_benchmark_fixture() {
     }
 }
 
+fn isolated_command(root: &Path, binary: &Path) -> Command {
+    let mut command = Command::new(binary);
+    command
+        .env_clear()
+        .env("PATH", root.join("bin"))
+        .env("HOME", root.join("home"))
+        .env("USERPROFILE", root.join("home"))
+        .env("ILLUSTASH_APP_SUPPORT", root.join("support"))
+        .env("ILLUSTASH_NO_KEYCHAIN", "1")
+        .env("ILLUSTASH_SHARED", root.join("shared"))
+        .env("ILLUSTASH_PYTHON_SENTINEL", root.join("python-launched"));
+    #[cfg(windows)]
+    command.env("SystemRoot", std::env::var_os("SystemRoot").expect("SystemRoot"));
+    command
+}
+
 fn launch(root: &Path, package: &Path, category: &str, upgrade: bool, binary: &Path) -> (Host, String, String) {
     launch_inner(root, package, category, upgrade, binary, false)
 }
@@ -264,23 +280,12 @@ fn launch_inner(
     let port = listener.local_addr().unwrap().port();
     drop(listener);
     let origin = format!("http://127.0.0.1:{port}");
-    let mut command = Command::new(binary);
-    command
-        .env_clear()
-        .env("PATH", root.join("bin"))
-        .env("HOME", root.join("home"))
-        .env("USERPROFILE", root.join("home"))
-        .env("ILLUSTASH_APP_SUPPORT", root.join("support"))
-        .env("ILLUSTASH_NO_KEYCHAIN", "1")
-        .env("ILLUSTASH_SHARED", root.join("shared"))
-        .env("ILLUSTASH_PYTHON_SENTINEL", root.join("python-launched"));
+    let mut command = isolated_command(root, binary);
     if category != "scale" {
         command
             .env("ILLUSTASH_TEST_VERIFY_INCREMENTAL", root.join("verified"))
             .env("ILLUSTASH_TEST_KEY_COUNTER", root.join("key-counter"));
     }
-    #[cfg(windows)]
-    command.env("SystemRoot", std::env::var_os("SystemRoot").expect("SystemRoot"));
     command
         .args(["http", "--no-auto-sync", "--no-names", "--no-index-check", "--no-provenance", "--library"])
         .arg(package)

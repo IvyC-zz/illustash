@@ -7,10 +7,15 @@ const NEW: usize = 8;
 const STAMP: &str = "2026-01-01 00:00:00";
 const BINARY: &str = env!("CARGO_BIN_EXE_illustash-terms");
 
-fn cli(args: &[&str], path: &Path, input: Option<&Value>) -> Value {
+fn cli(root: &Path, args: &[&str], path: &Path, input: Option<&Value>) -> Value {
     use std::io::Write;
-    let mut child =
-        Command::new(BINARY).args(args).arg(path).stdin(Stdio::piped()).stdout(Stdio::piped()).spawn().unwrap();
+    let mut child = isolated_command(root, Path::new(BINARY))
+        .args(args)
+        .arg(path)
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .spawn()
+        .unwrap();
     if let Some(value) = input {
         child.stdin.take().unwrap().write_all(value.to_string().as_bytes()).unwrap();
     }
@@ -55,7 +60,7 @@ fn seed(root: &Path, size: usize) -> (PathBuf, PathBuf) {
     .unwrap();
     let source = package.join("source.sqlite");
     let config: Value = serde_json::from_slice(&fs::read(package.join("library.json")).unwrap()).unwrap();
-    assert_eq!(cli(&["photos-scan", "--db"], &source, Some(&config["sources"][0]))["new"], size);
+    assert_eq!(cli(root, &["photos-scan", "--db"], &source, Some(&config["sources"][0]))["new"], size);
 
     let mut db = illustash_terms::open(&package.join("library.sqlite")).unwrap();
     db.execute("ATTACH DATABASE ? AS src", [source.to_str().unwrap()]).unwrap();
@@ -99,11 +104,11 @@ fn seed(root: &Path, size: usize) -> (PathBuf, PathBuf) {
         .map(|r| r[1].to_owned())
         .collect();
     assert_eq!(names.len(), 256);
-    tx.execute_batch("CREATE TEMP TABLE vocab(i INTEGER PRIMARY KEY,term INTEGER,key TEXT)").unwrap();
+    tx.execute_batch("CREATE TEMP TABLE vocab(i INTEGER PRIMARY KEY,key TEXT)").unwrap();
     for (i, tag) in names.iter().enumerate() {
         let id = store::create_term(&tx, Kind::Topic, Some(&format!("fixture-topic:{tag}")), "fixture").unwrap();
         store::add_link(&tx, id, "wd", tag, "", "fixture").unwrap();
-        tx.execute("INSERT INTO vocab VALUES (?,?,?)", params![i, id, tag]).unwrap();
+        tx.execute("INSERT INTO vocab VALUES (?,?)", params![i, tag]).unwrap();
     }
     let rating = store::create_term(&tx, Kind::Rating, Some("fixture-safe"), "fixture").unwrap();
     store::add_link(&tx, rating, "wd_rating", "general", "", "fixture").unwrap();
@@ -191,7 +196,7 @@ fn benchmark() {
                 .unwrap();
             }
         }
-        let result = measured(size, metric, || cli(&["library-scan", "--library"], &package, None));
+        let result = measured(size, metric, || cli(&root, &["library-scan", "--library"], &package, None));
         assert_eq!(result, json!({"added":delta,"removed":0,"pending":0}));
         let c = Connection::open(package.join("library.sqlite")).unwrap();
         let counts: (usize, usize, String) = c
@@ -201,8 +206,9 @@ fn benchmark() {
             .unwrap();
         assert_eq!(counts, (delta, delta, "done".into()));
     }
-    let names =
-        measured(size, "names_project", || cli(&["names-project", "--db"], &package.join("library.sqlite"), None));
+    let names = measured(size, "names_project", || {
+        cli(&root, &["names-project", "--db"], &package.join("library.sqlite"), None)
+    });
     assert!(names["shown"].as_u64().unwrap() > 0, "{names}");
     let (_host, origin, token) = measured(size, "open", || launch(&root, &package, "scale", false, Path::new(BINARY)));
     let get = |url: &str, body: Option<&Value>| {
