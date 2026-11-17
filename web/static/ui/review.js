@@ -11,7 +11,7 @@ import {charHash, go, hashFor} from '../core/route.js';
 import {api, post, readError} from '../core/session.js';
 import {state} from '../core/state.js';
 import {closeInspector, peekAt, wirePeek} from './detail.js';
-import {$, emptyLink, error, readFailure, reconcileSections, showArea, toast, written} from './dom.js';
+import {$, emptyLink, error, readFailure, reconcileSections, redraw, showArea, toast, written} from './dom.js';
 import {mutate} from './grid.js';
 import {markOc, openPicker, targets} from './palette.js';
 import {navCount, renderHeading} from './shell.js';
@@ -62,34 +62,54 @@ function groupSection(g) {
 }
 // ---------- 整个图库里的相似图片（native/terms/src/research_compute/similar.rs） ----------
 // 标过「看过了」的组（#427）不在列表里，「看过的 N 组」（#/similar?seen=1）只列它们；组里进了新图，后端就不再算它看过。
-let similarTimer = 0;
-export async function renderSimilar() {
+// 检查进行中每 3 秒重读一次。重读、撤销、学习落定之后（keep）只就地改状态行、工具条和进度条，组卡片按组号比对，
+// 内容没变的留在原处，封面不重新加载（#601）。组列表先显示 40 组，「再显示」接着往下，和按组整理一样；换页签、
+// 切换看过的组、切换 R18 时回到前 40 组。
+const SIMILAR_PAGE = 40;
+export const similar = {groups: [], others: 0, state: {}, kind: '', seen: false, shown: SIMILAR_PAGE, revision: 0, timer: 0};
+export async function renderSimilar(keep = false) {
   if (!onPage(state.route, 'similar')) return;
-  clearTimeout(similarTimer);
-  showArea();
-  closeInspector(); $('selectionBar').hidden = true; $('resultCount').textContent = ''; $('hint').textContent = t('点一组进去看');
-  const kind = state.route.kind || '', seen = state.route.seen === '1';
-  let result; try { result = await api('/api/similar?' + new URLSearchParams({kind, nsfw: state.nsfw, seen: '1'})); } catch (e) { if (onPage(state.route, 'similar') && kind === (state.route.kind || '')) readFailure($('groupsPage'), e); return; }
-  const {state: s} = result;
-  if (!onPage(state.route, 'similar')) return;
-  const groups = result.groups.filter(g => !!g.seen === seen), others = result.groups.length - groups.length;
-  const busy = SIMILAR_ACTIVE.includes(s.status);
-  const count = {n: number(groups.length), images: number(groups.reduce((n, g) => n + g.size, 0))};
+  clearTimeout(similar.timer);
+  if (!keep) { showArea(); closeInspector(); $('selectionBar').hidden = true; $('resultCount').textContent = ''; $('hint').textContent = t('点一组进去看'); }
+  const kind = state.route.kind || '', seen = state.route.seen === '1', revision = ++similar.revision;
+  const fresh = () => onPage(state.route, 'similar') && revision === similar.revision;
+  let result; try { result = await api('/api/similar?' + new URLSearchParams({kind, nsfw: state.nsfw, seen: '1'})); } catch (e) { if (fresh()) readFailure($('groupsPage'), e); return; }
+  if (!fresh()) return;
+  const groups = result.groups.filter(g => !!g.seen === seen);
+  Object.assign(similar, {groups, others: result.groups.length - groups.length, state: result.state, kind, seen});
+  if (!keep) similar.shown = SIMILAR_PAGE;
+  drawSimilar();
+  if (SIMILAR_ACTIVE.includes(result.state.status)) similar.timer = setTimeout(() => renderSimilar(true), 3000);
+}
+const similarCard = g => `<a class="group-card" href="#/s/${g.gid}"><div class="group-covers">${g.covers.map(u => `<img src="/image?id=${encodeURIComponent(u)}&size=thumb" loading="lazy" alt="">`).join('')}</div>
+      <div class="group-meta"><b>${t('相似组 {id}', {id: g.gid})}</b><span>${t('{n} 张', {n: number(g.size)})}</span></div>
+      <div class="group-traits">${Object.entries(g.kinds).sort((a, b) => b[1] - a[1]).map(([k, n]) => `<span>${RELATION_NAMES[k] || k}${n > 1 ? ' ×' + n : ''}</span>`).join('')}</div></a>`;
+export function drawSimilar() {
+  const {groups: list, others, state: s, kind, seen, shown} = similar, box = $('groupsPage');
+  if (!box.querySelector('.similar-list')) {
+    box.innerHTML = `<div class="similar-status"><span class="local-dot"></span><span class="muted-note"></span></div><div class="groups-bar"></div>
+      <div class="progress" hidden><span></span></div><div class="group-grid similar-list"></div><div class="similar-more"></div>`;
+  }
+  const busy = SIMILAR_ACTIVE.includes(s.status), line = similarLine(s);
+  const count = {n: number(list.length), images: number(list.reduce((n, g) => n + g.size, 0))};
+  const status = box.querySelector('.similar-status');
+  status.firstElementChild.classList.toggle('busy', busy);
+  status.lastElementChild.textContent = (seen ? t('看过的 {n} 组 · 共 {images} 张', count) : t('{n} 组 · 共 {images} 张', count)) + (line ? ' · ' + line : '');
   const otherText = seen ? t('没看过的 {n} 组', {n: number(others)}) : t('看过的 {n} 组', {n: number(others)});
   const other = others ? `<a class="quiet link" href="${hashFor({page: 'similar', kind, seen: seen ? '' : '1'})}">${otherText} →</a>` : '';
-  const empty = seen ? t('没有看过的组。') : others ? t('相似的组都看过了。') : busy ? t('还在检查，找到的组会陆续出现。') : t('没有找到相似的图。');
-  $('groupsPage').innerHTML = `<div class="similar-status"><span class="local-dot${busy ? ' busy' : ''}"></span><span class="muted-note">${seen ? t('看过的 {n} 组 · 共 {images} 张', count) : t('{n} 组 · 共 {images} 张', count)}${similarLine(s) ? ' · ' + esc(similarLine(s)) : ''}</span></div>
-    <div class="groups-bar"><div class="segmented">${RELATION_KINDS.map(([k, label]) => `<button class="${k === kind ? 'on' : ''}" data-kind="${k}">${label}</button>`).join('')}</div>
+  redraw(box.querySelector('.groups-bar'), `<div class="segmented">${RELATION_KINDS.map(([k, label]) => `<button class="${k === kind ? 'on' : ''}" data-kind="${k}">${label}</button>`).join('')}</div>
       <div class="spacer"></div>${other}
-      <button class="quiet" id="similarScan" ${busy || s.status === 'off' ? 'disabled' : ''} title="${t('比较新加入的图和还没比较过的候选')}">${t('重新检查')}</button></div>
-    ${busy && s.total ? `<div class="progress"><span style="width:${Math.round((s.done || 0) / s.total * 100)}%"></span></div>` : ''}
-    <div class="group-grid">${groups.map(g => `<a class="group-card" href="#/s/${g.gid}"><div class="group-covers">${g.covers.map(u => `<img src="/image?id=${encodeURIComponent(u)}&size=thumb" loading="lazy" alt="">`).join('')}</div>
-      <div class="group-meta"><b>${t('相似组 {id}', {id: g.gid})}</b><span>${t('{n} 张', {n: number(g.size)})}</span></div>
-      <div class="group-traits">${Object.entries(g.kinds).sort((a, b) => b[1] - a[1]).map(([k, n]) => `<span>${RELATION_NAMES[k] || k}${n > 1 ? ' ×' + n : ''}</span>`).join('')}</div></a>`).join('')
-      || `<p class="empty">${empty}</p>`}</div>`;
-  for (const b of $('groupsPage').querySelectorAll('[data-kind]')) b.onclick = () => go({page: 'similar', kind: b.dataset.kind, seen: state.route.seen});
-  $('similarScan').onclick = async () => { try { await post('/api/similar', {}); setTimeout(renderSimilar, 800); } catch (e) { toast(e.message); } };
-  if (busy) similarTimer = setTimeout(renderSimilar, 3000);
+      <button class="quiet" id="similarScan" ${busy || s.status === 'off' ? 'disabled' : ''} title="${t('比较新加入的图和还没比较过的候选')}">${t('重新检查')}</button>`);
+  const progress = box.querySelector('.progress');
+  progress.hidden = !(busy && s.total);
+  if (busy && s.total) progress.firstElementChild.style.width = Math.round((s.done || 0) / s.total * 100) + '%';
+  const empty = seen ? t('没有看过的组。') : others ? t('相似的组都看过了。') : busy ? t('还在检查，找到的组会陆续出现。') : t('没有找到相似的图。');
+  reconcileSections(box.querySelector('.similar-list'), list.slice(0, shown).map(g => [String(g.gid), similarCard(g)]), empty);
+  const more = box.querySelector('.similar-more');
+  redraw(more, list.length > shown ? `<div class="gsec-more"><button class="quiet">${t('再显示 {n} 组', {n: number(Math.min(SIMILAR_PAGE, list.length - shown))})}</button></div>` : '');
+  more.onclick = e => { if (e.target.closest('button')) { similar.shown += SIMILAR_PAGE; drawSimilar(); } };
+  for (const b of box.querySelectorAll('[data-kind]')) b.onclick = () => go({page: 'similar', kind: b.dataset.kind, seen: state.route.seen});
+  $('similarScan').onclick = async () => { try { await post('/api/similar', {}); setTimeout(() => renderSimilar(true), 800); } catch (e) { toast(e.message); } };
 }
 
 // ---------- 相似组 N（#/s/<id>，网格页）的「看过了」（#427） ----------
@@ -319,8 +339,8 @@ implement({
   // 不走这里，它们自己把答过的组从页面上拿掉。
   groups: {render: () => renderGroups(), reveal: revealThumb,
     refresh: why => { if (why === 'undo' || why === 'learned' || why === 'edit' && state.viewer >= 0) return renderGroups(true); else if (why === 'nsfw') renderGroups(); }},
-  // 撤销之后重画（#386 的 2-41）：撤销的可能就是「看过了」。
-  similar: {render: () => renderSimilar(), refresh: why => { if (why === 'undo' || why === 'learned' || why === 'nsfw') return renderSimilar(); }},
+  // 撤销之后重画（#386 的 2-41）：撤销的可能就是「看过了」。撤销、学习落定后按组比对、留在已显示的组数（#601）。
+  similar: {render: () => renderSimilar(), refresh: why => { if (why === 'undo' || why === 'learned') return renderSimilar(true); if (why === 'nsfw') return renderSimilar(); }},
   sgroup: {prepare: readSeen, heading: sgroupHeading, wireHeading: () => $('sgroupSeen')?.addEventListener('click', toggleSeen),
     // 改动、撤销、同步之后组里看得到的张数可能变了，重读一次，免得点「看过了」时张数对不上。
     refresh: async why => { if (why !== 'view' && why !== 'ask') { const route = state.route; if (await readSeen(route) !== false) renderHeading(); } }},
