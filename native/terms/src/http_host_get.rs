@@ -35,9 +35,69 @@ fn ccip_task_and_library(
     Ok((task, read_library()?))
 }
 
+/// `GET /api/packs`（#602）：本图库的角色资料包。
+/// `{catalog:{configured,serial,checked_at,error}, current, offer, download, library, task, wd, ccip}`：
+/// `current` 是卡片上的版本（本图库启用的；没启用时是本机已有的最新的，都没有就是最新的），`offer` 是比它新的最新一个
+/// （没有时为 null），两个都带两个文件在本机下载了多少（`status`、`have`），`offer` 另带 `downloading`。`download` 是
+/// 两个组成部分的下载或导入合成的一个状态，`task` 是启用、换包、撤回的任务（`part` 是正在处理的组成部分）。
+/// `library` 是本图库启用了哪个版本、两个组成部分各自启用没有，以及默认启用的提示（`prompt`，见 `app_packs::default_state`）。
+/// `location` 是共享数据里放角色资料包的文件夹。`wd`、`ccip` 是两个组成部分的旧路由的完整回复。只读，不联网：目录只跟着检查更新读（`app_updates::post`）。
+pub(super) fn packs(host: &Host, session: &Session) -> Result<Json> {
+    use serde_json::{json, Value};
+    let (checked_at, error) = crate::app_updates::packs_state()?;
+    let catalog = crate::app_packs::cached(&host.root)?;
+    let lib = crate::app_packs::for_library(&host.root, &session.library)?;
+    let download = crate::app_models::pack_download();
+    let view = |pack: &crate::app_packs::CharacterPack| -> Result<Value> {
+        let mut view = pack.view();
+        let progress = crate::app_models::pack_progress(&host.root, pack)?;
+        view["status"] = progress["status"].clone();
+        view["have"] = progress["have"].clone();
+        Ok(view)
+    };
+    let offer = match crate::app_packs::offer(&lib.known, &lib.card) {
+        Some(pack) => {
+            let mut v = view(&pack)?;
+            v["downloading"] = (download["version"] == pack.version.as_str()).into();
+            v
+        }
+        None => Value::Null,
+    };
+    let wd = host.wd_status(session)?;
+    let ccip: Value =
+        serde_json::from_str(&ccip_status(host, session, None)?.dump()).map_err(|e| Error::invalid(e.to_string()))?;
+    let prompt = crate::app_packs::default_state(&host.root, &session.library, &lib)?;
+    // 两个组成部分合起来的数：有扩展候选的图按图去重，补上的归属按来源算。
+    let app = crate::app_library::read_connection(&session.library.db())?;
+    let (images, assigned): (i64, i64) = app.query_row(
+        "SELECT (SELECT count(DISTINCT uuid) FROM candidates WHERE source IN ('WD_EXT','CCIP_LONGTAIL')),
+                (SELECT count(*) FROM memberships WHERE sources IN ('WD_EXT','CCIP_LONGTAIL'))",
+        [],
+        |r| Ok((r.get(0)?, r.get(1)?)),
+    )?;
+    let checked = [&wd["library"]["checked_at"], &ccip["library"]["checked_at"]]
+        .into_iter()
+        .filter_map(Value::as_str)
+        .max()
+        .map(str::to_owned);
+    let vectors = wd["library"]["vectors"].as_u64().unwrap_or(0).max(ccip["library"]["vectors"].as_u64().unwrap_or(0));
+    Ok(json!({
+        "catalog":{"configured":crate::app_packs::pubkey().is_some(),"serial":catalog.map(|c| c.serial),
+            "checked_at":checked_at,"error":error},
+        "current":view(&lib.card)?,"offer":offer,"download":download,
+        "location":crate::app_packs::extensions_root(&host.root)?,
+        "library":{"enabled":lib.wd.is_some() || lib.ccip.is_some(),"version":lib.enabled.as_ref().map(|p| &p.version),
+            "wd":lib.wd.is_some(),"ccip":lib.ccip.is_some(),"prompt":prompt,"images":images,"assigned":assigned,
+            "vectors":vectors,"checked_at":checked,"blocked":wd["library"]["blocked"].clone()},
+        "task":wd["task"].clone(),"wd":wd,"ccip":ccip
+    })
+    .into())
+}
+
 pub(super) fn ccip_status(host: &Host, session: &Session, started: Option<Json>) -> Result<Json> {
     use serde_json::{json, Value};
-    let model = crate::app_models::longtail_package(&host.root)?;
+    let pack = crate::app_ccip_longtail::card_pack(&host.root, &session.library)?;
+    let model = crate::app_models::longtail_package(&host.root, &pack)?;
     let (task, local) = ccip_task_and_library(
         || {
             started
@@ -286,6 +346,8 @@ fn read(request: &Request, host: &Host, session: &Session, path: &str) -> Result
         "/api/updates" => crate::app_updates::info().map(|p| Some((p, 200))),
         // 全应用范围（#168）：识别模型是否就位，以及正在进行的下载或导入。
         "/api/ccip-longtail" => ccip_status(host, session, None).map(|value| Some((value, 200))),
+        // 两种数据包的签名目录（#602）：卡片上的版本、目录里有没有更新的版本、最近一次读目录的结果。
+        "/api/packs" => packs(host, session).map(|value| Some((value, 200))),
         "/api/models" => crate::app_models::info(&host.root).map(|p| Some((p, 200))),
         "/api/onboarding" => {
             let works = crate::http_read::query(request.url()).get("works").is_some_and(|v| v == "1");

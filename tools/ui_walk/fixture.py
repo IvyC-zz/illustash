@@ -257,7 +257,7 @@ def wd_extension_spec(directory: Path, tags: bytes, heads: list[tuple[str, list[
     directory.mkdir(parents=True, exist_ok=True)
     (directory / path).write_bytes(contents)
     spec = {'revision': 1, 'format': format_name, 'heads': len(heads), 'license': 'Apache-2.0',
-            'base_sha256': base,
+            'base_sha256': base, 'tags_sha256': sha(tags),
             'file': {'path': path, 'size': len(contents), 'sha256': sha(contents), 'url': f'{origin}/{path}'}}
     manifest = directory / 'wd-extension.json'
     manifest.write_text(json.dumps(spec), encoding='utf-8')
@@ -275,6 +275,39 @@ def wd_extension_walk(fixture: Fixture, directory: Path, origin: str) -> Path:
         heads.append((label, [10 * x for x in vector], -8))
     tags = (fixture.root / 'resources' / 'tags' / 'tags_v3.csv').read_bytes()
     return wd_extension_spec(directory, tags, heads, origin)
+
+
+def pack_catalog_walk(fixture: Fixture, directory: Path, ccip: Path) -> tuple[dict[str, bytes], str]:
+    """走查用的签名包目录（#602）：角色资料包的新版本 0.2（测试版）。WD 部分在内置合成包的三个头之外多一个一级头
+    （group-3）和一个只给候选的二级头（group-4）；CCIP 部分原样用内置的合成长尾包（`ccip`）。用测试密钥 A 签名
+    （tests/fixtures/pack_catalog/make.py，要装 cryptography）。返回替身服务的「路径 → 字节」和测试公钥。"""
+    import sys
+    sys.path.insert(0, str(dev_preview.ROOT / 'tests' / 'fixtures' / 'pack_catalog'))
+    import make  # noqa: E402（测试夹具的签名工具）
+    from tools import pack_catalog
+    start = struct.unpack_from('<H', (data := (fixture.root / 'recognition' / 'wd.npy').read_bytes()), 8)[0] + 10
+    order = {name: i for i, name in enumerate(fixture.names.values())}
+    vector = lambda photo: [10 * x for x in struct.unpack_from(f'<{WD_DIM}f', data, start + order[photo] * WD_DIM * 4)]
+    heads = [('extone_(synthetic)', 'group-1-01', 1), ('exttwo_(synthetic)', 'dahlia-01', 1), ('extthree_(synthetic)', 'aster-01', 1),
+             ('extfour_(synthetic)', 'group-3-01', 1), ('extfive_(synthetic)', 'group-4-01', 2)]
+    tags = (fixture.root / 'resources' / 'tags' / 'tags_v3.csv').read_bytes()
+    header = {'format': 'illustash-wd-extension/2', 'wd_model_sha256': sha(b'synthetic WD'), 'wd_tags_sha256': sha(tags),
+              'labels': [h[0] for h in heads], 'thresholds': [0.8008725047111511] * len(heads), 'tiers': [h[2] for h in heads]}
+    weights = b''.join(struct.pack(f'<{WD_DIM}f', *vector(photo)) for _, photo, _ in heads)
+    contents = json.dumps(header).encode() + b'\n' + weights + struct.pack(f'<{len(heads)}f', *([-8.] * len(heads)))
+    directory.mkdir(parents=True, exist_ok=True)
+    package = directory / 'wd-extension-v2.bin'
+    package.write_bytes(contents)
+    entry = pack_catalog.entry(version='0.2', stage='preview', revision=2, wd=package, ccip=ccip, ccip_tag='ccip-longtail-v1',
+                               min_app='0.2.0',
+                               note_zh='合成走查包：多两个角色，其中一个只给候选',
+                               note_en='Synthetic walk pack: two more characters, one of them suggestion-only')
+    catalog = pack_catalog.dumps(pack_catalog.build([entry]))
+    key = make.Key('A')
+    prefix = '/shio-vinyl/illustash/releases/download/'
+    files = {prefix + 'packs/packs.json': catalog, prefix + 'packs/packs.json.sig': key.sign(catalog),
+             prefix + 'character-pack-0.2/wd-extension-v2.bin': contents}
+    return files, key.pubkey()
 
 
 def npy_rows(data: bytes) -> tuple[int, bytes]:

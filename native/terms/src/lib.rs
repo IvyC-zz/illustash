@@ -34,6 +34,7 @@ mod app_migrate;
 mod app_migrate_data;
 pub mod app_models;
 mod app_onboarding;
+mod app_packs;
 pub mod app_service;
 use illustash_platform::app_paths;
 mod app_ccip_longtail;

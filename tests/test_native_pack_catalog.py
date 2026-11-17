@@ -1,0 +1,368 @@
+"""数据包的签名目录（#602）走原生 HTTP：跟着检查更新读目录、下载新版本、换包、换回、撤回，离线包导入。
+
+GitHub 的版本列表和 Release 下载都由本机替身服务答复（ILLUSTASH_UPDATE_BASE），目录用测试密钥签名
+（ILLUSTASH_TEST_PACKS_PUBKEY，只在指向本机测试服务时才认）。包、图片和模型身份都是合成的，夹具见
+tests/fixtures/pack_catalog/。
+"""
+from contextlib import contextmanager
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+import hashlib
+import json
+from pathlib import Path
+import sqlite3
+import struct
+import subprocess
+import tempfile
+from threading import Thread
+import unittest
+import zipfile
+
+from tests.folder_fixture import image
+from tests.fixed_expectations import Library
+from tests import test_native_lifecycle as lifecycle
+from tests.test_read_http import free_port, wait_until
+from tools.dev_preview import isolated_env
+from tools.wait_limit import WAIT
+
+FIXTURES = Path(__file__).resolve().parent / 'fixtures' / 'pack_catalog'
+DOWNLOAD = '/shio-vinyl/illustash/releases/download/'
+WD_MODEL = 'ae25f5f12b2d5891728fb7768fa63d65bf13a83d6d4823e3a1bf7b42875c74ff'
+WD_TAGS = '298633d94d0031d2081c0893f29c82eab7f0df00b08483ba8f29d1e979441217'
+RELEASES = '/repositories/1407079068/releases?per_page=30'
+CCIP_MODEL = '4ea118d16496274f4f6e08d3afc768cc592389e8f7f32f8732ce2215c228ac5f'
+
+
+def sha(data):
+    return hashlib.sha256(data).hexdigest()
+
+
+@contextmanager
+def github(files):
+    """`files` 是「路径 → 字节」，随时可以改；`seen` 记下每个请求的路径。"""
+    seen = []
+
+    class Handler(BaseHTTPRequestHandler):
+        def do_GET(self):
+            seen.append(self.path)
+            body = b'[]' if self.path == RELEASES else files.get(self.path)
+            self.send_response(200 if body is not None else 404)
+            body = body if body is not None else b'{"message": "Not Found"}'
+            self.send_header('Content-Length', str(len(body)))
+            self.end_headers()
+            self.wfile.write(body)
+
+        def log_message(self, *_):
+            pass
+
+    with ThreadingHTTPServer(('127.0.0.1', 0), Handler) as server:
+        thread = Thread(target=server.serve_forever)
+        thread.start()
+        try:
+            yield f'http://127.0.0.1:{server.server_port}', seen
+        finally:
+            server.shutdown()
+            thread.join()
+
+
+def builtin_v1(directory, origin):
+    """内置包的走查替身：WD 部分一个头看第 0 维（ILLUSTASH_TEST_WD_EXTENSION），CCIP 部分是夹具里的
+    ccip-longtail-v1.zip（ILLUSTASH_TEST_CCIP_LONGTAIL）。目录里的 v2 原样带着这个 CCIP 文件。"""
+    header = {'format': 'illustash-wd-extension/1', 'wd_model_sha256': WD_MODEL, 'wd_tags_sha256': WD_TAGS,
+              'threshold': 0.8008725047111511, 'labels': ['packone_(synthetic)']}
+    weights = struct.pack('<1024f', 2., *([0.] * 1023))
+    contents = json.dumps(header).encode() + b'\n' + weights + struct.pack('<f', 0.)
+    spec = {'revision': 1, 'format': 'illustash-wd-extension/1', 'heads': 1, 'license': 'Apache-2.0',
+            'base_sha256': WD_MODEL,
+            'file': {'path': 'wd-extension-v1.bin', 'size': len(contents), 'sha256': sha(contents),
+                     'url': f'{origin}/builtin/wd-extension-v1.bin'}}
+    ccip = (FIXTURES / 'ccip-longtail-v1.zip').read_bytes()
+    longtail = {'sha256': sha(ccip), 'size': len(ccip), 'ccip_sha256': CCIP_MODEL, 'roles': 2,
+                'url': f'{origin}/builtin/A-longtail-p75.zip'}
+    directory.mkdir(parents=True, exist_ok=True)
+    (directory / 'wd-extension.json').write_text(json.dumps(spec), encoding='utf-8')
+    (directory / 'ccip-longtail.json').write_text(json.dumps(longtail), encoding='utf-8')
+    return directory / 'wd-extension.json', directory / 'ccip-longtail.json', contents, ccip
+
+
+class NativePackCatalogTest(unittest.TestCase):
+    setUpClass = classmethod(lifecycle.NativeLifecycleTest.setUpClass.__func__)
+    start = lifecycle.NativeLifecycleTest.start
+    stop = lifecycle.NativeLifecycleTest.stop
+    request = lifecycle.NativeLifecycleTest.request
+
+    def setUp(self):
+        temp = tempfile.TemporaryDirectory(prefix='illustash-pack-catalog-')
+        self.addCleanup(temp.cleanup)
+        self.root = Path(temp.name).resolve()
+        checkout = self.resources
+        self.resources = self.root / 'resources'
+        (self.resources / 'tags').mkdir(parents=True)
+        (self.resources / 'tags' / 'tags_v3.csv').write_bytes((checkout / 'tags' / 'tags_v3.csv').read_bytes())
+        self.env = {**isolated_env(self.root), 'USERPROFILE': str(self.root / 'home'),
+                    'ILLUSTASH_TEST_PACKS_PUBKEY': (FIXTURES / 'key-a.pub').read_text().strip()}
+        folder = self.root / 'images'
+        folder.mkdir()
+        for name, color in (('a.png', 'blue'), ('b.png', 'orange'), ('c.png', 'green')):
+            image(folder / name, color)
+        path = self.root / 'first.pilib'
+        self.cli('library-create', '--dest', str(path), '--folder', str(folder))
+        self.lib = Library(path)
+        self.cli('library-scan', '--library', str(self.lib.path))
+        # 第 i 张图（按 uuid 排）的向量只有第 i 维是 1：合成包的第 i 个头只认它。
+        with sqlite3.connect(self.lib.source) as source:
+            source.execute('CREATE TABLE IF NOT EXISTS embeddings(uuid TEXT,model TEXT,vec BLOB,PRIMARY KEY(uuid,model))')
+            self.ids = [u for u, in source.execute('SELECT uuid FROM assets WHERE in_scope=1 ORDER BY uuid')]
+            for i, uuid in enumerate(self.ids):
+                vector = [0.] * 1024
+                vector[i] = 1.
+                source.execute("INSERT INTO embeddings VALUES (?,'wd',?)", (uuid, struct.pack('<1024f', *vector)))
+        self.assertEqual(len(self.ids), 3)
+        self.port = free_port()
+        self.origin = f'http://127.0.0.1:{self.port}'
+
+    def cli(self, *arguments):
+        result = subprocess.run([str(self.binary), *arguments], env=self.env, capture_output=True, timeout=WAIT)
+        self.assertEqual(result.returncode, 0, result.stderr.decode(errors='replace'))
+
+    def restart(self):
+        if hasattr(self, 'process'):
+            self.stop(self.process)
+        self.process, self.log = self.start(self.lib.path)
+        self.token = json.loads(self.request('/api/bootstrap')['body'])['token']
+
+    def get(self, route):
+        response = self.request(route)
+        self.assertEqual(response['status'], 200, response['body'])
+        return json.loads(response['body'])
+
+    def post(self, route, body, status=200):
+        response = self.request(route, body)
+        self.assertEqual(response['status'], status, response['body'])
+        return json.loads(response['body'])
+
+    def finish(self, route, kind, key='task'):
+        observed = None
+
+        def ended():
+            nonlocal observed
+            observed = self.get(route)
+            job = observed[key]
+            return job and job['kind'] == kind and job['status'] != 'running'
+
+        wait_until(ended)
+        return observed
+
+    def members(self):
+        with sqlite3.connect(self.lib.db) as app:
+            assigned = [u for u, in app.execute("SELECT uuid FROM memberships WHERE sources='WD_EXT' ORDER BY uuid")]
+            candidates = [u for u, in app.execute("SELECT DISTINCT uuid FROM candidates WHERE source='WD_EXT' ORDER BY uuid")]
+        return assigned, candidates
+
+    def serve(self, origin):
+        files = {DOWNLOAD + 'packs/packs.json': (FIXTURES / 'packs.json').read_bytes(),
+                 DOWNLOAD + 'packs/packs.json.sig': (FIXTURES / 'packs.json.sig').read_bytes()}
+        for path, name in (('character-pack-1.0/wd-extension-v3.bin', 'wd-extension-v3.bin'),
+                           ('character-pack-1.0/ccip-longtail-v2.zip', 'ccip-longtail-v2.zip'),
+                           ('character-pack-0.2/wd-extension-v2.bin', 'wd-extension-v2.bin')):
+            files[DOWNLOAD + path] = (FIXTURES / name).read_bytes()
+        wd, ccip, wd_bytes, ccip_bytes = builtin_v1(self.root / 'builtin', origin)
+        files['/builtin/wd-extension-v1.bin'] = wd_bytes
+        files['/builtin/A-longtail-p75.zip'] = ccip_bytes
+        self.env['ILLUSTASH_TEST_WD_EXTENSION'] = str(wd)
+        self.env['ILLUSTASH_TEST_CCIP_LONGTAIL'] = str(ccip)
+        self.env['ILLUSTASH_UPDATE_BASE'] = origin + '/'
+        return files
+
+    def packs(self, body=None, status=200):
+        response = self.request('/api/packs', body)
+        self.assertEqual(response['status'], status, response['body'])
+        return json.loads(response['body'])
+
+    def settle(self, what):
+        """等 `GET /api/packs` 里的下载（`download`）或任务（`task`）结束。"""
+        observed = None
+
+        def ended():
+            nonlocal observed
+            observed = self.packs()
+            job = observed[what]
+            return job and job['status'] != 'running'
+
+        wait_until(ended)
+        return observed
+
+    def test_one_pack_follows_update_check_then_download_switch_back_and_withdraw(self):
+        files = {}
+        with github(files) as (origin, seen):
+            files.update(self.serve(origin))
+            self.restart()
+            packs = self.packs()
+            self.assertEqual((packs['catalog']['configured'], packs['catalog']['serial']), (True, None))
+            self.assertEqual((packs['current']['version'], packs['current']['stage'], packs['current']['status'], packs['offer']),
+                             ('0.1', 'preview', 'missing', None))
+            self.assertEqual(packs['current']['heads'], 3)
+            # 已有识别向量、还没决定过：提示一次，不自动启用。
+            self.assertEqual((packs['library']['enabled'], packs['library']['prompt']), (False, 'ask'))
+            # 没允许自动检查时，页面的自动检查什么都不读，也不读目录。
+            self.post('/api/updates', {'action': 'check', 'auto': True})
+            self.assertEqual(seen, [])
+
+            # 一个包：两个文件一起下载，一个开关一起启用。没有 CCIP 向量的组成部分只记下启用了哪个文件。
+            self.packs({'action': 'download'})
+            self.assertEqual(self.settle('download')['current']['status'], 'ready')
+            self.packs({'action': 'enable'})
+            enabled = self.settle('task')
+            self.assertEqual(enabled['task']['status'], 'done', enabled)
+            self.assertLessEqual({'enabled': True, 'version': '0.1', 'wd': True, 'ccip': True,
+                                  'prompt': None, 'images': 1, 'assigned': 1}.items(), enabled['library'].items())
+            self.assertEqual(self.members(), (self.ids[:1], self.ids[:1]))
+            before = {route: self.request(route)['body'] for route in ('/api/wd-extension', '/api/ccip-longtail')}
+            del seen[:]
+
+            # 手动检查更新时顺带读目录；不下载任何包。
+            self.post('/api/updates', {'action': 'check'})
+            self.assertEqual(seen, [RELEASES, DOWNLOAD + 'packs/packs.json', DOWNLOAD + 'packs/packs.json.sig'])
+            packs = self.packs()
+            self.assertEqual((packs['catalog']['serial'], packs['catalog']['error']), (1, None))
+            self.assertEqual(packs['current']['version'], '0.1')
+            offer = packs['offer']
+            self.assertEqual((offer['version'], offer['stage'], offer['heads'], offer['candidate_only'], offer['status']),
+                             ('1.0', 'release', 5, 1, 'missing'))
+            self.assertEqual(offer['note'], {'zh-CN': '合成测试包 3', 'en': 'Synthetic test pack 3'})
+            # 读到目录以后、用户点之前，两个组成部分的旧接口逐字节不变。
+            for route, body in before.items():
+                self.assertEqual(self.request(route)['body'], body, route)
+
+            # 目录里没有的版本、格式不对的请求都不认。
+            self.packs({'action': 'enable', 'version': '1.1'}, 409)
+            self.packs({'action': 'enable', 'version': 3}, 400)
+            self.packs({'action': 'withdraw', 'version': '1.0'}, 400)
+            self.packs({'action': 'download', 'version': '9.9'}, 409)
+            self.packs({'action': 'delete', 'version': '1.0'}, 400)
+            self.packs({'action': 'nope'}, 400)
+            self.packs({'action': 'enable', 'version': '1.0'}, 409)  # 还没下载
+            self.assertEqual(self.members(), (self.ids[:1], self.ids[:1]))
+
+            # 下载新版本：两个文件都下，卡片上仍是已启用的 v1。
+            self.packs({'action': 'download', 'version': '1.0'})
+            done = self.settle('download')
+            self.assertEqual(done['download']['status'], 'done', done)
+            self.assertEqual((done['current']['version'], done['offer']['status']), ('0.1', 'ready'))
+
+            # 换成新版本：两个组成部分都换；二级头（第三张图）只出候选，不补归属。
+            self.packs({'action': 'enable', 'version': '1.0'})
+            switched = self.settle('task')
+            self.assertEqual(switched['task']['status'], 'done', switched)
+            self.assertEqual(switched['library']['version'], '1.0')
+            self.assertEqual(switched['wd']['library']['package_sha256'], sha((FIXTURES / 'wd-extension-v3.bin').read_bytes()))
+            self.assertEqual(switched['ccip']['library']['package_sha256'], sha((FIXTURES / 'ccip-longtail-v2.zip').read_bytes()))
+            self.assertEqual(self.members(), (self.ids[:2], self.ids))
+            self.assertEqual((switched['library']['images'], switched['library']['assigned']), (3, 2))
+            self.assertIsNone(switched['offer'])
+            alternatives = json.loads(self.request('/api/detail?id=' + self.ids[2])['body'])['alternatives']
+            self.assertIn(['WD_EXT'], [alt['evidence']['sources'] for alt in alternatives])
+
+            # 重启以后照样记得用的是哪个版本。
+            self.restart()
+            self.assertEqual(self.packs()['library']['version'], '1.0')
+
+            # 换回 v1，再撤回；撤回以后不再提示，也不自动启用。
+            self.packs({'action': 'enable', 'version': '0.1'})
+            back = self.settle('task')
+            self.assertEqual((back['task']['status'], back['library']['version']), ('done', '0.1'), back)
+            self.assertEqual(self.members(), (self.ids[:1], self.ids[:1]))
+            self.assertEqual(back['offer']['status'], 'ready')
+            self.packs({'action': 'withdraw'})
+            withdrawn = self.settle('task')
+            self.assertEqual(withdrawn['task']['status'], 'done', withdrawn)
+            self.assertEqual(self.members(), ([], []))
+            self.assertLessEqual({'enabled': False, 'version': None, 'wd': False, 'ccip': False, 'prompt': 'declined',
+                                  'images': 0, 'assigned': 0}.items(), withdrawn['library'].items())
+            # 没启用时卡片上是本机已有的最新版本。
+            self.assertEqual(withdrawn['current']['version'], '1.0')
+
+            # 目录读不到时只记一句话，已有的缓存照用；签名对不上的目录整份不用。
+            files.pop(DOWNLOAD + 'packs/packs.json.sig')
+            self.post('/api/updates', {'action': 'check'})
+            packs = self.packs()
+            self.assertEqual(packs['catalog']['serial'], 1)
+            self.assertIn('HTTP 404', packs['catalog']['error'])
+            files[DOWNLOAD + 'packs/packs.json'] = (FIXTURES / 'packs-2.json').read_bytes()
+            files[DOWNLOAD + 'packs/packs.json.sig'] = (FIXTURES / 'packs.json.sig').read_bytes()
+            self.post('/api/updates', {'action': 'check'})
+            packs = self.packs()
+            self.assertEqual(packs['catalog']['serial'], 1)
+            self.assertIn('签名', packs['catalog']['error'])
+
+    def test_offline_bundle_carries_the_signed_catalog(self):
+        files = {}
+        with github(files) as (origin, seen):
+            files.update(self.serve(origin))
+            self.restart()
+            # 签名不对的离线包：目录不采用，包文件也就不认。
+            bad = self.root / 'character-pack-1.0-offline.zip'
+            with zipfile.ZipFile(bad, 'w') as archive:
+                archive.writestr('packs.json', (FIXTURES / 'packs.json').read_bytes())
+                archive.writestr('packs.json.sig', (FIXTURES / 'packs.json.sig-b').read_bytes())
+                for name in ('wd-extension-v3.bin', 'ccip-longtail-v2.zip'):
+                    archive.writestr(name, (FIXTURES / name).read_bytes())
+            self.packs({'action': 'import', 'paths': [str(bad)]})
+            results = self.settle('download')['download']['results']
+            self.assertEqual({r['name']: r['result'] for r in results}, {
+                'character-pack-1.0-offline.zip/packs.json': 'catalog_invalid',
+                'character-pack-1.0-offline.zip/packs.json.sig': 'catalog_invalid',
+                'character-pack-1.0-offline.zip/wd-extension-v3.bin': 'unknown',
+                'character-pack-1.0-offline.zip/ccip-longtail-v2.zip': 'unknown'})
+            self.assertIsNone(self.packs()['catalog']['serial'])
+
+            good = FIXTURES / 'character-pack-1.0-offline.zip'
+            self.packs({'action': 'import', 'paths': [str(good)]})
+            packs = self.settle('download')
+            self.assertEqual({r['name']: r['result'] for r in packs['download']['results']}, {
+                'character-pack-1.0-offline.zip/packs.json': 'catalog',
+                'character-pack-1.0-offline.zip/packs.json.sig': 'catalog',
+                'character-pack-1.0-offline.zip/wd-extension-v3.bin': 'accepted',
+                'character-pack-1.0-offline.zip/ccip-longtail-v2.zip': 'accepted'})
+            self.assertEqual(packs['catalog']['serial'], 1)
+            # 没启用：卡片上是本机已有的 v3；已有识别向量，提示一次。
+            self.assertEqual((packs['current']['version'], packs['current']['status'], packs['offer']),
+                             ('1.0', 'ready', None))
+            self.assertEqual(packs['library']['prompt'], 'ask')
+            self.assertEqual(self.packs({'action': 'decline'})['library']['prompt'], 'declined')
+            self.packs({'action': 'enable'})
+            enabled = self.settle('task')
+            self.assertEqual(enabled['task']['status'], 'done', enabled)
+            self.assertEqual((enabled['library']['version'], enabled['library']['prompt']), ('1.0', None))
+            self.assertEqual(self.members(), (self.ids[:2], self.ids))
+            self.assertTrue((self.root / 'shared/extensions' / ('ccip-longtail-' + sha(
+                (FIXTURES / 'ccip-longtail-v2.zip').read_bytes())[:12]) / 'ccip-longtail-v2.zip').is_file())
+            # 整个过程不联网。
+            self.assertEqual(seen, [])
+
+    def test_new_library_is_enabled_before_its_first_sync(self):
+        files = {}
+        with github(files) as (origin, seen):
+            files.update(self.serve(origin))
+            folder = self.root / 'fresh-images'
+            folder.mkdir()
+            image(folder / 'x.png', 'red')
+            fresh = self.root / 'fresh.pilib'
+            self.cli('library-create', '--dest', str(fresh), '--folder', str(folder))
+            self.lib = Library(fresh)
+            self.restart()
+            # 还没有任何识别向量的图库等于新图库：包就位以后，第一次同步之前记成启用。
+            self.assertEqual(self.packs()['library']['prompt'], 'auto')
+            self.packs({'action': 'download'})
+            self.assertEqual(self.settle('download')['current']['status'], 'ready')
+            self.assertEqual(self.request('/api/sync', {})['status'], 200)
+            wait_until(lambda: json.loads(self.request('/api/sync')['body'])['state']['status'] not in ('scanning', 'running'))
+            packs = self.packs()
+            self.assertLessEqual({'enabled': True, 'version': '0.1', 'wd': True, 'ccip': True,
+                                  'prompt': None, 'images': 0}.items(), packs['library'].items())
+            # 只记下启用了哪个文件：没有证据，也没有归属。
+            with sqlite3.connect(self.lib.db) as app:
+                self.assertEqual(app.execute("SELECT count(*) FROM candidates WHERE source IN ('WD_EXT','CCIP_LONGTAIL')").fetchone(), (0,))
+
+
+if __name__ == '__main__':
+    unittest.main()

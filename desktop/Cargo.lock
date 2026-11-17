@@ -1970,6 +1970,7 @@ dependencies = [
 name = "illustash-terms"
 version = "0.2.0"
 dependencies = [
+ "base64 0.22.1",
  "chrono",
  "crc32fast",
  "csv",
@@ -1989,6 +1990,7 @@ dependencies = [
  "libc",
  "lzma-rs",
  "md-5",
+ "minisign-verify",
  "mozjpeg",
  "ort",
  "regex",
