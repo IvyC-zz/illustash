@@ -243,7 +243,7 @@
 
  "native/terms/src/app_files.rs":"be49abed7bcc1e2ff0da093b7aa482fc8f28afe9e755755b72d9c645e33736e8",
 
- "native/terms/src/app_folder.rs":"c6de37ce328e3b68cab0cffc50a077582e193cbe49879bf6f8c8a24d906a70ab",
+ "native/terms/src/app_folder.rs":"01318a127d1ad7858ec4d70ca91c25748b88478409899ba9779b1f5a5f730317",
 
  "native/terms/src/app_folder_identity.rs":"3b437873ec1cbf0ac001647901b49f71dc60af8c576b71245b1d834f14b3a9e0",
 
@@ -325,9 +325,9 @@
 
  "native/terms/src/app_recognition.rs":"1d215db82be5d866dd2a5ac33314ed612eabe8fb27c0591140eb2bf113be764c",
 
- "native/terms/src/app_relocation.rs":"d1de0867798cca44fc402e4d15086bfef0c7e1f86b8a73245a657ea7813eb235",
+ "native/terms/src/app_relocation.rs":"fcbd418016f600c3e7432282a06c4d45eb5ead80399beab1e834b6b31da02fdb",
 
- "native/terms/src/app_rescue.rs":"c8edeb3f5d11a2bdb460ab498fc98385889d65e1cabbc42ef864780a9c109669",
+ "native/terms/src/app_rescue.rs":"9033bf89cebc5d8018d2cdea9c4013112ca3be55afce325dae949130fb2d9f15",
 
  "native/terms/src/app_research.rs":"323b2627210249c7e23576aa8ca285d426b12d8b0bf517cad228feb92dcc98d2",
 
@@ -343,7 +343,7 @@
 
  "native/terms/src/app_source_schema.sql":"51b8c0ecc6fcb856854ddbb21a9883b51c6546990c1673a57951fe02b16b207c",
 
- "native/terms/src/app_sources.rs":"b969d563a8e726717b1f627b52fff1159d9d5b3f4c26bf11756fc851269b6437",
+ "native/terms/src/app_sources.rs":"185979b4e3d72ddcd243bcc670b5c981fe3291b56cbf6f87c47dc5080b97828e",
 
  "native/terms/src/app_sync.rs":"7df091ba31ca69dab0672d0e0e1470181e51a53b3fc970abbefb2b2afaa47812",
 
@@ -689,7 +689,7 @@
  "native/terms/src/table_delta.rs":{"database-write":{"dynamic-or-wrapper":6}},
  "native/terms/src/app_onboarding.rs":{"entrypoint":{"process-start":1}},
  "native/terms/src/provenance_compute/mod.rs":{"database-write":{"PRAGMA:c.execute_batch(\"pragma synchronous":1}},
- "native/terms/src/app_rescue.rs":{"database-write":[297,[0,13],298,[1,2],7,299,232,182,176,300,5,301,304,302]},
+ "native/terms/src/app_rescue.rs":{"database-write":[297,[0,15],298,[1,3],7,299,232,182,176,300,5,301,304,302]},
  "native/terms/src/app_models.rs":{"entrypoint":{"process-start":2}},
  "native/terms/src/app_create_names.sql":{"database-write":{"INSERT OR IGNORE INTO:term_key_names":22}},
  "crates/core/src/character_review.rs":{"database-write":{"UPDATE:term_tree":1}},
@@ -724,7 +724,7 @@
  "native/terms/src/example_cache.rs":{"database-write":{"dynamic-or-wrapper":1,"COMMIT":1}},
  "native/terms/src/http_example_search.rs":{"database-write":{"dynamic-or-wrapper":2,"DELETE FROM:temp.like_rank":1,"INSERT INTO:temp.like_rank":1}},
  "native/terms/src/app_similar_seen.rs":{"database-write":{"dynamic-or-wrapper":4,"INSERT INTO:similar_seen":2,"DELETE FROM:similar_seen":2,"INSERT INTO:actions":1,"COMMIT":1}},
- "native/terms/src/app_relocation.rs":{"database-write":[341,[232,5],182,[0,12],176,[5,2],[7,3],342,[339,2],[343,2],11,[344,2],[1,2]]}
+ "native/terms/src/app_relocation.rs":{"database-write":[341,[232,5],182,[0,17],176,[5,2],[7,3],342,[339,2],[343,2],11,[344,4],379,[1,3]]}
 },
 "policies":{
  "application":{"final_owner":"rust","responsibility":"HTTP 参数/目标、人工命令、正式事务/投影；Python 包装待迁移","acceptance":"合成状态码/原始字节、返回/DB/历史/撤销/事件对照；竞争与注入失败原子回滚","deletion_condition":"Rust 调用链及无 Python 验收后删生产 Python；保留旧对照","stages":["M2","M3"]},
@@ -1158,6 +1158,7 @@
  "/api/human-conclusions",
  "/api/human-conclusions/report",
  "/api/settings",
- "/api/libraries"
+ "/api/libraries",
+ "INSERT OR IGNORE INTO:folder_changes"
 ]
 }

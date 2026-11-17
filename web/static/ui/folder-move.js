@@ -11,7 +11,8 @@ import {toast} from './dom.js';
 export function folderActions(source, change) {
   const id = esc(source.id);
   const result = change && (change.state === 'pending' ? t('等待核对新位置的文件') :
-    t('已认回 {kept} 张，新增 {added} 张', {kept: number(change.kept), added: number(change.new)}));
+    change.from ? t('已认回 {kept} 张，新增 {added} 张，旧记录未认回 {missing} 张',
+      {kept: number(change.kept), added: number(change.new), missing: number(change.missing)}) : t('已认回 {n} 张', {n: number(change.kept)}));
   const undo = change ? `<small>${esc(result)} <button class="quiet small" data-folder-undo="${id}"
     data-token="${esc(change.token)}">${t('撤销')}</button></small>` : '';
   return `${undo}<span class="set-actions">

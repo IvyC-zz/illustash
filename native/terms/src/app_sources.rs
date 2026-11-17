@@ -133,6 +133,9 @@ pub(crate) fn remove(library: &mut Library, source_id: &str, confirm: bool) -> R
     if !confirm {
         return Ok(Json::object([("confirm", true.into()), ("count", count.into())]));
     }
+    if crate::app_relocation::reports(library)?.iter().any(|r| r["source"] == source_id && r["state"] == "pending") {
+        return crate::error::invalid("请先完成或撤销上一次搬家");
+    }
     // 先处理图片：如果之后写 library.json 失败，来源仍在列表里，下次扫描会发现所有文件都还在，并把它们恢复。
     let tx = conn.transaction()?;
     tx.execute("UPDATE assets SET trashed=1 WHERE source_id=? AND coalesce(trashed,0)=0", [source_id])?;
@@ -163,6 +166,11 @@ pub(super) fn relocation(library: &mut Library, action: &str, sid: &str, argumen
         .filter(|s| s["kind"] == "folder" && s["id"] != sid)
         .filter_map(|s| s["path"].as_str().map(PathBuf::from))
         .collect();
+    if action != "undo"
+        && crate::app_relocation::reports(library)?.iter().any(|r| r["source"] == sid && r["state"] == "pending")
+    {
+        return crate::error::invalid("请先完成或撤销上一次搬家");
+    }
     match action {
         "recognize" => {
             return Ok(
@@ -183,9 +191,6 @@ pub(super) fn relocation(library: &mut Library, action: &str, sid: &str, argumen
                 return crate::error::invalid("已经是这个来源的位置");
             }
             let to = to.to_str().ok_or_else(|| Error::invalid("来源路径不是 UTF-8"))?;
-            if crate::app_relocation::reports(library)?.iter().any(|r| r["source"] == sid && r["state"] == "pending") {
-                return crate::error::invalid("请先完成或撤销上一次搬家");
-            }
             let c = crate::app_relocation::writer(library)?;
             let token = crate::app_relocation::prepare(&c, sid, root, to)?;
             entry.set("folder_move".into(), SettingValue::Scalar(token.into()));

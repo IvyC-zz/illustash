@@ -90,6 +90,9 @@ pub(crate) fn scan_with(
     let tx = c.transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)?;
     tx.execute_batch(include_str!("app_source_schema.sql"))?;
     let relocation = if rescue.is_none() { crate::app_relocation::begin(&tx, source)? } else { None };
+    if rescue.is_none() && relocation.is_none() {
+        crate::app_relocation::apply_confirmed(&tx, sid, source["path"].as_str().expect("已验证的来源路径"), check)?;
+    }
     let earlier = relocation.as_ref().map(|op| &op.earlier);
     // 由第一次识别导入创建（app_recognition.rs）；从没识别过的图库没有这张表。
     let recognised: bool = tx.query_row(
@@ -171,13 +174,13 @@ pub(crate) fn scan_with(
     }
     let candidates: Vec<_> =
         hashed.iter().filter(|f| !known.contains_key(&f.rel)).map(|f| (f.rel.clone(), f.hash.clone())).collect();
-    let movements = missing.matches(&candidates, &HashSet::new());
+    let movements = if rescued { HashMap::new() } else { missing.matches(&candidates, &HashSet::new()) };
     let identities = earlier
         .map(|history| {
             let candidates: Vec<_> = hashed
                 .iter()
                 .filter(|f| !known.contains_key(&f.rel) && !movements.contains_key(&f.rel))
-                .map(|f| (f.path.to_string_lossy().into_owned(), f.hash.clone()))
+                .map(|f| (f.rel.clone(), f.hash.clone()))
                 .collect();
             history.matches(&candidates, &taken)
         })
@@ -248,7 +251,7 @@ pub(crate) fn scan_with(
             if trashed.contains(&asset) {
                 back.push(asset.clone());
             }
-        } else if let Some(u) = identities.get(f.path.to_string_lossy().as_ref()).cloned() {
+        } else if let Some(u) = identities.get(if rescued { f.path.to_str().unwrap_or("") } else { &f.rel }).cloned() {
             asset = u;
             kept += 1;
             let name = f.path.file_name().expect("app_folder internal invariant").to_string_lossy().into_owned();

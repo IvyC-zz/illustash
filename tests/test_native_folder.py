@@ -257,6 +257,33 @@ class NativeFolderHTTPTest(unittest.TestCase):
         self.assertFalse(folder.exists())
         self.assertTrue(target.is_dir())
 
+    def test_native_library_new_move_rejects_ambiguous_or_replaced_content(self):
+        folder = self.new_folder
+        for name in ('one.png', 'two.png'):
+            image(folder / name, 'red')
+        same = folder / 'same.gif'
+        same.write_bytes(b'GIF89a-first')
+        self.sync()
+        original = self.file_ids()
+        target = self.root / 'elsewhere'
+        folder.rename(target)
+        for old, new in (('one.png', 'three.png'), ('two.png', 'four.png')):
+            (target / old).rename(target / new)
+        replacement = target / 'same.gif'
+        stamp = replacement.stat()
+        replacement.write_bytes(b'GIF89a-other')
+        os.utime(replacement, ns=(stamp.st_atime_ns, stamp.st_mtime_ns))
+        self.source_action('move', source='s1', path=str(target))
+        self.assertNotEqual(self.finish()['state']['status'], 'error')
+        current = self.file_ids()
+        self.assertTrue({current['s1', n] for n in ('three.png', 'four.png', 'same.gif')}.isdisjoint(original.values()))
+        change, = json.loads(self.request('/api/libraries')['body'])['folder_changes']
+        self.assertEqual((change['kept'], change['new']), (1, 3))
+        (target / 'same.gif').rename(target / 'edited.gif')
+        self.sync()
+        self.assertNotEqual(self.request('/api/libraries/sources/undo', {'source': 's1', 'token': change['token']})['status'], 200)
+        self.assertEqual(json.loads((self.lib.path / 'library.json').read_text())['sources'][0]['path'], str(target))
+
     def test_native_library_new_confirm_cross_source_and_undo(self):
         old = self.new_folder / 'one.png'
         image(old, 'red')
@@ -282,7 +309,7 @@ class NativeFolderHTTPTest(unittest.TestCase):
         self.assertEqual(self.file_ids(), original)
         self.new_folder.rename(self.root / 'offline')
         answer = self.source_action('recognize', source=sid, digest=ask['digest'])
-        self.assertEqual(answer['kept'], 1)
+        self.assertEqual(answer['pending'], 1)
         self.finish()
         self.assertEqual(self.file_ids()[sid, 'copy.png'], old_id)
         with closing(sqlite3.connect(self.lib.db)) as c:

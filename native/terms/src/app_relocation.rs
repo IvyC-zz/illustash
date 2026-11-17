@@ -7,7 +7,7 @@ use std::{collections::HashSet, path::Path};
 
 const HISTORY: &str = "CREATE TABLE IF NOT EXISTS folder_changes(
     token TEXT NOT NULL UNIQUE, sid TEXT NOT NULL, old_root TEXT, root TEXT NOT NULL,
-    state TEXT NOT NULL, before_files TEXT, after_files TEXT, kept INTEGER, added INTEGER)";
+    state TEXT NOT NULL, before_files TEXT, after_files TEXT, kept INTEGER, added INTEGER, missing INTEGER)";
 const SELECT_FILES: &str = "SELECT f.source_id,f.path,f.size,f.mtime_ns,f.md5,f.asset,a.filename,a.src_path,
     coalesce(a.trashed,0),a.preset FROM files f JOIN assets a ON a.uuid=f.asset";
 
@@ -99,9 +99,10 @@ pub(super) fn writer(library: &Library) -> Result<Connection> {
 pub(super) fn prepare(c: &Connection, sid: &str, from: &str, to: &str) -> Result<String> {
     c.execute_batch(HISTORY)?;
     let token = crate::store::new_key()?;
+    let before = rows(c, sid)?;
     c.execute(
-        "INSERT INTO folder_changes(token,sid,old_root,root,state) VALUES (?,?,?,?,'pending')",
-        params![token, sid, from, to],
+        "INSERT INTO folder_changes(token,sid,old_root,root,state,before_files) VALUES (?,?,?,?,'pending',?)",
+        params![token, sid, from, to, encode(&before)],
     )?;
     Ok(token)
 }
@@ -125,7 +126,7 @@ pub(super) fn begin(c: &Connection, source: &Value) -> Result<Option<Move>> {
         )
         .optional()?
         .ok_or_else(changed)?;
-    if state == "done" {
+    if state == "done" || state == "rescued" {
         return Ok(None);
     }
     if state != "pending" {
@@ -134,8 +135,7 @@ pub(super) fn begin(c: &Connection, source: &Value) -> Result<Option<Move>> {
     let before = rows(c, sid)?;
     let mut earlier = Earlier::default();
     for f in &before {
-        let path = Path::new(root).join(&f.path);
-        earlier.record(&f.id, path.to_str(), Some(&f.hash));
+        earlier.record(&f.id, Some(&f.path), Some(&f.hash));
         f.detach(c)?;
     }
     Ok(Some(Move { earlier, before, token: token.into(), sid: sid.into() }))
@@ -144,11 +144,41 @@ impl Move {
     pub fn finish(&self, c: &Connection, kept: i64, added: i64) -> Result<()> {
         let after = rows(c, &self.sid)?;
         c.execute(
-            "UPDATE folder_changes SET state='done',before_files=?,after_files=?,kept=?,added=? WHERE token=?",
-            params![encode(&self.before), encode(&after), kept, added, self.token],
+            "UPDATE folder_changes SET state='done',before_files=?,after_files=?,kept=?,added=?,missing=? WHERE token=?",
+            params![encode(&self.before), encode(&after), kept, added, self.before.len() as i64-kept, self.token],
         )?;
         Ok(())
     }
+}
+
+/// 抢救出的源库已经按配置的位置重建；不能在下一次同步重新执行旧指令。
+pub(super) fn rescued(db: &Path, source: &Value) -> Result<()> {
+    let Some(token) = source["folder_move"].as_str() else { return Ok(()) };
+    let sid = source["id"].as_str().ok_or_else(changed)?;
+    let root = source["path"].as_str().ok_or_else(changed)?;
+    let mut c = crate::sqlite::open(db)?;
+    let tx = c.transaction()?;
+    tx.execute_batch(HISTORY)?;
+    let pending: Option<String> = tx
+        .query_row("SELECT before_files FROM folder_changes WHERE token=? AND state='pending'", [token], |r| r.get(0))
+        .optional()?;
+    if let Some(before) = pending {
+        let before = decode(&before)?;
+        let ids: HashSet<_> = before.iter().map(|f| &f.id).collect();
+        let after = rows(&tx, sid)?;
+        let kept = after.iter().filter(|f| ids.contains(&f.id)).count();
+        tx.execute(
+            "UPDATE folder_changes SET state='done',after_files=?,kept=?,added=?,missing=? WHERE token=?",
+            params![encode(&after), kept, after.len() - kept, before.len() - kept, token],
+        )?;
+    } else {
+        tx.execute(
+            "INSERT OR IGNORE INTO folder_changes(token,sid,root,state) VALUES (?,?,?,'rescued')",
+            params![token, sid, root],
+        )?;
+    }
+    tx.commit()?;
+    Ok(())
 }
 
 fn has_history(c: &Connection) -> Result<bool> {
@@ -169,13 +199,13 @@ pub(super) fn reports(library: &Library) -> Result<Vec<Value>> {
     for s in library.config()["sources"].as_array().into_iter().flatten().filter(|s| s["kind"] == "folder") {
         let row = c
             .query_row(
-                "SELECT token,old_root,root,state,kept,added FROM folder_changes WHERE sid=?
-            AND (state='done' OR (state='pending' AND token=?)) ORDER BY rowid DESC LIMIT 1",
+                "SELECT token,old_root,root,state,kept,added,missing FROM folder_changes WHERE sid=?
+            AND (state='done' OR (state='pending' AND (token=? OR old_root IS NULL))) ORDER BY rowid DESC LIMIT 1",
                 params![s["id"].as_str(), s["folder_move"].as_str()],
                 |r| {
                     Ok(json!({"source":s["id"],
                 "token":r.get::<_,String>(0)?,"from":r.get::<_,Option<String>>(1)?,"to":r.get::<_,String>(2)?,
-                "state":r.get::<_,String>(3)?,"kept":r.get::<_,Option<i64>>(4)?,"new":r.get::<_,Option<i64>>(5)?}))
+                "state":r.get::<_,String>(3)?,"kept":r.get::<_,Option<i64>>(4)?,"new":r.get::<_,Option<i64>>(5)?,"missing":r.get::<_,Option<i64>>(6)?}))
                 },
             )
             .optional()?;
@@ -219,7 +249,7 @@ pub(super) fn undo(c: &Connection, sid: &str, token: &str, root: &str) -> Result
             f.attach(c)?;
         }
     }
-    c.execute("UPDATE folder_changes SET state='undone' WHERE token=?", [token])?;
+    c.execute("UPDATE folder_changes SET state='undone',before_files=NULL,after_files=NULL WHERE token=?", [token])?;
     Ok(old)
 }
 
@@ -228,6 +258,9 @@ pub(super) fn resume_undo(source: &Value, library: &Library) -> Result<()> {
     let Some(token) = source["folder_undo"].as_str() else { return Ok(()) };
     let mut c = writer(library)?;
     let tx = c.transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)?;
+    if !has_history(&tx)? {
+        return Ok(());
+    }
     let root: Option<String> = tx
         .query_row("SELECT root FROM folder_changes WHERE token=? AND state<>'undone'", [token], |r| r.get(0))
         .optional()?;
@@ -244,32 +277,7 @@ pub(super) fn recognize(library: &Library, source: &Value, confirmation: Option<
     let root = source["path"].as_str().ok_or_else(changed)?;
     let mut c = writer(library)?;
     let tx = c.transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)?;
-    let pairs = {
-        let mut query = tx.prepare(&format!(
-            "{SELECT_FILES} WHERE f.md5 IN
-            (SELECT md5 FROM files WHERE md5 IN (SELECT md5 FROM files WHERE source_id=?)
-             AND md5<>'' GROUP BY md5 HAVING count(*)=2) ORDER BY f.md5,f.source_id,f.path"
-        ))?;
-        let rows = query.query_map([sid], FileRow::read)?.collect::<rusqlite::Result<Vec<_>>>()?;
-        let mut pairs = Vec::new();
-        for group in rows.chunk_by(|a, b| a.hash == b.hash) {
-            let [a, b] = group else { continue };
-            let (new, old) = if a.sid == sid { (a, b) } else { (b, a) };
-            if old.sid == sid
-                || new.id == old.id
-                || new.trashed != 0
-                || !Path::new(&new.full).is_file()
-                || !std::fs::metadata(&old.full).is_err_and(|e| e.kind() == std::io::ErrorKind::NotFound)
-            {
-                continue;
-            }
-            if Path::new(root).join(&new.path) != Path::new(&new.full) {
-                continue;
-            }
-            pairs.push((old.clone(), new.clone()));
-        }
-        pairs
-    };
+    let pairs = candidates(&tx, sid, root)?;
     let digest = crate::strict_json::sha256_hex(encode(&pairs).as_bytes());
     let Some(expected) = confirmation else {
         let files: Vec<_> = pairs.iter().map(|(old, new)| json!({"old":old.full,"new":new.full})).collect();
@@ -278,27 +286,72 @@ pub(super) fn recognize(library: &Library, source: &Value, confirmation: Option<
     if expected != digest || pairs.is_empty() {
         return Err(changed());
     }
-    crate::app_folder::ensure_links(&tx)?;
+    let token = crate::store::new_key()?;
     tx.execute_batch(HISTORY)?;
+    tx.execute(
+        "INSERT INTO folder_changes(token,sid,root,state,before_files) VALUES (?,?,?,'pending',?)",
+        params![token, sid, root, digest],
+    )?;
+    tx.commit()?;
+    Ok(json!({"pending":pairs.len(),"token":token}))
+}
+
+fn candidates(c: &Connection, sid: &str, root: &str) -> Result<Vec<(FileRow, FileRow)>> {
+    let mut query = c.prepare(&format!(
+        "{SELECT_FILES} WHERE f.md5 IN
+            (SELECT md5 FROM files WHERE md5 IN (SELECT md5 FROM files WHERE source_id=?)
+             AND md5<>'' GROUP BY md5 HAVING count(*)=2) ORDER BY f.md5,f.source_id,f.path"
+    ))?;
+    let rows = query.query_map([sid], FileRow::read)?.collect::<rusqlite::Result<Vec<_>>>()?;
+    let mut pairs = Vec::new();
+    for group in rows.chunk_by(|a, b| a.hash == b.hash) {
+        let [a, b] = group else { continue };
+        let (new, old) = if a.sid == sid { (a, b) } else { (b, a) };
+        if old.sid == sid
+            || new.id == old.id
+            || new.trashed != 0
+            || !Path::new(&new.full).is_file()
+            || !std::fs::metadata(&old.full).is_err_and(|e| e.kind() == std::io::ErrorKind::NotFound)
+        {
+            continue;
+        }
+        if Path::new(root).join(&new.path) != Path::new(&new.full) {
+            continue;
+        }
+        pairs.push((old.clone(), new.clone()));
+    }
+    Ok(pairs)
+}
+
+/// 在可取消的同步任务内重新读内容，避免持有 HTTP 会话锁等待整盘文件。
+pub(super) fn apply_confirmed(tx: &Connection, sid: &str, root: &str, check: &dyn Fn() -> Result<()>) -> Result<()> {
+    if !has_history(tx)? {
+        return Ok(());
+    }
+    let pending = tx.query_row("SELECT token,before_files FROM folder_changes WHERE sid=? AND root=? AND old_root IS NULL AND state='pending'",
+        params![sid,root],|r|Ok((r.get::<_,String>(0)?,r.get::<_,String>(1)?))).optional()?;
+    let Some((token, digest)) = pending else { return Ok(()) };
+    let pairs = candidates(tx, sid, root)?;
+    if digest != crate::strict_json::sha256_hex(encode(&pairs).as_bytes()) {
+        return Err(changed());
+    }
+    crate::app_folder::ensure_links(tx)?;
     let mut before = Vec::new();
     let mut after = Vec::new();
     for (old, new) in pairs {
-        if crate::platform_folder::hash(Path::new(&new.full), &|| Ok(()))? != old.hash {
+        if crate::platform_folder::hash(Path::new(&new.full), check)? != old.hash {
             return Err(changed());
         }
-        old.detach(&tx)?;
-        new.detach(&tx)?;
+        old.detach(tx)?;
+        new.detach(tx)?;
         let linked = FileRow { id: old.id.clone(), ..new.clone() };
-        linked.attach(&tx)?;
+        linked.attach(tx)?;
         before.extend([old, new]);
         after.push(linked);
     }
-    let token = crate::store::new_key()?;
     tx.execute(
-        "INSERT INTO folder_changes(token,sid,root,state,before_files,after_files,kept,added)
-        VALUES (?,?,?,'done',?,?,?,0)",
-        params![token, sid, root, encode(&before), encode(&after), after.len()],
+        "UPDATE folder_changes SET state='done',before_files=?,after_files=?,kept=?,added=0 WHERE token=?",
+        params![encode(&before), encode(&after), after.len(), token],
     )?;
-    tx.commit()?;
-    Ok(json!({"kept":after.len(),"token":token}))
+    Ok(())
 }

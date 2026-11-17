@@ -207,13 +207,7 @@ fn build(library: &Library, reference: Option<&Path>, stop: &AtomicBool, step: S
         }
         batches.push(files);
     }
-    let c = crate::sqlite::open(&target)?;
-    let occupied = c
-        .prepare("SELECT asset FROM files")?
-        .query_map([], |r| r.get(0))?
-        .collect::<rusqlite::Result<HashSet<String>>>()?;
-    drop(c);
-    let mut matches = earlier.matches(&fingerprints, &occupied);
+    let mut matches = rescue_matches(&target, &folders, &fingerprints, &earlier)?;
     for (i, (source, files)) in folders.iter().zip(batches).enumerate() {
         let share = 0.35 / folders.len() as f64;
         let from = 0.6 + share * i as f64;
@@ -232,6 +226,7 @@ fn build(library: &Library, reference: Option<&Path>, stop: &AtomicBool, step: S
             &progress,
             Some(crate::app_folder::RescueInput { files, ids }),
         )?;
+        crate::app_relocation::rescued(&target, source)?;
         report.kept += scan.counts["kept"].as_i64().unwrap_or(0);
         report.new += scan.counts["new"].as_i64().unwrap_or(0);
     }
@@ -521,6 +516,13 @@ fn refill(target: &Path, reference: &Path, tables: &[String]) -> Result<()> {
 /// 对应的图片经扫描以同一个 ID 回来。
 fn earlier(target: &Path, library: &Library, folders: &[Value]) -> Result<Earlier> {
     let mut earlier = Earlier::default();
+    let roots: HashMap<_, _> = folders
+        .iter()
+        .filter_map(|s| Some((s["id"].as_str()?.to_owned(), PathBuf::from(s["path"].as_str()?))))
+        .collect();
+    let has_photos = ["sources", "removed_sources"]
+        .iter()
+        .any(|key| library.config()[*key].as_array().into_iter().flatten().any(|s| s["kind"] == "photos"));
     // 先读 library.sqlite：它的人工记录指向这些 ID。
     let lib = crate::app_library::read_connection(&library.db())?;
     let hashes = lib
@@ -531,28 +533,35 @@ fn earlier(target: &Path, library: &Library, folders: &[Value]) -> Result<Earlie
         .prepare("SELECT uuid,src_path FROM assets WHERE uuid IS NOT NULL ORDER BY uuid")?
         .query_map([], |r| Ok((r.get::<_, String>(0)?, r.get::<_, Option<String>>(1)?)))?
         .collect::<rusqlite::Result<Vec<_>>>()?;
-    let mut hashed = hashes.into_iter().collect::<Vec<_>>();
-    hashed.sort();
+    let mut folder_ids = HashSet::new();
     for (uuid, path) in paths {
-        earlier.record(&uuid, path.as_deref(), None);
+        if !has_photos || path.as_deref().is_some_and(|p| roots.values().any(|root| Path::new(p).starts_with(root))) {
+            earlier.record(&uuid, path.as_deref(), None);
+            folder_ids.insert(uuid);
+        }
     }
-    for (uuid, hash) in hashed {
-        earlier.record(&uuid, None, Some(&hash));
+    for (uuid, hash) in hashes {
+        if !has_photos || folder_ids.contains(&uuid) {
+            earlier.record(&uuid, None, Some(&hash));
+        }
     }
     let c = crate::sqlite::open_with_flags(target, OpenFlags::SQLITE_OPEN_READ_WRITE)?;
     let rows = c
-        .prepare("SELECT uuid,src_path,stable_hash FROM assets WHERE uuid IS NOT NULL AND NOT EXISTS(SELECT 1 FROM asset_links l WHERE l.asset=assets.uuid AND l.system='photos') ORDER BY rowid")?
+        .prepare("SELECT uuid,src_path,stable_hash,source_id FROM assets WHERE uuid IS NOT NULL ORDER BY rowid")?
         .query_map([], |r| {
-            Ok((r.get::<_, String>(0)?, r.get::<_, Option<String>>(1)?, r.get::<_, Option<String>>(2)?))
+            Ok((
+                r.get::<_, String>(0)?,
+                r.get::<_, Option<String>>(1)?,
+                r.get::<_, Option<String>>(2)?,
+                r.get::<_, Option<String>>(3)?,
+            ))
         })?
         .collect::<rusqlite::Result<Vec<_>>>()?;
-    for (uuid, path, hash) in rows {
-        earlier.record(&uuid, path.as_deref(), hash.as_deref());
+    for (uuid, path, hash, sid) in rows {
+        if sid.as_ref().is_some_and(|id| roots.contains_key(id)) {
+            earlier.record(&uuid, path.as_deref(), hash.as_deref());
+        }
     }
-    let roots = folders
-        .iter()
-        .filter_map(|s| Some((s["id"].as_str()?.to_owned(), PathBuf::from(s["path"].as_str()?))))
-        .collect::<HashMap<_, _>>();
     let records = c
         .prepare("SELECT source_id,path,md5,asset FROM files")?
         .query_map([], |r| {
@@ -560,15 +569,52 @@ fn earlier(target: &Path, library: &Library, folders: &[Value]) -> Result<Earlie
         })?
         .collect::<rusqlite::Result<Vec<_>>>()?;
     for (sid, path, hash, uuid) in &records {
-        if !roots.contains_key(sid) {
-            continue;
-        }
-        let full = roots.get(sid).map(|root| root.join(path).to_string_lossy().into_owned());
-        earlier.record(uuid, full.as_deref(), Some(hash));
-        c.execute("DELETE FROM files WHERE source_id=? AND path=?", [sid, path])?;
-        c.execute("DELETE FROM asset_links WHERE system='file' AND key=? AND source_id=?", [path, sid])?;
+        let Some(root) = roots.get(sid) else { continue };
+        let full = root.join(Path::new(path).components().collect::<PathBuf>());
+        earlier.record(uuid, full.to_str(), Some(hash));
     }
     Ok(earlier)
+}
+
+/// 让本次读到的文件按全批匹配重新绑定。保住确已消失、且这次没有认回的旧文件账目，方便以后接回。
+fn rescue_matches(
+    target: &Path,
+    folders: &[Value],
+    files: &[(String, String)],
+    earlier: &Earlier,
+) -> Result<HashMap<String, String>> {
+    let roots: HashMap<_, _> =
+        folders.iter().filter_map(|s| Some((s["id"].as_str()?, Path::new(s["path"].as_str()?)))).collect();
+    let mut c = crate::sqlite::open(target)?;
+    let tx = c.transaction()?;
+    let records = tx
+        .prepare("SELECT f.source_id,f.path,f.asset,a.uuid IS NULL FROM files f LEFT JOIN assets a ON a.uuid=f.asset")?
+        .query_map([], |r| {
+            Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?, r.get::<_, String>(2)?, r.get::<_, bool>(3)?))
+        })?
+        .collect::<rusqlite::Result<Vec<_>>>()?;
+    let mut reserved: HashSet<_> =
+        records.iter().filter(|(s, _, _, _)| !roots.contains_key(s.as_str())).map(|(_, _, id, _)| id.clone()).collect();
+    reserved.extend(
+        tx.prepare("SELECT asset FROM asset_links WHERE system='photos'")?
+            .query_map([], |r| r.get(0))?
+            .collect::<rusqlite::Result<Vec<String>>>()?,
+    );
+    let matches = earlier.matches(files, &reserved);
+    let assigned: HashSet<_> = matches.values().collect();
+    let present: HashSet<_> = files.iter().map(|(path, _)| Path::new(path)).collect();
+    for (sid, path, id, orphan) in records {
+        let Some(root) = roots.get(sid.as_str()) else { continue };
+        if orphan || assigned.contains(&id) || present.contains(root.join(&path).as_path()) {
+            tx.execute("DELETE FROM files WHERE source_id=? AND path=?", rusqlite::params![sid, path])?;
+            tx.execute(
+                "DELETE FROM asset_links WHERE asset=? AND source_id=? AND system IN ('file','md5')",
+                rusqlite::params![id, sid],
+            )?;
+        }
+    }
+    tx.commit()?;
+    Ok(matches)
 }
 
 /// 扫描之后：没有被任何扫描找到的文件夹图片按扫描的做法标为已消失；没有任何记录认识的图片的结果丢弃；
