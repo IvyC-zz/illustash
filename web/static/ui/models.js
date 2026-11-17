@@ -1,13 +1,12 @@
 // 不带识别模型的安装包在第一次使用时下载的模型（#168）：向导横条、任务面板和「设置 › 数据」共用的文字和按钮。用户点
 // 「下载」之前什么都不下载；按钮上写明有多大。拒绝的话还有「从文件导入」和手动下载页面。
 import {t, tb} from '../core/i18n.js';
-import {esc, bytes, number} from '../core/format.js';
+import {esc, bytes, home, number} from '../core/format.js';
 import {state} from '../core/state.js';
 import {SYNC_ACTIVE, INDEX_ACTIVE, startSync, pollSync, onJob} from '../core/jobs.js';
 import {loadModels, modelsPost, modelsWaiting, modelsFinished, modelsArrived, onModels, saveAcceleration, fallbacks} from '../core/models.js';
 import {$, toast, redraw, busy} from './dom.js';
 import {confirmAction} from './dialog.js';
-import {home} from '../core/human.js';
 
 const running = m => m?.job?.status === 'running';
 const left = m => Math.max(0, (m?.total || 0) - (m?.have || 0));
@@ -62,7 +61,7 @@ export function deleteButton(m = state.models) {
   const working = running(m) || SYNC_ACTIVE.includes(state.sync?.status) || INDEX_ACTIVE.includes(state.index?.state?.status);
   return `<div class="models-acts"><button class="quiet small" data-models="delete" ${working ? `disabled title="${t('正在识别或下载，等它结束再删除')}"` : ''}>${t('删除已下载的模型')}</button></div>`;
 }
-export const manualLink = (m = state.models) => m?.manual ? `<a class="link" href="${esc(m.manual)}" target="_blank" rel="noreferrer noopener">${t('手动下载说明')}</a>` : '';
+const manualLink = (m = state.models) => m?.manual ? `<a class="link" href="${esc(m.manual)}" target="_blank" rel="noreferrer noopener">${t('手动下载说明')}</a>` : '';
 // 导入对每个选中的文件做了什么。
 const RESULT = {accepted: () => t('已接收'), mismatch: () => t('SHA-256 不符，已拒绝'), unknown: () => t('不是需要的模型文件'), already: () => t('已经有了')};
 export function importSummary(job) {
@@ -115,7 +114,7 @@ export function renderModelsCard() {
   const card = $('setModels'), m = state.models; if (!card) return;
   if (!m) { redraw(card, `<h2>${t('识别模型')}</h2><p class="muted-note">…</p>`); return; }
   const html = `<h2>${t('识别模型')}<span class="set-scope" title="${t('保存在这台电脑上，所有图库共用')}">${t('所有图库共用')}</span></h2>
-    <p class="settings-note">${m.on_demand ? t('图片识别要用 WD 和 CCIP 两个模型，安装包里没有带，第一次使用时下载。每个文件都按应用里写好的大小和 SHA-256 核对，对不上就不用，从哪里下载都一样安全。') : t('这个安装自带识别模型。')}</p>
+    <p class="settings-note">${m.on_demand ? t('图片识别要用 WD 和 CCIP 两个模型，安装包里没有带，第一次使用时下载。每个文件都按应用里写好的大小和 SHA-256 核对，对不上就不用。') : t('这个安装自带识别模型。')}</p>
     <div class="setting-line"><span>${esc(modelsLine(m))}${m.status === 'ready' && extra(m) !== 'download' ? '' : `<small class="line-hint">${manualLink(m)}</small>`}</span></div>
     ${modelsBar(m)}${modelsFailures(m)}${importSummary(m.job)}<div class="models-acts">${modelsActions(m)}</div>${deleteButton(m)}
     ${accelerationLine(m)}
@@ -149,7 +148,7 @@ async function act(what) {
   renderModels();
 }
 // 重画所有显示模型的地方；向导横条自己画自己（ui/guide.js 也在监听）。
-export function renderModels() { renderModelsCard(); }
+function renderModels() { renderModelsCard(); }
 
 // 处理函数。页面启动时调用一次。
 export function wireModels() {
@@ -157,7 +156,8 @@ export function wireModels() {
     const button = e.target.closest('[data-models]'); if (!button || button.disabled) return;
     busy(button, () => act(button.dataset.models));
   });
-  document.addEventListener('change', async e => {
+  // GPU 加速开关只在设置页的模型卡片上。
+  $('settingsPage').addEventListener('change', async e => {
     const box = e.target.closest('[data-acceleration]'); if (!box) return;
     box.disabled = true;
     try { await saveAcceleration(box.checked); toast(t('设置已保存')); } catch (err) { toast(err.message); box.checked = !box.checked; }

@@ -22,7 +22,7 @@ function card(importTask) {
 const running = (extra = {}) => ({status: 'running', kind: 'archive', id: 't1', file: '合成.zip', ...extra});
 
 test('a running import shows its stage with real counts and a cancel button, and blocks another import', () => {
-  const {html, line} = card(running({stage: 'unpacking', done: 3 << 20, total: 256 << 20}));
+  const {html, line} = card(running({stage: 'unpacking', done: 3e6, total: 256e6}));
   assert.match(html, /导入归档「合成\.zip」：正在解压 3\.0\/256 MB…/);
   assert.match(html, /data-import-cancel/);
   assert.match(html, /data-lib-choose="zip" disabled/);

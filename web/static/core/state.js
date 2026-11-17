@@ -27,6 +27,8 @@ export const state = {
 
   // ---- 人工结论快照（自动快照的状态和最近一次导出，GET /api/human-conclusions）：core/human.js ----
   human: null,
+  // ---- 用图动作（能不能拖出、最近一次导出到文件夹，GET /api/files）：core/files.js ----
+  files: null,
   // ---- 图库完整性检查的回应：core/integrity.js ----
   integrity: null,
   // ---- 识别模型的状态：core/models.js ----
@@ -53,6 +55,6 @@ export const state = {
   // ---- 详情栏与大图：ui/detail.js ----
   focused: null, detail: null, viewer: -1, viewerItem: null, question: null,
 
-  // ---- 「第 N 组」页标题用的近似组信息和各组的先后（空了时「下一组」用）：ui/shell.js（进入该页前读取） ----
+  // ---- 「第 N 组」页标题用的近似组信息和各组的先后（空了时「下一组」用）：ui/review.js（进入该页前读取） ----
   groupNear: null, groupNearId: null, groupTraits: null, groupOrder: [],
 };
