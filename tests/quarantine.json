@@ -3,22 +3,6 @@
   "entries": [
     {
       "kind": "python",
-      "id": "test_native_research.NativeResearchTest.test_similar_ignores_human_verdict_and_retries_on_its_own_inputs",
-      "platforms": ["windows"],
-      "issue": 498,
-      "added": "2026-11-15",
-      "expires": "2026-11-29"
-    },
-    {
-      "kind": "python",
-      "id": "test_native_research.NativeResearchTest.test_continuous_input_change_retries_are_bounded_then_manual_retry",
-      "platforms": ["windows"],
-      "issue": 498,
-      "added": "2026-11-15",
-      "expires": "2026-11-29"
-    },
-    {
-      "kind": "python",
       "id": "test_native_names.NativeNamesTest.test_busy_refresh_cancel_switch_same_id_and_late_result",
       "platforms": ["macos"],
       "issue": 513,
