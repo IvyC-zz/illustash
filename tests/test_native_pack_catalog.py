@@ -213,8 +213,8 @@ class NativePackCatalogTest(unittest.TestCase):
             self.packs({'action': 'enable'})
             enabled = self.settle('task')
             self.assertEqual(enabled['task']['status'], 'done', enabled)
-            self.assertEqual(enabled['library'], {'enabled': True, 'version': 'character-pack-v1', 'wd': True, 'ccip': True,
-                                                  'prompt': None})
+            self.assertLessEqual({'enabled': True, 'version': 'character-pack-v1', 'wd': True, 'ccip': True,
+                                  'prompt': None, 'images': 1, 'assigned': 1}.items(), enabled['library'].items())
             self.assertEqual(self.members(), (self.ids[:1], self.ids[:1]))
             before = {route: self.request(route)['body'] for route in ('/api/wd-extension', '/api/ccip-longtail')}
             del seen[:]
@@ -257,6 +257,7 @@ class NativePackCatalogTest(unittest.TestCase):
             self.assertEqual(switched['wd']['library']['package_sha256'], sha((FIXTURES / 'wd-extension-v3.bin').read_bytes()))
             self.assertEqual(switched['ccip']['library']['package_sha256'], sha((FIXTURES / 'ccip-longtail-v2.zip').read_bytes()))
             self.assertEqual(self.members(), (self.ids[:2], self.ids))
+            self.assertEqual((switched['library']['images'], switched['library']['assigned']), (3, 2))
             self.assertIsNone(switched['offer'])
             alternatives = json.loads(self.request('/api/detail?id=' + self.ids[2])['body'])['alternatives']
             self.assertIn(['WD_EXT'], [alt['evidence']['sources'] for alt in alternatives])
@@ -275,8 +276,8 @@ class NativePackCatalogTest(unittest.TestCase):
             withdrawn = self.settle('task')
             self.assertEqual(withdrawn['task']['status'], 'done', withdrawn)
             self.assertEqual(self.members(), ([], []))
-            self.assertEqual(withdrawn['library'], {'enabled': False, 'version': None, 'wd': False, 'ccip': False,
-                                                    'prompt': 'declined'})
+            self.assertLessEqual({'enabled': False, 'version': None, 'wd': False, 'ccip': False, 'prompt': 'declined',
+                                  'images': 0, 'assigned': 0}.items(), withdrawn['library'].items())
             # 没启用时卡片上是本机已有的最新版本。
             self.assertEqual(withdrawn['current']['version'], 'character-pack-v3')
 
@@ -356,8 +357,8 @@ class NativePackCatalogTest(unittest.TestCase):
             self.assertEqual(self.request('/api/sync', {})['status'], 200)
             wait_until(lambda: json.loads(self.request('/api/sync')['body'])['state']['status'] not in ('scanning', 'running'))
             packs = self.packs()
-            self.assertEqual(packs['library'], {'enabled': True, 'version': 'character-pack-v1', 'wd': True, 'ccip': True,
-                                                'prompt': None})
+            self.assertLessEqual({'enabled': True, 'version': 'character-pack-v1', 'wd': True, 'ccip': True,
+                                  'prompt': None, 'images': 0}.items(), packs['library'].items())
             # 只记下启用了哪个文件：没有证据，也没有归属。
             with sqlite3.connect(self.lib.db) as app:
                 self.assertEqual(app.execute("SELECT count(*) FROM candidates WHERE source IN ('WD_EXT','CCIP_LONGTAIL')").fetchone(), (0,))

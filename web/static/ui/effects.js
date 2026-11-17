@@ -23,10 +23,10 @@ export function afterWrite(path, body) {
   // 防止更早的元数据读取覆盖刚完成的改动。
   metaWritten(path === '/api/tag');
 }
-// 角色数据包（#550、#559）的启用、重新检查、自动检查或撤回改了图库（result.changed 不为 0）：候选、归属和计数都可能变了，
-// 详情栏开着的那张图重新读取。
-export async function afterPack(key, before) {
-  const task = packFinished(before, state.packs[key]);
+// 角色资料包（#602）的启用、换包、重新检查、自动检查或撤回改了图库（result.changed 不为 0）：候选、归属和计数都可能
+// 变了，详情栏开着的那张图重新读取。
+export async function afterPack(before) {
+  const task = packFinished(before, state.pack);
   if (task?.status !== 'done' || !task.result?.changed) return;
   listChanged();
   await refreshMeta().catch(e => error(readError(e)));

@@ -66,12 +66,27 @@ pub(super) fn packs(host: &Host, session: &Session) -> Result<Json> {
     let wd = host.wd_status(session)?;
     let ccip: Value = serde_json::from_str(&ccip_status(host, session, None)?.dump()).map_err(|e| Error::invalid(e.to_string()))?;
     let prompt = crate::app_packs::default_state(&host.root, &session.library, &lib)?;
+    // 两个组成部分合起来的数：有扩展候选的图按图去重，补上的归属按来源算。
+    let app = crate::app_library::read_connection(&session.library.db())?;
+    let (images, assigned): (i64, i64) = app.query_row(
+        "SELECT (SELECT count(DISTINCT uuid) FROM candidates WHERE source IN ('WD_EXT','CCIP_LONGTAIL')),
+                (SELECT count(*) FROM memberships WHERE sources IN ('WD_EXT','CCIP_LONGTAIL'))",
+        [],
+        |r| Ok((r.get(0)?, r.get(1)?)),
+    )?;
+    let checked = [&wd["library"]["checked_at"], &ccip["library"]["checked_at"]]
+        .into_iter()
+        .filter_map(Value::as_str)
+        .max()
+        .map(str::to_owned);
+    let vectors = wd["library"]["vectors"].as_u64().unwrap_or(0).max(ccip["library"]["vectors"].as_u64().unwrap_or(0));
     Ok(json!({
         "catalog":{"configured":crate::app_packs::pubkey().is_some(),"serial":catalog.map(|c| c.serial),
             "checked_at":checked_at,"error":error},
         "current":view(&lib.card)?,"offer":offer,"download":download,
         "library":{"enabled":lib.wd.is_some() || lib.ccip.is_some(),"version":lib.enabled.as_ref().map(|p| &p.version),
-            "wd":lib.wd.is_some(),"ccip":lib.ccip.is_some(),"prompt":prompt},
+            "wd":lib.wd.is_some(),"ccip":lib.ccip.is_some(),"prompt":prompt,"images":images,"assigned":assigned,
+            "vectors":vectors,"checked_at":checked,"blocked":wd["library"]["blocked"].clone()},
         "task":wd["task"].clone(),"wd":wd,"ccip":ccip
     })
     .into())
