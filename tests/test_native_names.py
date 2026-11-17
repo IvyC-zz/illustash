@@ -14,7 +14,6 @@ import sqlite3
 import subprocess
 import tempfile
 import threading
-import time
 import unittest
 import urllib.parse
 from unittest.mock import patch
@@ -23,7 +22,7 @@ from tests import test_native_lifecycle as lifecycle
 from tests.fixed_expectations import RETIRED, SKIP_COLUMNS, unclocked
 from tests.test_read_http import INTERRUPT, SPAWN, free_port, wait_until
 from tests.name_providers import Providers
-from tools.verify_read_http import enter, fetch
+from tools.verify_read_http import enter, output
 from tools.wait_limit import WAIT
 
 
@@ -222,27 +221,53 @@ class NativeNamesTest(unittest.TestCase):
         wait_until(lambda:all(s=='done' for _,s,_ in self.events()))
     def enable_error(self):
         self.stop(self.process);self.enabled=True;self.process,self.log=self.start(self.lib.path);self.finish('error')
-    def test_busy_refresh_cancel_switch_same_id_and_late_result(self):
-        self.enable(); second = self.package('second')
-        second.config['id']=self.lib.config['id'];second.save()
-        self.service.block=True
-        self.assertEqual(self.request('/api/names',{'action':'refresh'})['status'],200)
+
+    def start_blocked_refresh(self):
+        self.env['ILLUSTASH_TEST_TRACE_NAMES_CANCEL'] = '1'
+        self.enable()
+        previous_ids = {event_id for event_id, _, _ in self.events()}
+        self.service.block = True
+        response = self.request('/api/names', {'action': 'refresh'})
+        self.assertEqual(response['status'], 200, response['body'])
         self.assertTrue(self.service.entered.wait(WAIT))
-        self.assertEqual(self.request('/api/names',{'action':'refresh'})['status'],400)
-        with closing(sqlite3.connect(self.lib.db)) as c: before=c.execute(NAMES+' ORDER BY t.key,n.value').fetchall()
+        new_events = [row for row in self.events() if row[0] not in previous_ids]
+        self.assertEqual(len(new_events), 1, new_events)
+        event_id, status, error = new_events[0]
+        self.assertEqual((status, error), ('pending', ''))
+        return event_id
+
+    def release_after_cancel(self):
+        try:
+            wait_until(lambda: b'ILLUSTASH_TEST_NAMES_CANCELLED' in output(self.log))
+        finally:
+            self.service.release.set()
+
+    def test_busy_refresh_cancel_switch_same_id_and_late_result(self):
+        second = self.package('second')
+        second.config['id'] = self.lib.config['id']
+        second.save()
+        event_id = self.start_blocked_refresh()
+        self.assertEqual(self.request('/api/names', {'action': 'refresh'})['status'], 400)
+        with closing(sqlite3.connect(self.lib.db)) as c:
+            before = c.execute(NAMES + ' ORDER BY t.key,n.value').fetchall()
         with ThreadPoolExecutor() as pool:
-            switched=pool.submit(self.request,'/api/libraries/open',{'path':str(second.path)})
-            time.sleep(.1);self.service.release.set()
-            self.assertEqual(switched.result(timeout=WAIT)['status'],200)
-        with closing(sqlite3.connect(self.lib.db)) as c: self.assertEqual(before,c.execute(NAMES+' ORDER BY t.key,n.value').fetchall())
-        self.assertTrue(any(s=='pending' for _,s,_ in self.events()))
+            switched = pool.submit(self.request, '/api/libraries/open', {'path': str(second.path)})
+            self.release_after_cancel()
+            opened = switched.result(timeout=WAIT)
+        self.assertEqual(opened['status'], 200, opened['body'])
+        self.assertTrue(Path(json.loads(opened['body'])['path']).samefile(second.path))
+        with closing(sqlite3.connect(self.lib.db)) as c:
+            self.assertEqual(before, c.execute(NAMES + ' ORDER BY t.key,n.value').fetchall())
+        self.assertIn((event_id, 'pending', '名称任务已取消'), self.events())
         self.assertFalse(self.sentinel.exists())
+
     def test_exit_waits_cancellation_and_keeps_pending_for_recovery(self):
-        self.enable();self.service.block=True
-        self.request('/api/names',{'action':'refresh'});self.assertTrue(self.service.entered.wait(WAIT))
-        self.process.send_signal(INTERRUPT);time.sleep(.1);self.service.release.set();self.process.wait(WAIT)
-        self.assertEqual(self.process.returncode,0)
-        self.assertTrue(any(s=='pending' for _,s,_ in self.events()))
+        event_id = self.start_blocked_refresh()
+        self.process.send_signal(INTERRUPT)
+        self.release_after_cancel()
+        self.assertEqual(self.process.wait(WAIT), 0)
+        self.assertIn((event_id, 'pending', '名称任务已取消'), self.events())
+
     def test_transient_retry(self):
         self.service.failures_left=2;self.enable()
         self.assertGreaterEqual(len(self.service.calls),3)

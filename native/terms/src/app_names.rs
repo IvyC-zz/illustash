@@ -729,6 +729,10 @@ impl Updater {
     pub fn stop(&mut self) {
         self.cancel.store(true, Ordering::SeqCst);
         if let Some(mut t) = self.thread.take() {
+            // 供名称测试在取消生效后才放行合成 HTTP 响应；随后照常等待 worker 退出。
+            if std::env::var_os("ILLUSTASH_TEST_TRACE_NAMES_CANCEL").is_some() {
+                eprintln!("ILLUSTASH_TEST_NAMES_CANCELLED");
+            }
             t.stop();
         }
     }
