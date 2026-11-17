@@ -353,7 +353,7 @@ fn run_with(
         }
         // 先扫描，避免已删除/换内容的图片被旧 pending 永久挡住；仍有效的结果再恢复。
         step.set("recognition resume, source.sqlite and library.sqlite");
-        let recovery = crate::app_recognition::resume(library, cancel, &crate::app_research::dispatch)?;
+        let recovery = crate::app_recognition::resume_at(library, root, cancel, &crate::app_research::dispatch)?;
         let deferred = crate::app_recognition::unavailable_inputs(&recovery)?;
         unreadable += deferred.len() as u64;
         step.set("sync record, library.sqlite");

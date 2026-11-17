@@ -950,19 +950,26 @@ fn alternatives(c: &Connection, id: &str) -> Result<Json> {
     let sql = format!(
         "SELECT *
          FROM (
-           SELECT e.id,entity_name(e.id) AS name,e.work,v.sources,v.score,v.wd,v.ccip,v.rank,0 AS weak
+           SELECT e.id,entity_name(e.id) AS name,e.work,v.sources,v.score,v.wd,v.ccip,v.rank,0 AS weak,0 AS priority
            FROM family_evidence v
            JOIN {ENTITIES} e ON e.id=v.entity
            WHERE v.uuid=?1
            UNION ALL
-           SELECT e.id,entity_name(e.id),e.work,group_concat(w.source),max(w.score),NULL,max(w.score),1000,1
+           SELECT e.id,entity_name(e.id),e.work,v.source,v.score,NULL,v.score,0,0,1
+           FROM candidates v
+           JOIN {ENTITIES} e ON e.id=v.entity
+           WHERE v.uuid=?1 AND v.source='CCIP_LONGTAIL'
+             AND NOT EXISTS(SELECT 1 FROM family_evidence f WHERE f.uuid=v.uuid AND f.entity=v.entity)
+           UNION ALL
+           SELECT e.id,entity_name(e.id),e.work,group_concat(w.source),max(w.score),NULL,max(w.score),1000,1,2
            FROM weak_claims w
            JOIN {ENTITIES} e ON e.id=w.entity
            WHERE w.uuid=?1 AND NOT EXISTS(SELECT 1 FROM family_evidence f WHERE f.uuid=w.uuid AND f.entity=w.entity)
+             AND NOT EXISTS(SELECT 1 FROM candidates v WHERE v.uuid=w.uuid AND v.entity=w.entity AND v.source='CCIP_LONGTAIL')
            GROUP BY e.id) x
          WHERE NOT EXISTS(SELECT 1 FROM memberships m WHERE m.uuid=?1 AND m.entity=x.id)
            AND NOT EXISTS(SELECT 1 FROM assertions s WHERE s.uuid=?1 AND s.entity=x.id AND s.status='rejected')
-         ORDER BY weak,rank,score DESC
+         ORDER BY priority,rank,score DESC
          LIMIT 12"
     );
     let mut alternatives = Vec::new();

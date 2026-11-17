@@ -77,14 +77,14 @@ fn touch(c: &Connection, uuids: Option<&[String]>) -> Result<()> {
 /// `candidates` 与 `memberships` 一样是核心维护的派生表（#201 第 4 步用户决定），权威是证据批次；写证据的命令在同一个
 /// 事务里按图刷新它。判定 SQL 和读者按索引直接查表：从证据现算时按图的条件推不进聚合，增量重算会慢几百倍。
 const CANDIDATES: &str =
-    "SELECT a.key,t.key,CASE e.source WHEN 'wd' THEN 'WD' WHEN 'ccip_index' THEN 'CCIP' ELSE 'WD_EXT' END,max(e.score)
+    "SELECT a.key,t.key,CASE e.source WHEN 'wd' THEN 'WD' WHEN 'ccip_index' THEN 'CCIP' WHEN 'wd_extension' THEN 'WD_EXT' ELSE 'CCIP_LONGTAIL' END,max(e.score)
          FROM term_active_evidence active
  JOIN term_evidence_set_rows current_row ON current_row.set_id=active.set_id
  JOIN term_evidence e ON e.id=current_row.evidence_id AND e.asset_id=active.asset_id
    AND e.source=active.source AND active.method IN (e.method,'*')
  JOIN term_assets a ON a.id=e.asset_id AND a.namespace='library'
          JOIN term_tree r ON r.term_id=e.term_id JOIN terms t ON t.id=e.term_id
-         WHERE e.source||'.'||e.method IN ('wd.wd_character','ccip_index.char_ext','wd_extension.linear_head')
+         WHERE e.source||'.'||e.method IN ('wd.wd_character','ccip_index.char_ext','wd_extension.linear_head','ccip_longtail.anchor_p75')
          GROUP BY a.key,t.key,e.source";
 
 /// 策略未设置时，候选的身份沿破坏式合并解析到代表（`_candidate` 与 `merge` 都这样写旧表）；hybrid 下是原始身份。
@@ -93,14 +93,14 @@ const CANDIDATES_RESOLVED: &str = "WITH RECURSIVE chain(term,key,depth) AS (
    UNION ALL SELECT c.term,r2.merged_into,c.depth+1 FROM chain c JOIN terms t2 ON t2.key=c.key
     JOIN term_tree r2 ON r2.term_id=t2.id WHERE r2.merged_into IS NOT NULL AND r2.merged_into<>'' AND c.depth<16),
   resolved(term,key) AS (SELECT term,key FROM chain c WHERE depth=(SELECT max(depth) FROM chain x WHERE x.term=c.term))
- SELECT a.key,k.key,CASE e.source WHEN 'wd' THEN 'WD' WHEN 'ccip_index' THEN 'CCIP' ELSE 'WD_EXT' END,max(e.score)
+ SELECT a.key,k.key,CASE e.source WHEN 'wd' THEN 'WD' WHEN 'ccip_index' THEN 'CCIP' WHEN 'wd_extension' THEN 'WD_EXT' ELSE 'CCIP_LONGTAIL' END,max(e.score)
  FROM term_active_evidence active
  JOIN term_evidence_set_rows current_row ON current_row.set_id=active.set_id
  JOIN term_evidence e ON e.id=current_row.evidence_id AND e.asset_id=active.asset_id
    AND e.source=active.source AND active.method IN (e.method,'*')
  JOIN term_assets a ON a.id=e.asset_id AND a.namespace='library'
  JOIN resolved k ON k.term=e.term_id
- WHERE e.source||'.'||e.method IN ('wd.wd_character','ccip_index.char_ext','wd_extension.linear_head')
+ WHERE e.source||'.'||e.method IN ('wd.wd_character','ccip_index.char_ext','wd_extension.linear_head','ccip_longtail.anchor_p75')
  GROUP BY a.key,k.key,e.source";
 
 /// 小范围刷新时由图片驱动：原计划会先扫描全库证据并分组，最后才过滤图片。
@@ -208,7 +208,9 @@ fn memberships_in(c: &Connection, uuids: Option<&[String]>, core: bool) -> Resul
         c.execute_batch("DROP TABLE temp.projected_membership_rules;")?;
     }
     if core {
-        crate::wd_extension::fill_unassigned(c, uuids.is_some())?;
+        use crate::character_extension::{fill_unassigned, Extension};
+        fill_unassigned(c, uuids.is_some(), Extension::Wd)?;
+        fill_unassigned(c, uuids.is_some(), Extension::Ccip)?;
     }
     let scope = if uuids.is_some() {
         " WHERE d.grp IN (SELECT grp FROM duplicates WHERE uuid IN (SELECT uuid FROM touched))"

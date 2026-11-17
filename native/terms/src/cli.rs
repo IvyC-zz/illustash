@@ -37,9 +37,10 @@ use crate::Error;
 use serde_json::json;
 use std::path::Path;
 
-pub const COMMANDS: [&str; 24] = [
+pub const COMMANDS: [&str; 25] = [
     "recognition-import",
     "wd-extension",
+    "ccip-longtail",
     "folder-scan",
     "photos-scan",
     "library-scan",
@@ -86,8 +87,18 @@ pub fn run(args: &[String]) -> u8 {
     let args: Vec<&str> = args.iter().map(String::as_str).collect();
     let result = match args.as_slice() {
         ["recognition-import", "--library", _library, "--root", root, "--model-specs"] => crate::app_recognition::model_specs(Path::new(root)),
-        ["recognition-import", "--library", library, "--root", _root, "--resume"] => crate::app_library::Library::open(Path::new(library)).and_then(|lib| crate::app_recognition::resume(&lib,&std::sync::atomic::AtomicBool::new(false),&|_,_| Ok(()))),
+        ["recognition-import", "--library", library, "--root", root, "--resume"] => crate::app_library::Library::open(Path::new(library)).and_then(|lib| crate::app_recognition::resume_at(&lib,Path::new(root),&std::sync::atomic::AtomicBool::new(false),&|_,_| Ok(()))),
         ["recognition-import", "--library", library, "--root", root, "--package", package] => crate::app_library::Library::open(Path::new(library)).and_then(|lib| crate::app_recognition::import_package(&lib,Path::new(package),Path::new(root),&std::sync::atomic::AtomicBool::new(false),&|_,_| Ok(()))),
+        ["ccip-longtail", "--library", library, "--root", root, "--package", package] =>
+            crate::app_library::Library::open(Path::new(library)).and_then(|lib|
+                crate::app_ccip_longtail::apply(&lib, Path::new(root), Path::new(package), &|| Ok(()), &crate::app_imports::Silent)),
+        ["ccip-longtail", "--library", library, "--withdraw"] =>
+            crate::app_library::Library::open(Path::new(library)).and_then(|lib| crate::app_ccip_longtail::withdraw(&lib, &crate::app_imports::Silent)),
+        ["ccip-longtail", "--library", library, "--status"] =>
+            crate::app_library::Library::open(Path::new(library)).and_then(|lib| crate::app_ccip_longtail::status(&lib, &crate::app_resources::default_root())),
+        ["ccip-longtail", ..] => Err(Error::invalid(
+            "用法：ccip-longtail --library <图库.pilib> (--root <资源目录> --package <参考包> | --status | --withdraw)"
+        )),
         ["wd-extension", "--library", library, "--package", package] => crate::app_library::Library::open(Path::new(library)).and_then(|lib| crate::app_wd_extension::apply(&lib,Path::new(package))),
         ["wd-extension", "--library", library, "--withdraw"] => crate::app_library::Library::open(Path::new(library)).and_then(|lib| crate::app_wd_extension::withdraw(&lib)),
         ["wd-extension", ..] => Err(Error::invalid("用法：wd-extension --library <图库.pilib> --package <扩展包> | wd-extension --library <图库.pilib> --withdraw")),

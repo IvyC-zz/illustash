@@ -209,10 +209,10 @@ pub(crate) fn check_undo(c: &Connection, action: i64, created: &[Created]) -> Re
     for object in created {
         let owner: bool = c.query_row("SELECT EXISTS(SELECT 1 FROM human_object_contributions WHERE kind='term' AND object_id=?1 AND owner_action_id=?2)",
             params![object.id,action],|r|r.get(0))?;
-        // 已失效的 WD 扩展证据仍引用物理定义，但不再依赖定义的有效贡献。
+        // 已失效的角色扩展证据仍引用物理定义，但不再依赖定义的有效贡献。
         let independent: bool = c.query_row("SELECT
             EXISTS(SELECT 1 FROM term_evidence e WHERE e.term_id=?1
-                AND (e.source<>?5 OR e.method<>?6
+                AND ((NOT ((e.source=?5 AND e.method=?6) OR (e.source=?7 AND e.method=?8)))
                     OR EXISTS(SELECT 1 FROM term_current_evidence active WHERE active.id=e.id)))
             OR EXISTS(SELECT 1 FROM term_verdicts v LEFT JOIN actions a ON a.id=v.action_id
               WHERE v.term_id=?1 AND (v.batch_id IS NOT NULL OR (v.action_id<>?2 AND a.undone=0)))
@@ -228,7 +228,7 @@ pub(crate) fn check_undo(c: &Connection, action: i64, created: &[Created]) -> Re
             OR EXISTS(SELECT 1 FROM identity_suspended WHERE entity=?3 OR EXISTS(SELECT 1 FROM json_each(options_json) WHERE value=?3))
             OR EXISTS(SELECT 1 FROM identity_uncertain WHERE EXISTS(SELECT 1 FROM json_each(options_json) WHERE value=?3))
             OR EXISTS(SELECT 1 FROM identity_anchor_decisions WHERE entity=?3)",
-            params![object.id,action,object.key,own,crate::wd_extension::SOURCE,crate::wd_extension::METHOD], |r|r.get(0))?;
+            params![object.id,action,object.key,own,crate::wd_extension::SOURCE,crate::wd_extension::METHOD,crate::ccip_longtail::SOURCE,crate::ccip_longtail::METHOD], |r|r.get(0))?;
         if !owner || independent || signature(c, object.id)? != object.signature {
             return Err(Error::Conflict("导入新建定义已有独立变化或依赖，无法安全撤销".into()));
         }
