@@ -393,7 +393,9 @@ fn request_json(origin: &str, url: &str, body: Option<&Value>, token: &str) -> (
 
 #[cfg(unix)]
 fn benchmark_root() -> PathBuf {
-    assert!(!cfg!(debug_assertions), "benchmark must be compiled --release");
+    if cfg!(debug_assertions) {
+        panic!("benchmark must be compiled --release");
+    }
     std::env::var_os("ILLUSTASH_BENCH_ROOT").expect("benchmark fixture directory required").into()
 }
 
