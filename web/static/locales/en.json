@@ -3006,5 +3006,9 @@
   "未识别角色": "No character",
   "画师未知": "Unknown artist",
   "导出图片完成": "Pictures exported",
-  "导出图片失败": "Picture export failed"
+  "导出图片失败": "Picture export failed",
+  "数据包覆盖": "In data packs",
+  "自己补过": "Added by you",
+  "还缺": "Missing",
+  "数据包覆盖 {packs} 个 · 自己补过 {own} 个 · 还缺 {missing} 个": "In data packs {packs} · added by you {own} · missing {missing}"
 }

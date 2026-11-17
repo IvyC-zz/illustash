@@ -257,7 +257,7 @@
 
  "native/terms/src/app_imports.rs":"994effa0bb18cd935887414031d60f7146ddb4836874a312677563070a730451",
 
- "native/terms/src/app_index.rs":"8f612b29b90f8c3aae3700ed50eeb2bda58c27b998e9a6425ad4a373b50c3881",
+ "native/terms/src/app_index.rs":"1b91ffa419dd39ffe96cf3fcce54a49b566e8309706b799d29b42b1a1efe3a32",
 
  "native/terms/src/app_integrity.rs":"7281f9384bf6a9f390e88b25d6ff509ec3194fa1677c7d5bdddc996581152a19",
 
@@ -339,7 +339,7 @@
 
  "native/terms/src/app_upgrade.rs":"de6b529fbb01865fb9adeb78ae45ca4b5a541b14129b9472f58f10ac693ce6cf",
 
- "native/terms/src/app_wd_extension.rs":"24bf9472036064c71171f526cdd53270eab45bccf67bac022d2d4f876efa4ade",
+ "native/terms/src/app_wd_extension.rs":"b595ac8af54422318a426b21c31c924d42cfaf59e6c27ff7e5874ef8313e9821",
 
  "native/terms/src/bin/illustash-terms.rs":"04ee80bb280034a16f8ddd9fe97e8de0700713259c44f76858f70b8713d4c594",
 
@@ -365,7 +365,7 @@
 
  "native/terms/src/http_characters.rs":"03e4c82c04a2708b576a26a6c8dbbd49834f7bf4126240f06e17da4827478f9e",
 
- "native/terms/src/http_host_get.rs":"8ca61fe886415296c3846048e0b2695301010f3333ad9ed7a6af4ba5da926506",
+ "native/terms/src/http_host_get.rs":"9ff316c2bca46d7dcf2400a529c652c54cd6cc58876df9ebacfa356d950e6f56",
 
  "native/terms/src/http_host_post.rs":"42885d132eacd641723a803bf2982bac0bae4952679cd475d3bcceacf75bcdde",
 
@@ -623,7 +623,7 @@
  "native/terms/src/cli.rs":{"cli-entry":["recognition-import","folder-scan","photos-scan","library-scan","library-create","http","serve","wd-pending","names-command","names-project","names-search","character-command","identity-command","learning-snapshot","publish-learning","reproject-characters","validate","migrate","import","judge","tag","reproject","undo","wd-extension"],"database-write":[[0,3],3,1]},
  "crates/core/src/character_sql/fold.sql":{"database-write":["UPDATE:duplicates"]},
  "crates/core/src/character_commands.rs":{"database-write":[[0,10],[184,2],198,[317,2],[318,2],316,14,15,"INSERT OR REPLACE INTO:assertions",[312,2],313,18,[35,4],"INSERT OR IGNORE INTO:deferred",[321,2],[322,2],315,"INSERT OR REPLACE INTO:identity_uncertain",175,314,190,"DELETE FROM:identity_anchor_decisions","INSERT INTO:identity_anchor_decisions","INSERT INTO:identity_anchor_history"]},
- "native/terms/src/http_host_get.rs":{"http-branch":[17,306,97,"/api/diagnostics",42,39,"/api/similar|/api/clusters",26,41,43,296,295,305,293,291,"/api/human-conclusions","/api/human-conclusions/report","/api/settings","/api/libraries","/api/files"]},
+ "native/terms/src/http_host_get.rs":{"http-branch":[17,306,97,"/api/diagnostics",42,39,"/api/similar|/api/clusters",26,41,43,296,295,305,293,291,"/api/human-conclusions","/api/human-conclusions/report","/api/settings","/api/libraries","/api/files","/api/index/coverage"]},
  "native/terms/src/app_create.rs":{"database-write":{"ATTACH":1,"dynamic-or-wrapper":9,"INSERT INTO:main.":1,"CREATE INDEX:if":1,"COMMIT":3,"DETACH":1,"ALTER TABLE:assets":1,"INSERT OR IGNORE INTO:meta":1}},
  "native/terms/src/app_index.rs":{"database-write":[[0,7],34,[1,5],33,283,284,285,286,[208,2],12,[199,2],287,249,201,[3,2]],"entrypoint":[4]},
  "native/terms/src/http_browse.rs":{"http-branch":["/api/assets|/api/ids",[246,3],[77,2],[248,3],24,99,89,"/api/assets|/api/assets/count|/api/ids",[78,3]],"database-write":[[7,2],[0,2]]},
