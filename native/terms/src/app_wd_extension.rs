@@ -9,6 +9,8 @@ use serde::Deserialize;
 use serde_json::{json, Value};
 use std::path::{Path, PathBuf};
 
+mod scoring;
+
 const DIM: usize = 1024;
 
 /// 包文件第一行的清单。`illustash-wd-extension/1`：统一的 `threshold`，可以另带逐头的 `thresholds`（#551 的 257 头包），
@@ -122,27 +124,28 @@ impl Package {
         Ok(())
     }
 
-    fn hits(&self, uuid: &str, bytes: &[u8], out: &mut Vec<Hit>) -> Result<()> {
+    /// 校验一行 WD 向量并追加到这一块（#582）。
+    fn push_vector(bytes: &[u8], block: &mut Vec<f32>) -> Result<()> {
         if bytes.len() != DIM * 4 {
             return Err(Error::invalid("WD 特征向量维数不正确"));
         }
-        let vector = float32(bytes);
-        if vector.iter().any(|v| !v.is_finite()) {
+        let start = block.len();
+        block.extend(bytes.chunks_exact(4).map(|b| f32::from_le_bytes(b.try_into().expect("四字节分块"))));
+        if block[start..].iter().any(|v| !v.is_finite()) {
             return Err(Error::invalid("WD 特征向量包含非有限值"));
         }
-        let heads = self.labels.iter().zip(self.weights.chunks_exact(DIM)).zip(&self.bias);
-        for ((((tag, weights), bias), &threshold), &candidate_only) in
-            heads.zip(&self.thresholds).zip(&self.candidate_only)
-        {
-            // 累加与 sigmoid 用 f64，阈值与证据分数沿用冻结实验的 f32 概率精度。
-            let sum: f64 = vector.iter().zip(weights).map(|(&x, &w)| f64::from(x) * f64::from(w)).sum();
-            let probability = (1.0 / (1.0 + (-(sum + f64::from(*bias))).exp())) as f32;
-            if f64::from(probability) >= threshold {
-                let probability = f64::from(probability);
-                out.push(Hit { uuid: uuid.to_owned(), tag: tag.clone(), probability, candidate_only });
-            }
-        }
         Ok(())
+    }
+
+    /// 给攒好的一块图片打分（`scoring`），命中按图片、再按头的顺序追加，然后清空这一块。
+    fn hits(&self, heads: &scoring::Heads<'_>, uuids: &mut Vec<String>, block: &mut Vec<f32>, out: &mut Vec<Hit>) {
+        heads.score(block, |image, head, probability| {
+            // 级别在打分之后才起作用：命中照常记下，二级头的命中标成只出候选（#602）。
+            let (tag, candidate_only) = (self.labels[head].clone(), self.candidate_only[head]);
+            out.push(Hit { uuid: uuids[image].clone(), tag, probability, candidate_only });
+        });
+        uuids.clear();
+        block.clear();
     }
 }
 
@@ -224,6 +227,9 @@ fn scan(
     let mut seen = std::collections::HashSet::new();
     let mut hits = Vec::new();
     let mut checked = 0;
+    let heads = scoring::Heads::new(DIM, &package.weights, &package.bias, &package.thresholds);
+    let rows_per_block = heads.block_rows();
+    let (mut uuids, mut block) = (Vec::with_capacity(rows_per_block), Vec::with_capacity(rows_per_block * DIM));
     let mut stmt = src.prepare(&sql)?;
     let mut rows = stmt.query([scope])?;
     while let Some(row) = rows.next()? {
@@ -237,11 +243,20 @@ fn scan(
             }
         }
         // 旧图库无逐图交付账本时，使用已经存储的 WD 向量。
-        package.hits(&row.get::<_, String>(0)?, &row.get::<_, Vec<u8>>(1)?, &mut hits)?;
-        checked += 1;
-        if checked % 32 == 0 || checked == total {
+        Package::push_vector(&row.get::<_, Vec<u8>>(1)?, &mut block)?;
+        uuids.push(row.get::<_, String>(0)?);
+        if uuids.len() == rows_per_block {
+            progress.check()?;
+            checked += uuids.len();
+            package.hits(&heads, &mut uuids, &mut block, &mut hits);
             progress.count(checked, total)?;
         }
+    }
+    if !uuids.is_empty() {
+        progress.check()?;
+        checked += uuids.len();
+        package.hits(&heads, &mut uuids, &mut block, &mut hits);
+        progress.count(checked, total)?;
     }
     Ok((checked, hits))
 }
@@ -914,6 +929,81 @@ mod tests {
         *tampered.last_mut().unwrap() ^= 1;
         fs::write(&path, &tampered).unwrap();
         assert!(Package::load(&path, &expected).is_err());
+    }
+
+    /// 带级别的 `/2` 包经过 `scan` 的批量打分（#582），逐图和改前的逐图逐头标量实现比：命中、概率的每一位、级别和顺序
+    /// 都相同。1,300 张图跨两块；偏置调成让多数头的 z 落在各自阈值的 logit 附近。
+    #[test]
+    fn tiered_package_scan_matches_scalar_hits() {
+        let (images, heads) = (1300usize, 37usize);
+        let mut state = 0x582_602_u64;
+        let mut unit = move || {
+            state ^= state << 13;
+            state ^= state >> 7;
+            state ^= state << 17;
+            (state >> 40) as f32 / (1u64 << 23) as f32 - 1.0
+        };
+        let base: Vec<f32> = (0..DIM).map(|_| unit() * 2.0).collect();
+        let vectors: Vec<Vec<f32>> =
+            (0..images).map(|i| base.iter().map(|&v| v + unit() * [0.0, 1e-6, 1e-3, 0.3][i % 4]).collect()).collect();
+        let weights: Vec<f32> = (0..heads * DIM).map(|_| unit() * 0.5).collect();
+        let thresholds: Vec<f64> = (0..heads).map(|h| [0.8008725047111511, f64::from(0.99_f32), 0.5][h % 3]).collect();
+        let bias: Vec<f32> = (0..heads)
+            .map(|h| {
+                let s: f64 = base.iter().zip(&weights[h * DIM..]).map(|(&x, &w)| f64::from(x) * f64::from(w)).sum();
+                let logit = (thresholds[h] / (1.0 - thresholds[h])).ln();
+                (logit - s + f64::from(unit()) * [0.0, 1e-6, 1e-3][h % 3]) as f32
+            })
+            .collect();
+        let tiers: Vec<u8> = (0..heads).map(|h| if h % 4 == 1 { 2 } else { 1 }).collect();
+        let labels: Vec<String> = (0..heads).map(|h| format!("role_{h:02}")).collect();
+        let manifest = json!({"format":WD_FORMAT_V2,"wd_model_sha256":"model","wd_tags_sha256":"tags",
+            "labels":labels,"thresholds":thresholds,"tiers":tiers});
+        let mut bytes = manifest.to_string().into_bytes();
+        bytes.push(b'\n');
+        bytes.extend(weights.iter().chain(&bias).flat_map(|v| v.to_le_bytes()));
+        let second = tiers.iter().filter(|&&t| t == 2).count();
+        let package = Package::decode(&bytes, &pack(WD_FORMAT_V2, heads, second, &bytes)).unwrap();
+
+        let f = Fixture::new();
+        let source = writer(&f.library.source()).unwrap();
+        source
+            .execute_batch(
+                "CREATE TABLE IF NOT EXISTS embeddings(uuid TEXT,model TEXT,vec BLOB,PRIMARY KEY(uuid,model))",
+            )
+            .unwrap();
+        let ids: Vec<String> = (0..images).map(|i| format!("image-{i:04}")).collect();
+        for (uuid, vector) in ids.iter().zip(&vectors) {
+            source
+                .execute(
+                    "INSERT INTO assets(uuid,filename,src_path,width,height,added_at,src_kind,in_scope,trashed)
+                     VALUES (?1,'synthetic.png','synthetic.png',8,8,'2026-11-18','folder',1,0)",
+                    [uuid],
+                )
+                .unwrap();
+            let blob = vector.iter().flat_map(|v| v.to_le_bytes()).collect::<Vec<_>>();
+            source.execute("INSERT INTO embeddings VALUES (?1,'wd',?2)", rusqlite::params![uuid, blob]).unwrap();
+        }
+        let (checked, hits) = scan(&source, &package, None, &Progress::silent()).unwrap();
+        assert_eq!(checked, images);
+
+        // 改前的逐图逐头实现（#614 的 `Package::hits`），按 `scan` 的 uuid 顺序。
+        let mut expected = Vec::new();
+        for (uuid, vector) in ids.iter().zip(&vectors) {
+            for h in 0..heads {
+                let w = &weights[h * DIM..(h + 1) * DIM];
+                let sum: f64 = vector.iter().zip(w).map(|(&x, &w)| f64::from(x) * f64::from(w)).sum();
+                let probability = (1.0 / (1.0 + (-(sum + f64::from(bias[h]))).exp())) as f32;
+                if f64::from(probability) >= thresholds[h] {
+                    expected.push((uuid.clone(), labels[h].clone(), f64::from(probability).to_bits(), tiers[h] == 2));
+                }
+            }
+        }
+        let actual: Vec<_> =
+            hits.iter().map(|h| (h.uuid.clone(), h.tag.clone(), h.probability.to_bits(), h.candidate_only)).collect();
+        assert!(expected.iter().any(|e| e.3) && expected.iter().any(|e| !e.3), "两级都要有命中");
+        assert!(expected.len() < images * heads, "要有不命中的头");
+        assert_eq!(actual, expected);
     }
 
     /// v1 → 新版本 → v1 → 撤回：换包沿用同一个 WD_EXT 来源的替换，图库记下用的是哪个包；二级头只出候选。

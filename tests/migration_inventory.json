@@ -351,7 +351,9 @@
 
  "native/terms/src/app_upgrade.rs":"a54111dd23542c882a5ac02a2a0913b0333625af44950108d8af33a2dbd1c5e6",
 
- "native/terms/src/app_wd_extension.rs":"823c2e92b278356d427dd085b0e2a0740db94ab806a7727bd2f95d21950121c1",
+ "native/terms/src/app_wd_extension.rs":"4763632e0c2f9802dd0db89374dee5eb660da4ee890ba0a98e57ec7a059d4716",
+
+ "native/terms/src/app_wd_extension/scoring.rs":"c486e27eae74356b12c836caee045adb61e164c5ffb433171327df47e55b1221",
 
  "native/terms/src/bin/illustash-terms.rs":"04ee80bb280034a16f8ddd9fe97e8de0700713259c44f76858f70b8713d4c594",
 
