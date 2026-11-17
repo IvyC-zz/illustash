@@ -102,6 +102,7 @@
         "matrixmultiply 0.3.11",
         "md-5 0.10.6",
         "memchr 2.8.3",
+        "minisign-verify 0.3.0",
         "miniz_oxide 0.8.9",
         "miniz_oxide 0.9.1",
         "mozjpeg 0.10.13",
