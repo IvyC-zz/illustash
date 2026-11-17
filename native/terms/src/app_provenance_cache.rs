@@ -18,7 +18,7 @@ pub(crate) fn connect(path: &Path) -> Result<Connection> {
     if !has_column(&c, "ref_sigs", "colour")? {
         c.execute_batch("ALTER TABLE ref_sigs ADD COLUMN colour BLOB")?;
     }
-    c.execute_batch("PRAGMA user_version=5; CREATE TABLE IF NOT EXISTS native_delivery(task_id TEXT PRIMARY KEY, package TEXT NOT NULL, status TEXT NOT NULL DEFAULT 'pending', error TEXT NOT NULL DEFAULT '');")?;
+    c.execute_batch("PRAGMA user_version=5; CREATE TABLE IF NOT EXISTS native_delivery(task_id TEXT PRIMARY KEY, package TEXT NOT NULL, status TEXT NOT NULL DEFAULT 'pending', error TEXT NOT NULL DEFAULT '', parts INTEGER NOT NULL DEFAULT 1 CHECK(parts>=1));")?;
     if !has_column(&c, "native_delivery", "error")? {
         c.execute_batch("ALTER TABLE native_delivery ADD COLUMN error TEXT NOT NULL DEFAULT ''")?;
     }
@@ -99,6 +99,10 @@ fn part_path(output: &Path, parts: usize, index: usize) -> std::path::PathBuf {
     }
 }
 
+fn part_id(task: &str, parts: usize, index: usize) -> String {
+    format!("{task}/{}/{parts}", index + 1)
+}
+
 fn seal_parts(library: &Library, cache: &Path, output: &Path, task: &str, limit: usize) -> Result<usize> {
     let app = crate::app_library::read_connection(&library.db())?;
     let present = app
@@ -115,8 +119,8 @@ fn seal_parts(library: &Library, cache: &Path, output: &Path, task: &str, limit:
         let mut evidence = image_evidence(&c, assets)?;
         let terms = if index == 0 { artist_evidence(&c, &mut evidence)? } else { String::new() };
         // 同一次交付的所有分包一并重放。新快照即使某一分包恰好回到更早的内容，也要重新发布该范围。
-        let task = needs_task_id.then_some(task);
-        write_part(library.id(), &part_path(output, parts, index), assets, task, evidence, terms)?;
+        let id = needs_task_id.then(|| part_id(task, parts, index));
+        write_part(library.id(), &part_path(output, parts, index), assets, id.as_deref(), evidence, terms)?;
     }
     Ok(parts)
 }
@@ -212,16 +216,14 @@ fn write_part(
     evidence: String,
     terms: String,
 ) -> Result<()> {
-    let outcomes: Vec<_> = assets
+    let mut outcomes: Vec<_> = assets
         .iter()
-        .map(|id| {
-            let mut outcome = json!({"asset":{"namespace":"library","id":id},"status":"completed","error":null});
-            if let Some(task) = task {
-                outcome["task_id"] = task.into();
-            }
-            outcome
-        })
+        .map(|id| json!({"asset":{"namespace":"library","id":id},"status":"completed","error":null}))
         .collect();
+    // 首行带这次交付的分包标识，重放时可以发现目录互换或同一个分包放了两次。
+    if let (Some(first), Some(id)) = (outcomes.first_mut(), task) {
+        first["task_id"] = id.into();
+    }
     let manifest = json!({"format":"illustash-evidence/1","library_id":library_id,"producer":{"name":"provenance","version":"db-v5"},"created_at":timestamp(""),"assets":outcomes,"files":{"evidence.jsonl":{"bytes":evidence.len(),"sha256":crate::strict_json::sha256_hex(evidence.as_bytes())},"terms.jsonl":{"bytes":terms.len(),"sha256":crate::strict_json::sha256_hex(terms.as_bytes())}}});
     let text = crate::strict_json::canonical(&manifest);
     crate::package::Package::from_texts(&text, &evidence, Some(&terms))?;
@@ -231,9 +233,8 @@ fn write_part(
     std::fs::write(output.join("manifest.json"), format!("{text}\n"))?;
     Ok(())
 }
-/// 按顺序导入待处理的包。核心因内容拒绝的包，或已经不存在的包，永远导入不了：把它连同原因标为 stale，
-/// 而不是挡住之后的所有交付。每个包都是整个缓存的快照，导入一个就替换前一个快照，所以最新结果为 stale 时，
-/// 把缓存当前的样子重新封包；新包只列出仍在图库里的图片。其他失败（数据库忙或读不出）保持队列原样，等下次重试。
+/// 按顺序交付完整快照。核心拒绝内容或分包缺失时把该次交付及原因标为 stale，继续处理后面的快照。
+/// 最新结果为 stale 时按当前缓存重封，只列出仍在图库里的图片。数据库忙等暂时失败保持队列原样，等下次重试。
 pub(super) fn deliver(library: &Library, cache: &Path) -> Result<Json> {
     if library.frozen() {
         return Ok(Json::Scalar(Value::Null));
@@ -263,8 +264,8 @@ pub(super) fn deliver(library: &Library, cache: &Path) -> Result<Json> {
     let _ = collect(library.instance_path(), &c, false);
     Ok(last)
 }
-/// 运行目录 `.provenance/<task>` 的保留规则（#31）。待处理的包保留：交付和恢复会导入它。已交付的包只保留最新的
-/// 一个，即核心现在持有的快照（每个包都替换前一个），供检查。stale 的包永远不会导入，原因留在
+/// 运行目录 `.provenance/<task>` 的保留规则（#31）。保留待交付的快照及其全部分包，另保留最近一次成功交付的
+/// 快照供检查。stale 的快照永远不会导入，原因留在
 /// `native_delivery.error`，所以删掉。带 `orphans` 时，没有交付记录的目录也删：这些是失败、被停止或在接收门
 /// 之前退出的运行，恢复从不导入它们。调用方持有溯源租约，所以这期间本包没有运行在写目录。返回删了多少个。
 pub(super) fn collect(instance: &Path, c: &Connection, orphans: bool) -> Result<usize> {
@@ -322,7 +323,7 @@ fn run_directory(instance: &Path, package: &str) -> Option<String> {
 }
 /// 交付一个待处理的包：结果是完成、带原因的 stale，或者出错并保持待处理。
 fn settle(library: &Library, c: &Connection, task: &str, path: &str, parts: usize) -> Result<(Json, bool)> {
-    match import(library, path, parts) {
+    match import(library, task, path, parts) {
         Ok(report) => {
             c.execute("UPDATE native_delivery SET status='done',error='' WHERE task_id=?", [task])?;
             Ok((report, false))
@@ -335,13 +336,19 @@ fn settle(library: &Library, c: &Connection, task: &str, path: &str, parts: usiz
         Err(e) => Err(e),
     }
 }
-fn import(library: &Library, path: &str, parts: usize) -> Result<Json> {
+fn import(library: &Library, task: &str, path: &str, parts: usize) -> Result<Json> {
     let saved = Path::new(path);
     let path = if saved.is_absolute() { saved.to_owned() } else { library.instance_path().join(saved) };
     let open = |index| -> Result<crate::package::Package> {
         let pkg = crate::package::Package::open(&part_path(&path, parts, index))?;
         if pkg.manifest.producer != "provenance" {
             return crate::error::invalid("不是溯源证据包");
+        }
+        if parts > 1
+            && pkg.manifest.assets.first().and_then(|outcome| outcome.task_id.as_ref())
+                != Some(&part_id(task, parts, index))
+        {
+            return crate::error::invalid("溯源分包与本次交付记录不符");
         }
         Ok(pkg)
     };
@@ -470,13 +477,24 @@ mod tests {
         let last = part_path(&output, parts, 1).join("manifest.json");
         let bytes = std::fs::read(&last).unwrap();
         std::fs::remove_file(&last).unwrap();
-        assert!(import(&library, path, parts).is_err());
+        assert!(import(&library, "first", path, parts).is_err());
         let count = |table: &str| {
             app.query_row(&format!("SELECT count(*) FROM {table}"), [], |r| r.get::<_, usize>(0)).unwrap()
         };
         assert_eq!(count("term_packages"), 0);
         assert_eq!(count("term_evidence"), 0);
         std::fs::write(last, bytes).unwrap();
+        // 把完整、可单独导入的后一包换到首包的位置。每个包的文件校验都会通过。
+        let first = part_path(&output, parts, 0);
+        let second = part_path(&output, parts, 1);
+        let saved = output.join("saved");
+        std::fs::rename(&first, &saved).unwrap();
+        std::fs::rename(&second, &first).unwrap();
+        assert!(
+            matches!(import(&library, "first", path, parts), Err(Error::Invalid(reason)) if reason.contains("交付记录"))
+        );
+        std::fs::rename(&first, second).unwrap();
+        std::fs::rename(saved, first).unwrap();
         c.execute(
             "INSERT INTO native_delivery(task_id,package,parts) VALUES ('first',?,?)",
             rusqlite::params![path, parts],
