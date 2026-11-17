@@ -198,17 +198,28 @@ PR 应明确区分“当前 head 上完整执行退出 0”和“当前候选仅
 
 2026-10-18 起，合入 main 由一个集成会话统一做（用户决定见 [AGENTS.md](../AGENTS.md#约定)「合并队列」一条）。起因：各开发会话分别在自己的 PR head 上跑全量，先合进一个，main 就变了，后面改到同一批文件的 PR 都要 rebase 再跑；并行的全量还互相抢机器。
 
-**开发会话**：做完定向检查和平台相关验收（Windows 定向构建与测试、虚拟机走查、浏览器走查），在 PR 描述里写明结果和检查级别（界面 / 普通代码 / 数据层 / 只改文档），转为 Ready 并写「待集成」。不跑本机全量，不合并。
+**开发会话**：做完定向检查和平台相关验收（Windows 定向构建与测试、虚拟机走查、浏览器走查），在 PR 描述里写明结果和检查级别（界面 / 普通代码 / 数据层 / 只改文档），转为 Ready 并写「待集成」。不跑本机全量，不合并。推送照 [AGENTS.md](../AGENTS.md#约定)「推送频率」一条：一组相关提交攒成一次推送，被拒或遇到限流时等一会儿再试。
 
 改了 Rust 代码的 PR，转 Ready 之前先对改过的 Cargo 项目跑格式和 clippy（2026-10-19 用户定，#240；起因是第 11 批全量因为一个 PR 没过 `cargo fmt --check` 白跑一次）。参数与 `tools/check_all.sh` 相同：`crates/core`、`crates/platform`、`crates/relation-fft`、`crates/iqdb`、`desktop`、`native/terms` 跑 `cargo fmt --manifest-path <项目>/Cargo.toml --check`；`crates/core`、`crates/platform`、`crates/relation-fft`、`crates/iqdb`、`desktop` 跑 `cargo clippy --locked --manifest-path <项目>/Cargo.toml --all-targets -- -D warnings`，`native/terms` 在 `--all-targets` 后面再加 `--all-features`。clippy 经 `collab_run.py bg` 运行。之后合了最新 main 或又改了代码，要重跑。PR 描述写明在哪个 head 上跑的、结果如何。前后叠着的 PR（例如同一件事拆成几块）在描述里写明顺序。
 
 **集成会话**，每一批：
 
-1. 从 `origin/main` 开候选分支 `integrate/<日期>-<序号>`，按顺序把这批 PR 的 head 逐个 `git merge --no-ff` 进来；合不上的退回原会话，写明冲突文件，这一批不带它。同一批里有前后叠着的 PR，按叠放顺序合。
-   例外是迁移清单的指纹冲突（2026-10-18 用户批准）。`tests/migration_inventory.json` 每个 `sources` 指纹单独一行、指纹之间空一行（规范格式由 `python -m tools.migration_inventory fmt` 写出，`check` 和单元测试拦住不规范的格式），两个 PR 改不同文件的指纹时 git 会自动合并，只有两边改了同一个文件的指纹时才冲突。如果冲突只在这个文件，并且正在合入的 PR 相对共同基点只改了 `sources`，集成会话自己解决：取候选里的版本，再跑 `python -m tools.migration_inventory sync-sources`，它只把 `sources` 改成当前源码的指纹并按规范格式写回，不动边界和归属；然后确认 `python -m tools.migration_inventory report` 的 `warnings` 和 `errors` 都为空，提交合并。正在合入的 PR 如果还改了这个文件里的边界、归属或别的键，照旧退回原会话。GitHub 是逐个 PR 合并的，前一个 PR 合入后，这个 PR 在 GitHub 上仍会冲突，所以重算的结果要放到它的 head 上：候选里合入它的那个合并提交是它原 head 的后代，把这个提交快进推到它的分支，不用强推，测过的提交就是 PR head。推的是别的会话的分支，每次推之前先请用户同意，推完通知原会话合入前别再推送，并在 PR 里留评论说明。
+1. 从 `origin/main` 开候选分支 `integrate/<日期>-<序号>`，按顺序把这批 PR 的 head 逐个 `git merge --no-ff` 进来；合不上的退回原会话，写明冲突文件，这一批不带它。同一批里有前后叠着的 PR，按叠放顺序合。合并提交的信息照 GitHub 的格式写，并带上 PR 关联的 Issue：第 4 步整批推送时，Issue 靠合并提交里的 `Closes` 关闭（#612）。关联的 Issue 用 `gh pr view <PR> --json closingIssuesReferences` 查，没有就省掉最后一个 `-m`：
+
+   ```bash
+   git merge --no-ff <PR head> -m "Merge pull request #<PR> from shio-vinyl/<分支>" -m "<PR 标题>" -m "Closes #<Issue>"
+   ```
+
+   例外是迁移清单的指纹冲突（2026-10-18 用户批准）。`tests/migration_inventory.json` 每个 `sources` 指纹单独一行、指纹之间空一行（规范格式由 `python -m tools.migration_inventory fmt` 写出，`check` 和单元测试拦住不规范的格式），两个 PR 改不同文件的指纹时 git 会自动合并，只有两边改了同一个文件的指纹时才冲突。如果冲突只在这个文件，并且正在合入的 PR 相对共同基点只改了 `sources`，集成会话自己解决：取候选里的版本，再跑 `python -m tools.migration_inventory sync-sources`，它只把 `sources` 改成当前源码的指纹并按规范格式写回，不动边界和归属；然后确认 `python -m tools.migration_inventory report` 的 `warnings` 和 `errors` 都为空，提交合并。正在合入的 PR 如果还改了这个文件里的边界、归属或别的键，照旧退回原会话。第 4 步整批推送时，这个合并提交随候选一起进 main，PR 原来的 head 是它的祖先，GitHub 照常把 PR 标为已合并，不用再推 PR 的分支。只有退回逐个合入时，前一个 PR 合入后这个 PR 在 GitHub 上仍会冲突，重算的结果才要放到它的 head 上：候选里合入它的那个合并提交是它原 head 的后代，把这个提交快进推到它的分支，不用强推，测过的提交就是 PR head。推的是别的会话的分支，每次推之前先请用户同意，推完通知原会话合入前别再推送，并在 PR 里留评论说明。
 2. 候选里只要有一个 PR 需要全量（普通代码或数据层），就在候选 head 上经 `collab_run.py` 跑一次 `tools/check_all.sh`；含数据层改动的，升级测试照常包含。整批都是界面级或只改文档时，按各自门槛检查（界面级跑 `node --test` 和 `tests.test_frontend_architecture`、`tests.test_styleguide_sync` 两条 Python 测试，只改文档的查相对链接），不跑全量。
 3. 全量失败时，先排除负载等环境原因（#219），再按 PR 二分定位，把失败的 PR 退回原会话，其余重新组批。
-4. 通过后请用户批准合并。批准后按候选里的顺序，用 `gh pr merge --merge --match-head-commit <PR head>` 逐个合入；全部合完后核对 `origin/main^{tree}` 与候选 head 的 tree 相同，不同就停下报告。集成会话之外没有人合并，所以合并期间 main 不会被别人改动。
+4. 通过后请用户批准合并。批准后整批一次推到 main（#612）：N 个 PR 只有一次推送、main 上一次 CI，合入的就是测过的那些提交。
+   1. 把候选分支推到 origin，在它上面手动触发 CI：`gh workflow run ci.yml --ref integrate/<日期>-<序号>`。main 的分支保护要求推上去的提交带着通过的「全部检查」，管理员也不例外；各 PR 上跑过的检查挂在 PR 自己的合并提交上，不算候选的。可以在本机全量开跑时就触发，失败照下文「和合并队列的关系」处理。
+   2. 推之前逐个核对：每个 PR 现在的 head（`gh pr view <PR> --json headRefOid`）就是候选里合入它的那个合并提交的第二个父提交。对不上说明测过之后又有人推了，这个 PR 退出这一批，重新组批。这一步代替 `--match-head-commit`。
+   3. `git push origin <候选 head>:refs/heads/main`，不加 `--force`：main 没被动过才能快进。集成会话之外没有人合并，所以正常不会被拒。
+   4. 核对 `origin/main` 就是候选 head，每个 PR 都显示为已合并（`gh pr view <PR> --json state` 为 `MERGED`），关联的 Issue 都已关闭。不符就停下报告。
+
+   推送被拒时先看原因：不是快进，说明 main 被动过，停下报告；候选的「全部检查」还没跑完就等它，没过照失败处理。只有别的原因（比如分支保护改了）才退回逐个合入：按候选里的顺序用 `gh pr merge --merge --match-head-commit <PR head>`，每两个之间隔一分钟以上（AGENTS.md「推送频率」），全部合完后核对 `origin/main^{tree}` 与候选 head 的 tree 相同，不同就停下报告。
 5. 在每个合入的 PR 里留一条评论：候选 head、同批 PR、全量结果（机器、系统、架构、工具链、通过与跳过）。删除已合并的远端分支和候选分支。
 6. 清理本机 worktree（2026-10-19 用户定）：每个 worktree 带一份 Rust 构建产物，约 7～13 GB，不清理会把磁盘占满。这一批合入后，对 `git worktree list` 里分支已合入 `origin/main`、没有开着的 PR 以它为头或目标、`git status --porcelain` 为空（没有未提交和未跟踪的文件）的 worktree，执行 `git worktree remove` 并删除对应的本地分支；任何一条不满足就跳过，并在报告里列出。不清理固定验收区 `.venv/local-acceptance/worktree` 和集成会话自己的工作区；虚拟机母版和副本不在此列。报告里写明删了几个、腾出多少空间（`df -h /` 前后对比）。
 
@@ -226,7 +237,7 @@ PR 应明确区分“当前 head 上完整执行退出 0”和“当前候选仅
 
 挪走的依据：2026-11-14、15 两天 `ci.yml` 跑了 182 次、失败 23 次，一半以上是时限类偶发失败，集中在 macOS Python 全量和 Windows；macOS 的 Python 全量与本机全量完全重复。留下的几项这两天没出过偶发失败，单项都在几分钟内跑完。
 
-**触发**：`ci.yml` 在目标为 main 的 PR 打开、推送新提交、重新打开、转 Ready 时运行；草稿 PR 和来自 fork 的 PR 不跑。push 到 main 时也跑一次，作用是写编译缓存：GitHub 的缓存按分支隔离，PR 写的缓存只有同一个 PR 读得到，main 上写的所有 PR 都能读。也可以在 Actions 页面对任意分支手动触发。仓库私有时（`github.event.repository.private`）自动触发的运行一律跳过，只有手动触发的会跑，所以这个 PR 在公开前合入也不会耗分钟数；私有期间也不手动触发 macOS 运行（私有库按 10 倍计分钟）。同一 PR 有新提交时取消旧运行。push 到 main 的运行各自成组、互不取消；重型 job 另有只在 push 时共用的并发组，后一次代码 push 取消前一次还没跑完的同名 job，集成会话连续合入几个代码 PR 时，main 上仍只有最后一次跑完。纯文档 push 跳过这些 job，不进组，不会取消前一轮还在写缓存的代码运行（#501）。这些组按 ref 区分，别的分支的 push 运行不会取消 main 的 job。
+**触发**：`ci.yml` 在目标为 main 的 PR 打开、推送新提交、重新打开、转 Ready 时运行；草稿 PR 和来自 fork 的 PR 不跑。push 到 main 时也跑一次，作用是写编译缓存：GitHub 的缓存按分支隔离，PR 写的缓存只有同一个 PR 读得到，main 上写的所有 PR 都能读。也可以在 Actions 页面对任意分支手动触发；集成会话合入前在候选分支上手动触发一次，让候选 head 带上「全部检查」（见[合并队列](#合并队列集成会话)第 4 步）。仓库私有时（`github.event.repository.private`）自动触发的运行一律跳过，只有手动触发的会跑，所以这个 PR 在公开前合入也不会耗分钟数；私有期间也不手动触发 macOS 运行（私有库按 10 倍计分钟）。同一 PR 有新提交时取消旧运行。push 到 main 的运行各自成组、互不取消；重型 job 另有只在 push 时共用的并发组，后一次代码 push 取消前一次还没跑完的同名 job，集成会话整批一次推送时 main 上只有一次运行；退回逐个合入时，main 上仍只有最后一次跑完。纯文档 push 跳过这些 job，不进组，不会取消前一轮还在写缓存的代码运行（#501）。这些组按 ref 区分，别的分支的 push 运行不会取消 main 的 job。
 
 **job**：「改动范围」先判断改了什么：PR 比较它与 main 的合并提交和当前 main，push 比较推送前后的两棵树（多提交的 push 合起来算），都按 `--no-renames` 把改名拆成删除和新增，移进 `docs/` 的代码仍算代码。只改 `docs/` 和根目录的 Markdown 时跳过构建与测试；`docs/THIRD_PARTY.md` 和 `docs/BACKEND_TASKS.md` 随安装包分发，仍须检查。新建分支、取不到推送前的提交（如强推后）和手动触发一律按代码改动处理。四个必需 job：「Rust 格式、clippy 与编译」（依赖方向、前端结构、样式清单同步，core、platform、relation-fft、terms、iqdb 的 fmt 和 `clippy --all-targets`，core、platform 的 build）、前端 JS（Ubuntu）、桌面壳 fmt/clippy、原生固定契约空 PATH 重放。除 JS 外都跑在 Apple 芯片的 `macos-latest` 上。公开库另有 Windows x64 快检（见下节）。分支保护要求「全部检查」汇总结果。代码改动要求四个必需 job 全部成功，文档改动要求所有构建与测试跳过；分流失败、缺失输出和 fork PR 没跑检查均判失败。Windows 不在「全部检查」的 `needs` 里，汇总不等它，Windows 快检作为单独的检查显示实际成败。
 
