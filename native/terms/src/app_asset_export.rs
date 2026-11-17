@@ -495,6 +495,9 @@ mod tests {
         assert!(lookup.locate("p").unwrap().photos.is_some() && lookup.locate("a").unwrap().photos.is_none());
         assert!(crate::app_asset_files::reveal(&lib, "p").is_err());
         assert!(lookup.locate("../a.png").is_err() && lookup.locate("b").is_err());
+        // Windows 上开着的数据库连接和图库会占住文件，先关掉再删临时目录。
+        drop(lookup);
+        drop(lib);
         fs::remove_dir_all(&dir).unwrap();
     }
 
