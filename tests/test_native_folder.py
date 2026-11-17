@@ -29,6 +29,23 @@ from tests.test_read_http import wait_until
 from tools.wait_limit import WAIT
 
 
+def assert_folder_source(test, source, before_scan, recorded):
+    """逐表比较历史录制，变更过的文件链接按扫描账目独立核验。"""
+    actual = snapshot(source)
+    test.assertEqual({k: v for k, v in actual.items() if k not in ('schema', 'asset_links')},
+                     {k: v for k, v in recorded.items() if k not in ('schema', 'asset_links')})
+    with closing(sqlite3.connect(source)) as c, closing(sqlite3.connect(before_scan)) as previous:
+        ddl = """SELECT type,name,tbl_name,sql FROM sqlite_schema WHERE tbl_name<>'asset_links'
+                 AND name<>'files_asset' ORDER BY type,name"""
+        test.assertEqual(c.execute(ddl).fetchall(), previous.execute(ddl).fetchall())
+        keys = {r[1]: r[5] for r in c.execute('PRAGMA table_info(asset_links)')}
+        test.assertEqual(keys, {'asset': 4, 'system': 1, 'key': 2, 'source_id': 3, 'current': 0})
+        rows = c.execute('SELECT asset,system,key,source_id,current FROM asset_links ORDER BY 1,2,3,4').fetchall()
+        expected = c.execute("""SELECT asset,'file',path,source_id,1 FROM files UNION ALL
+                                SELECT asset,'md5',md5,source_id,1 FROM files ORDER BY 1,2,3,4""").fetchall()
+        test.assertEqual(rows, expected)
+
+
 class NativeFolderScanTest(unittest.TestCase):
     tearDown = FolderSource.tearDown
     rows = FolderSource.rows
@@ -62,21 +79,7 @@ class NativeFolderScanTest(unittest.TestCase):
         ids = [u for u, in self.rows('SELECT uuid FROM assets ORDER BY rowid') if u not in before]
         expected = self.rec.value('old scan')
         self.assertEqual(new, expected['result'])
-        # #439 改了链接表的唯一键并新增内容链接。其余表仍逐表比较旧的有类型 / rowid 摘要。
-        actual = snapshot(self.lib.source)
-        recorded = expected['source']
-        self.assertEqual({k: v for k, v in actual.items() if k not in ('schema', 'asset_links')},
-                         {k: v for k, v in recorded.items() if k not in ('schema', 'asset_links')})
-        with sqlite3.connect(self.lib.source) as c, sqlite3.connect(old) as previous:
-            # 只有链接表和两个显式索引允许和旧结构不同。
-            ddl = """SELECT type,name,tbl_name,sql FROM sqlite_schema WHERE tbl_name<>'asset_links'
-                     AND name<>'files_asset' ORDER BY type,name"""
-            self.assertEqual(c.execute(ddl).fetchall(), previous.execute(ddl).fetchall())
-            keys = {r[1]: r[5] for r in c.execute('PRAGMA table_info(asset_links)')}
-            self.assertEqual(keys, {'asset': 4, 'system': 1, 'key': 2, 'source_id': 3, 'current': 0})
-            self.assertEqual(c.execute("SELECT asset,system,key,source_id,current FROM asset_links ORDER BY 1,2,3").fetchall(),
-                             c.execute("""SELECT asset,'file',path,source_id,1 FROM files UNION ALL
-                                          SELECT asset,'md5',md5,source_id,1 FROM files ORDER BY 1,2,3""").fetchall())
+        assert_folder_source(self, self.lib.source, old, expected['source'])
         return new
 
     @unittest.skipIf(os.name == 'nt', '固定期望录自 macOS：资产键序与文件元数据随平台不同')
@@ -489,21 +492,22 @@ class NativeFolderHTTPTest(unittest.TestCase):
     def test_native_library_new_folder_full_application_typed_rowid_projection_comparison(self):
         clone = self.root / 'reference-clone.pilib'
         clone.mkdir()
-        (clone / 'library.json').write_bytes((self.lib.path / 'library.json').read_bytes())
-        for name in ('source.sqlite', 'library.sqlite'):
-            with sqlite3.connect(self.lib.path / name) as src, sqlite3.connect(clone / name) as dest:
-                src.backup(dest)
+        with closing(sqlite3.connect(self.lib.source)) as src, closing(sqlite3.connect(clone / 'source.sqlite')) as dest:
+            src.backup(dest)
         image(self.new_folder / 'a.png', 'red')
         image(self.new_folder / 'b.webp', 'blue')
         state=self.sync()
         self.assertEqual(state['state']['status'],'needs_recognition',state)
-        with sqlite3.connect(self.lib.source) as c:
-            ids = [u for u, in c.execute('SELECT uuid FROM assets ORDER BY rowid')]
         expected = self.rec.value('old import')
-        self.assertEqual(snapshot(self.lib.source),expected['source'])
-        # 应用数据库按 #201 对照基准比较：除已退役的表以外的每张表、带类型的单元格和行
-        # （core v8 改了 schema；录制的摘要覆盖 DDL、物理 rowid 和视图）。
-        self.assertTrue(self.rec.baseline('old import', self.lib.path))
+        assert_folder_source(self, self.lib.source, clone / 'source.sqlite', expected['source'])
+        # #201 的完整逻辑行对照仍包含旧文件链接，只从测试副本里移去上面已核验的新增内容链接。
+        for name in ('source.sqlite', 'library.sqlite', 'provenance.sqlite'):
+            if (self.lib.path / name).exists():
+                with closing(sqlite3.connect(self.lib.path / name)) as src, closing(sqlite3.connect(clone / name)) as dest:
+                    src.backup(dest)
+        with closing(sqlite3.connect(clone / 'source.sqlite')) as c, c:
+            c.execute("DELETE FROM asset_links WHERE system='md5'")
+        self.assertTrue(self.rec.baseline('old import', clone))
         for url in ('/api/assets','/api/ids','/api/home','/api/assets/count'):
             self.assertEqual(self.request(url)['body'],lifecycle.NativeLifecycleTest.reference_response(self, url)['body'])
         self.assertFalse(self.sentinel.exists())
