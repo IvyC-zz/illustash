@@ -3,8 +3,9 @@
 import {t, tb} from '../core/i18n.js';
 import {esc, bytes, home, number} from '../core/format.js';
 import {state} from '../core/state.js';
-import {SYNC_ACTIVE, INDEX_ACTIVE, startSync, pollSync, onJob} from '../core/jobs.js';
-import {loadModels, modelsPost, modelsWaiting, modelsFinished, modelsArrived, onModels, saveAcceleration, fallbacks} from '../core/models.js';
+import {SYNC_ACTIVE, INDEX_ACTIVE, startSync, pollSync, pollIndex, onJob} from '../core/jobs.js';
+import {loadModels, modelsPost, modelsWaiting, modelsFinished, modelsArrived, onModels, saveAcceleration, fallbacks,
+  loadCharacterBase, characterBasePost, characterBasePath, optionalGaps} from '../core/models.js';
 import {$, toast, redraw, busy} from './dom.js';
 import {confirmAction} from './dialog.js';
 
@@ -19,7 +20,12 @@ export function modelsLine(m = state.models) {
   if (running(m)) return t('正在下载 {done} / {total}', {done: bytes(j.done), total: bytes(j.total)})
     + (j.speed ? ' · ' + t('{speed}/秒', {speed: bytes(j.speed)}) : '') + (j.source ? ' · ' + t('来自 {source}', {source: j.source}) : '')
     + (j.proxy ? ' · ' + t('经代理 {proxy}', {proxy: j.proxy}) : '');
-  if (m.status === 'ready') return m.optional_missing ? t('识别模型已就位；WD 加速文件尚未就位，WD 暂用 CPU。') : t('识别模型已就位');
+  if (m.status === 'ready') {
+    const gaps = optionalGaps(m);
+    if (!m.optional_missing) return t('识别模型已就位');
+    if (gaps.base && gaps.wd) return t('识别模型已就位；WD 加速文件和基础角色索引尚未就位。');
+    return gaps.base ? t('识别模型已就位；基础角色索引尚未就位，只认得 WD 词表里的角色。') : t('识别模型已就位；WD 加速文件尚未就位，WD 暂用 CPU。');
+  }
   if (j?.status === 'failed' && j.failed_file) return t('{path} 没能下载，每个来源都试过了', {path: j.failed_file});
   if (j?.status === 'failed') return t('下载没有完成：{reason}', {reason: tb(j.message || '')});
   if (j?.status === 'cancelled') return t('已取消，下好的部分会保留，下次接着下');
@@ -41,7 +47,10 @@ export function modelsActions(m = state.models, compact = false) {
   if (running(m)) return `<button class="quiet small" data-models="cancel">${t('取消')}</button>`;
   if (m.status === 'ready') {
     const want = extra(m); if (!want) return '';
-    const label = want === 'download' ? t('下载 WD 加速文件（约 {size}）', {size: bytes(left(m))}) : t('修复 WD 加速文件');
+    const gaps = optionalGaps(m), size = bytes(left(m));
+    const label = want !== 'download' ? t('修复 WD 加速文件')
+      : gaps.base && gaps.wd ? t('下载 WD 加速文件和基础角色索引（约 {size}）', {size})
+      : gaps.base ? t('下载基础角色索引（约 {size}）', {size}) : t('下载 WD 加速文件（约 {size}）', {size});
     return `<button class="quiet small" data-models="download">${label}</button>`
       + `<button class="quiet small" data-models="import">${t('从文件导入…')}</button>`;
   }
@@ -93,22 +102,40 @@ export function accelerationLine(m = state.models) {
 // 接着下 WD 加速文件，它没下成时并进同一句（提示条只有一个，后一条会盖掉前一条）。没下成的是可选文件时写「WD 加速文件」。
 export function finishedNote(job, arrived, m = state.models) {
   const optional = !!job.failed_file && !!m?.files?.find(f => f.path === job.failed_file)?.optional;
+  const base = optional && job.failed_file === characterBasePath();
   const failure = job.status !== 'failed' ? ''
+    : base ? t('基础角色索引没能下载，可以在「设置 › 数据」里重试。')
     : optional ? t('WD 加速文件没能下载，WD 暂用 CPU。')
     : job.failed_file ? t('{path} 没能下载，每个来源都试过了', {path: job.failed_file})
     : t('下载没有完成：{reason}', {reason: tb(job.message || '')});
-  if (arrived) return optional ? t('识别模型已就位，开始识别；WD 加速文件没能下载，WD 暂用 CPU。')
+  if (arrived) return base ? t('识别模型已就位，开始识别；基础角色索引没能下载，可以在「设置 › 数据」里重试。')
+    : optional ? t('识别模型已就位，开始识别；WD 加速文件没能下载，WD 暂用 CPU。')
     : failure ? t('识别模型已就位，开始识别。{problem}', {problem: failure}) : t('识别模型已就位，开始识别');
   if (failure) return failure;
   return job.status === 'done' && job.kind === 'import' && m?.status !== 'ready' ? t('还缺 {n} 个文件', {n: m.missing.length}) : '';
 }
-// 镜像说明：本平台清单里有可选的 WD 加速文件时（Apple 芯片的 macOS），说明它从哪里下载。
+// 镜像说明：清单里有项目自己发布的可选文件时（WD 加速文件只在 Apple 芯片的 macOS 上，基础角色索引在每个平台上），
+// 说明它们从哪里下载。
 const mirrorNote = m => {
-  const hf = {hf: 'https://huggingface.co'};
-  return m.files.some(f => f.optional)
-    ? t('原始模型先从这个地址下载，不行再换 ModelScope。填 {hf} 就是直连 Hugging Face。WD 加速文件从项目的 GitHub Release 下载。', hf)
+  const hf = {hf: 'https://huggingface.co'}, base = characterBasePath();
+  const wd = m.files.some(f => f.optional && f.path !== base), index = !!base && m.files.some(f => f.path === base);
+  return wd && index ? t('原始模型先从这个地址下载，不行再换 ModelScope。填 {hf} 就是直连 Hugging Face。WD 加速文件和基础角色索引从项目的 GitHub Release 下载。', hf)
+    : index ? t('原始模型先从这个地址下载，不行再换 ModelScope。填 {hf} 就是直连 Hugging Face。基础角色索引从项目的 GitHub Release 下载。', hf)
+    : wd ? t('原始模型先从这个地址下载，不行再换 ModelScope。填 {hf} 就是直连 Hugging Face。WD 加速文件从项目的 GitHub Release 下载。', hf)
     : t('先从这个地址下载，不行再换 ModelScope。填 {hf} 就是直连 Hugging Face。', hf);
 };
+// 基础角色索引（#607）在这个图库里的状态和按钮；文件还没下载时由上面的下载那一行负责。
+export function characterBaseLine(b = state.characterBase) {
+  if (!b?.included || !b.writable || (!b.available && !b.enabled)) return '';
+  const n = number(b.characters);
+  const text = b.running ? t('基础角色索引正在更新')
+    : b.enabled ? t('基础角色索引：已启用，{n} 个角色', {n})
+    : b.withdrawn ? t('基础角色索引：已撤回') : t('基础角色索引：已下载，这个图库还没启用');
+  const button = b.running ? ''
+    : b.enabled ? `<button class="quiet small" data-models="base-withdraw">${t('撤回')}</button>`
+    : `<button class="quiet small" data-models="base-enable">${t('启用')}</button>`;
+  return `<div class="setting-line"><span>${esc(text)}</span>${button ? `<div class="models-acts">${button}</div>` : ''}</div>`;
+}
 // 设置 › 数据：状态、存放位置、镜像，以及同样的按钮。
 export function renderModelsCard() {
   const card = $('setModels'), m = state.models; if (!card) return;
@@ -117,6 +144,7 @@ export function renderModelsCard() {
     <p class="settings-note">${m.on_demand ? t('图片识别要用 WD 和 CCIP 两个模型，安装包里没有带，第一次使用时下载。每个文件都按应用里写好的大小和 SHA-256 核对，对不上就不用。') : t('这个安装自带识别模型。')}</p>
     <div class="setting-line"><span>${esc(modelsLine(m))}${m.status === 'ready' && extra(m) !== 'download' ? '' : `<small class="line-hint">${manualLink(m)}</small>`}</span></div>
     ${modelsBar(m)}${modelsFailures(m)}${importSummary(m.job)}<div class="models-acts">${modelsActions(m)}</div>${deleteButton(m)}
+    ${characterBaseLine()}
     ${accelerationLine(m)}
     ${m.on_demand ? `<div class="form-grid"><label for="modelMirror">${t('Hugging Face 镜像')}</label><input id="modelMirror" value="${esc(m.mirror)}" placeholder="${esc(m.mirror_default)}" spellcheck="false" autocomplete="off"></div>
     <p class="settings-note">${mirrorNote(m)}</p>
@@ -133,6 +161,11 @@ async function act(what) {
     if (what === 'download') await modelsPost({action: 'download'});
     else if (what === 'cancel') await modelsPost({action: 'cancel'});
     else if (what === 'import') { const r = await modelsPost({action: 'import'}); if (r.cancelled) return; }
+    else if (what === 'base-enable') { await characterBasePost(true); pollIndex(); }
+    else if (what === 'base-withdraw') {
+      if (!await confirmAction(t('撤回基础角色索引？由它给出的角色候选会删掉，你确认过和移出的结论都保留。撤回对这台电脑上的所有图库生效，之后可以再启用。'), t('撤回基础角色索引'), t('撤回'))) return;
+      await characterBasePost(false); pollIndex();
+    }
     else if (what === 'delete') {
       if (!await confirmAction(t('删除已下载的识别模型（约 {size}）？删除后要重新下载或从文件导入，才能识别新加入的图片；已经识别的结果都保留。', {size: bytes(state.models.total)}), t('删除识别模型'), t('删除'))) return;
       await modelsPost({action: 'delete'});
@@ -166,12 +199,18 @@ export function wireModels() {
   onModels((before, start) => {
     renderModels();
     const job = modelsFinished(before); if (!job) return;
+    // 基础角色索引刚下载好时，宿主在下一次恢复检查里为这个图库启用它；稍等再读状态和索引任务。
+    setTimeout(() => { loadCharacterBase().catch(() => {}); pollIndex(); }, 2000);
     const arrived = modelsArrived(before, start), note = finishedNote(job, arrived);
     if (note) toast(note);
     // 图库里已有的图片等的就是这个：现在就识别它们。
     if (arrived && !SYNC_ACTIVE.includes(state.sync?.status) && state.sync?.status !== 'off') startSync().then(pollSync).catch(e => toast(e.message));
   });
   // 一次同步结束：重新读取模型状态，卡片上的加速回退原因跟着最近一次识别变，不用等打开任务面板。
-  onJob((job, change) => { if (job === 'sync' && change.ended) loadModels().catch(() => {}); });
+  onJob((job, change) => {
+    if (job === 'sync' && change.ended) loadModels().catch(() => {});
+    if (job === 'index' && change.ended) loadCharacterBase().catch(() => {});
+  });
   loadModels().catch(() => {});
+  loadCharacterBase().catch(() => {});
 }

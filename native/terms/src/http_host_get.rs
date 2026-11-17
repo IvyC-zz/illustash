@@ -253,6 +253,8 @@ fn read(request: &Request, host: &Host, session: &Session, path: &str) -> Result
         "/api/provenance" => session.provenance.info().map(|v| Some((v, 200))),
         // 上次检查时每个关注作品的覆盖情况（#561）；/api/index 的回复冻结，另开这个路由。
         "/api/index/coverage" => Ok(Some((session.index.coverage(), 200))),
+        // 基础角色索引（#607）的状态，同样不并进 /api/index。
+        "/api/index/base" => session.index.base_info(&session.library).map(|v| Some((v, 200))),
         "/api/index" => {
             if progress(request) {
                 Ok(Some((session.index.progress(), 200)))

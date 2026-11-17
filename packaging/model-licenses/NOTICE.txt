@@ -42,6 +42,19 @@ wd-extension-v1.bin (separate optional download)
             Character Index declares MIT (wd-extension/Character-Index-MIT.txt).
             The original illustrations belong to their respective authors.
 
+character-index/character-index-v1.bin (optional download with the models)
+  Data:     Illustash base character index v1: one anchor vector and three
+            distance thresholds per character, computed from the character
+            metadata and CCIP reference features of DeepGHS Character Index.
+  Source:   https://huggingface.co/datasets/deepghs/character_index
+            revision 5ee6075ff09f82c27e23f33044b9f9cabaf1e8c3
+  Build:    tools/build_character_index.py; exact output recorded in native/terms/models.json.
+  Release:  https://github.com/shio-vinyl/illustash/releases/tag/character-index-v1
+  License:  Character Index declares MIT (wd-extension/Character-Index-MIT.txt);
+            the package carries the same text and its own provenance record.
+            The features come from the CCIP model below, whose terms apply.
+            The original illustrations belong to their respective authors.
+
 ccip/model_feat.onnx, ccip/model_metrics.onnx, ccip/metrics.json
   Model:    CCIP (Contrastive Anime Character Image Pre-Training) by DeepGHS,
             variant ccip-caformer-24-randaug-pruned.

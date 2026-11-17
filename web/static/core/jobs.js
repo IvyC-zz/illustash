@@ -93,7 +93,7 @@ export function indexLine(s, check) {
   const n = s.total ? ` ${number(s.done || 0)}/${number(s.total)}` : '';
   return {checking: t('正在检查 Danbooru…'), fetching: t('正在下载参考图') + n, cleaning: t('正在处理参考图'), building: t('正在更新角色特征'), scanning: t('正在重新扫描图库'), importing: t('正在导入图库'),
     paused: t('添加角色已暂停，等你确认后继续') + n,
-    error: s.kind === 'add' ? t('添加角色失败：{reason}', {reason: tb(s.message || '')}) : s.kind === 'drop' ? t('移除角色失败：{reason}', {reason: tb(s.message || '')}) : t('检查失败：{reason}', {reason: tb(s.message || '')})}[s.status] || (check ? t('上次检查：{time} · 待添加 {n} 个角色', {time: stamp(check.checked_at), n: number(check.missing.length)}) : t('尚未检查'));
+    error: s.kind === 'add' ? t('添加角色失败：{reason}', {reason: tb(s.message || '')}) : s.kind === 'drop' ? t('移除角色失败：{reason}', {reason: tb(s.message || '')}) : s.kind === 'base' ? t('基础角色索引更新失败：{reason}', {reason: tb(s.message || '')}) : t('检查失败：{reason}', {reason: tb(s.message || '')})}[s.status] || (check ? t('上次检查：{time} · 待添加 {n} 个角色', {time: stamp(check.checked_at), n: number(check.missing.length)}) : t('尚未检查'));
 }
 export const pollIndex = poller(async fresh => {
   const was = state.index?.state.status;
@@ -109,6 +109,7 @@ export const pollIndex = poller(async fresh => {
 });
 // 一次运行结束时要说什么，按它怎样结束。
 export function indexEndText(s) {
+  if (s.status === 'done' && s.kind === 'base') return s.enabled ? t('基础角色索引已启用，{n} 张图片的识别结果已更新', {n: number(s.changed)}) : t('基础角色索引已撤回，{n} 张图片的识别结果已更新', {n: number(s.changed)});
   if (s.status === 'done') return s.kind === 'drop' ? t('已移除，{n} 张图片已重新识别', {n: number(s.changed)}) : t('已添加 {added} 个角色，{n} 张图片的识别结果已更新', {added: number(s.added), n: number(s.changed)});
   if (s.status === 'checked') return s.found ? t('发现 {n} 个可添加的角色，在任务面板里添加', {n: number(s.found)}) : t('未发现新角色');
   if (s.status === 'paused') return t('添加角色已暂停，在任务面板里继续');

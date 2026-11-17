@@ -76,6 +76,7 @@ pub use illustash_core::character_projection;
 pub use illustash_core::character_relations;
 pub use illustash_core::character_review;
 pub use illustash_core::character_structure;
+mod character_index;
 pub mod cli;
 pub(crate) use illustash_core::compat_text;
 

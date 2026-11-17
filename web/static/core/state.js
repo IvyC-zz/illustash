@@ -33,8 +33,8 @@ export const state = {
   files: null,
   // ---- 图库完整性检查的回应：core/integrity.js ----
   integrity: null,
-  // ---- 识别模型的状态：core/models.js ----
-  models: null,
+  // ---- 识别模型和基础角色索引（#607，GET /api/index/base，这个图库的启用状态）的状态：core/models.js ----
+  models: null, characterBase: null,
   // ---- 角色数据包的状态（wd：GET /api/wd-extension，#550；ccip：GET /api/ccip-longtail，#559）：core/packs.js ----
   packs: {wd: null, ccip: null},
   // ---- 画廊列表（GET /api/galleries，#445）：core/galleries.js ----

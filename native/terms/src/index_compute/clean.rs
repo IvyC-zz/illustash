@@ -42,6 +42,17 @@ pub(super) fn existing(review: &Path, selected: &HashSet<String>) -> Result<(Vec
             vectors.push(rows.merged()?);
         }
     }
+    // 基础角色索引（#607）的锚点就是同一公式的合并结果；共享目录里同名的条目已在上面。
+    let listed = files(&review.join("char-index"), "json")?
+        .iter()
+        .filter_map(|p| p.file_stem().and_then(|s| s.to_str()).map(String::from))
+        .collect::<HashSet<_>>();
+    for entry in crate::character_index::load_job(review)?.into_iter().flatten() {
+        if !selected.contains(&entry.id) && !listed.contains(&entry.id) {
+            ids.push(entry.id);
+            vectors.push(entry.anchor);
+        }
+    }
     Ok((ids, vectors))
 }
 pub(super) fn clean(review: &Path, selected: &HashSet<String>) -> Result<()> {

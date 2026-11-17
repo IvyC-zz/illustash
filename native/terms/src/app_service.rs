@@ -500,6 +500,12 @@ impl Application {
         }
         let busy = session.syncer.running() || session.wd_extension.running();
         session.index.recover(&library, busy);
+        let base_busy = busy
+            || self.imports.busy()
+            || self.exports.running()
+            || session.human_exports.running()
+            || self.imports.recognition_running(session.generation);
+        session.index.sync_base(&library, base_busy);
         session.names.recover(&library);
         if let Err(error) = session.research.recover(&library, busy) {
             eprintln!("研究事件恢复失败：{error}");

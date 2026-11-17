@@ -321,6 +321,7 @@ impl Fixture {
             modelscope: "https://modelscope.invalid".into(),
             files: entries,
             wd_coreml: None,
+            character_index: None,
         }));
         Self { dir, files, manifest }
     }
@@ -724,14 +725,24 @@ fn the_built_in_manifest_lists_the_packaged_models() {
             Source::Upstream { hf, .. } => assert_eq!(hf.revision.len(), 40, "HF 固定提交"),
             Source::Project { url } => {
                 assert!(e.optional);
-                assert!(url.starts_with("https://github.com/shio-vinyl/illustash/releases/download/wd-coreml-v1/"));
+                assert!(
+                    url.starts_with("https://github.com/shio-vinyl/illustash/releases/download/wd-coreml-v1/")
+                        || url.starts_with(
+                            "https://github.com/shio-vinyl/illustash/releases/download/character-index-v1/"
+                        )
+                );
             }
         }
     }
     let variant = m.wd_coreml.as_ref().unwrap();
     assert_eq!(variant.source_sha256, m.files[0].sha256);
     assert_eq!(variant.revision, 1);
-    assert_eq!(m.files.iter().any(|e| e.optional), cfg!(all(target_os = "macos", target_arch = "aarch64")));
+    // 基础角色索引（#607）在每个平台都是可选文件，排在最后；WD 加速文件只在 Apple 芯片的 macOS 上。
+    let index = m.character_index.as_ref().unwrap();
+    assert_eq!(m.files.last().map(|e| (e.path.as_str(), e.optional)), Some((index.file.path.as_str(), true)));
+    assert_eq!(index.release.ccip_sha256, m.files[1].sha256, "包的锚点来自清单里的 CCIP 模型");
+    let variants = m.files.iter().filter(|e| e.optional && e.path != index.file.path).count();
+    assert_eq!(variants == 1, cfg!(all(target_os = "macos", target_arch = "aarch64")));
     assert_eq!(base(&m.mirror).unwrap(), m.mirror);
     assert!(m.manual.starts_with("https://github.com/shio-vinyl/illustash/"));
     assert_eq!(configured_root(Path::new("/r"), None), Path::new("/r/models"));

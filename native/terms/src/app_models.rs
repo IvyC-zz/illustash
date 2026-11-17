@@ -40,6 +40,15 @@ pub struct Manifest {
     pub files: Vec<Entry>,
     /// macOS 的 WD 执行变体；原始文件仍决定模型身份和 CPU 回退。
     pub wd_coreml: Option<WdCoreMl>,
+    /// 基础角色索引（#607）：所有平台都作为可选文件下载，缺它不挡识别。
+    #[serde(default)]
+    pub character_index: Option<CharacterIndex>,
+}
+#[derive(Deserialize, Clone)]
+pub struct CharacterIndex {
+    #[serde(flatten)]
+    pub release: crate::character_index::Release,
+    pub file: Entry,
 }
 #[derive(Deserialize, Clone)]
 pub struct Entry {
@@ -86,8 +95,48 @@ pub fn manifest() -> &'static Manifest {
                 manifest.files.push(file);
             }
         }
+        if let Some(index) = &mut manifest.character_index {
+            if let Some(path) = std::env::var_os("ILLUSTASH_TEST_CHARACTER_INDEX") {
+                test_character_index(index, Path::new(&path));
+            }
+            let mut file = index.file.clone();
+            file.optional = true;
+            manifest.files.push(file);
+        }
         manifest
     })
+}
+
+/// 走查和测试用本机合成包换掉清单里的基础角色索引（#607，同 `ILLUSTASH_TEST_CCIP_LONGTAIL`）：文件名和发布版一致，
+/// 角色数和大小不超过发布版，只能从 127.0.0.1 的 HTTP 端口下载。只在测试进程里设置，清单无效时直接停下。
+fn test_character_index(index: &mut CharacterIndex, path: &Path) {
+    #[derive(Deserialize)]
+    struct Fixture {
+        characters: usize,
+        ccip_sha256: String,
+        size: u64,
+        sha256: String,
+        url: String,
+    }
+    let text = fs::read_to_string(path).expect("读得到基础角色索引测试清单");
+    let fixture: Fixture = serde_json::from_str(&text).expect("基础角色索引测试清单有效");
+    let local = url::Url::parse(&fixture.url).is_ok_and(|u| {
+        u.scheme() == "http" && u.host_str() == Some("127.0.0.1") && u.username().is_empty() && u.port().is_some()
+    });
+    let hex = |s: &str| s.len() == 64 && s.bytes().all(|b| b.is_ascii_digit() || (b'a'..=b'f').contains(&b));
+    assert!(
+        local
+            && (1..=index.release.characters).contains(&fixture.characters)
+            && (1..=index.file.size).contains(&fixture.size)
+            && hex(&fixture.sha256)
+            && hex(&fixture.ccip_sha256),
+        "基础角色索引测试清单无效，下载地址须为 127.0.0.1 的 HTTP 端口"
+    );
+    index.release.characters = fixture.characters;
+    index.release.ccip_sha256 = fixture.ccip_sha256;
+    index.file.size = fixture.size;
+    index.file.sha256 = fixture.sha256;
+    index.file.source = Source::Project { url: fixture.url };
 }
 
 /// worker 加载模型的根目录：`ILLUSTASH_MODELS`（相对于资源根目录），否则 `<resources>/models`。
@@ -923,6 +972,7 @@ fn longtail_place(resources: &Path) -> Result<Place> {
             optional: false,
         }],
         wd_coreml: None,
+        character_index: None,
     });
     let shared = crate::app_resources::shared_path(resources)?;
     Ok(Place {
@@ -968,13 +1018,14 @@ fn acceleration_at(shared: Option<&Path>, place: &Place) -> Value {
     }
     value
 }
-/// 可选文件（只有 WD 加速文件）装好的时间：下载和导入都先在 `.partial` 里写出新文件，校验后改名进根目录（`activate`），
+/// WD 加速文件装好的时间（可选文件里只看它，基础角色索引不算）：下载和导入都先在 `.partial` 里写出新文件，校验后改名进根目录（`activate`），
 /// 所以它的修改时间就是装好的时间，与所选文件原来的时间无关；同长度损坏的修复同样写出新文件。
 fn variant_installed(root: &Path, manifest: &Manifest) -> Option<SystemTime> {
+    let index = manifest.character_index.as_ref().map(|c| c.file.path.as_str());
     manifest
         .files
         .iter()
-        .filter(|e| e.optional && has(root, e))
+        .filter(|e| e.optional && Some(e.path.as_str()) != index && has(root, e))
         .filter_map(|e| fs::metadata(root.join(&e.path)).and_then(|m| m.modified()).ok())
         .max()
 }
@@ -1163,6 +1214,7 @@ fn extension_place(resources: &Path) -> Result<Place> {
         modelscope: String::new(),
         files: vec![spec.file.clone()],
         wd_coreml: None,
+        character_index: None,
     });
     let shared = if std::env::var_os("ILLUSTASH_SHARED").is_some() {
         crate::app_resources::shared_path(resources)?

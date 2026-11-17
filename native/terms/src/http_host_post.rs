@@ -635,6 +635,15 @@ fn route(
                 session.index.post(&library, body, busy)
             }
         }
+        "/api/index/base" => {
+            let library = session.library.clone();
+            let busy = session.syncer.running() || session.wd_extension.running();
+            if host.imports.recognition_running(session.generation) {
+                Err(Error::Invalid("识别结果正在导入，完成后再更新角色索引".into()))
+            } else {
+                session.index.base_post(&library, body, busy)
+            }
+        }
         "/api/names" => {
             let library = session.library.clone();
             session.names.post(&library, body)

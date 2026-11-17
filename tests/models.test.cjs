@@ -135,6 +135,32 @@ test('WD 加速文件可补下载，缺失不阻塞识别，下载中仍可取�
   assert.match(context.modelsActions({...m, optional_missing: false, acceleration: {backend: 'coreml', on: true, last: {wd: {reason: '损坏'}}}}), /修复 WD 加速文件/);
 });
 
+test('基础角色索引（#607）：缺文件时提示和按钮按缺的是哪个写，下好后按图库启用或撤回', () => {
+  const base = {included: true, characters: 7367, file: {path: 'character-index/character-index-v1.bin'}, available: false,
+    enabled: false, withdrawn: false, running: false, writable: true, mode: null};
+  const files = [{path: 'coreml/wd.onnx', optional: true}, {path: base.file.path, optional: true}];
+  const saved = context.state.characterBase;
+  try {
+    context.state.characterBase = base;
+    const both = models({status: 'ready', optional_missing: true, total: 1110 * MB, have: 618 * MB, files, missing: files.map(f => f.path)});
+    assert.equal(context.modelsLine(both), '识别模型已就位；WD 加速文件和基础角色索引尚未就位。');
+    assert.match(context.modelsActions(both), /下载 WD 加速文件和基础角色索引（约 492.0 MB）/);
+    const only = {...both, have: 1085 * MB, missing: [base.file.path]};
+    assert.equal(context.modelsLine(only), '识别模型已就位；基础角色索引尚未就位，只认得 WD 词表里的角色。');
+    assert.match(context.modelsActions(only), /下载基础角色索引（约 25.0 MB）/);
+    assert.equal(context.finishedNote({status: 'failed', failed_file: base.file.path}, true, only),
+      '识别模型已就位，开始识别；基础角色索引没能下载，可以在「设置 › 数据」里重试。');
+    // 文件还没下载：这一行不出现，由上面的下载负责。
+    assert.equal(context.characterBaseLine(base), '');
+    assert.match(context.characterBaseLine({...base, available: true}), /已下载，这个图库还没启用.*data-models="base-enable"/s);
+    assert.match(context.characterBaseLine({...base, available: true, enabled: true}), /已启用，7,367 个角色.*data-models="base-withdraw"/s);
+    assert.match(context.characterBaseLine({...base, available: true, withdrawn: true}), /已撤回.*data-models="base-enable"/s);
+    assert.doesNotMatch(context.characterBaseLine({...base, available: true, enabled: true, running: true}), /data-models/);
+    assert.equal(context.characterBaseLine({...base, available: true, writable: false}), '');
+    assert.equal(context.characterBaseLine({...base, included: false}), '');
+  } finally { context.state.characterBase = saved; }
+});
+
 // 依次读到这些状态（core/models.js 的 adopt 的做法），返回每次读取后「模型刚到」的判断（#375）。第一个 before 为空：
 // 页面刚打开。
 function arrivals(...seen) {
