@@ -378,13 +378,15 @@ pub(crate) fn builtin_ccip() -> Result<Pack> {
 
 // ---------- 签名 ----------
 
-/// 专签数据包的公钥。仓库里的 `pack-key.pub` 还是占位时为 None，目录功能不启用。测试和走查可以用
-/// `ILLUSTASH_TEST_PACKS_PUBKEY` 换成测试密钥，但只在 ILLUSTASH_UPDATE_BASE 指向本机测试服务时才认。
+/// 专签数据包的公钥。仓库里的 `pack-key.pub` 还是占位时为 None，目录功能不启用。
+/// ILLUSTASH_UPDATE_BASE 指向本机测试服务时（测试和走查），只认 `ILLUSTASH_TEST_PACKS_PUBKEY` 给的测试公钥，
+/// 没给就不启用：本机测试服务拿不出用正式密钥签的目录，检查更新的测试也不会因为配了正式公钥而多出请求。
 pub(crate) fn pubkey() -> Option<String> {
     if std::env::var_os("ILLUSTASH_UPDATE_BASE").is_some() {
-        if let Some(key) = std::env::var("ILLUSTASH_TEST_PACKS_PUBKEY").ok().filter(|k| !k.trim().is_empty()) {
-            return Some(key.trim().to_owned());
-        }
+        return std::env::var("ILLUSTASH_TEST_PACKS_PUBKEY")
+            .ok()
+            .map(|k| k.trim().to_owned())
+            .filter(|k| !k.is_empty());
     }
     configured(PUBKEY_FILE)
 }
@@ -510,7 +512,7 @@ pub(crate) fn refresh(resources: &Path) -> Option<std::result::Result<Adopted, S
     pubkey()?;
     Some((|| {
         let prefix = crate::app_updates::asset_url(&format!("{RELEASE_PREFIX}{CATALOG_TAG}/"))?;
-        let agent = crate::app_models::download_agent(Duration::from_secs(15));
+        let agent = crate::app_models::download_agent(Duration::from_secs(15), &prefix);
         let bytes = get(&agent, &format!("{prefix}{CATALOG_NAME}"), CATALOG_LIMIT)?;
         let signature = get(&agent, &format!("{prefix}{SIGNATURE_NAME}"), SIGNATURE_LIMIT)?;
         adopt(resources, &bytes, &signature).map_err(|e| e.reason())

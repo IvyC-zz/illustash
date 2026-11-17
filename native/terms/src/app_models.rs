@@ -313,11 +313,13 @@ fn windows_proxy(text: &str) -> Option<String> {
     };
     Some(if chosen.contains("://") { chosen } else { format!("http://{chosen}") })
 }
-/// 读数据包目录用的连接（#602）：照下载模型的规矩走代理、跟随跳转（GitHub 的下载地址会跳到存储服务），整体限时。
-pub(crate) fn download_agent(timeout: Duration) -> ureq::Agent {
-    let proxy = proxy();
+/// 读数据包目录用的连接（#602）：照下载模型的规矩走代理（本机上的测试服务不走）、跟随跳转（GitHub 的下载地址会跳到
+/// 存储服务），整体限时。
+pub(crate) fn download_agent(timeout: Duration, address: &str) -> ureq::Agent {
+    let local =
+        url::Url::parse(address).is_ok_and(|u| matches!(u.host_str(), Some("127.0.0.1" | "localhost" | "[::1]")));
     let mut builder = ureq::AgentBuilder::new().timeout(timeout).redirects(8);
-    if let Some(proxy) = proxy.as_deref().and_then(|address| ureq::Proxy::new(address).ok()) {
+    if let Some(proxy) = proxy().filter(|_| !local).as_deref().and_then(|address| ureq::Proxy::new(address).ok()) {
         builder = builder.proxy(proxy);
     }
     builder.build()

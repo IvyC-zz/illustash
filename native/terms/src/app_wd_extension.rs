@@ -58,8 +58,10 @@ impl Package {
             serde_json::from_slice(&input[..end]).map_err(|e| Error::invalid(format!("WD 扩展包清单无效：{e}")))?;
         let coefficients = &input[end + 1..];
         let heads = pack.heads;
+        // 目录里的包，模型和标签表都要是目录写的那两个。内置包只看模型（models.json 只写了它，和以前一样）；
+        // 标签表和每次交付对不对得上，扫描时逐批核对（`compatible`）。
         let base_matches = matches!(&pack.base, Base::Wd { model, tags }
-            if *model == manifest.wd_model_sha256 && *tags == manifest.wd_tags_sha256);
+            if *model == manifest.wd_model_sha256 && (pack.builtin || *tags == manifest.wd_tags_sha256));
         if manifest.format != pack.format
             || !base_matches
             || manifest.labels.len() != heads
