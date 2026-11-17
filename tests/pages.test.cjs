@@ -19,6 +19,7 @@ const ROWS = {
   '首页': {hash: '#/', page: 'home', doc: '`#/`'},
   '图库': {hash: '#/library?tag=x', page: 'library', doc: '`#/library`'},
   '角色页': {hash: '#/library?char=c1', page: 'library', char: true, doc: '`#/library?char='},
+  '更多像这张的': {hash: '#/library?like=%5B%22a%22%5D', page: 'library', doc: '`#/library?like='},
   '资料库 · 角色': {hash: '#/characters', page: 'characters', doc: '`#/characters`'},
   '资料库 · 作品': {hash: '#/characters/works', page: 'characters', doc: '`#/characters/works`'},
   '资料库 · 画师': {hash: '#/characters/artists', page: 'characters', doc: '`#/characters/artists`'},

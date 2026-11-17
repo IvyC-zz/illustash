@@ -7,6 +7,7 @@ import {fetchChar} from '../core/meta.js';
 import {detailAfterViewer, shownUuid} from '../core/modes.js';
 import {keyScope, pageOf, poolIs, viewOf} from '../core/pages.js';
 import {charHash, cleanup, filterRoute, go, hashFor} from '../core/route.js';
+import {likeRoute} from '../core/like.js';
 import {api} from '../core/session.js';
 import {state} from '../core/state.js';
 import {$, readFailure, workSmall} from './dom.js';
@@ -80,6 +81,7 @@ export async function inspect(ident, quiet = false) {
     $('inspector').innerHTML = `<div class="inspector-head"><button class="icon" data-nav="-1" aria-label="${t('上一张')}" title="${t('上一张（←）')}">${INSP_ICONS.prev}</button><button class="icon" data-nav="1" aria-label="${t('下一张')}" title="${t('下一张（→）')}">${INSP_ICONS.next}</button><div class="spacer"></div><button class="icon" id="expand" title="${t('大图（Space）')}" aria-label="${t('大图')}">${INSP_ICONS.expand}</button><button class="icon" id="closeInspector" aria-label="${t('关闭详情')}" title="${t('关闭（Esc）')}">${INSP_ICONS.close}</button></div>
       <button class="preview" id="previewButton" title="${t('大图查看')}"><img src="/image?id=${encodeURIComponent(ident)}&size=preview" alt="${t('插画预览')}" draggable="false"></button>
       ${shouldAsk(d, ident) ? askHTML(d.question) : ''}
+      <section class="inspector-section"><div class="chips-row"><button class="quiet small" id="likeOne">${t('更多像这张的')}</button></div></section>
       ${pc ? `<section class="inspector-section cc-card"><a class="cc-name" href="${charHash(pc.id)}" title="${t('在图库里只看 TA')}">${esc(pc.name)}${workSmall(pc)}</a>${original ? `<div class="cc-orig">${esc(original)}</div>` : ''}${path.length ? `<div class="cc-path">${path.map(esc).join(' · ')}</div>` : ''}${pendingNote}
         <div id="charStats" class="cc-stats"></div></section>`
         : `<section class="inspector-section cc-card"><div class="cc-name muted">${d.unknown ? t('已跳过') : t('还没认出是谁')}</div>${pendingNote}</section>`}
@@ -105,6 +107,7 @@ export async function inspect(ident, quiet = false) {
     for (const b of $('inspector').querySelectorAll('[data-curate]')) b.onclick = () => mutate('/api/curate', {ids: [ident], action: b.dataset.curate}, b.dataset.curate === 'exclude' || poolIs(state.route, 'excluded', 'pending'));
     $('skipOne')?.addEventListener('click', () => singleAction('skip'));
     $('addTag').onclick = () => singleAction('tag');
+    $('likeOne').onclick = () => likeOne(ident);
     for (const b of $('inspector').querySelectorAll('[data-artist-verdict]')) b.onclick = () => {
       const v = b.dataset.artistVerdict || null;
       mutate('/api/artist/verdict', {ids: [ident], artist: b.dataset.artist, verdict: v, name: b.dataset.name}, v === 'no' && state.route.artist === b.dataset.artist);
@@ -270,15 +273,22 @@ async function refreshViewerBar(item, i) {
   if (!d || state.viewerItem?.uuid !== item.uuid) return;
   state.detail = d; $('viewerBar').innerHTML = (shouldAsk(d, item.uuid) ? askHTML(d.question, true) : '') + identityChips(d, true) + viewerActions(d);
   bindIdentity($('viewerBar'), d, item.uuid); bindAsk($('viewerBar'), d, item.uuid);
-  for (const b of $('viewerBar').querySelectorAll('[data-vact]')) b.onclick = () => b.dataset.vact === 'info' ? toggleInfo() : singleAction(b.dataset.vact);
+  for (const b of $('viewerBar').querySelectorAll('[data-vact]')) {
+    const act = b.dataset.vact;
+    b.onclick = () => act === 'info' ? toggleInfo() : act === 'like' ? likeOne(item.uuid) : singleAction(act);
+  }
 }
-// 大图底栏的「跳过 S」「排除 X」「信息 I」（#424 的 2-1、2-7）：只在这一页按这个键做的就是它时才画。跳过和详情栏的
+// 「更多像这张的」（#449）：详情栏预览图下面、大图底栏各一个，去相似结果（core/like.js；结果页的标题在 ui/like.js）。
+// 在相似结果里再点，换成这一张作例图，比较方式不变。没有快捷键。
+const likeOne = ident => go(likeRoute([ident], state.route.by));
+// 大图底栏的「跳过 S」「排除 X」「信息 I」（#424 的 2-1、2-7）和「更多像这张的」（#449，没有键）：只在这一页按这个键做的就是它时才画。跳过和详情栏的
 // 「跳过 S」一样，只在能跳过的页、图还没有角色也还没跳过时有（刚跳过、还停在原图时不再显示）；已排除的图 X 是恢复收录，不画；信息在有详情栏的页面才有。
 function viewerActions(d) {
   const r = state.route, b = [], btn = (act, key, label) => `<button class="alt" data-vact="${act}"><kbd>${key}</kbd>${label}</button>`;
   if (pageOf(r).skip && !d.memberships.length && !d.unknown) b.push(btn('skip', 'S', t('跳过')));
   if (!d.excluded) b.push(btn('exclude', 'X', t('排除')));
   if (keyScope(viewOf(r)) && !previewing()) b.push(btn('info', 'I', t('信息')));
+  b.push(`<button class="alt" data-vact="like">${t('更多像这张的')}</button>`);
   return b.length ? `<div class="alts"><div class="alt-row">${b.join('')}</div></div>` : '';
 }
 function applyView() { $('viewerImg').style.transform = `translate(${view.x}px,${view.y}px) scale(${view.scale})`; $('viewerStage').classList.toggle('zoomed', view.scale > 1.01); }

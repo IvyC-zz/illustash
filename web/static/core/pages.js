@@ -5,6 +5,7 @@
 // 新增一个页面要做什么，见 docs/WEB_UI_MAP.md「新增一个页面」。
 import {isMac} from './format.js';
 import {t} from './i18n.js';
+import {likeParams} from './like.js';
 
 // 字段：
 //   prefix     地址里的前缀，#/g/<id>、#/s/<id>；没有前缀的页面用页面名作路径（#/unmatched）
@@ -37,7 +38,7 @@ const libraryBase = {
   params: r => {
     const f = {};
     if (r.day) f.day = r.day; if (r.work) f.work = r.work; if (r.artist) f.artist = r.artist; if (r.q) f.q = r.q; if (r.tag) f.tag = r.tag; if (r.utag) f.utag = r.utag;
-    return f;
+    return Object.assign(f, likeParams(r));
   },
   // 「只看 R18」时没有图，多半是这个筛选造成的：写明，旁边给「显示全部」（#386 的 2-16）。
   empty: (r, {nsfw} = {}) => nsfw === 'only' ? t('「只看 R18」开着，没有符合条件的 R18 图片。') : t('没有符合条件的图片。'),
@@ -88,16 +89,23 @@ const character = {name: 'character', virtual: true, legacyPrefix: 'c', ...libra
   empty: (r, ctx = {}) => narrowed(r) || ctx.nsfw === 'only' ? PAGES.library.empty(r, ctx) : t('这个角色已经没有图片了。'),
   hint: () => t('点击或拖动选择 · Space 看大图 · ⌫ 不是 TA · C 换成')};
 
+// 「更多像这张的」（#449）：也不是 route.page，而是 library 加 like（例图）参数，见 core/like.js。点击照常打开详情；排序多
+// 「最相似」并默认是它；没有结果时，有别的筛选就照图库说，否则说没找到。#427 的「看过了」角标和按钮在这里另加 card、bar。
+const like = {name: 'like', virtual: true, ...libraryBase, click: 'browse', sorts: ['similar', ...NEWEST], sortPref: 'sortLike', sortDefault: 'similar',
+  empty: (r, ctx = {}) => narrowed(r) || r.work || r.artist || r.day || ctx.nsfw === 'only' ? PAGES.library.empty(r, ctx) : t('没有找到相似的图。')};
+
 export const PAGES = Object.fromEntries(list.map(p => [p.name, p]));
 export const CHARACTER = character;
+export const LIKE = like;
+const VIRTUAL = {character, like};
 // 路由里的页面名没登记时（只有测试会这样）按没有特殊性质的网格页处理。
 const UNKNOWN = {name: '', area: 'grid', panel: false, click: 'own', nav: '', toolbar: 'grid', sorts: NEWEST, bar: 'default'};
 export const pageOf = route => PAGES[route.page] || UNKNOWN;
 // 主区的全部种类（index.html 里各有一个元素），ui/dom.js 的 showArea 按它切换。
 export const AREAS = [...new Set(list.map(p => p.area))];
-// 屏幕上看到的那一页：角色筛选下是角色页，否则就是 route.page。char 默认取路由的 char；渲染标题和元数据重画时
+// 屏幕上看到的那一页：带例图的是相似结果，角色筛选下是角色页，否则就是 route.page。char 默认取路由的 char；渲染标题和元数据重画时
 // 要看角色有没有读到，传 state.char。
-export const viewOf = (route, char = route.char) => char ? CHARACTER : pageOf(route);
+export const viewOf = (route, char = route.char) => route.like ? LIKE : char ? CHARACTER : pageOf(route);
 // 单图快捷键在这页的范围（见上面的 keys 字段）：'grid'、'shown' 或 ''。
 export const keyScope = view => view.keys || (view.area === 'grid' ? 'grid' : '');
 // 本页的后端 pool 是不是这几个之一（条目离开本页的判断：设为角色之后离开未识别、排除之后离开已排除……）。
@@ -105,7 +113,7 @@ export const keyScope = view => view.keys || (view.area === 'grid' ? 'grid' : ''
 export const onPage = (route, ...names) => names.includes(route.page);
 export const poolIs = (route, ...pools) => pools.includes(pageOf(route).pool);
 
-// ui/ 登记页面的处理函数：{页面名: {render, refresh, heading, ...}}。
+// ui/ 登记页面的处理函数：{页面名: {render, refresh, heading, ...}}；character、like 是上面两个视图。
 //   render({samePage})   进入本页时画主区；没有的页面是网格页，由 shell 调 reload(true)
 //   prepare(route)       进入本页前要先读的数据；返回 false 表示已经导航走了
 //   heading(r, ctx)      [标题, 副标题, 右侧链接 HTML]；角色页另用 drawHeading。副标题只放数量、状态和必须一眼看到的警告
@@ -113,13 +121,14 @@ export const poolIs = (route, ...pools) => pools.includes(pageOf(route).pool);
 //   onMeta(info)         计数等元数据到达后重画什么；没有的页面重画工具栏
 //   emptyNext(r)         网格空了时空状态下面的去处（链接或 data-empty 按钮的 HTML，#386 的 2-12）；没有的页面只有一句话
 //   emptyAct(act)        点了 emptyNext 里的 data-empty 按钮（「显示全部」由 shell 自己处理）
+//   readFailed(e)        网格读取失败时：返回一句话就当作没有结果、把它写进空状态，不弹错误条（相似结果的例图没有特征）
 //   reveal(uuid)         主区不是网格的页面把这张图滚进视野：详情栏、大图翻页时，和面板页借列表看的大图关掉时（#424）
 //   refresh(why)         数据变了之后重画面板页：'edit' 改动之后、'undo' 撤销之后、'learned' 确认或撤销后后台学习
 //                        收尾之后（#400）、'sync' 同步到新图之后、'nsfw' 切换 R18 之后、'view' 视图选项之后、
 //                        'ask' 「偶尔问一句」开关之后
 export function implement(hooks) {
   for (const [name, h] of Object.entries(hooks)) {
-    const page = name === 'character' ? character : PAGES[name];
+    const page = VIRTUAL[name] || PAGES[name];
     if (!page) throw new Error(`没有登记过的页面：${name}`);
     Object.assign(page, h);
   }

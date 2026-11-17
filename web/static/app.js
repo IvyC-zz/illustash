@@ -23,6 +23,8 @@ import {applyRoute, wireShell} from './ui/shell.js';
 import {renderGrid, undo, wireGrid} from './ui/grid.js';
 import {wirePalette} from './ui/palette.js';
 import {wireDetail} from './ui/detail.js';
+// 相似结果页（#449）只在载入时登记它的标题，没有 wire。
+import './ui/like.js';
 import {wireHome} from './ui/home.js';
 import {wireReview} from './ui/review.js';
 import {guideAfterBoot, guideOnOpen, wireGuide} from './ui/guide.js';

@@ -10,7 +10,8 @@ import {learnerState, learningSettled, metaSoon, refreshMeta} from '../core/meta
 import {prefs} from '../core/prefs.js';
 import {SHORTCUTS, currentSource, keyAction, keySelection, modes, selectionSize, shownUuid, viewerTarget} from '../core/modes.js';
 import {keyScope, pageOf, viewOf} from '../core/pages.js';
-import {browsing, cleanup, defaultSort, hashFor, stepHistory} from '../core/route.js';
+import {browsing, cleanup, defaultSort, go, hashFor, stepHistory} from '../core/route.js';
+import {canLike, likeRoute} from '../core/like.js';
 import {api, post, readError} from '../core/session.js';
 import {state} from '../core/state.js';
 import {offerWatch} from './catalog.js';
@@ -98,7 +99,18 @@ export async function reload(reset = false, place = null) {
     $('empty').innerHTML = next ? `<div>${text}<div>${next}</div></div>` : text;
     renderHeading();
     if (state.route.char) refreshMaybe(gen);
-  } catch (e) { if (e.name !== 'AbortError' && gen === state.generation && route === state.route) { error(e.message); $('resultCount').textContent = t('读取失败'); } }
+  } catch (e) {
+    if (e.name === 'AbortError' || gen !== state.generation || route !== state.route) return;
+    const text = viewOf(route).readFailed?.(e);   // 这一页认得的失败当作没有结果（core/pages.js 的 readFailed）
+    if (text) { showNone(text); return; }
+    error(e.message); $('resultCount').textContent = t('读取失败');
+  }
+}
+function showNone(text) {
+  state.total = 0; state.totalReady = true; state.countDirty = false; state.items = []; state.pages = new Set(); state.dataVersion++; state.gridKey = '';
+  renderGrid(); updateCount(); renderSelection();
+  $('empty').hidden = false; $('empty').textContent = text;
+  renderHeading();
 }
 // 首页借用网格的列表放它自己的图（详情栏翻页、大图都按这个列表走）。
 // 面板页看一组图的大图（previewList：按组整理、首页「认一认」、身份整理、画师抽查，#424 的 2-2、2-34）时列表先换成那一组，
@@ -527,6 +539,7 @@ export function renderSelection() {
   buttons += `<button class="quiet" data-act="tag">${t('标签')} <kbd>G</kbd></button>`;
   buttons += `<button class="quiet" data-act="findartist" title="${t('用像素哈希和 IQDB 查这些图的画师（只发哈希文本，不发图片；一次最多 500 张）')}">${t('查找画师')}</button>`;
   buttons += `<button class="quiet" data-act="export" ${exportActive() ? `disabled title="${t('正在导出，完成后再开始下一次')}"` : `title="${t('把原图复制到一个文件夹')}"`}>${t('导出…')}</button>`;
+  if (!state.sel.all && canLike(n)) buttons += `<button class="quiet" data-act="like">${n === 1 ? t('更多像这张的') : t('更多像这些的')}</button>`;
   if (!state.sel.all && n >= 2 && n <= 12) buttons += `<button class="quiet" data-act="relate" title="${t('两两比较，判断是同一张图、裁剪、差分、局部编辑，还是不同的图')}">${t('判断关系')}</button>`;
   const note = kind === 'audit' ? t('一次最多回答 500 张，这次答前 500 张') : t('超过 500 张需再点一次确认');
   // 重复页上改哪一份都会同步到整组副本：这件事放在动手的地方，不写在副本页常驻的说明里（#528）。
@@ -578,6 +591,7 @@ function runBarAction(act) {
   const payload = () => ({...selectionPayload(), confirm: n > 500});
   if (act === 'audit_yes' || act === 'audit_no') { answerAudit(act === 'audit_yes'); return; }
   if (act === 'export') { openExport(selectionPayload(), n); return; }
+  if (act === 'like') { if (!state.sel.all) go(likeRoute([...state.sel.ids])); return; }
   if (act === 'findartist') {
     const sel = state.sel;
     (sel.all ? api('/api/ids?' + new URLSearchParams({...filters(), limit: 500})).then(ids => ids.filter(u => !sel.exclude.has(u))) : Promise.resolve([...sel.ids].slice(0, 500)))

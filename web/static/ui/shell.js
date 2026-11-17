@@ -147,7 +147,7 @@ export function renderChrome() {
     return;
   }
   const tagPage = !!(r.char && state.char?.mascot);
-  const SORT_LABELS = {suspicious: t('可疑优先'), newest: t('最新加入'), oldest: t('最早加入'), hinted: t('有线索优先')};
+  const SORT_LABELS = {suspicious: t('可疑优先'), newest: t('最新加入'), oldest: t('最早加入'), hinted: t('有线索优先'), similar: t('最相似')};
   const sorts = view.sorts.filter(v => !(tagPage && v === 'suspicious')).map(v => [v, SORT_LABELS[v]]);
   const skins = r.char && !r.maybe ? (state.char?.variants || []).filter(v => v.count) : [];
   const variants = skins.length ? `<div class="chips-row">${[{id: '', name: t('全部'), count: state.char.count}, ...skins].map(v => `<button class="chip-filter${(r.variant || '') === v.id ? ' on' : ''}" data-variant="${esc(v.id)}">${esc(v.name)} <span>${number(v.count)}</span></button>`).join('')}</div>` : '';
@@ -325,6 +325,7 @@ const showAll = r => state.nsfw === 'only' ? `<button class="quiet" data-empty="
 implement({
   library: {emptyNext: showAll},
   character: {emptyNext: showAll},
+  like: {emptyNext: showAll},
   skipped: {emptyNext: () => emptyLink('#/groups', t('回到按组整理'))},
   pending: {emptyNext: () => emptyLink('#/excluded', t('回到已排除'))},
 });
