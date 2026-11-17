@@ -16,9 +16,14 @@ import {guideAfterPost, guideRefresh} from './guide.js';
 import {humanImportEnded, renderHumanBlock} from './human.js';
 import {renderIndexCard, renderLibrariesCard, renderNamesCard, renderProvenanceCard} from './settings.js';
 
+// 不改图片列表的写入（#452）：引导进度、画廊、收藏（不让图离开本页的那条路径在本地改心形；会离开的走 ui/grid.js 的
+// mutate，自己重读）、设置，以及启动后台任务（任务结束时由 afterJob 处理）。这些写入之后已读到的列表照旧有效。
+const KEEPS_LIST = new Set(['/api/onboarding', '/api/galleries', '/api/favorite', '/api/startup', '/api/cache', '/api/backup',
+  '/api/names', '/api/sync', '/api/index', '/api/provenance', '/api/similar', '/api/regroup', '/api/integrity', '/api/entities', '/api/oc/shared']);
 // 后端接受了一次写入：可能变了的计数和读取，以及向导的下一步。
 export function afterWrite(path, body) {
   guideAfterPost(path, body);
+  if (KEEPS_LIST.has(path)) return;
   listChanged();
   // 防止更早的元数据读取覆盖刚完成的改动。
   metaWritten(path === '/api/tag');

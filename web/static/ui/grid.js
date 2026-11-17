@@ -91,8 +91,9 @@ export async function reload(reset = false, place = null) {
     const pages = await Promise.all(offsets.map((o, i) => api(pageUrl(o, i === 0), {signal: abortList.signal})));
     if (gen !== state.generation || route !== state.route) return;
     if (epoch !== state.readEpoch) return reload(reset, place);
+    const same = reuseSame(state.items);
     state.total = pages[0].total; state.totalReady = true; state.countDirty = false; state.items = new Array(state.total); state.pages = new Set();
-    pages.forEach((p, i) => { p.items.forEach((item, j) => { if (offsets[i] + j < state.total) state.items[offsets[i] + j] = item; }); state.pages.add(offsets[i]); });
+    pages.forEach((p, i) => { p.items.forEach((item, j) => { if (offsets[i] + j < state.total) state.items[offsets[i] + j] = same(item); }); state.pages.add(offsets[i]); });
     state.dataVersion++; state.gridKey = '';
     if (place) restorePlace(place);
     renderGrid(); updateCount(); renderSelection();
@@ -107,6 +108,13 @@ export async function reload(reset = false, place = null) {
     if (text) { showNone(text); return; }
     error(e.message); $('resultCount').textContent = t('读取失败');
   }
+}
+// 重读回来的图和已显示的那份内容相同，就沿用原来的对象（#452）：renderGrid 按对象判断卡片要不要重建，写入之后只有
+// 变了的那几张重画。
+function reuseSame(items) {
+  const shown = new Map();
+  for (const x of items) if (x) shown.set(x.uuid, x);
+  return item => { const was = shown.get(item.uuid); return was && JSON.stringify(was) === JSON.stringify(item) ? was : item; };
 }
 function showNone(text) {
   state.total = 0; state.totalReady = true; state.countDirty = false; state.items = []; state.pages = new Set(); state.dataVersion++; state.gridKey = '';
@@ -307,6 +315,7 @@ function cardHTML(item, i) {
     + `${cardHeart(item, state.cellW < 70)}<span class="check" aria-hidden="true"></span>`;
   return `<div class="image-stage">${isSquare() ? inner : `<div class="fit-box${rawRatio(item) && rawRatio(item) !== ratio ? ' whole' : ''}">${inner}</div>`}</div>${caption}`;
 }
+const cardLabel = (item, i) => t('{names}，第 {n} 张', {names: item.memberships.map(m => m.name).join(t('、')) || t('未识别图片'), n: i + 1});
 export function renderGrid(relayout = false) {
   if ($('grid').hidden) return;
   const v = $('viewport'), grid = $('grid');
@@ -325,34 +334,43 @@ export function renderGrid(relayout = false) {
   const scale = screenScale(), key = `${first}:${last}:${state.cols}:${state.rowH}:${state.dataVersion}:${state.fit}:${gridLayoutKey}:${scale}`;
   if (key !== state.gridKey) {
     state.gridKey = key;
-    const existing = new Map([...grid.children].map(el => [Number(el.dataset.index), el]));
-    const keep = new Set();
+    // 已有的卡片按图找（#452）：写入后图合拢、重新排序时，内容没变的卡片只换位置，不重建；骨架按序号找。
+    const byId = new Map(), byIndex = new Map();
+    for (const el of grid.children) (el.dataset.id ? byId.set(el.dataset.id, el) : byIndex.set(Number(el.dataset.index), el));
+    const keep = new Set(), order = [];
     const dupCards = !!viewOf(state.route).card?.dup;
-    const layoutKey = `${state.cols}:${state.cellW}:${state.rowH}:${state.gap}:${state.fit}:${scale}:${state.route.page}:${state.route.char}:${state.route.maybe}:${state.route.reason}`;
+    // 卡片内容除了图本身，还看这些（视图选项里的说明和「可能是」提示也在内）：变了就重建。
+    const r = state.route, layoutKey = `${state.cols}:${state.cellW}:${state.rowH}:${state.gap}:${state.fit}:${scale}:`
+      + `${r.page}:${r.char}:${r.maybe}:${r.reason}:${viewOpts.captions}:${viewOpts.hints}`;
     for (let i = rowStart(first); i < rowStart(last); i++) {
       const item = state.items[i];
-      let el = existing.get(i);
+      let el = item ? byId.get(item.uuid) : byIndex.get(i);
+      if (keep.has(el)) el = undefined;
       // 重复页的角标颜色看前一组：前面一页后读到时颜色可能变，变了的卡片要重画。
       const hue = dupCards && item?.dup ? dupHue(i) : null;
       if (el && el._item === item && el._layoutKey === layoutKey && el._hue === hue) {
         const box = cardRect(i);
         for (const [k, value] of Object.entries(box)) if (el.style[k] !== `${value}px`) el.style[k] = `${value}px`;
-        keep.add(el); continue;
+        if (Number(el.dataset.index) !== i) { el.dataset.index = i; el.setAttribute('aria-label', cardLabel(item, i)); }
+        keep.add(el); order.push(el); continue;
       }
       const previous = el; el = document.createElement('div');
       el._item = item; el._layoutKey = layoutKey; el._hue = hue;
       if (previous) previous.replaceWith(el);
       else grid.insertBefore(el, [...grid.children].find(child => Number(child.dataset.index) > i) || null);
-      keep.add(el);
+      keep.add(el); order.push(el);
       const box = cardRect(i); Object.assign(el.style, Object.fromEntries(Object.entries(box).map(([k, value]) => [k, `${value}px`])));
       el.dataset.index = i;
       if (!item) { el.className = 'card skeleton'; continue; }
       el.className = 'card' + (isSquare() ? ' square' : ' fit'); el.dataset.id = item.uuid; el.setAttribute('role', 'button');
-      el.setAttribute('aria-label', t('{names}，第 {n} 张', {names: item.memberships.map(m => m.name).join(t('、')) || t('未识别图片'), n: i + 1}));
+      el.setAttribute('aria-label', cardLabel(item, i));
       el.innerHTML = cardHTML(item, i);
       el.querySelector('img').addEventListener('error', ev => { const msg = document.createElement('span'); msg.className = 'missing'; msg.textContent = t('图片暂不可读'); ev.target.replaceWith(msg); }, {once: true});
     }
     for (const el of [...grid.children]) if (!keep.has(el)) el.remove();
+    // 换了位置的卡片按序号排回去（Tab 和读屏按 DOM 的先后走），只挪不在位置上的那几张。
+    let at = grid.firstElementChild;
+    for (const el of order) { if (el === at) at = at.nextElementSibling; else grid.insertBefore(el, at); }
   }
   syncCards();
   clearTimeout(pageTimer); const gen = state.generation;
@@ -692,12 +710,17 @@ async function write(path, body, leaving, advance) {
   if (advance) kept.hold = null; else holdCurrent();
   const gone = leaving ? new Set(body.ids || state.items.filter(x => x && isSelected(x.uuid)).map(x => x.uuid)) : null;
   if (gone) for (const el of $('grid').children) if (gone.has(el.dataset.id)) el.classList.add('leaving');
+  const confirmed = path === '/api/change' && body.action === 'confirmed';
   try {
     const r = await post(path, body);
     quitSelecting();
     written(r.undo);
-    if (path === '/api/change' && body.action === 'confirmed') offerWatch(body.entities || [body.entity]).catch(() => {});
+    // 确认角色之后后台会学习，学完未识别计数和分组还会变（#400、#404）。先读一次学习状态再重读（#452）：这时已经落定
+    // （没有学习 worker，或者这次不用学），接下来这次重读就是最终值，不用再补读；还在学习的，落定后再读一次。
+    const learning = confirmed ? learningNow() : null;
+    if (confirmed) offerWatch(body.entities || [body.entity]).catch(() => {});
     if (gone) { await new Promise(done => setTimeout(done, Math.max(0, 170 - (performance.now() - started)))); collapse(gone); }
+    const first = await learning;
     await reload(); pageOf(state.route).refresh?.('edit'); metaSoon(path === '/api/tag');
     if (state.focused) inspect(state.focused, true);
     if (state.viewer >= 0) {
@@ -705,9 +728,7 @@ async function write(path, body, leaving, advance) {
       else if (advance || !kept.hold) showViewer(Math.min(state.viewer, state.total - 1));
       else { const i = indexOf(kept.hold.uuid); showViewer(i >= 0 ? i : state.viewer, i >= 0 ? state.items[i] : state.viewerItem); }
     }
-    // 确认角色之后后台会学习，学完未识别计数和分组还会变（#400）：图片离开列表这一步已经是对的，照旧立即重读，
-    // 学到的结果发布以后再读一次。
-    if (path === '/api/change' && body.action === 'confirmed') learningNow().then(afterLearning);
+    if (first && first.state !== 'done') afterLearning(first);
     return true;
   } catch (e) { toast(e.message); for (const el of $('grid').querySelectorAll('.leaving')) el.classList.remove('leaving'); }
 }

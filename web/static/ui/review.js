@@ -145,9 +145,11 @@ function identitySide(s, label) {
   return `<div class="pair-side"><div class="pair-name"><span class="pair-label">${label}</span><a href="${charHash(s.id)}" title="${esc(s.tag || s.name)}">${esc(s.name)}</a><small>${t('{n} 张', {n: number(s.count)})}</small></div>
     <div class="pair-thumbs">${s.samples.map(u => `<img src="/image?id=${encodeURIComponent(u)}&size=thumb" loading="lazy" alt="" data-peek="${esc(u)}" title="${t('看大图')}">`).join('') || `<span class="muted-note">${t('没有可显示的图')}</span>`}</div></div>`;
 }
-function identityCard(x, i) {
-  const s = identitySuggestion(x), btn = (act, text, title) => `<button class="${s === act ? 'primary' : 'quiet'}" data-act="${act}" data-i="${i}" title="${esc(title)}">${text}</button>`;
-  return `<article class="pair-card" data-i="${i}">
+// 一对角色的键：判断、撤销以后按它比对，只换变了的卡片（#452）。
+const pairKey = x => `${x.a.id}|${x.b.id}`;
+function identityCard(x) {
+  const s = identitySuggestion(x), btn = (act, text, title) => `<button class="${s === act ? 'primary' : 'quiet'}" data-act="${act}" title="${esc(title)}">${text}</button>`;
+  return `<article class="pair-card" data-pair="${esc(pairKey(x))}">
     <div class="pair-body">${identitySide(x.a, 'A')}${identitySide(x.b, 'B')}</div>
     <p class="pair-evidence">${identityEvidence(x)}</p>
     <div class="pair-actions">
@@ -160,6 +162,7 @@ function identityCard(x, i) {
 }
 // how：'more' 在后面再接一页；'keep' 判断或撤销之后，按现在显示的对数从头重读、留在原来的滚动位置，判过的那对原地
 // 移走、撤销的那对回到原处，点过「再显示一些」的人不被带回前 12 对（#386 的 2-36）；不给就是从头显示前 12 对。
+// 卡片按角色对比对，没变的留在原处（#452）。
 async function renderIdentity(how = '') {
   if (!onPage(state.route, 'identity')) return;
   showArea();
@@ -174,16 +177,21 @@ async function renderIdentity(how = '') {
   identity.items.push(...page.items); identity.total = page.total; setIdentityCount(page.total); navCount('countIdentity', page.total);
   $('resultCount').textContent = t('{n} 对待判断', {n: number(page.total)});
   renderHeading();
-  $('groupsPage').innerHTML = `<div class="pair-list">${identity.items.map(identityCard).join('') || `<p class="empty">${t('没有需要判断的角色了。')}</p>`}</div>
-    ${identity.items.length < identity.total ? `<div class="pair-more"><button class="quiet" id="identityMore">${t('再显示一些')}</button></div>` : ''}`;
-  $('identityMore')?.addEventListener('click', () => renderIdentity('more'));
-  for (const b of $('groupsPage').querySelectorAll('[data-act]')) b.onclick = () => decideIdentity(Number(b.dataset.i), b.dataset.act);
+  const box = $('groupsPage');
+  if (!box.querySelector('.pair-list')) {
+    box.innerHTML = `<div class="pair-list"></div><div class="pair-more" hidden><button class="quiet" id="identityMore">${t('再显示一些')}</button></div>`;
+    $('identityMore').addEventListener('click', () => renderIdentity('more'));
+  }
+  const list = box.querySelector('.pair-list');
+  reconcileSections(list, identity.items.map(x => [pairKey(x), identityCard(x)]), t('没有需要判断的角色了。'));
+  box.querySelector('.pair-more').hidden = identity.items.length >= identity.total;
+  for (const b of list.querySelectorAll('[data-act]')) b.onclick = () => decideIdentity(b.closest('.pair-card').dataset.pair, b.dataset.act);
   if (keep) $('viewport').scrollTop = scroll;
 }
-async function decideIdentity(i, act) {
-  const x = identity.items[i]; if (!x || identity.busy.has(i) || edits.busy) return;
-  const card = $('groupsPage').querySelector(`.pair-card[data-i="${i}"]`);
-  identity.busy.add(i); card?.classList.add('working');
+async function decideIdentity(key, act) {
+  const x = identity.items.find(y => pairKey(y) === key); if (!x || identity.busy.has(key) || edits.busy) return;
+  const card = [...$('groupsPage').querySelectorAll('.pair-card')].find(el => el.dataset.pair === key);
+  identity.busy.add(key); card?.classList.add('working');
   // 重复的角色显示在图多的那一边下面。
   const [small, big] = x.a.count <= x.b.count ? [x.a, x.b] : [x.b, x.a];
   const body = act === 'skip' ? null : {status: 'accepted', reason: '身份整理',
@@ -196,9 +204,10 @@ async function decideIdentity(i, act) {
     card?.classList.add('leaving');
     await new Promise(done => setTimeout(done, 170));
     await renderIdentity('keep');
+    card?.classList.remove('working', 'leaving');   // 卡片按角色对比对，这一对还在队列里时留下的是同一张卡片
     refreshMeta().catch(e => error(readError(e)));
   } catch (e) { toast(e.message); card?.classList.remove('working'); }
-  finally { identity.busy.delete(i); }
+  finally { identity.busy.delete(key); }
 }
 
 // ---------- 画师抽查：找回画师的验收（docs/PROVENANCE.md 第 8 节） ----------
@@ -237,25 +246,32 @@ async function renderArtistAudit() {
     return `<div class="aa-card${state_}"><a class="aa-img" href="/image?id=${encodeURIComponent(it.uuid)}&size=full" target="_blank" data-peek="${esc(it.uuid)}" title="${t('看大图')}"><img src="/image?id=${encodeURIComponent(it.uuid)}&size=medium" alt="" loading="lazy"><span class="aa-no">${i + 1}</span></a>
       <div class="aa-body">${it.artists.map(a => artistRow(it, a)).join('')}${it.posts?.length ? `<div class="aa-links">${t('原帖')} ${it.posts.map(p => link(p.url, p.site)).join(' · ')}</div>` : ''}</div></div>`;
   };
-  $('groupsPage').innerHTML = `<div class="aa-summary">
-      <div class="prov-stat"><b>${acc === null ? '—' : (acc * 100).toFixed(1) + '%'}</b><span>${t('准确率')}<small>${t('目标 ≥ 95%')}</small></span></div>
+  // 判断以后按图比对，只换判断过的那张卡片（#452）；统计和说明每次重写。
+  const box = $('groupsPage');
+  if (!box.querySelector('.aa-grid')) {
+    box.innerHTML = `<div class="aa-summary"></div><p class="muted-note"></p><div class="aa-grid"></div><p class="aa-more" hidden><button class="quiet" id="aaMore">${t('再加 10 张')}</button></p>`;
+    $('aaMore').addEventListener('click', () => { prefs.set('artistAuditN', (Number(prefs.get('artistAuditN', 50)) || 50) + 10); renderArtistAudit(); });
+  }
+  box.querySelector('.aa-summary').innerHTML = `<div class="prov-stat"><b>${acc === null ? '—' : (acc * 100).toFixed(1) + '%'}</b><span>${t('准确率')}<small>${t('目标 ≥ 95%')}</small></span></div>
       <div class="prov-stat"><b>${number(tl.done)}<em> / ${number(tl.all)}</em></b><span>${t('已判断')}<small>${t('对 {yes} · 不对 {no}', {yes: number(tl.yes), no: number(tl.no)})}</small></span></div>
-      ${byMethod.map(([m, x]) => `<div class="prov-stat"><b>${x.done ? (x.yes / x.done * 100).toFixed(0) + '%' : '—'}</b><span>${esc(AUDIT_METHODS[m][0])}<small>${t('{done} / {all} 已判', {done: number(x.done), all: number(x.all)})}</small></span></div>`).join('')}
-    </div>
-    <p class="muted-note">${t('从 {pool} 张有画师的图里按固定的随机顺序取的前 {n} 张。判断会写进图库，判为「不对」的画师不再显示在这张图上。', {pool: number(d.pool), n: number(d.items.length)})}</p>
-    <div class="aa-grid">${d.items.map(card).join('')}</div>
-    ${d.items.length < d.pool ? `<p class="aa-more"><button class="quiet" id="aaMore">${t('再加 10 张')}</button></p>` : ''}`;
+      ${byMethod.map(([m, x]) => `<div class="prov-stat"><b>${x.done ? (x.yes / x.done * 100).toFixed(0) + '%' : '—'}</b><span>${esc(AUDIT_METHODS[m][0])}<small>${t('{done} / {all} 已判', {done: number(x.done), all: number(x.all)})}</small></span></div>`).join('')}`;
+  box.querySelector('.muted-note').innerHTML = t('从 {pool} 张有画师的图里按固定的随机顺序取的前 {n} 张。判断会写进图库，判为「不对」的画师不再显示在这张图上。', {pool: number(d.pool), n: number(d.items.length)});
+  const grid = box.querySelector('.aa-grid');
+  if (d.items.length) reconcileSections(grid, d.items.map((it, i) => [it.uuid, card(it, i)])); else grid.innerHTML = '';
+  box.querySelector('.aa-more').hidden = d.items.length >= d.pool;
   $('viewport').scrollTop = scroll;
-  for (const b of $('groupsPage').querySelectorAll('[data-aa]')) b.onclick = async () => {
-    const ran = await exclusive(async () => {
-      b.disabled = true;
-      try { written((await post('/api/artist/verdict', {ids: [b.dataset.uuid], artist: b.dataset.artist, verdict: b.dataset.aa || null, name: b.dataset.name})).undo); }
-      catch (e) { toast(e.message); }
-      return true;
-    });
-    if (ran) renderArtistAudit();
-  };
-  $('aaMore')?.addEventListener('click', () => { prefs.set('artistAuditN', n + 10); renderArtistAudit(); });
+  for (const b of grid.querySelectorAll('[data-aa]')) {
+    b.disabled = false;   // 留下来的卡片上可能还是点下去时禁用的那个按钮（写入失败时）
+    b.onclick = async () => {
+      const ran = await exclusive(async () => {
+        b.disabled = true;
+        try { written((await post('/api/artist/verdict', {ids: [b.dataset.uuid], artist: b.dataset.artist, verdict: b.dataset.aa || null, name: b.dataset.name})).undo); }
+        catch (e) { toast(e.message); }
+        return true;
+      });
+      if (ran) renderArtistAudit();
+    };
+  }
 }
 
 // 页面这一部分注册的处理函数。页面启动时调用一次。
