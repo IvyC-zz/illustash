@@ -1,9 +1,9 @@
 // 由 tools/styleguide/census.py 从 web/static/app.css 生成，不要手改。
 window.CENSUS = {
  "source": "web/static/app.css",
- "sha256": "9501bb2e13e6a63e43cf174abf6aee8cbf5f3daf990d033a93e2b51ae248eb6a",
- "lines": 1392,
- "rules": 1230,
+ "sha256": "d44a017c6f0929b7cc03594e75adeecd9c1e154b0f99f61c2d3552747b16ea71",
+ "lines": 1399,
+ "rules": 1235,
  "themeVars": {
   "light": {
    "--canvas": "#f4f4f6",
@@ -153,7 +153,7 @@ window.CENSUS = {
    "--fs-13": 24,
    "--hair": 30,
    "--sh": 35,
-   "--muted": 116,
+   "--muted": 117,
    "--sheet": 54,
    "--soft": 65,
    "--ink2": 57,
@@ -172,7 +172,7 @@ window.CENSUS = {
    "--fs-16": 2,
    "--space-4": 83,
    "--radius-pill": 46,
-   "--fs-12": 116,
+   "--fs-12": 117,
    "--tone-sand-ink": 3,
    "--space-8": 109,
    "--faint": 15,
@@ -200,6 +200,7 @@ window.CENSUS = {
    "--space-1": 22,
    "--dup-hue": 1,
    "--radius-8": 12,
+   "--w": 1,
    "--err": 4,
    "--radius-10": 22,
    "--switch-off": 1,
@@ -451,7 +452,7 @@ window.CENSUS = {
    {
     "name": "--fs-12",
     "value": "12px",
-    "uses": 116
+    "uses": 117
    },
    {
     "name": "--fs-13",
@@ -1074,7 +1075,7 @@ window.CENSUS = {
  "rgbaCalls": 88,
  "fontSize": {
   "kinds": 22,
-  "uses": 284,
+  "uses": 285,
   "table": [
    {
     "value": "0",
@@ -1113,7 +1114,7 @@ window.CENSUS = {
    },
    {
     "value": "var(--fs-12)",
-    "uses": 116,
+    "uses": 117,
     "examples": [
      ".heading-main>.menu-drop p",
      "p",

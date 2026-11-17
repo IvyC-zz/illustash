@@ -277,13 +277,20 @@ dialog.palette{width:520px;padding:0;margin-top:14vh;overflow:hidden}
 .dup-copy:hover{background:var(--soft)}
 .dup-copy img{width:44px;height:55px;object-fit:cover;border-radius:var(--radius-6);background:var(--soft);flex:none}
 .dup-copy small{color:var(--muted)}
-/* 「更多像这张的」标题右侧的例图（#449，ui/like.js）：点一张看详情；两张以上时悬停出 × 去掉它；没有特征、没算进去的变淡 */
-.like-examples{display:flex;align-items:center;flex-wrap:wrap;gap:var(--space-4);max-width:360px;margin-right:var(--space-8)}
+/* 「更多像这张的」的标题（#449，ui/like.js）：标题、例图、「按画面｜按角色」直接排在 #heading 里。位置不够时先裁例图那一段
+   （flex-shrink 大、宽度由页面给 --w），再截短标题和副标题，比较方式不缩。例图点一张看详情，两张以上时悬停出 × 去掉它，
+   没有特征、没算进去的变淡，放不下的写「+N」 */
+.like-head{flex:0 1 auto;min-width:0}
+.like-head h1,.like-head>p{white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.like-examples{display:flex;align-items:center;gap:var(--space-4);flex:0 100 var(--w);min-width:0;overflow:hidden;margin-left:auto;margin-right:var(--space-8)}
+.like-examples>*{flex-shrink:0}
+.like-more{font-size:var(--fs-12);color:var(--muted)}
+.like-by{flex-shrink:0;white-space:nowrap}
 .like-example{position:relative;line-height:0}
 .like-example>button{border:0;padding:0;background:var(--soft);border-radius:var(--radius-6);overflow:hidden}
 .like-example img{width:32px;height:40px;object-fit:cover;display:block}
 .like-example.off img{opacity:.35}
-.like-example>.like-drop{position:absolute;top:-6px;right:-6px;width:16px;height:16px;border-radius:var(--radius-round);background:var(--ink);color:var(--sheet);font-size:var(--fs-10);line-height:16px;opacity:0}
+.like-example>.like-drop{position:absolute;top:2px;right:2px;width:16px;height:16px;border-radius:var(--radius-round);background:var(--ink);color:var(--sheet);font-size:var(--fs-10);line-height:16px;opacity:0}
 .like-example:hover>.like-drop,.like-example>.like-drop:focus-visible{opacity:1}
 .dup-badge.folded{background:#0000008a;box-shadow:none;font-weight:500}
 /* 按宽高比的网格：图片自己的方框带着圆环、勾选和角标 */
