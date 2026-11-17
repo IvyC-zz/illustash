@@ -1,14 +1,14 @@
 // 「设置 › 数据 › 备份与存储」里的人工结论快照（#502）：自动快照的状态和清单、导出、从文件导入、从自动快照恢复，以及完成后
 // 的报告对话框和撤销。数据、请求和文字在 core/human.js；导入的进度和取消沿用 core/jobs.js 的导入槽。
 import {t, tb} from '../core/i18n.js';
-import {esc, number, localStamp} from '../core/format.js';
+import {esc, home, number, localStamp} from '../core/format.js';
 import {state} from '../core/state.js';
 import {edits} from '../core/edits.js';
 import {onPage} from '../core/pages.js';
 import {refreshMeta} from '../core/meta.js';
 import {readError} from '../core/session.js';
 import {IMPORT_STAGES, importActive, importCount, importLine, cancelImport} from '../core/jobs.js';
-import {HUMAN_IMPORT, exportActive, home, rfcSeconds, loadHuman, onHuman, startExport, cancelExport, startHumanImport, restoreSnapshot, isRestore,
+import {HUMAN_IMPORT, exportActive, rfcSeconds, loadHuman, onHuman, startExport, cancelExport, startHumanImport, restoreSnapshot, isRestore,
   readReport, REPORT_PAGE, adoptUndo, humanError, COUNT_GROUPS, resultText, kindText, reasonText, fieldText, conflictCount} from '../core/human.js';
 import {$, toast, error, fold, wireFolds} from './dom.js';
 import {openDialog, confirmAction} from './dialog.js';
@@ -115,12 +115,12 @@ export function renderHumanBlock() {
 
 // ---------- 报告 ----------
 // 汇总：每一类计数各列一张表，不相加；冲突写明保留了目标图库的结论；没有改动时说没有新内容、不给撤销。
-// undoable：这次导入现在还是顶栏撤销的那一步（之后有别的改动、或已经撤销过，就不是了）。extra 是接在后面的明细区。
+// extra 是接在后面的明细区。能不能撤销由对话框里的「撤销这次导入」按钮表示，正文不另写（#528）。
 // 引导句在上面，其余放进一个可滚动的区域，明细展开后对话框也不会超出窗口。
-export function reportSummary(r, undoable = r.undo != null, extra = '') {
+export function reportSummary(r, extra = '') {
   const lines = [];
   const lead = r.undo == null ? t('没有新内容：图库没有改动，也没有可以撤销的步骤。')
-    : undoable ? t('已经写进这个图库。可以整步撤销：点下面的「撤销这次导入」，或用顶栏的撤销按钮。') : t('已经写进这个图库。');
+    : t('已经写进这个图库。');
   const note = text => lines.push(`<p class="muted-note">${text}</p>`);
   if (r.committed && r.pending_effects) note(t('收录结果还在后台更新，稍后会自己刷新，不需要重新导入。'));
   if (conflictCount(r)) note(t('有 {n} 条和这个图库已有的结论冲突，都保留了这个图库的结论。', {n: number(conflictCount(r))}));
@@ -155,11 +155,11 @@ export function reportDetails(page, total) {
       <button type="button" class="quiet small" data-page="${to}" ${to < total ? '' : 'disabled'}>${t('下一页')}</button></div>`;
 }
 // 导入或恢复完成后的报告。只读，点背景可以关。
-export function openReport(r, restore = false) {
+function openReport(r, restore = false) {
   if (!r) return null;
   const undoable = r.committed && r.undo != null && edits.latest?.id === r.undo;
   const d = openDialog({title: restore ? t('从自动快照恢复：结果') : t('导入人工结论：结果'), backdropClose: true,
-    body: reportSummary(r, undoable, r.detail_count
+    body: reportSummary(r, r.detail_count
       ? `<div data-details><button type="button" class="quiet small" data-page="0">${t('查看明细（{n} 条）', {n: number(r.detail_count)})}</button></div>` : ''),
     actions: `${undoable ? `<button type="button" class="quiet" data-human-undo>${t('撤销这次导入')}</button>` : ''}<button value="ok" class="primary" autofocus>${t('完成')}</button>`});
   d.addEventListener('click', async e => {
@@ -205,7 +205,7 @@ export async function onHumanClick(e) {
     else if (act === 'import') await startHumanImport();
     else if (act === 'cancel-import') await cancelImport();
     else if (act === 'restore') {
-      const note = t('用 {time} 的自动快照补回人工结论？\n\n只补上这个图库现在缺少的结论；和已有结论冲突的，保留已有的。完成后会显示报告，可以整步撤销。', {time: b.dataset.at});
+      const note = t('用 {time} 的自动快照补回人工结论？\n\n只补上这个图库现在缺少的结论；和已有结论冲突的，保留已有的。完成后会显示报告。', {time: b.dataset.at});
       if (await confirmAction(note, t('从自动快照恢复'), t('恢复'))) await restoreSnapshot(b.dataset.backup);
     }
   } catch (err) { toast(humanError(err.status, op, false, err.message)); }

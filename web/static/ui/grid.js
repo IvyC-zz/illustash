@@ -1,8 +1,8 @@
 // 图片网格（桌面布局，#199）：分页加载图片、虚拟网格和它的缩放、选择、选择栏的操作、键盘快捷键、视图选项和 R18
 // 筛选。
-import {edits, setLatest, undoLatest, undoneText} from '../core/edits.js';
-import {esc, isMac, number, platformText, shortcut} from '../core/format.js';
-import {t, tb} from '../core/i18n.js';
+import {edits, exclusive, undoLatest, undoneText} from '../core/edits.js';
+import {esc, isMac, number, platformText, screenScale, shortcut, thumbSize} from '../core/format.js';
+import {t} from '../core/i18n.js';
 import {composing} from '../core/keys.js';
 import {REASONS, nameWithWork} from '../core/labels.js';
 import {undoRefusal} from '../core/human.js';
@@ -14,9 +14,11 @@ import {browsing, cleanup, defaultSort, hashFor, stepHistory} from '../core/rout
 import {api, post, readError} from '../core/session.js';
 import {state} from '../core/state.js';
 import {offerWatch} from './catalog.js';
-import {$, error, toast} from './dom.js';
+import {$, error, showArea, toast, written} from './dom.js';
 import {renderChrome, renderHeading} from './shell.js';
 import {findArtists} from './artists.js';
+import {openExport, startDrag} from './files.js';
+import {canDrag, exportActive} from '../core/files.js';
 import {answerAsk, closeInspector, closeViewer, ensureVisible, indexOf, inspect, openViewer, peek, pickAlternative, showViewer, singleAction, step, zoomView} from './detail.js';
 import {jumpToCharacter, markOc, newIds, openPicker, openRelate, targets} from './palette.js';
 import {createLayer, inPopover, popoverOpen} from './overlay.js';
@@ -78,7 +80,7 @@ export async function reload(reset = false, place = null) {
   if (pageOf(state.route).panel) return;
   const epoch = state.readEpoch, route = state.route;
   const gen = ++state.generation; abortList?.abort(); abortList = new AbortController(); state.pending.clear();
-  $('charIndex').hidden = true; $('settingsPage').hidden = true; $('groupsPage').hidden = true; $('grid').hidden = false; error('');
+  showArea('grid'); error('');
   if (reset) { $('viewport').scrollTop = 0; $('resultCount').textContent = t('正在读取…'); state.totalReady = false; }
   layout();
   try {
@@ -268,7 +270,7 @@ function auditTags(item) {
 }
 function cardHTML(item, i) {
   // 在两端对齐的行里，宽图比名义上的格子宽：按实际宽度决定它的缩略图和说明文字。
-  const r = state.route, ratio = state.fit ? imageRatio(item) : 1, size = state.cellW * Math.max(1, ratio) > 260 ? 'medium' : 'thumb';
+  const r = state.route, ratio = state.fit ? imageRatio(item) : 1, size = thumbSize(state.cellW * Math.max(1, ratio));
   let extra = '';
   if (r.char) {
     const m = item.memberships.find(m => m.id === r.char);
@@ -280,7 +282,7 @@ function cardHTML(item, i) {
   if (card?.reason && !r.reason && item.excluded && state.cellW >= 120) extra += `<span class="chips"><span>${REASONS[item.excluded] || ''}</span></span>`;
   // 随机抽查 / 未识别 是在小尺寸下快速浏览的：它们的单行角标一直保留到 70 px 的格子。
   if (card?.audit && item.audit && state.cellW >= 70) extra += auditTags(item);
-  if (viewOpts.hints && !item.memberships.length && item.hint && state.cellW >= (card?.hintMin ?? 120)) extra += `<span class="chips"><button class="hint-add" data-hint title="${t('机器觉得可能是 {name}，点一下设为 TA（可撤销）', {name: esc(item.hint.name)})}">+ ${esc(short(item.hint.name))}</button></span>`;
+  if (viewOpts.hints && !item.memberships.length && item.hint && state.cellW >= (card?.hintMin ?? 120)) extra += `<span class="chips"><button class="hint-add" data-hint title="${t('可能是 {name}，点一下设为 TA', {name: esc(item.hint.name)})}">+ ${esc(short(item.hint.name))}</button></span>`;
   if (card?.dup && item.dup) extra += `<span class="dup-badge" style="--dup-hue:${dupHue(i)}" title="${t('同一组共 {n} 份副本', {n: item.dup.size})}">${item.dup.pos}/${item.dup.size}</span>`;
   else if (item.dup && state.cellW >= 70) extra += `<span class="dup-badge folded" title="${t('共 {n} 份相同副本，操作会同步到全部', {n: item.dup.size})}">×${item.dup.size}</span>`;
   // 窄图显示第一个名字和数量，而不是把每个名字都截短；悬停显示全部。
@@ -304,13 +306,14 @@ export function renderGrid(relayout = false) {
   if (relayout || before[0] !== state.cols || before[1] !== state.rowH) state.gridKey = '';
   const rows = rowCount(); grid.style.height = `${rowTop(rows)}px`;
   const first = Math.max(0, rowAt(v.scrollTop) - (state.fit ? 1 : 2)), last = Math.min(rows, state.fit ? rowAt(v.scrollTop + v.clientHeight) + 2 : Math.ceil((v.scrollTop + v.clientHeight) / state.rowH) + 2);
-  const key = `${first}:${last}:${state.cols}:${state.rowH}:${state.dataVersion}:${state.fit}:${gridLayoutKey}`;
+  // 屏幕倍率也算进键：窗口拖到倍率不同的屏幕后，下一次重画（滚动、改窗口大小）就按新倍率换缩略图档位（#452）。
+  const scale = screenScale(), key = `${first}:${last}:${state.cols}:${state.rowH}:${state.dataVersion}:${state.fit}:${gridLayoutKey}:${scale}`;
   if (key !== state.gridKey) {
     state.gridKey = key;
     const existing = new Map([...grid.children].map(el => [Number(el.dataset.index), el]));
     const keep = new Set();
     const dupCards = !!viewOf(state.route).card?.dup;
-    const layoutKey = `${state.cols}:${state.cellW}:${state.rowH}:${state.gap}:${state.fit}:${state.route.page}:${state.route.char}:${state.route.maybe}:${state.route.reason}`;
+    const layoutKey = `${state.cols}:${state.cellW}:${state.rowH}:${state.gap}:${state.fit}:${scale}:${state.route.page}:${state.route.char}:${state.route.maybe}:${state.route.reason}`;
     for (let i = rowStart(first); i < rowStart(last); i++) {
       const item = state.items[i];
       let el = existing.get(i);
@@ -407,11 +410,11 @@ function setSelected(id, on) {
   if (state.sel.all) on ? state.sel.exclude.delete(id) : state.sel.exclude.add(id);
   else on ? state.sel.ids.add(id) : state.sel.ids.delete(id);
 }
-export function clearSelection() { state.sel = {all: false, ids: new Set(), exclude: new Set()}; state.anchor = -1; state.armed = null; renderSelection(); }
+function clearSelection() { state.sel = {all: false, ids: new Set(), exclude: new Set()}; state.anchor = -1; state.armed = null; renderSelection(); }
 export function selectAll() { if (!state.total) return; state.sel = {all: true, ids: new Set(), exclude: new Set()}; state.selecting = true; renderSelection(); }
 export function toggleSelecting() { state.selecting = !state.selecting; if (!state.selecting) clearSelection(); renderSelection(); }
 // 取消选择并退出选择模式（Esc、选择栏的 ×、写入之后、切换 R18）。
-export function quitSelecting() { state.selecting = false; clearSelection(); }
+function quitSelecting() { state.selecting = false; clearSelection(); }
 // 换页时复位网格这一侧的状态：退出选择模式、清空选择、光标归位、张数等新读取（ui/shell.js applyRoute 调用）。
 export function resetForRoute() { quitSelecting(); state.cursor = -1; state.totalReady = false; }
 // 键盘光标移到第 i 张（详情栏和大图翻页时跟着走）。
@@ -494,7 +497,7 @@ export function renderSelection() {
   const big = n > 500, arm = key => state.armed === key ? ` armed` : '';
   const count = `<button class="icon" id="clearSel" title="${t('取消选择（Esc）')}">×</button><span class="sel-count">${state.sel.all ? t('已选全部 {n} 张', {n: number(n)}) : t('已选 {n} 张', {n: number(n)})}</span><div class="bar-divider"></div>`;
   let buttons = '';
-  const ocButton = `<button class="quiet" data-act="oc" title="${t('画师自己的原创角色：统一标为「原创角色（未细分）」，以后需要时再按相似细分')}">${t('原创角色')}</button>`;
+  const ocButton = `<button class="quiet" data-act="oc" title="${t('把画师自己的原创角色统一标为「原创角色（未细分）」')}">${t('原创角色')}</button>`;
   if (r.char && r.maybe) {
     const name = short(state.char?.name || t('该角色'));
     buttons = `<button class="primary${arm('isme')}" data-act="isme">${state.armed === 'isme' ? t('再点一次：{n} 张设为 {name}', {n: number(n), name: esc(name)}) : t('是 {name}', {name: esc(name)})}</button><button class="quiet${arm('remove')}" data-act="remove">${state.armed === 'remove' ? t('再点一次：{n} 张不是', {n: number(n)}) : t('不是 TA')} <kbd>⌫</kbd></button>`;
@@ -520,12 +523,15 @@ export function renderSelection() {
         + `<button class="quiet" data-act="assign">${t('加角色…')} <kbd>A</kbd></button>`;
     buttons += `<button class="quiet" data-act="notlib" ${state.sel.all ? `disabled title="${t('全选时请进入角色页移出')}"` : ''}>${t('不是…')} <kbd>⌫</kbd></button>`;
   }
-  if (!['excluded', 'pending'].includes(kind)) buttons += `<button class="quiet${arm('exclude')}" data-act="exclude" title="${t('不是插画（截图、照片等）：从图库移到「已排除」')}">${state.armed === 'exclude' ? t('再点一次：排除 {n} 张', {n: number(n)}) : t('排除')} <kbd>X</kbd></button>`;
+  if (!['excluded', 'pending'].includes(kind)) buttons += `<button class="quiet${arm('exclude')}" data-act="exclude" title="${t('把截图、照片等不是插画的图移到「已排除」')}">${state.armed === 'exclude' ? t('再点一次：排除 {n} 张', {n: number(n)}) : t('排除')} <kbd>X</kbd></button>`;
   buttons += `<button class="quiet" data-act="tag">${t('标签')} <kbd>G</kbd></button>`;
   buttons += `<button class="quiet" data-act="findartist" title="${t('用像素哈希和 IQDB 查这些图的画师（只发哈希文本，不发图片；一次最多 500 张）')}">${t('查找画师')}</button>`;
-  if (!state.sel.all && n >= 2 && n <= 12) buttons += `<button class="quiet" data-act="relate" title="${t('两两比较：同一张图、裁剪、差分、局部编辑，还是不同的图（只在本机计算）')}">${t('判断关系')}</button>`;
+  buttons += `<button class="quiet" data-act="export" ${exportActive() ? `disabled title="${t('正在导出，完成后再开始下一次')}"` : `title="${t('把原图复制到一个文件夹')}"`}>${t('导出…')}</button>`;
+  if (!state.sel.all && n >= 2 && n <= 12) buttons += `<button class="quiet" data-act="relate" title="${t('两两比较，判断是同一张图、裁剪、差分、局部编辑，还是不同的图')}">${t('判断关系')}</button>`;
   const note = kind === 'audit' ? t('一次最多回答 500 张，这次答前 500 张') : t('超过 500 张需再点一次确认');
-  bar.innerHTML = count + buttons + (big ? `<span class="bar-note">${note}</span>` : '');
+  // 重复页上改哪一份都会同步到整组副本：这件事放在动手的地方，不写在副本页常驻的说明里（#528）。
+  const dupNote = viewOf(r).card?.dup ? t('改动会同步到同组的全部副本') : '';
+  bar.innerHTML = count + buttons + (big ? `<span class="bar-note">${note}</span>` : dupNote ? `<span class="bar-note">${dupNote}</span>` : '');
   $('clearSel').onclick = quitSelecting;
   for (const b of bar.querySelectorAll('[data-act]')) b.onclick = () => runBarAction(b.dataset.act);
 }
@@ -571,6 +577,7 @@ function runBarAction(act) {
   const n = selCount(), r = state.route; if (!n || edits.busy) return;
   const payload = () => ({...selectionPayload(), confirm: n > 500});
   if (act === 'audit_yes' || act === 'audit_no') { answerAudit(act === 'audit_yes'); return; }
+  if (act === 'export') { openExport(selectionPayload(), n); return; }
   if (act === 'findartist') {
     const sel = state.sel;
     (sel.all ? api('/api/ids?' + new URLSearchParams({...filters(), limit: 500})).then(ids => ids.filter(u => !sel.exclude.has(u))) : Promise.resolve([...sel.ids].slice(0, 500)))
@@ -651,8 +658,13 @@ export function currentItem() {
   const uuid = src.uuid, i = indexOf(uuid);
   return i >= 0 ? state.items[i] : uuid === kept.hold?.uuid ? kept.hold.item : state.viewerItem?.uuid === uuid ? state.viewerItem : null;
 }
-export async function mutate(path, body, leaving, {advance = false} = {}) {
-  if (edits.busy) return; edits.busy = true; document.body.classList.add('busy');
+export function mutate(path, body, leaving, {advance = false} = {}) {
+  return exclusive(async () => {
+    document.body.classList.add('busy');
+    try { return await write(path, body, leaving, advance); } finally { document.body.classList.remove('busy'); }
+  });
+}
+async function write(path, body, leaving, advance) {
   const started = performance.now();
   const advanceFrom = advance && state.viewer >= 0 ? state.viewerItem?.uuid : null;
   if (advance) kept.hold = null; else holdCurrent();
@@ -661,9 +673,9 @@ export async function mutate(path, body, leaving, {advance = false} = {}) {
   // 确认角色之后后台会学习，学完未识别计数和分组还会变（#400）：写入前先记下学习的状态，好知道之后要不要再读。
   const learner = path === '/api/change' && body.action === 'confirmed' ? learnerState().catch(() => null) : null;
   try {
-    const r = await post(path, body); setLatest(r.undo);
+    const r = await post(path, body);
     quitSelecting();
-    toast(tb(r.undo.label), true);
+    written(r.undo);
     if (path === '/api/change' && body.action === 'confirmed') offerWatch(body.entities || [body.entity]).catch(() => {});
     if (gone) { await new Promise(done => setTimeout(done, Math.max(0, 170 - (performance.now() - started)))); collapse(gone); }
     await reload(); pageOf(state.route).refresh?.('edit'); metaSoon(path === '/api/tag');
@@ -676,12 +688,11 @@ export async function mutate(path, body, leaving, {advance = false} = {}) {
     if (learner) learner.then(afterLearning);
     return true;
   } catch (e) { toast(e.message); for (const el of $('grid').querySelectorAll('.leaving')) el.classList.remove('leaving'); }
-  finally { edits.busy = false; document.body.classList.remove('busy'); setLatest(edits.latest); }
 }
 function collapse(gone) {
-  const kept = []; let removed = 0;
-  for (let i = 0; i < state.total; i++) { const x = state.items[i]; if (x && gone.has(x.uuid)) { removed++; continue; } kept[i - removed] = x; }
-  kept.length = state.total - removed; state.items = kept; state.total = kept.length; state.dataVersion++;
+  const left = []; let removed = 0;
+  for (let i = 0; i < state.total; i++) { const x = state.items[i]; if (x && gone.has(x.uuid)) { removed++; continue; } left[i - removed] = x; }
+  left.length = state.total - removed; state.items = left; state.total = left.length; state.dataVersion++;
   // 光标停在离开的最后一张上时，收回到新的最后一张，接着按键还有对象（#386 的 2-6）。
   if (state.cursor >= state.total) state.cursor = state.total - 1;
   renderGrid(true); updateCount();
@@ -701,16 +712,18 @@ async function afterLearning(before) {
   if (await learningSettled(before) && !edits.busy) await reread('learned');
 }
 export async function undo() {
-  if (!edits.latest || edits.busy) return; edits.busy = true;
-  const learner = learnerState().catch(() => null);
-  try {
-    toast(undoneText(await undoLatest())); await reread('undo');
-    learner.then(afterLearning);
-  } catch (e) {
-    // 历史可能已经往前走了（另一个窗口，或服务端提交之后才失败）：显示它最新的一步。
-    // 撤销一次人工结论导入被拒（后面有改动依赖它）时，说清楚为什么（core/human.js）。
-    toast(undoRefusal(e, edits.latest)); refreshMeta().catch(err => error(readError(err)));
-  } finally { edits.busy = false; setLatest(edits.latest); }
+  if (!edits.latest) return;
+  return exclusive(async () => {
+    const learner = learnerState().catch(() => null);
+    try {
+      toast(undoneText(await undoLatest())); await reread('undo');
+      learner.then(afterLearning);
+    } catch (e) {
+      // 历史可能已经往前走了（另一个窗口，或服务端提交之后才失败）：显示它最新的一步。
+      // 撤销一次人工结论导入被拒（后面有改动依赖它）时，说清楚为什么（core/human.js）。
+      toast(undoRefusal(e, edits.latest)); refreshMeta().catch(err => error(readError(err)));
+    }
+  });
 }
 export async function sweep() {
   const c = state.char; if (!c?.unchecked) return;
@@ -746,7 +759,7 @@ export function renderViewPop() {
       ${viewSwitch('chart', t('收藏曲线'), t('这个角色每月收了多少张'))}
       ${viewSwitch('same', t('同一角色的其它图'))}
       ${viewSwitch('meta', t('文件信息与画面标签'))}
-      ${viewSwitch('ask', t('偶尔问一句「是 TA 吗？」'), t('详情和首页；回答会用来学习认人'))}
+      ${viewSwitch('ask', t('偶尔问一句「是 TA 吗？」'), t('在详情和首页'))}
     </div><div class="view-foot"><span>${t('设置会自动保存')}</span><button class="link-button strong" id="viewReset">${t('恢复默认')}</button></div>`;
   $('zoom')?.addEventListener('input', e => requestZoom(() => setSize(sliderToSize(Number(e.target.value)), undefined, undefined, true)));
   $('viewReset').onclick = () => { Object.assign(viewOpts, VIEW_DEFAULTS); prefs.set('view', viewOpts); afterViewChange(true); renderViewPop(); pageOf(state.route).refresh?.('view'); };
@@ -833,6 +846,9 @@ export function wireGrid() {
     drag.lastX = e.clientX; drag.lastY = e.clientY;
     if (!drag.moved && Math.hypot(e.clientX - drag.x, e.clientY - drag.y) < 6) return;
     if (!drag.moved) {
+      // 按住一张已选中的图拖动：把选中的图拖到别的应用（#450 的方案 ①），不再是拖动选择。全选时没有展开的 ID，不拖。
+      const held = drag.start !== null ? state.items[drag.start] : null;
+      if (held && canDrag() && !state.sel.all && isSelected(held.uuid)) { drag = null; startDrag([...state.sel.ids]); return; }
       drag.moved = true; state.selecting = state.selecting || browsing();
       drag.base = {all: state.sel.all, ids: new Set(state.sel.ids), exclude: new Set(state.sel.exclude)};
       const startItem = drag.start !== null ? state.items[drag.start] : null;

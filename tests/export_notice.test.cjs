@@ -26,7 +26,7 @@ test('the export notice appears once whatever the export state', () => {
 });
 
 test('a finished export repeats the notice next to its path instead of below', () => {
-  const html = render({status: 'done', path: '/tmp/synthetic.pilib.zip', bytes: 3 << 20});
+  const html = render({status: 'done', path: '/tmp/synthetic.pilib.zip', bytes: 30e6});
   assert.equal(count(html), 1);
-  assert.match(html, /已导出：\/tmp\/synthetic\.pilib\.zip（3 MB）。不含图片/);
+  assert.match(html, /已导出：\/tmp\/synthetic\.pilib\.zip（30 MB）。不含图片/);
 });

@@ -4,10 +4,22 @@ import {t, tb} from '../core/i18n.js';
 import {esc, isMac, platformText, shortcut} from '../core/format.js';
 import {prefs} from '../core/prefs.js';
 import {session, STALE, onStale, readError} from '../core/session.js';
-import {onLatest} from '../core/edits.js';
+import {onLatest, setLatest} from '../core/edits.js';
 import {workLabel} from '../core/labels.js';
+import {AREAS, pageOf} from '../core/pages.js';
+import {state} from '../core/state.js';
 import {createLayer} from './overlay.js';
 export const $ = id => document.getElementById(id);
+// 主区切换：显示 area（core/pages.js 登记的主区，默认是当前页的），隐藏其余几个。网格的空状态跟着网格：换到别的主区时
+// 收起，回到网格时由 reload 按读到的结果显示。
+export function showArea(area = pageOf(state.route).area) {
+  for (const a of AREAS) $(a).hidden = a !== area;
+  if (area !== 'grid') $('empty').hidden = true;
+}
+// 名称联网查询还没授权时，搜索结果的说明后面接的「允许查询…」。点击由 ui/settings.js 的 [data-names-allow] 处理。
+export const namesAllowButton = `<button type="button" class="link-button" data-names-allow>${t('允许查询…')}</button>`;
+// 网格空了时空状态下面的一个去处（core/pages.js 的 emptyNext）。
+export const emptyLink = (href, label) => `<a class="quiet link" href="${href}">${label}</a>`;
 // ---------- 页面说明「?」（#527） ----------
 // 页面标题旁的「?」：这一页是什么、怎么操作，点开（键盘聚焦后 Enter／Space）才显示，标题下面只留数量、状态和
 // 必须一眼看到的警告。说明是非模态浮层，Esc、点外关闭由浮层管理器处理，关了焦点回到按钮。标题重画时元素换掉，
@@ -42,6 +54,8 @@ export function toast(message, withUndo = false) {
 }
 // 给正在显示的 toast 追加一点：再补几个字，可选再加一个按钮（如对刚设好的角色所属作品「关注」，#293）。toast 随后会多
 // 停留一会儿。
+// 一次可撤销的写入成功之后（#432 ③-7）：撤销指向这一步，toast 写明做了什么并带「撤销」。text 默认是后端给这一步的名字。
+export function written(undo, text = tb(undo.label)) { setLatest(undo); toast(text, true); }
 export function toastMore(text, label = '', run = null) {
   if ($('toast').hidden) return;
   $('toastText').textContent += text;
