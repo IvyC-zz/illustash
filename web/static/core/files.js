@@ -7,6 +7,7 @@ import {isMac, number} from './format.js';
 import {session, api} from './session.js';
 import {state} from './state.js';
 import {listeners} from './events.js';
+import {poller} from './poll.js';
 const changed = listeners();
 export const onFiles = changed.on;
 
@@ -29,19 +30,16 @@ export const dragFiles = ids => send('/api/files/drag', {ids});
 // ---------- 导出到文件夹 ----------
 export const EXPORT_ACTIVE = ['running'];
 export const exportActive = () => EXPORT_ACTIVE.includes(state.files?.export?.status);
-let timer = 0, poll = 0;
-export async function loadFiles() {
-  clearTimeout(timer);
-  const mine = ++poll, token = session.token;
-  try {
-    const value = await api('/api/files');
-    if (mine !== poll || token !== session.token) return;
-    const was = state.files?.export?.status;
-    state.files = value;
-    await changed.emit({ended: EXPORT_ACTIVE.includes(was) && !exportActive()});
-    if (exportActive()) timer = setTimeout(loadFiles, 700);
-  } catch { if (mine === poll && token === session.token) timer = setTimeout(loadFiles, 5000); }
-}
+// 导出进行中每 0.7 s 读一次，读失败 5 s 后再试；重叠的读取和换了会话的回应丢掉（core/poll.js）。
+export const loadFiles = poller(async fresh => {
+  const token = session.token, current = () => fresh() && token === session.token;
+  let value; try { value = await api('/api/files'); } catch { return current() ? 5000 : 0; }
+  if (!current()) return 0;
+  const was = state.files?.export?.status;
+  state.files = value;
+  await changed.emit({ended: EXPORT_ACTIVE.includes(was) && !exportActive()});
+  return exportActive() ? 700 : 0;
+});
 // selection 是选择栏的 {ids} 或 {filter, exclude}；group 是 none、character 或 artist。宿主先弹选目录的窗口：
 // 取消时回应 {cancelled: true}，返回 false。
 export async function startExport(selection, group) {

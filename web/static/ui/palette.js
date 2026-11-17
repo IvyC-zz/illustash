@@ -1,7 +1,7 @@
 // 对角色的操作（桌面布局，#199）：命令面板（换成 / 也是 / 设为角色 / 跳到角色）、原创角色、编辑角色资料、合并，以及
 // 选中图片之间的关系。
 import {forgetLocalLinks, workName} from '../core/catalog.js';
-import {edits, setLatest} from '../core/edits.js';
+import {exclusive} from '../core/edits.js';
 import {esc, number} from '../core/format.js';
 import {t, tb} from '../core/i18n.js';
 import {composing} from '../core/keys.js';
@@ -14,7 +14,7 @@ import {api, post, readError} from '../core/session.js';
 import {currentLibraryId, remoteNames, remoteNote} from '../core/settings.js';
 import {state} from '../core/state.js';
 import {refreshLocalLinks} from './catalog.js';
-import {$, namesAllowButton, toast} from './dom.js';
+import {$, namesAllowButton, toast, written} from './dom.js';
 import {openDialog} from './dialog.js';
 import {openModal} from './overlay.js';
 import {combo, listNav} from './combo.js';
@@ -182,7 +182,7 @@ export function mergeCharacter(c) {
   openPicker({title: t('把 {name} 合并到…', {name: c.name}), placeholder: t('输入同一个人的另一个角色'), jump: true, exclude: [c.id],
     sentence: e => t('把 {name} 并入 {target}：图、人工结论、造型和别名都过去', {name: c.name, target: e.name}),
     pick: async e => {
-      try { const r = await post('/api/merge', {source: c.id, target: e.id}); setLatest(r.undo); toast(tb(r.undo.label), true); await refreshMeta(); go(charRoute(e.id)); }
+      try { const r = await post('/api/merge', {source: c.id, target: e.id}); written(r.undo); await refreshMeta(); go(charRoute(e.id)); }
       catch (err) { toast(err.message); }
     }});
 }
@@ -288,7 +288,7 @@ export async function editProfile(c) {
     q('#pfSave').disabled = true;
     try {
       const r = await post('/api/character/profile', body);
-      close(); setLatest(r.undo); toast(tb(r.undo.label), true);
+      close(); written(r.undo);
       forgetLocalLinks(); await refreshMeta(); renderHeading();
     } catch (err) { q('#pfSave').disabled = false; toast(err.message); }
   };
@@ -309,7 +309,7 @@ export async function openLocalLinks() {
   count();
   for (const b of d.querySelectorAll('[data-merge]')) b.onclick = async () => {
     const x = merges.find(m => m.id === b.dataset.merge); b.disabled = true;
-    try { const r = await post('/api/merge', {source: x.id, target: x.target.id}); setLatest(r.undo); toast(tb(r.undo.label), true); b.closest('.link-row').remove(); await refreshMeta(); refreshLocalLinks(); }
+    try { const r = await post('/api/merge', {source: x.id, target: x.target.id}); written(r.undo); b.closest('.link-row').remove(); await refreshMeta(); refreshLocalLinks(); }
     catch (e) { b.disabled = false; toast(e.message); }
   };
   d.querySelector('form').onsubmit = async e => {
@@ -317,7 +317,7 @@ export async function openLocalLinks() {
     const chosen = links.filter(x => d.querySelector(`[data-link="${CSS.escape(x.id)}"]`)?.checked).map(x => ({id: x.id, tag: x.tag}));
     if (!chosen.length) return;
     $('llApply').disabled = true; $('llApply').textContent = t('正在关联…');
-    try { const r = await post('/api/local-links', {items: chosen}); close(); setLatest(r.undo); toast(tb(r.undo.label), true); await refreshMeta(); refreshLocalLinks(); }
+    try { const r = await post('/api/local-links', {items: chosen}); close(); written(r.undo); await refreshMeta(); refreshLocalLinks(); }
     catch (err) { count(); toast(err.message); }
   };
 }
@@ -327,15 +327,14 @@ export function toggleOc(c) {
 export function toggleMascot(c) {
   return editCharacterFlag('/api/character/mascot', {entity: c.id, mascot: !c.mascot});
 }
-async function editCharacterFlag(path, body) {
-  if (edits.busy) return;
-  edits.busy = true; setLatest(edits.latest);
-  try {
-    const {undo} = await post(path, body);
-    if (undo) { setLatest(undo); toast(tb(undo.label), true); }
-    await refreshMeta(); await reload();
-  } catch (err) { toast(err.message); }
-  finally { edits.busy = false; setLatest(edits.latest); }
+function editCharacterFlag(path, body) {
+  return exclusive(async () => {
+    try {
+      const {undo} = await post(path, body);
+      if (undo) written(undo);
+      await refreshMeta(); await reload();
+    } catch (err) { toast(err.message); }
+  });
 }
 // ---------- 选中图片之间的关系（relate，native/terms/src/research_compute/relations.rs） ----------
 export async function openRelate(ids) {
