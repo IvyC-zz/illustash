@@ -23,6 +23,7 @@ import threading
 import time
 import unittest
 from unittest.mock import patch
+from urllib.parse import urlencode
 
 from tests.fixed_expectations import Library, Expectations, RECORDED_TODAY, TERMS_VERSION, unclocked
 from tests.synthetic_source import source_fixture as fixture, synthetic_reference
@@ -270,6 +271,28 @@ class NativeLifecycleTest(unittest.TestCase):
         for url in ('/api/assets?limit=bad', '/api/assets?nsfw=hide', '/api/characters?q=Alice',
                     '/api/identity/queue?limit=0', '/api/artist-audit?n=bad'):
             self.pair(url)
+
+        # 菜单应答经过原生 HTTP，并把规范 tag 交给同一个图库的筛选接口。
+        for query in ('蓝发', '青髪', 'ＢＬＵＥ ＨＡＩＲ', '蓝毛'):
+            with self.subTest(query=query):
+                params = urlencode({'format': 'menu', 'q': query})
+                result = self.request(f'/api/general-tags?{params}')
+                self.assertEqual(result['status'], 200)
+                self.assertIn({'tag': 'blue_hair', 'zh': '蓝发', 'ja': '青髪'}, json.loads(result['body']))
+        for query, expected in (
+            ('ロングヘア', {'tag': 'long_hair', 'zh': '长发', 'ja': 'ロングヘア'}),
+            ('eyeglasses', {'tag': 'glasses', 'zh': '眼镜', 'ja': None}),
+            ('night sky', {'tag': 'night_sky', 'zh': None, 'ja': None}),
+        ):
+            params = urlencode({'format': 'menu', 'q': query})
+            self.assertIn(expected, json.loads(self.request(f'/api/general-tags?{params}')['body']))
+        result = self.request('/api/general-tags?format=menu')
+        self.assertEqual(len(json.loads(result['body'])), 30)
+        result = self.request('/api/general-tags?format=menu&q=explicit')
+        self.assertNotIn('explicit', [item['tag'] for item in json.loads(result['body'])])
+        result = self.request('/api/ids?tag=blue_hair')
+        self.assertEqual(result['status'], 200)
+        self.assertEqual(json.loads(result['body']), ['a'])
         self.assertFalse(self.sentinel.exists())
 
     def test_host_origin_csrf_security_and_unavailable_forward(self):

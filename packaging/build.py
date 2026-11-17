@@ -37,6 +37,8 @@ def copy(source, destination):
 NOTICES = {'licenses/LICENSE': 'LICENSE', 'licenses/THIRD_PARTY.md': 'docs/THIRD_PARTY.md',
            'licenses/pocketfft/LICENSE.md': 'native/terms/vendor/pocketfft/LICENSE.md',
            'licenses/LCMS.txt': 'native/terms/licenses/LCMS.txt',
+           'licenses/general_names_zh_LICENSE.txt': 'tags/general_names_zh_LICENSE.txt',
+           'licenses/general_names_ja_LICENSE.txt': 'tags/general_names_ja_LICENSE.txt',
            'licenses/rust-dependencies.txt': 'packaging/rust-licenses/rust-dependencies.txt'}
 # 这些 lock 文件里每个第三方 crate 的许可文本，由 tools/gen_rust_licenses.py 生成，和 crates.json 一起提交；
 # 打包暂存时只拿它们和 lock 文件核对，然后复制（#161）。
