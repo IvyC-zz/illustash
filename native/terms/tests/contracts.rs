@@ -293,6 +293,11 @@ fn check_backup(
     fs::remove_dir_all(&check).unwrap();
 }
 
+fn migrate_fixture(package: &Path, category: &str, binary: &Path) {
+    let done = Command::new(binary).args(["migrate", "--db"]).arg(package.join("library.sqlite")).output().unwrap();
+    assert!(done.status.success(), "{category}: upgrade: {}", String::from_utf8_lossy(&done.stderr));
+}
+
 fn replay(category: &str) {
     let fixture = load(category);
     let (_scratch, root, package) = materialize(&fixture, category);
@@ -308,12 +313,7 @@ fn replay(category: &str) {
     // 较旧的 source.sqlite 布局一并更新，而这不在录制范围内），再检查并删除升级前备份。
     let upgrade = version < recorded;
     if version == recorded && recorded < illustash_terms::SCHEMA_VERSION {
-        let done = Command::new(env!("CARGO_BIN_EXE_illustash-terms"))
-            .args(["migrate", "--db"])
-            .arg(package.join("library.sqlite"))
-            .output()
-            .unwrap();
-        assert!(done.status.success(), "{category}: upgrade: {}", String::from_utf8_lossy(&done.stderr));
+        migrate_fixture(&package, category, Path::new(env!("CARGO_BIN_EXE_illustash-terms")));
         check_backup(&package, &root, &before, recorded, category);
         fs::remove_dir_all(package.join("library-backups")).unwrap();
     }
@@ -402,6 +402,7 @@ fn benchmark_root() -> PathBuf {
 #[ignore = "explicit release performance runner only"]
 fn prepare_benchmark_fixture() {
     let root = benchmark_root();
+    let binary = std::env::var_os("ILLUSTASH_BENCH_BINARY").expect("explicit baseline release binary");
     let fixture = load("http_api");
     fs::create_dir(&root).unwrap();
     let root = root.canonicalize().unwrap();
@@ -424,13 +425,11 @@ fn prepare_benchmark_fixture() {
         }
         tx.commit().unwrap();
     }
-    // 使用与迁移命令相同的连接和升级逻辑，关闭 SQLite 后再复制已准备的图库包。
-    let db = package.join("library.sqlite");
-    let mut conn = illustash_terms::open(&db).unwrap();
-    let before = illustash_terms::migrate(&mut conn).expect("benchmark fixture migration failed");
-    drop(conn);
-    if before < illustash_terms::SCHEMA_VERSION {
-        fs::remove_dir_all(package.join("library-backups")).unwrap();
+    // 基线宿主决定要准备的版本；它和候选都用不带 --upgrade 的普通打开来测量。
+    migrate_fixture(&package, "benchmark fixture", Path::new(&binary));
+    let backups = package.join("library-backups");
+    if backups.exists() {
+        fs::remove_dir_all(backups).unwrap();
     }
 }
 

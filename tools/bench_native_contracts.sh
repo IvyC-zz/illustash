@@ -17,7 +17,7 @@ run_contract() {
         "$runner" --ignored --exact "$1" --nocapture > "$owned/trial.log" 2>&1 || { cat "$owned/trial.log" >&2; exit 1; }
 }
 # 只扩容、迁移一次。合成记录含绝对路径，所以每轮把准备好的副本放回同一个试验目录。
-run_contract prepare_benchmark_fixture ''
+run_contract prepare_benchmark_fixture "$baseline"
 # 一个物理上不同的图库包使用同一个图库 ID；每次切换都必须打开那个实例。
 cp -R "$owned/trial/fixture.pilib" "$owned/trial/replacement.pilib"
 mv "$owned/trial" "$owned/prepared"
