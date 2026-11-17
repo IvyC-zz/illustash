@@ -625,7 +625,7 @@ mod tests {
         assert_eq!(before, fs::read(&f.reference).unwrap());
     }
     #[test]
-    fn all_27_native_reads_work_on_fresh_empty_package() {
+    fn all_core_reads_work_on_fresh_empty_package() {
         let f = Fixture::new();
         f.create().unwrap();
         let context = crate::http::LibraryContext {
@@ -650,6 +650,7 @@ mod tests {
             let target = match *route {
                 "/api/character/profile" => format!("{route}?entity={id}"),
                 "/api/character/stats" => format!("{route}?id={id}"),
+                "/api/galleries/covers" => format!("{route}?ids=%5B%5D"),
                 _ => (*route).to_owned(),
             };
             let out = crate::http_read::read(&context, &target).unwrap_or_else(|e| panic!("{route}: {e}"));
