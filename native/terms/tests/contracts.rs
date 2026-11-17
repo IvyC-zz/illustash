@@ -681,6 +681,9 @@ fn combined_gallery_http_contract() {
         ("/api/galleries", vec![("nsfw", "invalid")]),
         ("/api/galleries/covers", vec![("ids", "[1]"), ("nsfw", "invalid")]),
         ("/api/galleries/covers", vec![("ids", r#"[1,"2"]"#)]),
+        ("/api/galleries/covers", vec![("ids", "1")]),
+        ("/api/galleries/covers", vec![("ids", "[1.5]")]),
+        ("/api/galleries/covers", vec![("ids", r#"{"id":1}"#)]),
     ] {
         assert_eq!(request(&origin, &url(path, &filters), None, &token).0, 400);
     }

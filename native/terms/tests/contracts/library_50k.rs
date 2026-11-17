@@ -267,6 +267,9 @@ fn benchmark_galleries_http() {
     let list_url = filter_url("/api/galleries", &[common]);
     // 原夹具前四个位置分别使用四组选区，模拟只请求当前可见画廊的封面。
     let covers_url = filter_url("/api/galleries/covers", &[("ids", "[1,2,3,4]"), common]);
+    // 20 个画廊全部可见时一次取齐封面，作为封面批次的上界对照。
+    let all_ids = json!((1..=20).collect::<Vec<_>>()).to_string();
+    let covers_all_url = filter_url("/api/galleries/covers", &[("ids", &all_ids), common]);
     let old_page = filter_url("/api/assets", &[("tag", &tags[0]), common]);
     let old_count = filter_url("/api/assets/count", &[("tag", &tags[0]), common]);
     let legacy = [("page", old_page.as_str()), ("count", old_count.as_str()), ("detail", "/api/detail?id=img-00013")];
@@ -294,9 +297,11 @@ fn benchmark_galleries_http() {
                             .push(measure(&origin, &token, &url));
                     }
                 }
-                for (name, url, count) in
-                    [("candidate_list_20_ms", list_url.as_str(), 20), ("candidate_covers_4_ms", covers_url.as_str(), 4)]
-                {
+                for (name, url, count) in [
+                    ("candidate_list_20_ms", list_url.as_str(), 20),
+                    ("candidate_covers_4_ms", covers_url.as_str(), 4),
+                    ("candidate_covers_20_ms", covers_all_url.as_str(), 20),
+                ] {
                     samples.entry(name.into()).or_default().push(measure(&origin, &token, url));
                     let (status, body, _) = request_json(&origin, url, None, &token);
                     assert_eq!(status, 200, "{url}: {body}");
