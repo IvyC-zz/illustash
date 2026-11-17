@@ -35,9 +35,44 @@ fn ccip_task_and_library(
     Ok((task, read_library()?))
 }
 
+/// `GET /api/packs`（#602）。`{catalog:{configured,serial,checked_at,error}, wd:{current,offer}, ccip:{current,offer}}`；
+/// `offer` 是比卡片上的版本新的最新一个（没有时为 null），带它在本机下载了多少（`status`、`have`）和正在不在下载
+/// （`downloading`）。只读，不联网：目录只跟着检查更新读（`app_updates::post`）。
+fn packs(host: &Host, session: &Session) -> Result<Json> {
+    use crate::app_packs::Kind;
+    use serde_json::json;
+    let (checked_at, error) = crate::app_updates::packs_state()?;
+    let catalog = crate::app_packs::cached(&host.root)?;
+    let mut out = json!({"catalog":{
+        "configured":crate::app_packs::pubkey().is_some(),"serial":catalog.map(|c| c.serial),
+        "checked_at":checked_at,"error":error
+    }});
+    for kind in [Kind::Wd, Kind::Ccip] {
+        let current = match kind {
+            Kind::Wd => crate::app_wd_extension::card_pack(&host.root, &session.library)?,
+            Kind::Ccip => crate::app_ccip_longtail::card_pack(&host.root, &session.library)?,
+        };
+        let known = crate::app_packs::known(&host.root, kind)?;
+        let offer = match crate::app_packs::offer(&known, &current) {
+            Some(pack) => {
+                let mut view = pack.view();
+                let progress = crate::app_models::pack_progress(&host.root, &pack)?;
+                view["status"] = progress["status"].clone();
+                view["have"] = progress["have"].clone();
+                view["downloading"] = (crate::app_models::pack_job_version(kind).as_deref() == Some(&pack.version)).into();
+                view
+            }
+            None => serde_json::Value::Null,
+        };
+        out[kind.key()] = json!({"current":current.view(),"offer":offer});
+    }
+    Ok(out.into())
+}
+
 pub(super) fn ccip_status(host: &Host, session: &Session, started: Option<Json>) -> Result<Json> {
     use serde_json::{json, Value};
-    let model = crate::app_models::longtail_package(&host.root)?;
+    let pack = crate::app_ccip_longtail::card_pack(&host.root, &session.library)?;
+    let model = crate::app_models::longtail_package(&host.root, &pack)?;
     let (task, local) = ccip_task_and_library(
         || {
             started
@@ -286,6 +321,8 @@ fn read(request: &Request, host: &Host, session: &Session, path: &str) -> Result
         "/api/updates" => crate::app_updates::info().map(|p| Some((p, 200))),
         // 全应用范围（#168）：识别模型是否就位，以及正在进行的下载或导入。
         "/api/ccip-longtail" => ccip_status(host, session, None).map(|value| Some((value, 200))),
+        // 两种数据包的签名目录（#602）：卡片上的版本、目录里有没有更新的版本、最近一次读目录的结果。
+        "/api/packs" => packs(host, session).map(|value| Some((value, 200))),
         "/api/models" => crate::app_models::info(&host.root).map(|p| Some((p, 200))),
         "/api/onboarding" => {
             let works = crate::http_read::query(request.url()).get("works").is_some_and(|v| v == "1");

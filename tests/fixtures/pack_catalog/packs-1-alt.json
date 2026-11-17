@@ -1,0 +1,113 @@
+{
+  "format": "illustash-packs/1",
+  "serial": 1,
+  "packs": [
+    {
+      "kind": "ccip-longtail",
+      "revision": 2,
+      "version": "ccip-longtail-v2",
+      "format": "illustash-557-ccip-offline/1",
+      "heads": 2,
+      "candidate_only": 0,
+      "file": {
+        "name": "ccip-longtail-v2.zip",
+        "size": 7102,
+        "sha256": "1484e78bbbc457a2ae600cb6c179928a42ee670299411ad2442f77d2d7858c3a",
+        "url": "https://github.com/shio-vinyl/illustash/releases/download/ccip-longtail-v2/ccip-longtail-v2.zip"
+      },
+      "base": {
+        "ccip_model_sha256": "4ea118d16496274f4f6e08d3afc768cc592389e8f7f32f8732ce2215c228ac5f"
+      },
+      "min_app": "0.2.0",
+      "license": "MIT"
+    },
+    {
+      "kind": "wd-extension",
+      "revision": 2,
+      "version": "wd-extension-v2",
+      "format": "illustash-wd-extension/1",
+      "heads": 2,
+      "candidate_only": 0,
+      "file": {
+        "name": "wd-extension-v2.bin",
+        "size": 8529,
+        "sha256": "ddf85bbb7aa4b223b8e60ad67104827fac3f65b2958763b3528de3d37040f905",
+        "url": "https://github.com/shio-vinyl/illustash/releases/download/wd-extension-v2/wd-extension-v2.bin"
+      },
+      "base": {
+        "wd_model_sha256": "ae25f5f12b2d5891728fb7768fa63d65bf13a83d6d4823e3a1bf7b42875c74ff",
+        "wd_tags_sha256": "298633d94d0031d2081c0893f29c82eab7f0df00b08483ba8f29d1e979441217"
+      },
+      "min_app": "0.2.0",
+      "license": "Apache-2.0",
+      "note": {
+        "zh-CN": "合成测试包 2",
+        "en": "Synthetic test pack 2"
+      }
+    },
+    {
+      "kind": "wd-extension",
+      "revision": 3,
+      "version": "wd-extension-v3",
+      "format": "illustash-wd-extension/2",
+      "heads": 3,
+      "candidate_only": 1,
+      "file": {
+        "name": "wd-extension-v3.bin",
+        "size": 12646,
+        "sha256": "a20d208015bffe18789803954261bee9df3bc29cf6640011ed4a073be85e191b",
+        "url": "https://github.com/shio-vinyl/illustash/releases/download/wd-extension-v3/wd-extension-v3.bin"
+      },
+      "base": {
+        "wd_model_sha256": "ae25f5f12b2d5891728fb7768fa63d65bf13a83d6d4823e3a1bf7b42875c74ff",
+        "wd_tags_sha256": "298633d94d0031d2081c0893f29c82eab7f0df00b08483ba8f29d1e979441217"
+      },
+      "min_app": "0.2.0",
+      "license": "Apache-2.0",
+      "note": {
+        "zh-CN": "合成测试包 3",
+        "en": "Synthetic test pack 3"
+      }
+    },
+    {
+      "kind": "wd-extension",
+      "revision": 4,
+      "version": "wd-extension-v4",
+      "format": "illustash-wd-extension/1",
+      "heads": 1,
+      "candidate_only": 0,
+      "file": {
+        "name": "wd-extension-v4.bin",
+        "size": 8,
+        "sha256": "e465fd7e3680ba2cb0d3578762b9ecd892a6afa7a907944a657902226ed33726",
+        "url": "https://github.com/shio-vinyl/illustash/releases/download/wd-extension-v4/wd-extension-v4.bin"
+      },
+      "base": {
+        "wd_model_sha256": "ae25f5f12b2d5891728fb7768fa63d65bf13a83d6d4823e3a1bf7b42875c74ff",
+        "wd_tags_sha256": "298633d94d0031d2081c0893f29c82eab7f0df00b08483ba8f29d1e979441217"
+      },
+      "min_app": "99.0.0",
+      "license": "Apache-2.0"
+    },
+    {
+      "kind": "wd-extension",
+      "revision": 5,
+      "version": "wd-extension-v5",
+      "format": "illustash-wd-extension/9",
+      "heads": 1,
+      "candidate_only": 0,
+      "file": {
+        "name": "wd-extension-v5.bin",
+        "size": 8,
+        "sha256": "913b192eb3754014dd8c1528eae5ca888508886f358283d83b95409910d49cf4",
+        "url": "https://github.com/shio-vinyl/illustash/releases/download/wd-extension-v5/wd-extension-v5.bin"
+      },
+      "base": {
+        "wd_model_sha256": "ae25f5f12b2d5891728fb7768fa63d65bf13a83d6d4823e3a1bf7b42875c74ff",
+        "wd_tags_sha256": "298633d94d0031d2081c0893f29c82eab7f0df00b08483ba8f29d1e979441217"
+      },
+      "min_app": "0.2.0",
+      "license": "Apache-2.0"
+    }
+  ]
+}

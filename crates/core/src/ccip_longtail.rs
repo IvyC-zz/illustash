@@ -47,7 +47,7 @@ fn publish(c: &Connection, package: &str, scope: Option<&[String]>, hits: &[Hit]
         Extension::Ccip,
         package,
         scope,
-        hits.iter().map(|h| (h.uuid.as_str(), h.tag.as_str(), h.score)),
+        hits.iter().map(|h| (h.uuid.as_str(), h.tag.as_str(), h.score, false)),
     )
 }
 

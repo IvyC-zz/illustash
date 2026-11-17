@@ -313,6 +313,16 @@ fn windows_proxy(text: &str) -> Option<String> {
     };
     Some(if chosen.contains("://") { chosen } else { format!("http://{chosen}") })
 }
+/// 读数据包目录用的连接（#602）：照下载模型的规矩走代理、跟随跳转（GitHub 的下载地址会跳到存储服务），整体限时。
+pub(crate) fn download_agent(timeout: Duration) -> ureq::Agent {
+    let proxy = proxy();
+    let mut builder = ureq::AgentBuilder::new().timeout(timeout).redirects(8);
+    if let Some(proxy) = proxy.as_deref().and_then(|address| ureq::Proxy::new(address).ok()) {
+        builder = builder.proxy(proxy);
+    }
+    builder.build()
+}
+
 fn agent(proxy: Option<&str>) -> ureq::Agent {
     let mut builder = ureq::AgentBuilder::new()
         .timeout_connect(Duration::from_secs(20))
@@ -780,25 +790,48 @@ fn copy_checked(
 /// 用户选的文件：每个文件或 ZIP 里的每一项，先按大小、再按 SHA-256 匹配。名字和文件夹无关紧要（上游的两个 ONNX
 /// 文件都叫 model*.onnx）。
 fn import(models: &Models, place: &Place, paths: &[PathBuf]) -> std::result::Result<Value, Stop> {
-    let partial = partial_dir(&place.root);
-    fs::create_dir_all(&partial)?;
-    let manifest = place.manifest;
-    let wanted = |size: u64| manifest.files.iter().find(|e| e.size == size);
+    import_into(models, std::slice::from_ref(place), paths, &[])
+}
+
+/// 同一种数据包的几个版本一起认（#602）：每个所选文件或 ZIP 成员按大小、SHA-256 归到它所属的版本，各自核对、改名就位。
+/// `notes` 是事先处理过的成员（离线包里的目录和签名）的结果，原样列进结果。参考包（`raw_archive`）本身是 ZIP：
+/// 整个文件对得上某个版本时整份接收，否则当作离线包读里面的成员。
+fn import_into(
+    models: &Models,
+    places: &[Place],
+    paths: &[PathBuf],
+    notes: &[(String, &'static str)],
+) -> std::result::Result<Value, Stop> {
+    let partials = places.iter().map(|place| partial_dir(&place.root)).collect::<Vec<_>>();
+    for partial in &partials {
+        fs::create_dir_all(partial)?;
+    }
+    let raw_archive = places.iter().any(|place| place.raw_archive);
+    let wanted = |size: u64| {
+        places.iter().enumerate().find_map(|(i, place)| place.manifest.files.iter().find(|e| e.size == size).map(|e| (i, e)))
+    };
     let mut results = Vec::new();
     let mut meter = Meter::new(models, 0);
     let mut take =
         |name: String, size: u64, reader: &mut dyn Read, meter: &mut Meter| -> std::result::Result<(), Stop> {
+            if let Some((_, result)) = notes.iter().find(|(noted, _)| *noted == name) {
+                results.push(json!({"name": name, "result": result, "path": null}));
+                return Ok(());
+            }
             let result = match wanted(size) {
                 None => "unknown",
-                Some(entry) if !place.raw_archive && (usable(&place.root, entry) || usable(&partial, entry)) => {
+                Some((i, entry))
+                    if !places[i].raw_archive && (usable(&places[i].root, entry) || usable(&partials[i], entry)) =>
+                {
                     "already"
                 }
-                Some(entry) => {
+                Some((i, entry)) => {
+                    let place = &places[i];
                     let installed = place.raw_archive
                         && crate::recognition_compute::models::hash(&place.root.join(&entry.path), &|| Ok(()))
                             .is_ok_and(|sha| sha == entry.sha256);
                     models.set(|job| job["file"] = entry.path.clone().into());
-                    let ok = copy_checked(reader, &partial, entry, meter)?;
+                    let ok = copy_checked(reader, &partials[i], entry, meter)?;
                     meter.finish(entry.size);
                     if ok && installed {
                         "already"
@@ -809,14 +842,15 @@ fn import(models: &Models, place: &Place, paths: &[PathBuf]) -> std::result::Res
                     }
                 }
             };
-            results.push(json!({"name": name, "result": result, "path": wanted(size).map(|e| e.path.clone())}));
+            results.push(json!({"name": name, "result": result, "path": wanted(size).map(|(_, e)| e.path.clone())}));
             Ok(())
         };
     for path in paths {
         let name = path.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
         let unreadable = |e: std::io::Error| Stop::Failed(format!("读不到所选文件 {name}：{error}", error = e));
         let metadata = fs::metadata(path).map_err(unreadable)?;
-        let zip = !place.raw_archive && path.extension().is_some_and(|x| x.eq_ignore_ascii_case("zip"));
+        let whole = raw_archive && metadata.is_file() && wanted(metadata.len()).is_some();
+        let zip = !whole && path.extension().is_some_and(|x| x.eq_ignore_ascii_case("zip"));
         if zip {
             let file = fs::File::open(path).map_err(unreadable)?;
             let mut archive = zip::ZipArchive::new(file)
@@ -839,9 +873,16 @@ fn import(models: &Models, place: &Place, paths: &[PathBuf]) -> std::result::Res
             take(name, u64::MAX, &mut empty, &mut meter)?;
         }
     }
-    let complete = manifest.files.iter().filter(|e| !e.optional).all(|e| has(&place.root, e) || has(&partial, e));
-    if complete {
-        activate(&place.root, &partial, manifest)?;
+    for (place, partial) in places.iter().zip(&partials) {
+        let manifest = place.manifest;
+        let complete = manifest.files.iter().filter(|e| !e.optional).all(|e| has(&place.root, e) || has(partial, e));
+        let touched = manifest.files.iter().any(|e| has(partial, e));
+        if complete && (touched || places.len() == 1) {
+            activate(&place.root, partial, manifest)?;
+        } else if !touched && places.len() > 1 && fs::read_dir(partial).is_ok_and(|mut d| d.next().is_none()) {
+            // 这次没有用到的版本不留空的 .partial 文件夹。
+            let _ = fs::remove_dir(partial);
+        }
     }
     Ok(json!({"results": results}))
 }
@@ -904,30 +945,14 @@ pub(crate) fn info(resources: &Path) -> Result<Json> {
 
 static CCIP_LONGTAIL: Models = Models::new();
 
-fn longtail_place(resources: &Path) -> Result<Place> {
-    use crate::app_ccip_longtail::{self, PACKAGE_NAME, PACKAGE_VERSION};
-    static MANIFEST: OnceLock<Manifest> = OnceLock::new();
-    // 走查和测试可以换成本机合成包（ILLUSTASH_TEST_CCIP_LONGTAIL，见 app_ccip_longtail::release）。
-    let release = app_ccip_longtail::release()?;
-    let manifest = MANIFEST.get_or_init(|| Manifest {
-        format: 1,
-        pack: PACKAGE_VERSION.into(),
-        manual: "https://github.com/shio-vinyl/illustash/blob/main/docs/INSTALL.md#可选的-ccip-长尾角色参考包".into(),
-        mirror: String::new(),
-        modelscope: String::new(),
-        files: vec![Entry {
-            path: PACKAGE_NAME.into(),
-            size: release.bytes,
-            sha256: release.sha256.clone(),
-            source: Source::Project { url: release.url.clone() },
-            optional: false,
-        }],
-        wd_coreml: None,
-    });
+const LONGTAIL_MANUAL: &str = "https://github.com/shio-vinyl/illustash/blob/main/docs/INSTALL.md#可选的-ccip-长尾角色参考包";
+
+/// 某个版本的参考包放在共享数据的 `extensions/<版本>/` 下（内置的是 `extensions/ccip-longtail-v1/`）。
+fn longtail_place(resources: &Path, pack: &crate::app_packs::Pack) -> Result<Place> {
     let shared = crate::app_resources::shared_path(resources)?;
     Ok(Place {
-        root: app_ccip_longtail::package_path(&shared).parent().expect("参考包有存放目录").into(),
-        manifest,
+        root: crate::app_ccip_longtail::package_path(&shared, pack).parent().expect("参考包有存放目录").into(),
+        manifest: pack_manifest(pack, LONGTAIL_MANUAL)?,
         preferences: PathBuf::new(),
         modelscope: String::new(),
         proxy: None,
@@ -937,19 +962,24 @@ fn longtail_place(resources: &Path) -> Result<Place> {
     })
 }
 
-pub(crate) fn longtail_package(resources: &Path) -> Result<Json> {
+/// `GET /api/ccip-longtail` 的 `package`：说的是卡片上的那个版本。
+pub(crate) fn longtail_package(resources: &Path, pack: &crate::app_packs::Pack) -> Result<Json> {
     // 下载状态可能在文件改名后进入终态，响应以取得任务快照时序为准。
     let job = CCIP_LONGTAIL.snapshot();
-    Ok(package_info(&longtail_place(resources)?, || job))
+    Ok(package_info(&longtail_place(resources, pack)?, || job))
 }
 
-pub(crate) fn longtail_package_post(resources: &Path, body: &Json, in_use: bool) -> Result<()> {
-    let mut place = longtail_place(resources)?;
+/// `POST /api/ccip-longtail/package`，动作同 `extension_post`。
+pub(crate) fn longtail_package_post(
+    resources: &Path,
+    body: &Json,
+    in_use: bool,
+    current: &crate::app_packs::Pack,
+) -> Result<()> {
     if body.get("action").map(Json::text) == Some("delete") && in_use {
         return Err(Error::Conflict("正在检查角色，请等任务结束后再删除参考包".into()));
     }
-    place.proxy = proxy();
-    post_at(&CCIP_LONGTAIL, place, body).map(|_| ())
+    pack_post(resources, body, current, &CCIP_LONGTAIL, "未知操作")
 }
 
 /// 「使用 GPU 加速识别」（#270）在模型卡片上：这个构建有没有加速器、开关（POST /api/preferences），
@@ -1151,19 +1181,36 @@ pub(crate) fn wd_extension() -> Result<&'static WdExtension> {
 const WD_EXTENSION_MANUAL: &str =
     "https://github.com/shio-vinyl/illustash/blob/main/docs/INSTALL.md#可选的-wd-角色扩展包";
 static WD_EXTENSION: Models = Models::new();
+/// 两种数据包各自正在下载或导入的是哪个版本（#602）；下载状态（`download`）是整个种类共用的一个。
+static PACK_JOBS: Mutex<[Option<String>; 2]> = Mutex::new([None, None]);
 
-fn extension_place(resources: &Path) -> Result<Place> {
-    static DOWNLOAD: OnceLock<Manifest> = OnceLock::new();
-    let spec = wd_extension()?;
-    let manifest = DOWNLOAD.get_or_init(|| Manifest {
-        format: 1,
-        pack: format!("wd-extension-v{}", spec.revision),
-        manual: WD_EXTENSION_MANUAL.into(),
-        mirror: String::new(),
-        modelscope: String::new(),
-        files: vec![spec.file.clone()],
-        wd_coreml: None,
-    });
+fn job_slot(kind: crate::app_packs::Kind) -> usize {
+    match kind {
+        crate::app_packs::Kind::Wd => 0,
+        crate::app_packs::Kind::Ccip => 1,
+    }
+}
+
+/// 这一种数据包最近一次下载或导入针对的版本（`GET /api/packs` 据此把下载进度算到「新版本」那一行）。
+pub(crate) fn pack_job_version(kind: crate::app_packs::Kind) -> Option<String> {
+    PACK_JOBS.lock().expect("数据包任务锁中毒")[job_slot(kind)].clone()
+}
+
+fn note_pack_job(kind: crate::app_packs::Kind, version: Option<String>) {
+    PACK_JOBS.lock().expect("数据包任务锁中毒")[job_slot(kind)] = version;
+}
+
+/// 清单条目的文件名、大小、SHA-256 和下载地址（项目 Release 的派生文件才有地址）。
+pub(crate) fn entry_parts(entry: &Entry) -> (String, u64, String, String) {
+    let url = match &entry.source {
+        Source::Project { url } => url.clone(),
+        Source::Upstream { .. } => String::new(),
+    };
+    (entry.path.clone(), entry.size, entry.sha256.clone(), url)
+}
+
+/// 共享数据里放数据包的文件夹：WD 角色扩展包、各版本的数据包和包目录的本机缓存都在这里（#602）。
+pub(crate) fn extensions_root(resources: &Path) -> Result<PathBuf> {
     let shared = if std::env::var_os("ILLUSTASH_SHARED").is_some() {
         crate::app_resources::shared_path(resources)?
     } else {
@@ -1179,9 +1226,48 @@ fn extension_place(resources: &Path) -> Result<Place> {
         };
         support.join("Shared")
     };
+    Ok(shared.join("extensions"))
+}
+
+/// 下载清单要活到进程结束（`Place` 借用它）。每个版本只建一次。
+fn pack_manifest(pack: &crate::app_packs::Pack, manual: &str) -> Result<&'static Manifest> {
+    static MANIFESTS: Mutex<Vec<&'static Manifest>> = Mutex::new(Vec::new());
+    // 目录里的地址是 GitHub Release 的；测试时换到本机测试服务（内置包的走查清单本来就指向本机）。
+    let url = if pack.builtin {
+        pack.file.url.clone()
+    } else {
+        crate::app_updates::asset_url(&pack.file.url).map_err(Error::Invalid)?
+    };
+    let mut known = MANIFESTS.lock().expect("数据包清单锁中毒");
+    if let Some(found) = known.iter().find(|m| {
+        m.pack == pack.version
+            && m.files.first().is_some_and(|e| e.sha256 == pack.file.sha256 && matches!(&e.source, Source::Project { url: u } if *u == url))
+    }) {
+        return Ok(found);
+    }
+    let manifest: &'static Manifest = Box::leak(Box::new(Manifest {
+        format: 1,
+        pack: pack.version.clone(),
+        manual: manual.into(),
+        mirror: String::new(),
+        modelscope: String::new(),
+        files: vec![Entry {
+            path: pack.file.name.clone(),
+            size: pack.file.size,
+            sha256: pack.file.sha256.clone(),
+            source: Source::Project { url },
+            optional: false,
+        }],
+        wd_coreml: None,
+    }));
+    known.push(manifest);
+    Ok(manifest)
+}
+
+fn extension_place(resources: &Path, pack: &crate::app_packs::Pack) -> Result<Place> {
     Ok(Place {
-        root: shared.join("extensions").join(&manifest.pack),
-        manifest,
+        root: extensions_root(resources)?.join(&pack.version),
+        manifest: pack_manifest(pack, WD_EXTENSION_MANUAL)?,
         preferences: PathBuf::new(),
         modelscope: String::new(),
         proxy: None,
@@ -1191,18 +1277,25 @@ fn extension_place(resources: &Path) -> Result<Place> {
     })
 }
 
-pub(crate) fn extension_file(resources: &Path) -> Result<Option<PathBuf>> {
-    let place = extension_place(resources)?;
-    let entry = &wd_extension()?.file;
+/// 这个版本的 WD 角色扩展包已经就位（核对过 SHA-256）时，它的路径。
+pub(crate) fn extension_file(resources: &Path, pack: &crate::app_packs::Pack) -> Result<Option<PathBuf>> {
+    let place = extension_place(resources, pack)?;
+    let entry = &place.manifest.files[0];
     Ok(usable(&place.root, entry).then(|| place.root.join(&entry.path)))
 }
 
-pub(crate) fn extension_info(resources: &Path) -> Result<Value> {
+/// 这个版本的包文件是不是已经在本机（只看大小，读状态时用；用的时候再核对 SHA-256）。
+pub(crate) fn extension_present(resources: &Path, pack: &crate::app_packs::Pack) -> Result<bool> {
+    let place = extension_place(resources, pack)?;
+    Ok(has(&place.root, &place.manifest.files[0]))
+}
+
+/// `GET /api/wd-extension` 的 `package` 和 `download`：说的是卡片上的那个版本（`pack`）。
+pub(crate) fn extension_info(resources: &Path, pack: &crate::app_packs::Pack) -> Result<Value> {
     // 先读任务快照；看到下载已结束时才开始确认激活后的文件。
     let download = WD_EXTENSION.snapshot();
-    let place = extension_place(resources)?;
-    let spec = wd_extension()?;
-    let entry = &spec.file;
+    let place = extension_place(resources, pack)?;
+    let entry = &place.manifest.files[0];
     let ready = usable(&place.root, entry);
     let partial = partial_dir(&place.root);
     let have = if ready || usable(&partial, entry) {
@@ -1212,7 +1305,7 @@ pub(crate) fn extension_info(resources: &Path) -> Result<Value> {
     };
     Ok(json!({
         "package": {
-            "version":place.manifest.pack, "heads":spec.heads, "license":spec.license,
+            "version":place.manifest.pack, "heads":pack.heads, "license":pack.license,
             "file":{"path":entry.path,"size":entry.size,"sha256":entry.sha256},
             "manual":place.manifest.manual, "location":place.root,
             "status":if ready {"ready"} else if have > 0 {"partial"} else {"missing"},
@@ -1223,22 +1316,103 @@ pub(crate) fn extension_info(resources: &Path) -> Result<Value> {
     }))
 }
 
-pub(crate) fn extension_post(resources: &Path, body: &Json) -> Result<()> {
-    let mut place = extension_place(resources)?;
+/// 某个版本的包下载了多少（`GET /api/packs` 的「新版本」一行）。
+pub(crate) fn pack_progress(resources: &Path, pack: &crate::app_packs::Pack) -> Result<Value> {
+    let place = match pack.kind {
+        crate::app_packs::Kind::Wd => extension_place(resources, pack)?,
+        crate::app_packs::Kind::Ccip => longtail_place(resources, pack)?,
+    };
+    let entry = &place.manifest.files[0];
+    let partial = partial_dir(&place.root);
+    let ready = has(&place.root, entry);
+    let have = if ready || has(&partial, entry) {
+        entry.size
+    } else {
+        fs::metadata(part(&partial, entry)).map_or(0, |m| m.len().min(entry.size))
+    };
+    Ok(json!({"status":if ready {"ready"} else if have > 0 {"partial"} else {"missing"},"have":have}))
+}
+
+/// `POST /api/wd-extension/package`：
+/// - `download` 下载卡片上的版本，带 `version` 时下载那个版本（「有新版本」，#602）；
+/// - `import` 一起认所选文件里的所有可用版本，离线包里的目录先验签采用（`app_packs::adopt_archives`）；
+/// - `cancel`、`discard`、`delete` 针对卡片上的版本（取消针对正在进行的那个）。
+pub(crate) fn extension_post(resources: &Path, body: &Json, current: &crate::app_packs::Pack) -> Result<()> {
+    pack_post(resources, body, current, &WD_EXTENSION, "未知的 WD 角色扩展包操作")
+}
+
+fn pack_post(
+    resources: &Path,
+    body: &Json,
+    current: &crate::app_packs::Pack,
+    models: &'static Models,
+    unknown: &str,
+) -> Result<()> {
+    let kind = current.kind;
     let action = body.get("action").map(Json::text).unwrap_or("");
     if !matches!(action, "download" | "import" | "cancel" | "discard" | "delete") {
-        return Err(Error::invalid("未知的 WD 角色扩展包操作"));
+        return Err(Error::invalid(unknown));
     }
-    if action != "cancel" && WD_EXTENSION.running.load(Ordering::SeqCst) {
-        return Err(Error::Conflict("扩展包正在下载或导入，请等它结束".into()));
+    let (busy, ready) = match kind {
+        crate::app_packs::Kind::Wd => ("扩展包正在下载或导入，请等它结束", "扩展包已经就位"),
+        crate::app_packs::Kind::Ccip => ("参考包正在下载或导入，请等它结束", "参考包已经就位"),
+    };
+    if action != "cancel" && models.running.load(Ordering::SeqCst) {
+        return Err(Error::Conflict(busy.into()));
     }
-    if action == "download" {
-        if usable(&place.root, &wd_extension()?.file) {
-            return Err(Error::Conflict("扩展包已经就位".into()));
+    let place_of = |pack: &crate::app_packs::Pack| match kind {
+        crate::app_packs::Kind::Wd => extension_place(resources, pack),
+        crate::app_packs::Kind::Ccip => longtail_place(resources, pack),
+    };
+    let Json::Object(fields) = body else { return Err(Error::invalid("未知操作")) };
+    let version = match fields.iter().find(|(k, _)| k == "version").map(|(_, v)| v) {
+        None => None,
+        Some(Json::Scalar(Value::String(v))) if action == "download" && !v.is_empty() => Some(v.clone()),
+        Some(_) => return Err(Error::invalid("未知参数")),
+    };
+    let rest = Json::Object(fields.iter().filter(|(k, _)| k != "version").cloned().collect());
+    match action {
+        "download" => {
+            let pack = match &version {
+                Some(version) => crate::app_packs::by_version(resources, kind, version)?,
+                None => current.clone(),
+            };
+            let mut place = place_of(&pack)?;
+            if usable(&place.root, &place.manifest.files[0]) {
+                return Err(Error::Conflict(ready.into()));
+            }
+            place.proxy = proxy();
+            post_at(models, place, &rest)?;
+            note_pack_job(kind, Some(pack.version));
         }
-        place.proxy = proxy();
+        "import" => {
+            let paths: Vec<PathBuf> = match rest.get("paths") {
+                Some(Json::Array(list)) if !list.is_empty() && list.len() <= 64 => list
+                    .iter()
+                    .map(|p| match p {
+                        Json::Scalar(Value::String(p)) if !p.is_empty() => Ok(PathBuf::from(p)),
+                        _ => Err(Error::Invalid("文件路径不正确".into())),
+                    })
+                    .collect::<Result<_>>()?,
+                _ => return Err(Error::Invalid("请选择要导入的文件".into())),
+            };
+            if fields.iter().any(|(k, _)| k != "action" && k != "paths") {
+                return Err(Error::invalid("未知参数"));
+            }
+            // 离线包里的目录先采用，再按采用后的目录认包文件。
+            let notes = crate::app_packs::adopt_archives(resources, &paths);
+            let mut places = Vec::new();
+            for pack in crate::app_packs::known(resources, kind)? {
+                places.push(place_of(&pack)?);
+            }
+            let total = paths.iter().filter_map(|p| fs::metadata(p).ok()).map(|m| m.len()).sum();
+            models.start("import", total, move |models| import_into(models, &places, &paths, &notes))?;
+            note_pack_job(kind, None);
+        }
+        "cancel" => models.cancel.store(true, Ordering::SeqCst),
+        _ => post_at(models, place_of(current)?, &rest).map(|_| ())?,
     }
-    post_at(&WD_EXTENSION, place, body).map(|_| ())
+    Ok(())
 }
 
 #[cfg(test)]

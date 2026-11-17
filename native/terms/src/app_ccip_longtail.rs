@@ -1,6 +1,7 @@
 //! 加载冻结的 CCIP 长尾参考包，扫描已保存的向量，并发布独立的候选批次。
 use crate::app_imports::Observer;
 use crate::app_library::Library;
+use crate::app_packs::{Base, Pack};
 use crate::recognition_compute::{
     anchor_snapshot::{Fingerprint, LongtailSnapshot, Reference, Snapshot},
     anchors::Metadata,
@@ -142,10 +143,12 @@ fn floats(bytes: &[u8]) -> Option<Vec<f32>> {
 }
 
 impl Package {
-    fn load(path: &Path) -> Result<Self> {
-        let release = release()?;
-        let bytes = crate::app_recognition::file(path, release.bytes)?;
-        if bytes.len() as u64 != release.bytes || crate::strict_json::sha256_hex(&bytes) != release.sha256 {
+    /// 读一个版本的参考包（内置的或目录里的，#602）：大小、SHA-256、CCIP 模型和角色数都对上这个版本。
+    fn load(path: &Path, pack: &Pack) -> Result<Self> {
+        let Base::Ccip { model } = &pack.base else { return Err(bad()) };
+        let (size, roles) = (pack.file.size, pack.heads);
+        let bytes = crate::app_recognition::file(path, size)?;
+        if bytes.len() as u64 != size || crate::strict_json::sha256_hex(&bytes) != pack.file.sha256 {
             return Err(bad());
         }
         let mut archive = zip::ZipArchive::new(Cursor::new(&bytes)).map_err(|_| bad())?;
@@ -162,20 +165,19 @@ impl Package {
             Ok(contents)
         };
         let provenance: Value = serde_json::from_slice(&member("A-provenance.json", 16 * 1024)?).map_err(|_| bad())?;
-        if provenance["format"] != "illustash-557-ccip-offline/1"
-            || provenance["ccip_sha256"] != release.ccip_sha256.as_str()
-        {
+        if provenance["format"] != crate::app_packs::CCIP_FORMAT || provenance["ccip_sha256"] != model.as_str() {
             return Err(bad());
         }
-        let metadata = member("A-metadata.json", 128 * 1024)?;
-        let packed = member("A-anchors.f32", (release.roles * DIMENSION * size_of::<f32>()) as u64)?;
+        // 元数据每个角色约两百字节；内置包 54 个角色的上限照旧是 128 KB。
+        let metadata = member("A-metadata.json", (128 * 1024).max(roles as u64 * 2048))?;
+        let packed = member("A-anchors.f32", (roles * DIMENSION * size_of::<f32>()) as u64)?;
         for (name, value) in [("A-metadata.json", &metadata), ("A-anchors.f32", &packed)] {
             if provenance["files"][name] != crate::strict_json::sha256_hex(value) {
                 return Err(bad());
             }
         }
         let entries: Vec<Entry> = serde_json::from_slice(&metadata).map_err(|_| bad())?;
-        if entries.len() != release.roles || packed.len() != release.roles * DIMENSION * size_of::<f32>() {
+        if entries.len() != roles || packed.len() != roles * DIMENSION * size_of::<f32>() {
             return Err(bad());
         }
         let mut ids = HashSet::new();
@@ -216,7 +218,7 @@ impl Package {
     }
 
     fn remember(&self, destination: &Path) -> Result<()> {
-        if matches!(crate::app_recognition::file(destination, release()?.bytes), Ok(previous) if previous == self.bytes)
+        if matches!(crate::app_recognition::file(destination, self.bytes.len() as u64), Ok(previous) if previous == self.bytes)
         {
             return Ok(());
         }
@@ -237,8 +239,28 @@ impl Package {
     }
 }
 
-pub(crate) fn package_path(shared: &Path) -> PathBuf {
-    shared.join("extensions").join(PACKAGE_VERSION).join(PACKAGE_NAME)
+/// 某个版本的参考包在共享数据里的位置：`extensions/<版本>/<文件名>`。
+pub(crate) fn package_path(shared: &Path, pack: &Pack) -> PathBuf {
+    shared.join("extensions").join(&pack.version).join(&pack.file.name)
+}
+
+/// 卡片上的版本（`app_packs::current`）：本图库启用的那个，否则本机已有的最新的，都没有就是最新的。
+pub(crate) fn card_pack(root: &Path, library: &Library) -> Result<Pack> {
+    let app = crate::app_library::read_connection(&library.db())?;
+    let enabled = ccip_longtail::enabled_package(&app)?;
+    let shared = crate::app_resources::shared_path(root)?;
+    let packs = crate::app_packs::known(root, crate::app_packs::Kind::Ccip)?;
+    Ok(crate::app_packs::current(&packs, enabled.as_deref(), |pack| {
+        package_path(&shared, pack).try_exists().unwrap_or(false)
+    }))
+}
+
+/// 本图库启用的版本（在可用列表里的话）。
+fn enabled_pack(root: &Path, app: &Connection) -> Result<Option<Pack>> {
+    match ccip_longtail::enabled_package(app)? {
+        Some(sha) => crate::app_packs::by_sha(root, crate::app_packs::Kind::Ccip, &sha),
+        None => Ok(None),
+    }
 }
 
 fn writable(library: &Library) -> Result<()> {
@@ -332,17 +354,31 @@ fn compatible_model(raw: &str) -> bool {
         && model["sha256"] == release.ccip_sha256.as_str()
 }
 
-/// 扫描阶段使用只读事务，写入前在来源库租约下复核输入版本。
-pub(crate) fn apply(
+/// 命令行（`ccip-longtail --package`）：按文件的 SHA-256 找它是哪个可用版本。
+pub(crate) fn apply_file(
     library: &Library,
     root: &Path,
     path: &Path,
     check: &dyn Fn() -> Result<()>,
     observer: &dyn Observer,
 ) -> Result<Value> {
+    let sha = crate::strict_json::sha256_hex(&crate::app_recognition::file(path, 512 << 20)?);
+    let pack = crate::app_packs::by_sha(root, crate::app_packs::Kind::Ccip, &sha)?.ok_or_else(bad)?;
+    apply(library, root, &pack, path, check, observer)
+}
+
+/// 扫描阶段使用只读事务，写入前在来源库租约下复核输入版本。用别的版本启用过的图库，这一次换成 `pack`（#602）。
+pub(crate) fn apply(
+    library: &Library,
+    root: &Path,
+    pack: &Pack,
+    path: &Path,
+    check: &dyn Fn() -> Result<()>,
+    observer: &dyn Observer,
+) -> Result<Value> {
     writable(library)?;
     observer.stage("models");
-    let package = Package::load(path)?;
+    let package = Package::load(path, pack)?;
     let shared = crate::app_resources::shared_path(root)?;
     let mut source = writer(&library.source())?;
     let read = source.transaction()?;
@@ -372,10 +408,10 @@ pub(crate) fn apply(
     }
     crate::app_recognition::require_published_inputs(&app, &source)?;
     check()?;
-    package.remember(&package_path(&shared))?;
+    package.remember(&package_path(&shared, pack))?;
     let tx = app.transaction_with_behavior(TransactionBehavior::Immediate)?;
     crate::schema::begin_writing(&tx)?;
-    let changed = ccip_longtail::apply(&tx, &release()?.sha256, &hits)?;
+    let changed = ccip_longtail::apply(&tx, &pack.file.sha256, &hits)?;
     tx.execute("INSERT OR REPLACE INTO meta(key,value) VALUES (?1,?2)", [INDEX_GENERATION, &generation.to_string()])?;
     tx.execute(
         "INSERT INTO meta(key,value) VALUES (?1,json_object('enabled_at',CURRENT_TIMESTAMP,'checked_at',CURRENT_TIMESTAMP,'scored',?2))
@@ -387,7 +423,7 @@ pub(crate) fn apply(
     let mut tx = Some(tx);
     observer.publish(&mut || crate::schema::commit_writing(tx.take().expect("角色参考包只提交一次")))?;
     Ok(
-        json!({"package_sha256":release()?.sha256,"roles":release()?.roles,"scored":count,"hits":hits.len(),"changed":changed,
+        json!({"package_sha256":pack.file.sha256,"roles":pack.heads,"scored":count,"hits":hits.len(),"changed":changed,
         "missing":rows.missing,"incompatible":rows.incompatible,"scan_ms":scan_ms,"publish_ms":publish.elapsed().as_millis()}),
     )
 }
@@ -422,7 +458,8 @@ pub(crate) fn status(library: &Library, root: &Path) -> Result<Value> {
     let app = crate::app_library::read_connection(&library.db())?;
     let enabled = ccip_longtail::enabled_package(&app)?;
     let shared = crate::app_resources::shared_path(root)?;
-    let available = package_path(&shared).try_exists()?;
+    let pack = card_pack(root, library)?;
+    let available = package_path(&shared, &pack).try_exists()?;
     let candidates: i64 =
         app.query_row("SELECT count(DISTINCT uuid) FROM candidates WHERE source='CCIP_LONGTAIL'", [], |r| r.get(0))?;
     let memberships: i64 =
@@ -446,36 +483,38 @@ pub(crate) fn status(library: &Library, root: &Path) -> Result<Value> {
     } else {
         false
     };
-    let release = release()?;
-    Ok(json!({"roles":release.roles,"package_sha256":release.sha256,"package_bytes":release.bytes,"enabled":enabled,
+    Ok(json!({"roles":pack.heads,"package_sha256":pack.file.sha256,"package_bytes":pack.file.size,"enabled":enabled,
         "needs_scan":needs_scan,"available":available,"candidates":candidates,"assigned":memberships,"error":error,
         "writable":!library.frozen(),"vectors":vectors,"enabled_at":enabled_at,"checked_at":checked_at,"scored":scored}))
 }
 
 fn delivery_snapshot(
+    root: &Path,
     shared: &Path,
     app: &Connection,
     source: &Connection,
     check: &dyn Fn() -> Result<()>,
 ) -> Result<Option<LongtailSnapshot>> {
-    let path = package_path(shared);
-    if ccip_longtail::enabled_package(app)?.as_deref() != Some(release()?.sha256.as_str()) || !path.try_exists()? {
+    let Some(pack) = enabled_pack(root, app)? else { return Ok(None) };
+    let path = package_path(shared, &pack);
+    if !path.try_exists()? {
         return Ok(None);
     }
-    let package = Package::load(&path)?;
+    let package = Package::load(&path, &pack)?;
     LongtailSnapshot::load(shared, source, &package.references, check).map(Some)
 }
 
 /// 正常识别任务在接收任何批次之前构建一次长尾快照，避免在回执锁里做平方级计算。
 pub(crate) fn prepare_delivery(
     library: &Library,
+    root: &Path,
     shared: &Path,
     expected: &Fingerprint,
     check: &dyn Fn() -> Result<()>,
 ) -> Result<Option<LongtailSnapshot>> {
     let app = crate::app_library::read_connection(&library.db())?;
     let source = crate::app_library::read_connection(&library.source())?;
-    let snapshot = delivery_snapshot(shared, &app, &source, check)?;
+    let snapshot = delivery_snapshot(root, shared, &app, &source, check)?;
     if snapshot.as_ref().is_some_and(|snap| &snap.anchors.fingerprint != expected) {
         return Err(Error::Conflict("准备识别时基础角色索引已更新".into()));
     }
@@ -519,7 +558,7 @@ pub(crate) fn score_delivery(
         return Ok(None);
     }
     let shared = crate::app_resources::shared_path(root)?;
-    let Some(snapshot) = delivery_snapshot(&shared, app, source, check)? else {
+    let Some(snapshot) = delivery_snapshot(root, &shared, app, source, check)? else {
         return Ok(None);
     };
     let rows = read_rows(source, Some(ids), check)?;
@@ -533,12 +572,12 @@ pub(crate) fn publish_delivery(
     ids: &[String],
     result: Result<Option<Vec<Hit>>>,
 ) -> Result<Option<Value>> {
-    if ccip_longtail::enabled_package(app)?.is_none() {
+    let Some(enabled) = ccip_longtail::enabled_package(app)? else {
         return Ok(None);
-    }
+    };
     let task = match result {
         Ok(Some(hits)) => {
-            let changed = ccip_longtail::refresh(app, &release()?.sha256, ids, &hits)?;
+            let changed = ccip_longtail::refresh(app, &enabled, ids, &hits)?;
             app.execute("DELETE FROM meta WHERE key=?1", [DELIVERY_ERROR])?;
             json!({"id":digest,"kind":"auto","phase":"write","status":"done","result":{"changed":changed}})
         }
