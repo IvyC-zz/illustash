@@ -21,6 +21,7 @@ const ROWS = {
   '角色页': {hash: '#/library?char=c1', page: 'library', char: true, doc: '`#/library?char='},
   '资料库 · 角色': {hash: '#/characters', page: 'characters', doc: '`#/characters`'},
   '资料库 · 作品': {hash: '#/characters/works', page: 'characters', doc: '`#/characters/works`'},
+  '资料库 · 画师': {hash: '#/characters/artists', page: 'characters', doc: '`#/characters/artists`'},
   '设置': {hash: '#/settings/data', page: 'settings', doc: '`#/settings/'},
   '未识别 · 全部': {hash: '#/unmatched', page: 'unmatched', doc: '`#/unmatched`'},
   '未识别 · 已跳过': {hash: '#/skipped', page: 'skipped', doc: '`#/skipped`'},
