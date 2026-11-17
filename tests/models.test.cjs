@@ -158,6 +158,10 @@ test('基础角色索引（#607）：缺文件时提示和按钮按缺的是哪�
     assert.doesNotMatch(context.characterBaseLine({...base, available: true, enabled: true, running: true}), /data-models/);
     assert.equal(context.characterBaseLine({...base, available: true, writable: false}), '');
     assert.equal(context.characterBaseLine({...base, included: false}), '');
+    // 首次准备时图库还没有识别结果，启用提示不说「0 张」。
+    const {indexEndText} = web.core();
+    assert.equal(indexEndText({status: 'done', kind: 'base', enabled: true, changed: 0}), '基础角色索引已启用');
+    assert.equal(indexEndText({status: 'done', kind: 'base', enabled: false, changed: 3}), '基础角色索引已撤回，3 张图片的识别结果已更新');
   } finally { context.state.characterBase = saved; }
 });
 

@@ -786,7 +786,13 @@ impl Updater {
             "drop" | "base" => "building",
             _ => "fetching",
         };
-        *state.lock().expect("index state mutex poisoned") = json!({"status":status,"started_at":now()}).into();
+        let mut initial = json!({"status":status,"started_at":now()});
+        // 基础角色索引的任务从一开始就带 kind，`GET /api/index/base` 才看得出它在运行（#607）。其他动作的运行中状态
+        // 是冻结的 /api/index 回复，照旧不带。
+        if kind == "base" {
+            initial["kind"] = kind.into();
+        }
+        *state.lock().expect("index state mutex poisoned") = initial.into();
         self.task = Some(Task::start_with(identity, deadline(), move |ctx| {
             let run = || {
                 let net = crate::app_name_sources::Source::new(lib.db(), ctx.cancellation_arc(), network, true)?;

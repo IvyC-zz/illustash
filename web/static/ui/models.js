@@ -3,7 +3,7 @@
 import {t, tb} from '../core/i18n.js';
 import {esc, bytes, home, number} from '../core/format.js';
 import {state} from '../core/state.js';
-import {SYNC_ACTIVE, INDEX_ACTIVE, startSync, pollSync, pollIndex, onJob} from '../core/jobs.js';
+import {SYNC_ACTIVE, INDEX_ACTIVE, startSync, pollSync, pollIndex, onJob, indexEndText} from '../core/jobs.js';
 import {loadModels, modelsPost, modelsWaiting, modelsFinished, modelsArrived, onModels, saveAcceleration, fallbacks,
   loadCharacterBase, characterBasePost, characterBasePath, optionalGaps} from '../core/models.js';
 import {$, toast, redraw, busy} from './dom.js';
@@ -200,7 +200,15 @@ export function wireModels() {
     renderModels();
     const job = modelsFinished(before); if (!job) return;
     // 基础角色索引刚下载好时，宿主在下一次恢复检查里为这个图库启用它；稍等再读状态和索引任务。
-    setTimeout(() => { loadCharacterBase().catch(() => {}); pollIndex(); }, 2000);
+    const wasEnabled = state.characterBase?.enabled;
+    setTimeout(async () => {
+      const was = state.index?.state?.status;
+      await Promise.all([loadCharacterBase().catch(() => {}), pollIndex()]);
+      // 新图库启用得很快，2 秒后第一次读到的已经是结束状态，任务面板等不到它「结束」：在这里说一次（#607）。
+      const b = state.characterBase, s = state.index?.state;
+      if (wasEnabled === false && b?.enabled && !b.running && !INDEX_ACTIVE.includes(was))
+        toast(s?.kind === 'base' && s.status === 'done' ? indexEndText(s) : t('基础角色索引已启用'));
+    }, 2000);
     const arrived = modelsArrived(before, start), note = finishedNote(job, arrived);
     if (note) toast(note);
     // 图库里已有的图片等的就是这个：现在就识别它们。
@@ -208,7 +216,7 @@ export function wireModels() {
   });
   // 一次同步结束：重新读取模型状态，卡片上的加速回退原因跟着最近一次识别变，不用等打开任务面板。
   onJob((job, change) => {
-    if (job === 'sync' && change.ended) loadModels().catch(() => {});
+    if (job === 'sync' && change.ended) { loadModels().catch(() => {}); loadCharacterBase().catch(() => {}); }
     if (job === 'index' && change.ended) loadCharacterBase().catch(() => {});
   });
   loadModels().catch(() => {});

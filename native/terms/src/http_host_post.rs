@@ -820,9 +820,12 @@ fn route(
     })
 }
 fn sync(host: &Host, received: u64, session: &mut Session) -> Result<Json> {
-    wd_idle(session)?;
-    if session.index.writing() {
-        return Err(Error::Invalid("角色索引正在更新，请稍后".into()));
+    // 角色索引在写入、WD 扩展检查在跑：这次同步排在它们后面，不报错（#607）。首次准备时模型一到齐，宿主就为图库启用
+    // 基础角色索引，页面同时发起的首次同步正好撞上。
+    if session.sync_waits() {
+        let library = session.library.clone();
+        session.syncer.queue(&library)?;
+        return Ok(Json::object([("started", false.into()), ("queued", true.into())]));
     }
     if host.imports.recognition_running(session.generation) {
         return Err(Error::Invalid("识别结果正在导入，请稍后".into()));

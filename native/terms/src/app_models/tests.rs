@@ -176,7 +176,11 @@ fn optional_download_failure_keeps_originals_ready_and_retry_repairs_the_variant
             fs::write(repaired.root.join("coreml/wd.onnx"), bytes(data.len(), 38)).unwrap();
         }
         post(models, &repaired, json!({"action": "download"})).unwrap();
-        assert_eq!(finished(models)["status"], "done");
+        let job = finished(models);
+        assert_eq!(job["status"], "done");
+        // 只补一个文件时，进度的分母是它自己的大小（#607）。
+        assert_eq!(job["total"], data.len() as u64, "{job}");
+        assert_eq!(job["done"], job["total"]);
         assert_eq!(fs::read(repaired.root.join("coreml/wd.onnx")).unwrap(), data);
         for (path, expected) in &fixture.files {
             assert_eq!(fs::read(repaired.root.join(path)).unwrap(), *expected, "原始文件不受补下载影响");

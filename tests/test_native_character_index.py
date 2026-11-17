@@ -8,11 +8,14 @@ import json
 import os
 from pathlib import Path
 import sqlite3
+import sys
 import time
 import unittest
 
 import numpy as np
 
+from tests import library_fixture as library
+from tests.native_worker_fixture import command as worker_command
 from tests.test_native_human_labels import snapshot
 from tools.build_character_index import FORMAT, archive
 from tools.wait_limit import WAIT
@@ -253,6 +256,63 @@ class CharacterIndexTest(unittest.TestCase):
         self.assertEqual(base['mode'], 'rebuilt')
         self.assertEqual(self.shared_ids(), ['alice', *IDS, 'bob'])
 
+
+    def test_first_sync_during_base_enable_waits_and_then_starts(self):
+        """首次准备（走查 2/2 复现）：模型一到齐，宿主就为图库启用基础索引；打开图库时的自动同步和页面同时发起的首次同步
+        都撞上索引写入。它们排在后面，不报错，写完以后同步自己开始，不用再点「立即同步」。"""
+        f = self.fixture
+        hold, entered = f.root / 'hold-index', f.root / 'index-entered'
+        hold.touch()
+        wrapper = f.root / 'held-index-worker'
+        wrapper.write_text('#!' + sys.executable + '\nimport subprocess,sys,time\nfrom pathlib import Path\n'
+                           f'Path({str(entered)!r}).touch()\n'
+                           f'while Path({str(hold)!r}).exists(): time.sleep(.02)\n'
+                           f'sys.exit(subprocess.run([{str(self.binary)!r},*sys.argv[1:]]).returncode)\n')
+        f.env['ILLUSTASH_INDEX_WORKER'] = worker_command(wrapper)
+        # 新用户的图库：一个文件夹来源，打开时自动同步。
+        folder = f.root / 'first-folder'; folder.mkdir()
+        f.lib.config['sources'] = [library.folder_source(folder)]
+        (f.lib.path / 'library.json').write_text(json.dumps(f.lib.config))
+        with closing(sqlite3.connect(f.lib.source)) as c, c:
+            library.ensure_source_schema(c)
+            for col in ('hidden INTEGER', 'stable_hash TEXT', 'orig_size INTEGER'):
+                if col.split()[0] not in [r[1] for r in c.execute('PRAGMA table_info(assets)')]:
+                    c.execute('ALTER TABLE assets ADD COLUMN ' + col)
+            # 夹具的旧识别结果没有来源列的值；同步刷新时要读。
+            c.execute("UPDATE labels SET source=CASE dim WHEN 'char_ext' THEN 'char_index' ELSE 'wd_v3' END WHERE source IS NULL")
+        with closing(sqlite3.connect(f.lib.db)) as c, c:
+            c.execute("INSERT OR REPLACE INTO prefs VALUES ('startup',?)", (json.dumps({'sync': True}),))
+        self.install()
+        f.restart(('--auto-sync',))
+
+        def sync():
+            r = f.request('/api/sync')
+            self.assertEqual(r['status'], 200, r['body'])
+            return json.loads(r['body'])['state']
+
+        deadline = time.monotonic() + WAIT
+        while not entered.exists():
+            self.assertLess(time.monotonic(), deadline, '基础角色索引没有开始启用')
+            time.sleep(.02)
+        status, base = self.base()
+        self.assertTrue(base['running'], base)
+        self.assertEqual(sync()['status'], 'waiting')
+        r = f.request('/api/sync', {})
+        self.assertEqual(r['status'], 200, r['body'])
+        self.assertEqual(json.loads(r['body']), {'started': False, 'queued': True})
+        self.assertEqual(sync(), {'status': 'waiting'})
+        self.assertEqual(f.index()['state']['status'], 'building')
+        hold.unlink()
+        base, state = self.wait_enabled(True)
+        self.assertEqual(state['status'], 'done', state)
+        deadline = time.monotonic() + WAIT
+        while (s := sync())['status'] in ('waiting', 'scanning', 'recognising', 'importing'):
+            self.assertLess(time.monotonic(), deadline, s)
+            time.sleep(.05)
+        self.assertIn(s['status'], ('done', 'needs_recognition'), s)
+        history = json.loads(f.request('/api/sync')['body'])['history']
+        self.assertEqual(len(history), 1, history)
+        self.assertGreaterEqual(history[0]['started_at'], state['finished_at'], '同步要等基础索引写完才开始')
 
 if __name__ == '__main__':
     unittest.main()

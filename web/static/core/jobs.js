@@ -20,7 +20,8 @@ export function mergeNames(patch) { state.names = {...state.names, ...patch}; }
 export const onJob = changed.on;
 
 // ---------- 同步 ----------
-export const SYNC_ACTIVE = ['scanning', 'recognising', 'importing'];
+// waiting：角色索引在写入或 WD 扩展检查在跑，同步排在它们后面，结束后宿主自己开始（#607）。
+export const SYNC_ACTIVE = ['waiting', 'scanning', 'recognising', 'importing'];
 // 系统拒绝让本 App 访问照片图库（#202）：后端用一个代码表示，从不放在错误文字里。出路是「系统设置 ›
 // 隐私与安全性 › 照片」，然后退出并重新打开；桌面外壳会在窗口外打开这一个地址（desktop/src/server.rs PHOTOS_PRIVACY），
 // 浏览器会先询问。
@@ -44,6 +45,7 @@ function remaining(ms) {
 }
 // 识别和导入分开计数：done/total 是已识别或已放弃的图片，import_done/import_total 是已识别并写进图库的。
 export function syncLine(s) {
+  if (s.status === 'waiting') return t('等后台任务结束后开始同步');
   if (s.status === 'scanning') return s.scan_total == null ? t('正在检查来源…') : t('正在检查文件 {done}/{total}', {done: number(s.scanned || 0), total: number(s.scan_total)});
   if (s.status === 'importing') {
     if (!s.import_total) return t('正在导入…');
@@ -85,7 +87,7 @@ export const pollSync = poller(async fresh => {
   return SYNC_ACTIVE.includes(s.status) ? 2000 : 0;
 });
 export const syncDoneText = s => t('同步完成：新加入 {n} 张', {n: number(s.imported)});
-export async function startSync() { await post('/api/sync', {}); state.sync = {status: 'scanning'}; }
+export async function startSync() { const r = await post('/api/sync', {}); state.sync = {status: r?.queued ? 'waiting' : 'scanning'}; }
 
 // ---------- 外部索引的新角色 ----------
 export const INDEX_ACTIVE = ['checking', 'fetching', 'cleaning', 'building', 'scanning', 'importing'];
@@ -109,6 +111,8 @@ export const pollIndex = poller(async fresh => {
 });
 // 一次运行结束时要说什么，按它怎样结束。
 export function indexEndText(s) {
+  // 首次准备时图库里还没有识别结果，没有图片要更新，就不说张数。
+  if (s.status === 'done' && s.kind === 'base' && !s.changed) return s.enabled ? t('基础角色索引已启用') : t('基础角色索引已撤回');
   if (s.status === 'done' && s.kind === 'base') return s.enabled ? t('基础角色索引已启用，{n} 张图片的识别结果已更新', {n: number(s.changed)}) : t('基础角色索引已撤回，{n} 张图片的识别结果已更新', {n: number(s.changed)});
   if (s.status === 'done') return s.kind === 'drop' ? t('已移除，{n} 张图片已重新识别', {n: number(s.changed)}) : t('已添加 {added} 个角色，{n} 张图片的识别结果已更新', {added: number(s.added), n: number(s.changed)});
   if (s.status === 'checked') return s.found ? t('发现 {n} 个可添加的角色，在任务面板里添加', {n: number(s.found)}) : t('未发现新角色');

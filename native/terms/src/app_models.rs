@@ -701,10 +701,16 @@ fn download(models: &Models, place: &Place) -> std::result::Result<Value, Stop> 
             .sum()
     };
     check_space(&partial, missing_bytes(false))?;
+    // 进度只算这次要下载的文件（#607）：只补基础角色索引时，分母是它自己的大小，不是整套模型。已经就位的文件在这里
+    // 校验一次，下面的循环沿用结果。
+    let needed: Vec<bool> =
+        place.manifest.files.iter().map(|e| !(usable(&place.root, e) || usable(&partial, e))).collect();
+    let total: u64 = place.manifest.files.iter().zip(&needed).filter(|(_, n)| **n).map(|(e, _)| e.size).sum();
+    models.set(|job| job["total"] = total.into());
     let (direct, proxied) = (agent(None), agent(place.proxy.as_deref()));
     let mut meter = Meter::new(models, 0);
     let mut originals_active = false;
-    for entry in &place.manifest.files {
+    for (entry, needed) in place.manifest.files.iter().zip(needed) {
         if entry.optional && !originals_active {
             if !ready_at(&place.root, place.manifest) {
                 activate(&place.root, &partial, place.manifest)?;
@@ -713,8 +719,7 @@ fn download(models: &Models, place: &Place) -> std::result::Result<Value, Stop> 
             check_space(&partial, missing_bytes(true))?;
             originals_active = true;
         }
-        if usable(&place.root, entry) || usable(&partial, entry) {
-            meter.finish(entry.size);
+        if !needed {
             continue;
         }
         let mut tried = Vec::new();
@@ -1128,7 +1133,15 @@ fn post_at(models: &'static Models, place: Place, body: &Json) -> Result<Json> {
             {
                 return Err(Error::Invalid("识别模型已经就位".into()));
             }
-            let total = place.manifest.files.iter().map(|e| e.size).sum();
+            // 先按大小估一个总量，下载线程校验过已有文件后改成准确的（见 `download`）。
+            let partial = partial_dir(&place.root);
+            let total = place
+                .manifest
+                .files
+                .iter()
+                .filter(|e| !(has(&place.root, e) || has(&partial, e)))
+                .map(|e| e.size)
+                .sum();
             let job = place.clone();
             models.start("download", total, move |models| download(models, &job))?;
         }
