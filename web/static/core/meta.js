@@ -70,6 +70,8 @@ export function afterSyncLearning() {
   return learningSettled({upto: wait.upto, state: 'pending'}, {marking: wait.marking});
 }
 export function refreshMeta({tagsOnly = false, boot = null} = {}) {
+  // 这次读取包含了还没到时间的 metaSoon 要读的（#452）：写入之后紧接着撤销、学习落定后的重读，不再隔 700 ms 又读一遍。
+  if (!tagsOnly || metaTagsOnly) { clearTimeout(metaTimer); metaTimer = null; metaTagsOnly = true; }
   metaRevision++; metaFull ||= !tagsOnly;
   const bootEpoch = state.readEpoch, bootMode = state.nsfw;
   if (!metaPending) metaPending = Promise.resolve().then(async () => {

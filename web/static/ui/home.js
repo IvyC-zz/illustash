@@ -8,7 +8,7 @@ import {charHash, hashFor} from '../core/route.js';
 import {api, post, readError} from '../core/session.js';
 import {state} from '../core/state.js';
 import {INSP_ICONS, indexOf, inspect, openViewer, wirePeek} from './detail.js';
-import {$, showArea, toast, workSmall} from './dom.js';
+import {$, reconcileSections, showArea, toast, workSmall} from './dom.js';
 import {mutate, showList, viewOpts} from './grid.js';
 import {MARKS} from '../core/favorites.js';
 import {homeHeart} from './favorites.js';
@@ -41,11 +41,12 @@ export async function moreHome() {
     if (gen !== home.gen || !onPage(state.route, 'home')) return;
     const known = new Set(home.days.map(g => g.day)), days = r.days.filter(g => !known.has(g.day) && known.add(g.day));
     home.days.push(...days); home.next = r.next;
-    const sentinel = $('homeSentinel');
-    sentinel.insertAdjacentHTML('beforebegin', days.map(g => homeDay(g, home.width)).join(''));
+    // 已有的几天和哨兵内容不变，留在原处；新的几天接在后面。
+    reconcileSections($('homePage'), homeSections());
     for (const day of days) for (const el of $('homePage').querySelectorAll(`.home-day[data-day="${day.day}"] .home-strip`)) syncStrip(el);
+    markHomeFocus();
     showList([...state.items, ...days.flatMap(g => g.items)]);
-    if (!home.next) { home.observer?.disconnect(); sentinel.textContent = t('已经到底了'); }
+    if (!home.next) home.observer?.disconnect();
     appended = true;
   } catch (e) { if (gen === home.gen && onPage(state.route, 'home')) {
     $('homeSentinel').innerHTML = `<button class="home-retry" data-home-retry>${t('读取失败，重试')}</button>`; toast(e.message);
@@ -63,7 +64,7 @@ export const ratio = x => x.width && x.height ? Math.min(2.4, Math.max(.4, x.wid
 function homeTile(x, style, rowH) {
   const names = x.memberships.map(m => m.name), ids = x.memberships.map(m => m.id).join(' ');
   const badge = viewOpts.marks && x.dup ? `<span class="home-badge" title="${t('共 {n} 份副本', {n: x.dup.size})}">×${x.dup.size}</span>` : '';
-  return `<button class="home-j${state.focused === x.uuid ? ' on' : ''}" data-id="${esc(x.uuid)}" data-chars="${esc(ids)}" style="${style}"${names.length ? ` title="${esc(x.memberships.map(nameWithWork).join(t('、')))}"` : ''}><img src="/image?id=${encodeURIComponent(x.uuid)}&size=${thumbSize(rowH)}" alt="" loading="lazy" decoding="async" draggable="false">${badge}${homeHeart(x)}<span class="home-ov">${names.length ? names.map(esc).join(' · ') : x.unknown ? t('已跳过') : t('未识别')}</span></button>`;
+  return `<button class="home-j" data-id="${esc(x.uuid)}" data-chars="${esc(ids)}" style="${style}"${names.length ? ` title="${esc(x.memberships.map(nameWithWork).join(t('、')))}"` : ''}><img src="/image?id=${encodeURIComponent(x.uuid)}&size=${thumbSize(rowH)}" alt="" loading="lazy" decoding="async" draggable="false">${badge}${homeHeart(x)}<span class="home-ov">${names.length ? names.map(esc).join(' · ') : x.unknown ? t('已跳过') : t('未识别')}</span></button>`;
 }
 // 整行拉伸到满宽（比目标高度略矮）；需要长到目标高度 ROW_GROW 倍以上的行（图片少的一天、一天的最后一行）保持目标
 // 高度，右侧留空。
@@ -77,7 +78,7 @@ export function homeRows(items, width, target) {
 }
 function heroTile(hero, w, h) {
   const top = hero.memberships[0];
-  return `<button class="home-j home-hero${state.focused === hero.uuid ? ' on' : ''}" data-id="${esc(hero.uuid)}" data-chars="${esc(hero.memberships.map(m => m.id).join(' '))}" style="width:${w}px;height:${h}px"><img src="/image?id=${encodeURIComponent(hero.uuid)}&size=${thumbSize(h)}" alt="" loading="lazy" decoding="async" draggable="false">${homeHeart(hero)}${top ? `<span class="home-cap"><b>${esc(top.name)}${workSmall(top)}</b>${top.tag && top.tag !== top.name ? `<small>${esc(top.tag.replaceAll('_', ' '))}</small>` : ''}</span>` : ''}</button>`;
+  return `<button class="home-j home-hero" data-id="${esc(hero.uuid)}" data-chars="${esc(hero.memberships.map(m => m.id).join(' '))}" style="width:${w}px;height:${h}px"><img src="/image?id=${encodeURIComponent(hero.uuid)}&size=${thumbSize(h)}" alt="" loading="lazy" decoding="async" draggable="false">${homeHeart(hero)}${top ? `<span class="home-cap"><b>${esc(top.name)}${workSmall(top)}</b>${top.tag && top.tag !== top.name ? `<small>${esc(top.tag.replaceAll('_', ' '))}</small>` : ''}</span>` : ''}</button>`;
 }
 // 宽度放不下的一天横向滚动：先是大图，然后是按最短优先填充的两行。
 function stripRows(items, rowH) {
@@ -136,18 +137,28 @@ export async function moreOfDay(day) {
     if (!r.items.length) g.count = g.items.length;
     const el = $('homePage').querySelector(`.home-strip[data-day="${day}"]`), left = el?.scrollLeft || 0;
     const sec = el?.closest('.home-day'); if (!sec) return;
-    const tmp = document.createElement('div'); tmp.innerHTML = homeDay(g, home.width); sec.replaceWith(tmp.firstElementChild);
+    const tmp = document.createElement('div'); tmp.innerHTML = homeDay(g, home.width); sec.replaceWith(tmp.firstElementChild); markHomeFocus();
     const fresh = $('homePage').querySelector(`.home-strip[data-day="${day}"]`); if (fresh) { fresh.scrollLeft = left; syncStrip(fresh); }
     showList(home.days.flatMap(x => x.items));
   } catch (e) { if (gen === home.gen && onPage(state.route, 'home')) toast(e.message); } finally { if (gen === home.gen) dayLoading.delete(day); }
 }
+// 首页的各块：每天一块（第一天后面跟「认一认」）和末尾的哨兵。重画时只换内容变了的块（#452）：写入之后没变的那几天
+// 连同图条的横向位置都留着。哪张图开着详情不写进块里，由 markHomeFocus 标。
+function homeSections() {
+  const ask = askCardHTML();
+  return [...home.days.flatMap((g, i) => [[g.day, homeDay(g, home.width)], ...(i === 0 && ask ? [['ask', ask]] : [])]),
+    ['more', `<div class="home-more-line" id="homeSentinel">${sentinelText()}</div>`]];
+}
+const sentinelText = () => home.next ? t('正在读取更早的图…') : t('已经到底了');
 function drawHome() {
   if (!onPage(state.route, 'home')) return;
   const page = $('homePage'); home.width = page.clientWidth;
   if (!home.days.length) { page.innerHTML = `<p class="empty">${t('没有符合当前 R18 设置的图片。')}</p>`; showList([]); return; }
-  page.innerHTML = home.days.map((g, i) => homeDay(g, home.width) + (i === 0 ? askCardHTML() : '')).join('') + `<div class="home-more-line" id="homeSentinel">${home.next ? t('正在读取更早的图…') : t('已经到底了')}</div>`;
+  reconcileSections(page, homeSections());
+  $('homeSentinel').textContent = sentinelText();   // 留下来的哨兵可能还写着「读取失败，重试」
   showList(home.days.flatMap(g => g.items));
   for (const el of page.querySelectorAll('.home-strip')) syncStrip(el);
+  markHomeFocus();
   home.observer?.disconnect();
   if (home.next) { home.observer = new IntersectionObserver(es => { if (es.some(e => e.isIntersecting)) moreHome(); }, {root: $('viewport'), rootMargin: '600px'}); home.observer.observe($('homeSentinel')); }
 }
