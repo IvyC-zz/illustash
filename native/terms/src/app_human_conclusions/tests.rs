@@ -882,7 +882,7 @@ fn linked_character(c: &Connection, key: &str, parent: Option<&str>) {
 
 #[test]
 fn family_conflicts_follow_existing_hybrid_representative() {
-    for source_parent_no in [true, false] {
+    for (source_parent_no, suspended) in [(true, false), (false, false), (true, true), (false, true)] {
         let source = Fixture::new("canonical-source");
         let target = Fixture::new("canonical-target");
         for (fixture, is_target) in [(&source, false), (&target, true)] {
@@ -890,7 +890,7 @@ fn family_conflicts_follow_existing_hybrid_representative() {
             let mut c = crate::open(&fixture.db).unwrap();
             let tx = c.transaction().unwrap();
             crate::schema::begin_writing(&tx).unwrap();
-            hybrid(&tx);
+            tx.execute("INSERT INTO meta VALUES ('identity_policy','hybrid')", []).unwrap();
             linked_character(&tx, "Q", None);
             if is_target {
                 linked_character(&tx, "P", None);
@@ -909,32 +909,49 @@ fn family_conflicts_follow_existing_hybrid_representative() {
             .unwrap();
             if is_target {
                 illustash_core::character_identity::command(&tx,&json!({"op":"decide","a":"P","b":"Q","kind":"duplicate_of","status":"accepted","reason":"合成代表更换"})).unwrap();
+                if suspended {
+                    tx.execute(
+                        "INSERT INTO identity_suspended VALUES ('image',?,'equivalence_split',json_array('P','Q'))",
+                        [if parent_no { parent } else { "C" }],
+                    )
+                    .unwrap();
+                }
             }
             crate::schema::commit_writing(tx).unwrap();
         }
         let c = crate::open(&target.db).unwrap();
-        let before: Vec<(String, String, String)> = c
-            .prepare("SELECT entity,character_id,status FROM effective_assertions ORDER BY entity")
+        let assertions = || {
+            c.prepare(
+                "SELECT s.entity,n.canonical_id,n.character_id,s.status
+                 FROM assertions s JOIN identity_nodes n ON n.id=s.entity ORDER BY s.entity",
+            )
             .unwrap()
-            .query_map([], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)))
+            .query_map([], |r| {
+                Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?, r.get::<_, String>(2)?, r.get::<_, String>(3)?))
+            })
             .unwrap()
-            .collect::<rusqlite::Result<_>>()
-            .unwrap();
-        assert_eq!(before[0].1, "Q");
+            .collect::<rusqlite::Result<Vec<_>>>()
+            .unwrap()
+        };
+        let before = assertions();
+        let (raw, canonical, status) = if source_parent_no { ("C", "C", "confirmed") } else { ("P", "Q", "rejected") };
+        assert_eq!(before, vec![(raw.into(), canonical.into(), "Q".into(), status.into())]);
         let path = source.root.join("canonical.illustash-human.jsonl");
         capture(&source.db, &source.id, &|| Ok(())).unwrap().write(&mut File::create(&path).unwrap()).unwrap();
         let result = import_file(&target.db, &target.id, &path, &|| Ok(())).unwrap();
-        assert_eq!(result.action_id, None);
-        assert!(result.records["blocked_dependency"] > 0);
+        if suspended {
+            let action = result.action_id.expect("挂起的目标裁决不构成角色冲突");
+            assert!(result.records["applied"] > 0);
+            assert_eq!(target.count("SELECT count(*) FROM identity_suspended"), 1);
+            assert!(assertions().iter().all(|row| row.2 == "Q"));
+            target.undo(action).unwrap();
+            assert_eq!(target.count("SELECT count(*) FROM identity_suspended"), 1);
+        } else {
+            assert_eq!(result.action_id, None);
+            assert!(result.records["blocked_dependency"] > 0);
+        }
         assert_eq!(target.count("SELECT count(*) FROM actions WHERE undone=0"), 2);
-        let after: Vec<(String, String, String)> = c
-            .prepare("SELECT entity,character_id,status FROM effective_assertions ORDER BY entity")
-            .unwrap()
-            .query_map([], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)))
-            .unwrap()
-            .collect::<rusqlite::Result<_>>()
-            .unwrap();
-        assert_eq!(after, before);
+        assert_eq!(assertions(), before);
     }
 }
 
