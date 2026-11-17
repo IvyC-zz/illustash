@@ -20,7 +20,12 @@ impl Earlier {
     }
 
     /// 先成批认出路径和内容都一致的记录，再配对剩下的一对一内容。整个批次与遍历顺序无关。
-    pub(crate) fn matches(&self, files: &[(String, String)], taken: &HashSet<String>) -> HashMap<String, String> {
+    pub(crate) fn matches(
+        &self,
+        files: &[(String, String)],
+        taken: &HashSet<String>,
+        complete: bool,
+    ) -> HashMap<String, String> {
         let mut matches = HashMap::new();
         let mut used = taken.clone();
         let mut exact = HashMap::<&str, Vec<&str>>::new();
@@ -39,6 +44,9 @@ impl Earlier {
                 matches.insert((*path).to_owned(), id.to_owned());
                 used.insert(id.to_owned());
             }
+        }
+        if !complete {
+            return matches;
         }
         let mut remaining = HashMap::<&str, Vec<&str>>::new();
         for (path, hash) in files {

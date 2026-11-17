@@ -243,9 +243,9 @@
 
  "native/terms/src/app_files.rs":"be49abed7bcc1e2ff0da093b7aa482fc8f28afe9e755755b72d9c645e33736e8",
 
- "native/terms/src/app_folder.rs":"01318a127d1ad7858ec4d70ca91c25748b88478409899ba9779b1f5a5f730317",
+ "native/terms/src/app_folder.rs":"226accca1ccc85af3e6a27de750116b221bba3c9cc651108226346a04f89ce24",
 
- "native/terms/src/app_folder_identity.rs":"3b437873ec1cbf0ac001647901b49f71dc60af8c576b71245b1d834f14b3a9e0",
+ "native/terms/src/app_folder_identity.rs":"eaa10fa5a6b070f16af32d25f23e7c5437f629a15b11ea577315cdb8c43cb791",
 
  "native/terms/src/app_galleries.rs":"4fbf4093715ede0c1670b860de1925c5360bb028b44c7b581c322cbfdaae028e",
 
@@ -325,9 +325,9 @@
 
  "native/terms/src/app_recognition.rs":"1d215db82be5d866dd2a5ac33314ed612eabe8fb27c0591140eb2bf113be764c",
 
- "native/terms/src/app_relocation.rs":"fcbd418016f600c3e7432282a06c4d45eb5ead80399beab1e834b6b31da02fdb",
+ "native/terms/src/app_relocation.rs":"439da1900a51966ab3f116264d00130f8d4a6fe57da761c1a2c9c71ee5d90eb4",
 
- "native/terms/src/app_rescue.rs":"9033bf89cebc5d8018d2cdea9c4013112ca3be55afce325dae949130fb2d9f15",
+ "native/terms/src/app_rescue.rs":"64c0f0053e36a32da153031a2203d5fe3a66a3cc1ac7c811b0331102b24449c3",
 
  "native/terms/src/app_research.rs":"323b2627210249c7e23576aa8ca285d426b12d8b0bf517cad228feb92dcc98d2",
 

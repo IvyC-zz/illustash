@@ -133,6 +133,9 @@ pub(super) fn begin(c: &Connection, source: &Value) -> Result<Option<Move>> {
         return Err(changed());
     }
     let before = rows(c, sid)?;
+    if !before.is_empty() {
+        crate::app_folder::ensure_links(c)?;
+    }
     let mut earlier = Earlier::default();
     for f in &before {
         earlier.record(&f.id, Some(&f.path), Some(&f.hash));
@@ -229,7 +232,14 @@ pub(super) fn undo(c: &Connection, sid: &str, token: &str, root: &str) -> Result
     if state == "done" {
         let before = decode(before.as_deref().ok_or_else(changed)?)?;
         let after = decode(after.as_deref().ok_or_else(changed)?)?;
-        if old.is_some() && rows(c, sid)? != after {
+        // 原本失去位置的 ID 也可能已通过别的来源操作接走，不能再给它第二个位置。
+        let ids: HashSet<_> = before.iter().chain(&after).map(|f| &f.id).collect();
+        let occupied: usize = c.query_row(
+            "SELECT count(*) FROM files WHERE asset IN (SELECT value FROM json_each(?))",
+            [encode(&ids)],
+            |r| r.get(0),
+        )?;
+        if occupied != after.len() || (old.is_some() && rows(c, sid)? != after) {
             return Err(changed());
         }
         // 检查涉及的所有位置，也包括跨来源认回后已空出的旧位置。
@@ -271,7 +281,7 @@ pub(super) fn resume_undo(source: &Value, library: &Library) -> Result<()> {
     Ok(())
 }
 
-/// 遍历同一哈希在文件账目里只有两个位置的组。旧位置须确实缺失，权限或其他读取错误不能说明原件已搬走。
+/// 普通添加保留独立 ID。只在预览的候选仍然相同时，才登记用户确认的这批文件。
 pub(super) fn recognize(library: &Library, source: &Value, confirmation: Option<&str>) -> Result<Value> {
     let sid = source["id"].as_str().ok_or_else(changed)?;
     let root = source["path"].as_str().ok_or_else(changed)?;
@@ -299,26 +309,36 @@ pub(super) fn recognize(library: &Library, source: &Value, confirmation: Option<
 fn candidates(c: &Connection, sid: &str, root: &str) -> Result<Vec<(FileRow, FileRow)>> {
     let mut query = c.prepare(&format!(
         "{SELECT_FILES} WHERE f.md5 IN
-            (SELECT md5 FROM files WHERE md5 IN (SELECT md5 FROM files WHERE source_id=?)
-             AND md5<>'' GROUP BY md5 HAVING count(*)=2) ORDER BY f.md5,f.source_id,f.path"
+        (SELECT md5 FROM files WHERE md5 IN (SELECT md5 FROM files WHERE source_id=?)
+         AND md5<>'' GROUP BY md5 HAVING count(*)>1) ORDER BY f.md5,f.source_id,f.path"
     ))?;
-    let rows = query.query_map([sid], FileRow::read)?.collect::<rusqlite::Result<Vec<_>>>()?;
+    let files = query.query_map([sid], FileRow::read)?.collect::<rusqlite::Result<Vec<_>>>()?;
     let mut pairs = Vec::new();
-    for group in rows.chunk_by(|a, b| a.hash == b.hash) {
-        let [a, b] = group else { continue };
-        let (new, old) = if a.sid == sid { (a, b) } else { (b, a) };
-        if old.sid == sid
-            || new.id == old.id
-            || new.trashed != 0
-            || !Path::new(&new.full).is_file()
-            || !std::fs::metadata(&old.full).is_err_and(|e| e.kind() == std::io::ErrorKind::NotFound)
+    for group in files.chunk_by(|a, b| a.hash == b.hash) {
+        let (new, old): (Vec<_>, Vec<_>) = group.iter().partition(|f| f.sid == sid);
+        if new.is_empty()
+            || old.is_empty()
+            || old.iter().any(|f| !std::fs::metadata(&f.full).is_err_and(|e| e.kind() == std::io::ErrorKind::NotFound))
+            || new.iter().any(|f| {
+                f.trashed != 0 || Path::new(root).join(&f.path) != Path::new(&f.full) || !Path::new(&f.full).is_file()
+            })
         {
             continue;
         }
-        if Path::new(root).join(&new.path) != Path::new(&new.full) {
-            continue;
+        let mut history = Earlier::default();
+        let mut originals = std::collections::HashMap::new();
+        for f in old {
+            history.record(&f.id, Some(&f.path), Some(&f.hash));
+            originals.insert(&f.id, f);
         }
-        pairs.push((old.clone(), new.clone()));
+        let available = new.iter().map(|f| (f.path.clone(), f.hash.clone())).collect::<Vec<_>>();
+        let taken = new.iter().map(|f| f.id.clone()).collect();
+        let matched = history.matches(&available, &taken, true);
+        for f in new {
+            if let Some(id) = matched.get(&f.path) {
+                pairs.push((originals[id].clone(), f.clone()));
+            }
+        }
     }
     Ok(pairs)
 }

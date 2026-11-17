@@ -198,17 +198,24 @@ fn build(library: &Library, reference: Option<&Path>, stop: &AtomicBool, step: S
         let (mut files, mut unreadable) = (Vec::new(), Vec::new());
         let check = || crate::app_sync::check(stop);
         crate::platform_folder::walk(root, root, &mut files, &mut unreadable, &check)?;
-        if !unreadable.is_empty() {
-            return crate::error::invalid("来源里有文件无法读取，请恢复访问后再抢救");
-        }
-        for file in &mut files {
-            file.hash = crate::platform_folder::hash(&file.path, &check)?;
+        let mut checked = Vec::new();
+        for mut file in files {
+            match crate::platform_folder::hash(&file.path, &check) {
+                Ok(hash) => file.hash = hash,
+                Err(Error::Io(_)) => {
+                    unreadable.push(file.rel);
+                    continue;
+                }
+                Err(e) => return Err(e),
+            }
             fingerprints.push((file.path.to_string_lossy().into_owned(), file.hash.clone()));
+            checked.push(file);
         }
-        batches.push(files);
+        batches.push((checked, unreadable));
     }
-    let mut matches = rescue_matches(&target, &folders, &fingerprints, &earlier)?;
-    for (i, (source, files)) in folders.iter().zip(batches).enumerate() {
+    let complete = batches.iter().all(|(_, unreadable)| unreadable.is_empty());
+    let mut matches = rescue_matches(&target, &folders, &fingerprints, &earlier, complete)?;
+    for (i, (source, (files, unreadable))) in folders.iter().zip(batches).enumerate() {
         let share = 0.35 / folders.len() as f64;
         let from = 0.6 + share * i as f64;
         let progress = |done: usize, total: usize| step(SCANNING, from + share * done as f64 / total.max(1) as f64);
@@ -224,7 +231,7 @@ fn build(library: &Library, reference: Option<&Path>, stop: &AtomicBool, step: S
             &target,
             &|| crate::app_sync::check(stop),
             &progress,
-            Some(crate::app_folder::RescueInput { files, ids }),
+            Some(crate::app_folder::RescueInput { files, ids, unreadable }),
         )?;
         crate::app_relocation::rescued(&target, source)?;
         report.kept += scan.counts["kept"].as_i64().unwrap_or(0);
@@ -582,6 +589,7 @@ fn rescue_matches(
     folders: &[Value],
     files: &[(String, String)],
     earlier: &Earlier,
+    complete: bool,
 ) -> Result<HashMap<String, String>> {
     let roots: HashMap<_, _> =
         folders.iter().filter_map(|s| Some((s["id"].as_str()?, Path::new(s["path"].as_str()?)))).collect();
@@ -600,7 +608,7 @@ fn rescue_matches(
             .query_map([], |r| r.get(0))?
             .collect::<rusqlite::Result<Vec<String>>>()?,
     );
-    let matches = earlier.matches(files, &reserved);
+    let matches = earlier.matches(files, &reserved, complete);
     let assigned: HashSet<_> = matches.values().collect();
     let present: HashSet<_> = files.iter().map(|(path, _)| Path::new(path)).collect();
     for (sid, path, id, orphan) in records {

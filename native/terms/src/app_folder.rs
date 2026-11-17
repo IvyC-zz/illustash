@@ -70,6 +70,7 @@ pub(crate) fn scan(
 pub(crate) struct RescueInput {
     pub files: Vec<crate::platform_folder::File>,
     pub ids: HashMap<String, String>,
+    pub unreadable: Vec<String>,
 }
 /// 使用普通遍历，或使用抢救对所有来源做完内容校验的结果。
 pub(crate) fn scan_with(
@@ -127,6 +128,7 @@ pub(crate) fn scan_with(
     let rescued = rescue.is_some();
     let rescue_ids = if let Some(input) = rescue {
         files = input.files;
+        unreadable = input.unreadable;
         input.ids
     } else {
         walk(root, root, &mut files, &mut unreadable, check)?;
@@ -174,7 +176,8 @@ pub(crate) fn scan_with(
     }
     let candidates: Vec<_> =
         hashed.iter().filter(|f| !known.contains_key(&f.rel)).map(|f| (f.rel.clone(), f.hash.clone())).collect();
-    let movements = if rescued { HashMap::new() } else { missing.matches(&candidates, &HashSet::new()) };
+    let movements =
+        if rescued { HashMap::new() } else { missing.matches(&candidates, &HashSet::new(), unreadable.is_empty()) };
     let identities = earlier
         .map(|history| {
             let candidates: Vec<_> = hashed
@@ -182,7 +185,7 @@ pub(crate) fn scan_with(
                 .filter(|f| !known.contains_key(&f.rel) && !movements.contains_key(&f.rel))
                 .map(|f| (f.rel.clone(), f.hash.clone()))
                 .collect();
-            history.matches(&candidates, &taken)
+            history.matches(&candidates, &taken, true)
         })
         .unwrap_or(rescue_ids);
     let (mut new, mut moved, mut kept, mut changed) = (0, 0, 0, Vec::new());
