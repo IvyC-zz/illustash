@@ -19,7 +19,7 @@
 | 详情栏 | `#inspector` | 一张图的详情，见 §4 | `detail.js` |
 | 浮层 | 见 §3 | | |
 
-主区的 6 个面板互斥，但没有统一的切换函数：每个渲染函数（`renderHome`、`renderIndex`、`renderSettings`、`renderGroups`、`renderSimilar`、`renderIdentity`、`renderArtistAudit`、`reload`）开头各自手写一遍「隐藏另外几个、显示自己」，`#homePage` 的显隐另在 `applyRoute` 里按注册表的 `area` 设。
+主区的 6 个面板互斥，由 `ui/dom.js` 的 `showArea(area)` 统一切换（#431）：它按注册表登记的主区（`core/pages.js` 的 `AREAS`，由各页的 `area` 汇总）显示一个、隐藏其余，网格的空状态 `#empty` 跟着网格。`applyRoute` 换页时先按 `area` 切一次，各渲染函数（`renderHome`、`renderSettings`、`renderGroups`……和 `reload`）开头再调一次 `showArea()`。
 
 侧栏切换：≤760px 宽时 ☰ 切换 `.mobile-open`（抽屉），否则切换侧栏的 `hidden`；每次换页都会收起抽屉。
 
