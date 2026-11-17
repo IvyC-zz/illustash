@@ -151,6 +151,7 @@
 - `GET /api/user-tags?limit=` 可指定 1–1,000 条，默认 60 条。
 - `GET /api/galleries` 按 `position,id` 返回 `[{id,name,params,position,cover_manual}]`，`position` 是保存的整数顺序值，可能不连续；创建和更新回复的 `gallery` 同样带 `position`。保存的条件失效时仍返回该画廊。
 - `GET /api/galleries/covers?ids=&nsfw=` 按需读取当前封面。`ids` 为 URL 编码的 JSON 整数数组。按画廊顺序返回 `[{id,cover}]`，重复 ID 去重、缺失的 ID 跳过。手动封面仍在当前选区且符合调用方的 `nsfw` 时使用它，否则取排序第一张。空选区或失效的保存条件返回 `cover:null`，打开图片列表时沿用筛选错误响应。
+- `GET /api/similar?kind=&nsfw=&seen=1`（#427）：带 `seen=1` 时每组多一个 `seen` 布尔值，表示这组看得到的成员是否都在某一次「看过了」里；不带时回复和以前相同。
 - `GET /api/identity/count?nsfw=...`：复用身份待判断队列的筛选、去重与跳过规则，仅返回 `{total}`，不排序或加载展示名称、样例图。
 - 每张图片返回 `memberships`，每个父角色包含 `status,origin,evidence:{sources,max_score},variants`。状态区分 `confirmed` 与 `machine`；`confirmed` 数组为前端兼容字段。
 - `GET /api/detail?id=` 另返回 `ownership`，包含有效归属与 `rejected` 父角色记录，每项带 origin 和证据。原始 assertions/candidates 继续返回，保留历史人工结论和逐来源证据。
@@ -177,6 +178,8 @@ change/reassign 的选择方式二选一：
 `POST /api/sweep {"entity":"父角色 ID"}` 检查该角色全部机器归属，不受当前前端分页/筛选影响。`POST /api/undo {"id":123}` 撤销最近未撤销 action；跨重启保留。写接口继续要求同源与 CSRF token。
 
 `POST /api/favorite` 沿用 `/api/tag` 的 `ids` 或 `filter` 选图、`exclude` 与 `confirm` 规则。默认收藏，`add:false` 取消。对选中的重复组写入全部副本，提示张数按组计。回复 `{"undo":…}`，在从未建立收藏词条的库里直接取消会返回 `{"undo":null}`。人工裁决与快照规则见 [词条数据模型](TERMS_SCHEMA.md#人工标记447)。
+
+相似组的「看过了」（#427）：`POST /api/similar/seen {"gid":组号,"size":张数,"nsfw":"","seen":true}` 记下这组现在看得到的成员（按 `nsfw` 筛选，和列表同一口径），`seen:false` 把这组的图从覆盖它的标记里去掉。`size` 是界面显示的张数，和现在的成员数对不上时回 409（组刚变过），组不存在或只剩一张回 400，已经是要的状态也回 400。返回 `undo`，撤销恢复原来的行，不触发学习。存储见 [词条 schema](TERMS_SCHEMA.md#相似组的看过了427)。
 
 画廊将当前筛选保存到图库。对 `POST /api/galleries` 传 `action=create` 和 `params`，可带 `name`，省略时由条件生成。传 `action=update`、`id` 和待改字段 `name,params,cover,position`，其中 `cover:null` 恢复自动封面。传 `action=delete` 与 `id` 可删除。每次操作随 `undo` 返回一步历史，创建和更新另返回 `gallery`，写入回复中的封面按隐藏 R18 解析。现行存储和备份口径见 [词条 schema](TERMS_SCHEMA.md#画廊445)。
 
@@ -535,6 +538,8 @@ change/reassign 的选择方式二选一：
 4. **分组**：除了「构图相似」和「不同的图」，其他关系都会把两张图连成一组，写进 `similar_groups`。这是派生表，升级 schema 时根据 `relations` 重建。
 
 界面：「重复」页右上角有「相似的图 →」入口（`#/similar`），相似组可以按关系筛选：重复、细微差分、差分、局部重复、局部编辑。点进一组（`#/s/<组号>`），就是普通的图片网格，可以选图、排除、加角色；图不超过 12 张时，标题旁有「判断关系」按钮。
+
+看完一组可以点标题旁的「看过了」（#427）：回到列表，这组不再出现，提示条上可以撤销。组里进了新图（包括和别的组连成一组）就重新出现；组里有图被排除或移走，仍算看过。列表状态行末尾的「看过的 N 组」（`#/similar?seen=1`）只列看过的组，打开其中一组，标题按钮是「标为没看过」。「更多像这张的」的结果没有「看过了」：那是按例图临时算出的排名，没有固定的组。
 
 `image_sigs`、`relations` 是非派生表（schema 17）。设置里关掉启动时的相似扫描（`startup.similar`）即不在后台扫描。
 

@@ -24,6 +24,7 @@ pub(crate) fn request_prepared(
         "/api/tag" => tag(&mut c, context, body),
         "/api/favorite" => favorite(&mut c, context, body),
         "/api/galleries" => crate::app_galleries::write(&mut c, context, body),
+        "/api/similar/seen" => crate::app_similar_seen::write(&mut c, body),
         "/api/undo" => undo(&mut c, body),
         "/api/artist/verdict" => artist(&mut c, body),
         "/api/change" | "/api/audit/answer" | "/api/ask/answer" | "/api/reassign" | "/api/sweep" => {
@@ -366,12 +367,18 @@ fn restore_application(c: &Connection, bound: &SqlValue, before: &Value) -> Resu
     }
     let id = last.expect("app_commands internal invariant");
     let items = before.as_array().ok_or_else(|| Error::Io(std::io::Error::other("未知历史")))?;
-    let gallery = match items.as_slice() {
-        [item] if item.as_object().is_some_and(|o| o.len() == 1) => item.get("gallery"),
+    // 画廊和相似组的「看过了」不碰人工结论，撤销时也不触发学习。
+    let single = match items.as_slice() {
+        [item] if item.as_object().is_some_and(|o| o.len() == 1) => Some(item),
         _ => None,
     };
-    if let Some(gallery) = gallery {
+    if let Some(gallery) = single.and_then(|item| item.get("gallery")) {
         crate::app_galleries::restore(c, gallery)?;
+        c.execute("UPDATE actions SET undone=1 WHERE id=?", [id])?;
+        return Ok(());
+    }
+    if let Some(seen) = single.and_then(|item| item.get("similar_seen")) {
+        crate::app_similar_seen::restore(c, seen)?;
         c.execute("UPDATE actions SET undone=1 WHERE id=?", [id])?;
         return Ok(());
     }
@@ -639,6 +646,57 @@ mod tests {
                 original
             );
         }
+    }
+    #[test]
+    fn similar_seen_hides_until_new_member_and_undo_skips_learning() {
+        let f = Fixture::new();
+        let c = crate::sqlite::open(&f.context.db).unwrap();
+        c.execute_batch(
+            "INSERT INTO assets VALUES ('c','2026-09-29'),('d','2026-09-28');
+             CREATE TABLE similar_groups(uuid TEXT PRIMARY KEY,gid INTEGER);
+             INSERT INTO similar_groups VALUES ('b',7),('c',7);
+             CREATE TABLE relations(a TEXT,b TEXT,kind TEXT);
+             INSERT INTO relations VALUES ('b','c','duplicate');",
+        )
+        .unwrap();
+        let listed = || {
+            let groups = crate::http_browse::similar_groups(&c, "", "", true).unwrap();
+            let Json::Array(groups) = groups else { panic!("组列表") };
+            groups.iter().map(|g| (g.field("gid").integer(), g.field("seen").dump())).collect::<Vec<_>>()
+        };
+        assert_eq!(listed(), [(7, "false".to_owned())]);
+        // 界面看到的张数不对（组刚变过）：拒绝，不写历史。
+        assert!(matches!(f.call("/api/similar/seen", r#"{"gid":7,"size":3,"seen":true}"#), Err(Error::Conflict(_))));
+        assert!(matches!(f.call("/api/similar/seen", r#"{"gid":7,"size":2,"seen":false}"#), Err(Error::Invalid(_))));
+        assert_eq!(f.count("SELECT count(*) FROM actions"), 0);
+        let marked = f.call("/api/similar/seen", r#"{"gid":7,"size":2,"nsfw":"","seen":true}"#).unwrap();
+        assert_eq!(marked.field("undo").field("label").text(), "已标为看过");
+        assert_eq!(listed(), [(7, "true".to_owned())]);
+        assert!(matches!(f.call("/api/similar/seen", r#"{"gid":7,"size":2,"seen":true}"#), Err(Error::Invalid(_))));
+        // 组号重建成别的号，仍算看过。
+        c.execute_batch("UPDATE similar_groups SET gid=9").unwrap();
+        assert_eq!(listed(), [(9, "true".to_owned())]);
+        // 进了新图：回到列表。
+        c.execute_batch("INSERT INTO similar_groups VALUES ('d',9)").unwrap();
+        assert_eq!(listed(), [(9, "false".to_owned())]);
+        c.execute_batch("DELETE FROM similar_groups WHERE uuid='d'").unwrap();
+        assert_eq!(listed(), [(9, "true".to_owned())]);
+        // 标为没看过，再撤销：原来的行放回去。
+        let unmarked = f.call("/api/similar/seen", r#"{"gid":9,"size":2,"seen":false}"#).unwrap();
+        assert_eq!(unmarked.field("undo").field("label").text(), "已标为没看过");
+        assert_eq!(listed(), [(9, "false".to_owned())]);
+        f.call("/api/undo", &format!(r#"{{"id":{}}}"#, unmarked.field("undo").field("id").integer())).unwrap();
+        assert_eq!(listed(), [(9, "true".to_owned())]);
+        assert_eq!(f.count("SELECT count(*) FROM similar_seen"), 2);
+        f.call("/api/undo", &format!(r#"{{"id":{}}}"#, marked.field("undo").field("id").integer())).unwrap();
+        assert_eq!(listed(), [(9, "false".to_owned())]);
+        assert_eq!(f.count("SELECT count(*) FROM similar_seen"), 0);
+        assert_eq!(f.count("SELECT count(*) FROM actions WHERE undone=1"), 2);
+        // 撤销「看过了」不触发学习（#404）。
+        assert_eq!(f.count("SELECT count(*) FROM backend_effects"), 0);
+        // 不带 seen 的读取和以前一样，没有 seen 字段。
+        let Json::Array(plain) = crate::http_browse::similar_groups(&c, "", "", false).unwrap() else { panic!() };
+        assert!(plain[0].get("seen").is_none());
     }
     #[test]
     fn unknown_history_rolls_back_and_does_not_skip_latest_step() {

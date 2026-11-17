@@ -25,7 +25,8 @@ pub(crate) fn read(c: &Connection, path: &str, q: &HashMap<String, String>) -> R
             ask(c, get(q, "nsfw"), &get(q, "skip").split(',').filter(|s| !s.is_empty()).collect::<Vec<_>>())?,
         )]),
         "/api/similar" => Json::object([
-            ("groups", crate::http_browse::similar_groups(c, get(q, "kind"), get(q, "nsfw"))?),
+            // 不带 seen=1 时回复和以前逐字节相同（#427）。
+            ("groups", crate::http_browse::similar_groups(c, get(q, "kind"), get(q, "nsfw"), get(q, "seen") == "1")?),
             ("state", off()),
         ]),
         "/api/clusters" => {

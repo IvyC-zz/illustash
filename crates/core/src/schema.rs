@@ -715,6 +715,15 @@ fn v10(conn: &Connection) -> Result<()> {
            created_at TEXT NOT NULL,
            updated_at TEXT NOT NULL);",
     )?;
+    // 相似组的「看过了」（#427）：同一个 id 是一次标记，行是当时这组里看得到的图。
+    conn.execute_batch(
+        "CREATE TABLE similar_seen(
+           id INTEGER NOT NULL,
+           uuid TEXT NOT NULL,
+           seen_at TEXT NOT NULL,
+           PRIMARY KEY(id,uuid)) WITHOUT ROWID;
+         CREATE INDEX similar_seen_uuid ON similar_seen(uuid);",
+    )?;
     Ok(())
 }
 
