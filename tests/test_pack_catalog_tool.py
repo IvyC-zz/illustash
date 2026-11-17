@@ -1,4 +1,4 @@
-"""tools/pack_catalog.py（#602）：条目从包文件读字段、组目录时序号加一、发布时拒绝应用会跳过的条目、核对签名、打离线包。
+"""tools/pack_catalog.py（#602）：条目从两个组成部分的包文件读字段、组目录时序号加一、发布时拒绝应用会跳过的条目、核对签名、打离线包。
 
 夹具在 tests/fixtures/pack_catalog/（全部合成）。签名的完整核对要装 cryptography；没装时只核对密钥编号，测试照样跑。
 """
@@ -14,44 +14,56 @@ FIXTURES = Path(__file__).resolve().parent / 'fixtures' / 'pack_catalog'
 
 
 class PackCatalogToolTest(unittest.TestCase):
-    def test_entry_reads_format_heads_tiers_and_base_from_the_package(self):
-        wd = pack_catalog.entry(kind='wd-extension', revision=3, path=FIXTURES / 'wd-extension-v3.bin', min_app='0.3.0',
-                                license_text='Apache-2.0')
-        self.assertEqual((wd['version'], wd['format'], wd['heads'], wd['candidate_only']),
-                         ('wd-extension-v3', 'illustash-wd-extension/2', 3, 1))
-        self.assertEqual(wd['file']['url'], pack_catalog.RELEASE_PREFIX + 'wd-extension-v3/wd-extension-v3.bin')
+    def test_entry_reads_both_components_from_their_packages(self):
+        e = pack_catalog.entry(revision=3, wd=FIXTURES / 'wd-extension-v3.bin', ccip=FIXTURES / 'ccip-longtail-v2.zip',
+                               min_app='0.3.0')
+        self.assertEqual((e['kind'], e['version'], e['license']), ('character-pack', 'character-pack-v3', 'Apache-2.0 AND MIT'))
+        wd, ccip = e['components']['wd'], e['components']['ccip']
+        self.assertEqual((wd['format'], wd['heads'], wd['candidate_only'], wd['license']),
+                         ('illustash-wd-extension/2', 3, 1, 'Apache-2.0'))
+        self.assertEqual(wd['file']['url'], pack_catalog.RELEASE_PREFIX + 'character-pack-v3/wd-extension-v3.bin')
         self.assertEqual(set(wd['base']), {'wd_model_sha256', 'wd_tags_sha256'})
-        ccip = pack_catalog.entry(kind='ccip-longtail', revision=2, path=FIXTURES / 'ccip-longtail-v2.zip', min_app='0.3.0',
-                                  license_text='MIT', name='A-longtail-p75.zip')
-        self.assertEqual((ccip['heads'], ccip['file']['name']), (2, 'A-longtail-p75.zip'))
-        self.assertTrue(ccip['file']['url'].endswith('/ccip-longtail-v2/A-longtail-p75.zip'))
+        self.assertEqual((ccip['format'], ccip['heads'], ccip['license']), ('illustash-557-ccip-offline/1', 2, 'MIT'))
+        self.assertEqual(set(ccip['base']), {'ccip_model_sha256'})
+        # 和上一版相同的组成部分指向原来的 Release，可以换发布用的名字。
+        e = pack_catalog.entry(revision=2, wd=FIXTURES / 'wd-extension-v2.bin', ccip=FIXTURES / 'ccip-longtail-v1.zip',
+                               ccip_tag='ccip-longtail-v1', ccip_name='A-longtail-p75.zip', min_app='0.3.0')
+        self.assertTrue(e['components']['ccip']['file']['url'].endswith('/ccip-longtail-v1/A-longtail-p75.zip'))
         with self.assertRaises(pack_catalog.CatalogError):
-            pack_catalog.entry(kind='wd-extension', revision=2, path=FIXTURES / 'wd-extension-v2.bin', min_app='0.3',
-                               license_text='Apache-2.0')
+            pack_catalog.entry(revision=2, wd=FIXTURES / 'wd-extension-v2.bin', ccip=FIXTURES / 'ccip-longtail-v1.zip',
+                               min_app='0.3')
         with self.assertRaises(pack_catalog.CatalogError):
-            pack_catalog.entry(kind='wd-extension', revision=2, path=FIXTURES / 'wd-extension-v2.bin', min_app='0.3.0',
-                               license_text='Apache-2.0', note_zh='只有中文')
+            pack_catalog.entry(revision=2, wd=FIXTURES / 'wd-extension-v2.bin', ccip=FIXTURES / 'ccip-longtail-v1.zip',
+                               min_app='0.3.0', note_zh='只有中文')
+        # 组成部分放反了：包文件读不出来。
+        with self.assertRaises(Exception):
+            pack_catalog.entry(revision=2, wd=FIXTURES / 'ccip-longtail-v1.zip', ccip=FIXTURES / 'wd-extension-v2.bin',
+                               min_app='0.3.0')
 
     def test_build_merges_by_version_and_bumps_the_serial(self):
-        v2 = pack_catalog.entry(kind='wd-extension', revision=2, path=FIXTURES / 'wd-extension-v2.bin', min_app='0.3.0',
-                                license_text='Apache-2.0')
+        entry = lambda revision, wd, ccip: pack_catalog.entry(revision=revision, wd=FIXTURES / wd, ccip=FIXTURES / ccip,
+                                                              min_app='0.3.0')
+        v2 = entry(2, 'wd-extension-v2.bin', 'ccip-longtail-v1.zip')
         first = pack_catalog.build([v2])
-        self.assertEqual((first['serial'], [p['version'] for p in first['packs']]), (1, ['wd-extension-v2']))
-        v3 = pack_catalog.entry(kind='wd-extension', revision=3, path=FIXTURES / 'wd-extension-v3.bin', min_app='0.3.0',
-                                license_text='Apache-2.0')
-        second = pack_catalog.build([v3, {**v2, 'license': 'Apache-2.0 AND MIT'}], first)
+        self.assertEqual((first['serial'], [p['version'] for p in first['packs']]), (1, ['character-pack-v2']))
+        # 两个版本共用一个 CCIP 文件可以。
+        v3 = entry(3, 'wd-extension-v3.bin', 'ccip-longtail-v1.zip')
+        second = pack_catalog.build([v3, {**v2, 'license': 'Apache-2.0'}], first)
         self.assertEqual(second['serial'], 2)
         self.assertEqual([(p['version'], p['license']) for p in second['packs']],
-                         [('wd-extension-v2', 'Apache-2.0 AND MIT'), ('wd-extension-v3', 'Apache-2.0')])
-        # 同一个修订号或文件不能出现两次。
+                         [('character-pack-v2', 'Apache-2.0'), ('character-pack-v3', 'Apache-2.0 AND MIT')])
+        # 同一个修订号不能出现两次。
         with self.assertRaises(pack_catalog.CatalogError):
-            pack_catalog.build([{**v3, 'version': 'wd-extension-v3b'}], second)
+            pack_catalog.build([{**v3, 'version': 'character-pack-v3b'}], second)
         # 发布时拒绝应用会跳过的条目；测试夹具用 strict=False 才能写进去。
-        future = {**v2, 'version': 'future-v1', 'kind': 'future-pack', 'revision': 9, 'format': 'x/1',
-                  'file': {**v2['file'], 'sha256': '0' * 64, 'url': pack_catalog.RELEASE_PREFIX + 'future-v1/' + v2['file']['name']}}
+        future = {**v2, 'version': 'future-v1', 'kind': 'future-pack', 'revision': 9}
         with self.assertRaises(pack_catalog.CatalogError):
             pack_catalog.build([future])
         self.assertEqual(len(pack_catalog.build([future], strict=False)['packs']), 1)
+        tiered_v1 = {**v2, 'version': 'character-pack-v8', 'revision': 8,
+                     'components': {**v2['components'], 'wd': {**v2['components']['wd'], 'candidate_only': 1}}}
+        with self.assertRaises(pack_catalog.CatalogError):
+            pack_catalog.build([tiered_v1])
 
     def test_verify_checks_the_key_and_the_bytes(self):
         data = (FIXTURES / 'packs.json').read_bytes()
@@ -73,9 +85,11 @@ class PackCatalogToolTest(unittest.TestCase):
             output = Path(temp) / 'wd-extension-v2-offline.zip'
             notice = Path(temp) / 'NOTICE.txt'
             notice.write_text('synthetic notice\n')
-            pack_catalog.offline(FIXTURES / 'packs.json', FIXTURES / 'wd-extension-v2.bin', output, extra=[notice])
+            pack_catalog.offline(FIXTURES / 'packs.json', [FIXTURES / 'wd-extension-v2.bin', FIXTURES / 'ccip-longtail-v1.zip'],
+                                 output, extra=[notice])
             with zipfile.ZipFile(output) as archive:
-                self.assertEqual(archive.namelist(), ['packs.json', 'packs.json.sig', 'wd-extension-v2.bin', 'NOTICE.txt'])
+                self.assertEqual(archive.namelist(), ['packs.json', 'packs.json.sig', 'wd-extension-v2.bin',
+                                                      'ccip-longtail-v1.zip', 'NOTICE.txt'])
                 self.assertEqual(archive.read('packs.json'), (FIXTURES / 'packs.json').read_bytes())
             with self.assertRaises(pack_catalog.CatalogError):
                 pack_catalog.offline(FIXTURES / 'packs.json', notice, output)
