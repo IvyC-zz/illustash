@@ -16,7 +16,8 @@ import {state} from '../core/state.js';
 import {refreshLocalLinks} from './catalog.js';
 import {$, namesAllowButton, toast} from './dom.js';
 import {openDialog} from './dialog.js';
-import {createLayer, openModal} from './overlay.js';
+import {openModal} from './overlay.js';
+import {combo, listNav} from './combo.js';
 import {mutate, reload} from './grid.js';
 import {renderHeading} from './shell.js';
 
@@ -24,6 +25,9 @@ import {renderHeading} from './shell.js';
 let pickerTimer = 0;
 // ---------- command palette (换成 / 也是 / 设为角色 / 跳到角色) ----------
 let palette = null;
+// 命令面板结果的键盘和鼠标（ui/combo.js 的 listNav），高亮的是第几项在它的 index 里。wirePalette 之前（只有测试会这样）
+// 用一个只记位置的替身。
+let pickerNav = {index: 0, mark() {}};
 // 多选面板（设为角色 / 也是）：⇧+点击、⇧+↵ 或行上的 ＋ 收集角色；↵ 一次全部应用。
 export const targets = list => list.length > 1 ? {entities: list.map(e => e.id)} : {entity: list[0].id};
 // 「换成」接受多个角色；只有一个时照以前的方式发送。
@@ -79,7 +83,7 @@ async function paletteSearch() {
         remote.note = result.found ? '' : result.unauthorized ? t('{reason}，也可以先只在本地新建', {reason: remoteNote(result)}) : t('{reason}，可以稍后再试，或先只在本地新建', {reason: remoteNote(result)});
         remote.allow = result.unauthorized;
         // 没动过：最佳匹配获得高亮（第一个本地结果，否则是第一个 Danbooru 结果）。
-        renderPalette(sections, q, p.touched && p.index > 0);
+        renderPalette(sections, q, p.touched && pickerNav.index > 0);
       }, 380);
     }
   } else {
@@ -97,11 +101,11 @@ async function paletteSearch() {
   renderPalette(sections, q);
 }
 function renderPalette(sections, q, keep = false) {
-  const p = palette, current = keep ? p.list[p.index] : null;
+  const p = palette, current = keep ? p.list[pickerNav.index] : null;
   p.list = sections.flatMap(s => s.items);
-  p.index = current ? Math.max(0, p.list.indexOf(current)) : 0;
+  pickerNav.index = current ? Math.max(0, p.list.indexOf(current)) : 0;
   // 只在本地新建是兜底：只要有别的匹配，它绝不是默认项。
-  if (!current && p.list[p.index]?.create) p.index = Math.max(0, p.list.findIndex(e => !e.create));
+  if (!current && p.list[pickerNav.index]?.create) pickerNav.index = Math.max(0, p.list.findIndex(e => !e.create));
   let n = 0;
   $('pickerResults').innerHTML = sections.filter(s => s.items.length || s.note).map(s => (s.label ? `<div class="palette-label">${s.label}</div>` : '') + (s.note && !s.items.length ? `<p class="palette-note">${esc(s.note)}${s.allow ? ' ' + namesAllowButton : ''}</p>` : '') + s.items.map(e => {
     const i = n++, char = e.id && state.charMap.get(e.id), cover = char?.cover;
@@ -115,9 +119,8 @@ function renderPalette(sections, q, keep = false) {
 }
 function highlight() {
   const p = palette; if (!p) return;
-  for (const el of $('pickerResults').querySelectorAll('.palette-item')) el.classList.toggle('on', Number(el.dataset.i) === p.index);
-  $('pickerResults').querySelector('.palette-item.on')?.scrollIntoView({block: 'nearest'});
-  const e = p.list[p.index], chosen = p.multi ? finalList(e, p.touched) : e ? [e] : [];
+  pickerNav.mark();
+  const e = p.list[pickerNav.index], chosen = p.multi ? finalList(e, p.touched) : e ? [e] : [];
   const sentence = chosen.length ? (p.sentence ? p.sentence({...chosen[0], name: chosen.map(x => x.name).join(t('、'))}) : chosen.map(x => x.name).join(t('、'))) : '';
   $('pickerFoot').innerHTML = chosen.length ? `<kbd>↵</kbd> ${esc(sentence)}${p.multi ? `<span class="palette-tip"><kbd>⇧↵</kbd> ${p.staged.length ? t('继续加') : t('多选')}</span>` : ''}` : `<span>${esc(p.title || '')}</span>`;
 }
@@ -212,31 +215,6 @@ export async function splitOc(c) {
   };
 }
 // ---------- 角色资料（编辑资料） ----------
-// 带结果菜单的搜索框：`search(q)` 解析为若干部分 [{label, items, note}]，`pick(item)` 取其中一项。
-// 菜单是非模态浮层，叠在输入框所在的对话框或页面上面：Esc 只关菜单（由浮层管理器 ui/overlay.js 处理），再按一次才轮到下面那层。
-export function combo(input, menu, search, pick) {
-  let list = [], index = 0, gen = 0, timer = 0;
-  const layer = createLayer({kind: 'popover', id: 'combo', el: menu, anchor: input, onDismiss: reason => show(false, reason)});
-  const show = (on, reason) => { menu.hidden = !on; if (on) layer.open(); else layer.close(reason); };
-  const render = sections => {
-    list = sections.flatMap(x => x.items); index = Math.min(index, Math.max(0, list.length - 1));
-    let i = 0;
-    menu.innerHTML = sections.filter(x => x.items.length || x.note).map(x => (x.label ? `<div class="palette-label">${esc(x.label)}</div>` : '') + (x.note ? `<p class="palette-note">${esc(x.note)}${x.allow ? ' ' + namesAllowButton : ''}</p>` : '') +
-      x.items.map(r => `<button type="button" class="menu-item watch-option${i === index ? ' on' : ''}" data-i="${i++}"><span class="watch-name">${esc(r.label)}</span><small>${esc(r.detail || '')}</small><em>${esc(r.extra || '')}</em></button>`).join('')).join('');
-    show(!!menu.innerHTML);
-  };
-  const run = () => { const g = ++gen; clearTimeout(timer); timer = setTimeout(() => search(input.value.trim(), sections => { if (g === gen) render(sections); }), 160); };
-  const choose = i => { const r = list[i]; if (!r) return; show(false); pick(r); };
-  input.addEventListener('input', () => { index = 0; run(); });
-  input.addEventListener('focus', run);
-  input.addEventListener('blur', () => setTimeout(() => show(false, 'outside'), 150));
-  input.addEventListener('keydown', e => {
-    if (composing(e) || menu.hidden || !list.length) return;
-    if (e.key === 'ArrowDown' || e.key === 'ArrowUp') { e.preventDefault(); index = (index + (e.key === 'ArrowDown' ? 1 : list.length - 1)) % list.length; for (const b of menu.querySelectorAll('[data-i]')) b.classList.toggle('on', Number(b.dataset.i) === index); }
-    else if (e.key === 'Enter') { e.preventDefault(); choose(index); }
-  });
-  menu.addEventListener('mousedown', e => { const b = e.target.closest('[data-i]'); if (b) { e.preventDefault(); choose(Number(b.dataset.i)); } });
-}
 // 先是本地结果（即时），然后只用输入的文字查 Danbooru。
 export function twoStage(local, remote, extra = () => []) {
   return (q, show) => {
@@ -385,17 +363,12 @@ export function wirePalette() {
   // 0.2.0 及以前不分图库存的最近使用：不知道是哪个图库的，丢掉（#523）。
   prefs.drop('tagPicks'); prefs.drop('picks');
   $('pickerSearch').addEventListener('input', () => { if (palette) palette.touched = true; clearTimeout(pickerTimer); pickerTimer = setTimeout(paletteSearch, 140); });
-  $('pickerSearch').addEventListener('keydown', e => {
-    const p = palette; if (!p || composing(e)) return;
-    if (e.key === 'ArrowDown' || e.key === 'ArrowUp') p.touched = true;
-    if (e.key === 'ArrowDown') { e.preventDefault(); p.index = Math.min(p.list.length - 1, p.index + 1); highlight(); }
-    else if (e.key === 'ArrowUp') { e.preventDefault(); p.index = Math.max(0, p.index - 1); highlight(); }
-    else if (e.key === 'Enter') { e.preventDefault(); choose(p.index, e.shiftKey); }
-    else if (/^[1-9]$/.test(e.key) && !$('pickerSearch').value) { e.preventDefault(); choose(Number(e.key) - 1, false, true); }
-  });
-  $('pickerResults').addEventListener('click', e => { const b = e.target.closest('[data-i]'); if (b) choose(Number(b.dataset.i), e.shiftKey || !!e.target.closest('[data-add]'), true); });
+  // ↑ ↓ 循环、↵ 选（⇧↵ 加入多选）、点一项（⇧+点击或行上的 ＋ 加入多选），没输入时数字键直接选前 9 项；Esc 关对话框。
+  pickerNav = listNav($('pickerSearch'), $('pickerResults'), {shown: () => !!palette, hover: true, count: () => palette.list.length,
+    pick: (i, e) => e.type === 'click' ? choose(i, e.shiftKey || !!e.target.closest('[data-add]'), true) : choose(i, e.shiftKey),
+    moved: (i, how) => { if (!palette) return; if (how === 'key') palette.touched = true; highlight(); },
+    more: e => { if (/^[1-9]$/.test(e.key) && !$('pickerSearch').value) { e.preventDefault(); choose(Number(e.key) - 1, false, true); } }});
   $('pickerStaged').addEventListener('click', e => { const b = e.target.closest('[data-unstage]'); if (b && palette) stage(palette.staged[Number(b.dataset.unstage)]); });
-  $('pickerResults').addEventListener('mousemove', e => { const b = e.target.closest('[data-i]'); if (b && palette && palette.index !== Number(b.dataset.i)) { palette.index = Number(b.dataset.i); highlight(); } });
   $('picker').addEventListener('close', () => { palette = null; });
   $('ocSplitClose').onclick = () => $('ocSplitDialog').close();
   $('relateClose').onclick = () => $('relateDialog').close();

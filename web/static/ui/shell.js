@@ -17,6 +17,7 @@ import {closeInspector, closeViewer} from './detail.js';
 import {filters, markSelectButton, placeFor, rememberPlace, reload, resetForRoute, selectAll, setNsfw, short, sweep, toggleFit, toggleSelecting} from './grid.js';
 import {guideTick} from './guide.js';
 import {createLayer} from './overlay.js';
+import {listNav} from './combo.js';
 import {editProfile, markOc, mergeCharacter, openLocalLinks, openRelate, splitOc, toggleMascot, toggleOc} from './palette.js';
 
 // 画师筛选的标题和胶囊里显示的画师名：第一次用到时去读，读到后重画标题，胶囊只换文字（整条工具栏重画会打断正在
@@ -182,22 +183,24 @@ export function renderChrome() {
     $('wdTagPill')?.addEventListener('click', () => go({...r, tag: ''}));
     $('dayPill')?.addEventListener('click', () => go({...r, day: ''}));
     $('tagSearch').oninput = () => { clearTimeout(pickerTimer); pickerTimer = setTimeout(loadTagOptions, 120); };
-    $('tagOptions').onclick = e => {
-      const b = e.target.closest('[data-value],[data-utag]'); if (!b) return;
+    // 焦点留在搜索框里：↑ ↓ 在标签之间循环，↵ 或点击按这个标签筛选，Esc 关菜单、焦点回到「标签」按钮（#432）。
+    tagNav = listNav($('tagSearch'), $('tagOptions'), {shown: () => !$('tagPopover').hidden, count: () => tagCount, pick: i => {
+      const b = $('tagOptions').querySelector(`[data-i="${i}"]`); if (!b) return;
       setMenu(tagMenu, false);
       go(b.dataset.utag ? {...r, utag: b.dataset.utag} : {...r, tag: b.dataset.value});
-    };
+    }});
   }
 }
 // 标签菜单和角色页的更多菜单是非模态浮层：Esc、点外关闭由浮层管理器（ui/overlay.js）统一处理。它们的元素随工具栏
-// 和标题重画而换掉，所以层按 id 找元素；重画后旧的层自己会从栈里清掉。打开时焦点进第一项（标签菜单是搜索框），
-// ↑ ↓ 在各项之间移动（#422）。
-const menuLayer = (id, popover, button) => {
-  const layer = createLayer({kind: 'popover', id, el: () => $(popover), anchor: () => $(button), menu: true, focusIn: 'first', onDismiss: reason => setMenu(layer, false, reason)});
+// 和标题重画而换掉，所以层按 id 找元素；重画后旧的层自己会从栈里清掉。打开时焦点进第一项。更多菜单的 ↑ ↓ 在各项之间
+// 移动焦点（menu，#422）；标签菜单是搜索框加结果，焦点留在搜索框里，键盘由 ui/combo.js 的 listNav 处理（tagNav）。
+const menuLayer = (id, popover, button, menu) => {
+  const layer = createLayer({kind: 'popover', id, el: () => $(popover), anchor: () => $(button), menu, focusIn: 'first', onDismiss: reason => setMenu(layer, false, reason)});
   layer.popover = popover;
   return layer;
 };
-const tagMenu = menuLayer('tag-menu', 'tagPopover', 'tagButton'), moreMenu = menuLayer('more-menu', 'morePopover', 'moreButton');
+const tagMenu = menuLayer('tag-menu', 'tagPopover', 'tagButton', false), moreMenu = menuLayer('more-menu', 'morePopover', 'moreButton', true);
+let tagNav = null, tagCount = 0;
 function setMenu(layer, open, reason) {
   const el = $(layer.popover); if (el) el.hidden = !open;
   if (open) layer.open(); else layer.close(reason);
@@ -211,9 +214,11 @@ async function loadTagOptions() {
   const q = $('tagSearch').value.trim(), low = q.toLowerCase();
   const mine = state.userTags.filter(t => t.tag !== state.route.utag && (!q || t.tag.toLowerCase().includes(low))).slice(0, 12);
   try { const tags = await api('/api/general-tags?q=' + encodeURIComponent(q)); if (q !== $('tagSearch').value.trim()) return;
-    $('tagOptions').innerHTML = (mine.length ? `<div class="palette-label">${t('我的标签')}</div>${mine.map(x => `<button class="menu-item" data-utag="${esc(x.tag)}"># ${esc(x.tag)} <small>${number(x.count)}</small></button>`).join('')}` : '') +
-      (tags.length ? `<div class="palette-label">${t('画面标签')}</div>${tags.map(x => `<button class="menu-item" data-value="${esc(x)}">${esc(x.replaceAll('_', ' '))}</button>`).join('')}` : '') || `<p>${t('没有匹配的标签')}</p>`;
-  } catch (e) { $('tagOptions').textContent = e.message; }
+    let i = 0;
+    $('tagOptions').innerHTML = (mine.length ? `<div class="palette-label">${t('我的标签')}</div>${mine.map(x => `<button class="menu-item" data-i="${i++}" data-utag="${esc(x.tag)}"># ${esc(x.tag)} <small>${number(x.count)}</small></button>`).join('')}` : '') +
+      (tags.length ? `<div class="palette-label">${t('画面标签')}</div>${tags.map(x => `<button class="menu-item" data-i="${i++}" data-value="${esc(x)}">${esc(x.replaceAll('_', ' '))}</button>`).join('')}` : '') || `<p>${t('没有匹配的标签')}</p>`;
+    tagCount = i; tagNav?.mark(0);
+  } catch (e) { $('tagOptions').textContent = e.message; tagCount = 0; }
 }
 // 角色页的标题：名称、张数、未检查、检查日期，右侧是细分、标为已检查和 ⋯ 菜单。
 function drawCharHeading(h, r, c) {
