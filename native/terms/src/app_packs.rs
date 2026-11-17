@@ -1,12 +1,17 @@
-//! 角色数据包的签名目录（#602）：WD 角色扩展包和 CCIP 长尾包不跟软件版本发布，新包列在一份签过名的目录里。
+//! 角色资料包的签名目录（#602）：WD 角色扩展和 CCIP 长尾锚点合成一个「角色资料包」，不跟软件版本发布，新版本列在一份
+//! 签过名的目录里。2026-11-17 用户定：对用户只是一个包、一个版本号、一个开关；包里分成两个组成部分（WD、CCIP），
+//! 各自固定依赖的基础模型。证据仍按两个来源（`WD_EXT`、`CCIP_LONGTAIL`）分别记，启用、换包和撤回按组成部分分别执行。
 //!
 //! - 目录是 `packs` 这个 Release 里的 `packs.json`，签名在旁边的 `packs.json.sig`。签名和应用更新一样是 Tauri 写的
 //!   minisign 格式，但用另一把专签数据包的密钥；公钥在 `native/terms/pack-key.pub`，还没配置时整个目录功能不启用。
 //! - 只跟着「检查更新」读（`app_updates` 的 check）：关掉检查更新、也没手动检查过，就从不联网读目录。读到的目录验过签、
-//!   序号不比本机已有的小，才整份存进本机缓存（`extensions/catalog.json`）。下载、启用和换包仍然只在用户点了以后发生。
+//!   序号不比本机已有的小，才整份存进本机缓存（`extensions/catalog.json`）。
 //! - 离线时，用包 Release 里的 `-offline.zip`（包文件加上签过名的目录）从文件导入，见 `adopt_archives`。
-//! - 应用认的包 = 内置的两个（`wd-extension-v1`、`ccip-longtail-v1`，离线也能用）加上最近一份验过签的目录里、本版本能用的
-//!   那些：种类认识、包格式支持、基础模型和这个构建的模型对得上、满足最低应用版本。别的条目原样留在目录里，但不提供。
+//! - 应用认的包 = 内置的角色资料包 v1（就是原来写死的 `wd-extension-v1` 和 `ccip-longtail-v1`，离线也能用）加上最近一份
+//!   验过签的目录里、本版本能用的那些：两个组成部分的格式都支持、基础模型都和这个构建的模型对得上、满足最低应用版本。
+//!   别的条目原样留在目录里，但不提供。
+//! - 组成部分的文件按 SHA-256 放：和内置文件相同的就用内置的文件夹，其余放 `extensions/<种类>-<SHA-256 前 12 位>/`。
+//!   所以下一个版本只换了一个组成部分时，另一个不用重新下载。
 use crate::app_updates::Version;
 use crate::{Error, Result};
 use base64::{engine::general_purpose::STANDARD, Engine};
@@ -48,7 +53,7 @@ pub(crate) enum Kind {
 }
 
 impl Kind {
-    /// 目录里的种类名。
+    /// 组成部分的名字（也是按 SHA-256 取名的文件夹的前缀）。
     pub(crate) fn id(self) -> &'static str {
         match self {
             Self::Wd => "wd-extension",
@@ -60,13 +65,6 @@ impl Kind {
         match self {
             Self::Wd => "wd",
             Self::Ccip => "ccip",
-        }
-    }
-    fn parse(id: &str) -> Option<Self> {
-        match id {
-            "wd-extension" => Some(Self::Wd),
-            "ccip-longtail" => Some(Self::Ccip),
-            _ => None,
         }
     }
     /// 这个版本读得了的包格式。旧格式 `illustash-wd-extension/1` 的包全部算一级；`/2` 给每个头标级别。
@@ -98,13 +96,13 @@ pub(crate) enum Base {
     Ccip { model: String },
 }
 
-/// 一个可用的包：内置的，或目录里本版本能用的一条。
+/// 角色资料包的一个组成部分（WD 扩展头或 CCIP 长尾锚点）。WD、CCIP 两边的加载、扫描和启用都只看它。
 #[derive(Clone, Debug, PartialEq)]
 pub(crate) struct Pack {
     pub(crate) kind: Kind,
-    /// 同一种类里的先后；越大越新。
+    /// 所属角色资料包的修订号。
     pub(crate) revision: u32,
-    /// 也是共享数据里 `extensions/` 下的文件夹名。
+    /// 共享数据里 `extensions/` 下的文件夹名：内置的是 `wd-extension-v1`、`ccip-longtail-v1`，其余按 SHA-256 取名。
     pub(crate) version: String,
     pub(crate) format: String,
     /// WD 的头数或 CCIP 的角色数。
@@ -114,23 +112,59 @@ pub(crate) struct Pack {
     pub(crate) file: File,
     pub(crate) base: Base,
     pub(crate) license: String,
-    /// 一行说明（中文、英文）；内置包没有。
-    pub(crate) note: Option<(String, String)>,
     pub(crate) builtin: bool,
 }
 
 impl Pack {
+    fn view(&self) -> Value {
+        json!({"format":self.format,"heads":self.heads,"candidate_only":self.candidate_only,"license":self.license,
+            "file":{"path":self.file.name,"size":self.file.size,"sha256":self.file.sha256}})
+    }
+}
+
+/// 一个角色资料包：内置的 v1，或目录里本版本能用的一条。
+#[derive(Clone, Debug, PartialEq)]
+pub(crate) struct CharacterPack {
+    /// 页面上显示的版本，如 `character-pack-v2`。
+    pub(crate) version: String,
+    /// 越大越新。
+    pub(crate) revision: u32,
+    pub(crate) license: String,
+    /// 一行说明（中文、英文）；内置包没有。
+    pub(crate) note: Option<(String, String)>,
+    pub(crate) builtin: bool,
+    pub(crate) wd: Pack,
+    pub(crate) ccip: Pack,
+}
+
+impl CharacterPack {
+    pub(crate) fn component(&self, kind: Kind) -> &Pack {
+        match kind {
+            Kind::Wd => &self.wd,
+            Kind::Ccip => &self.ccip,
+        }
+    }
+    /// 角色数：两个组成部分的头数相加（两边认的角色不重复：长尾锚点只收 WD 和扩展头都没有的角色）。
+    pub(crate) fn heads(&self) -> usize {
+        self.wd.heads + self.ccip.heads
+    }
     pub(crate) fn view(&self) -> Value {
         json!({
-            "kind":self.kind.id(),"version":self.version,"revision":self.revision,"format":self.format,"heads":self.heads,
-            "candidate_only":self.candidate_only,"license":self.license,"builtin":self.builtin,
+            "version":self.version,"revision":self.revision,"heads":self.heads(),
+            "candidate_only":self.wd.candidate_only + self.ccip.candidate_only,"license":self.license,"builtin":self.builtin,
             "note":self.note.as_ref().map(|(zh, en)| json!({"zh-CN":zh,"en":en})),
-            "file":{"path":self.file.name,"size":self.file.size,"sha256":self.file.sha256},
+            "size":self.wd.file.size + self.ccip.file.size,
+            "components":{"wd":self.wd.view(),"ccip":self.ccip.view()},
         })
     }
 }
 
 // ---------- 目录格式 ----------
+
+/// 目录里角色资料包的种类名。以后的种类结构照查，本版本不提供。
+pub(crate) const PACK_KIND: &str = "character-pack";
+/// 内置的角色资料包 v1。
+pub(crate) const BUILTIN_VERSION: &str = "character-pack-v1";
 
 #[derive(Deserialize)]
 struct RawCatalog {
@@ -144,16 +178,29 @@ struct RawEntry {
     kind: String,
     revision: u32,
     version: String,
+    min_app: String,
+    license: String,
+    #[serde(default)]
+    note: Option<RawNote>,
+    #[serde(default)]
+    components: Option<RawComponents>,
+}
+
+#[derive(Deserialize)]
+struct RawComponents {
+    wd: RawComponent,
+    ccip: RawComponent,
+}
+
+#[derive(Deserialize)]
+struct RawComponent {
     format: String,
     heads: usize,
     #[serde(default)]
     candidate_only: usize,
     file: RawFile,
     base: RawBase,
-    min_app: String,
     license: String,
-    #[serde(default)]
-    note: Option<RawNote>,
 }
 
 #[derive(Deserialize)]
@@ -178,11 +225,13 @@ struct RawNote {
     en: String,
 }
 
-/// 一条结构合法的目录条目（还没看本版本能不能用）。
+/// 一条结构合法的目录条目（还没看本版本能不能用）。不认识的种类没有组成部分。
 #[derive(Clone, Debug)]
 pub(crate) struct Entry {
     kind: String,
-    pack: Pack,
+    pack: Option<CharacterPack>,
+    version: String,
+    revision: u32,
     min_app: Version,
 }
 
@@ -214,8 +263,13 @@ fn short(text: &str, limit: usize) -> bool {
     !text.trim().is_empty() && text.chars().count() <= limit && !text.chars().any(char::is_control)
 }
 
+/// 目录里的组成部分放在哪个文件夹：按 SHA-256 取名，同一个文件只放一份。
+fn component_dir(kind: Kind, sha256: &str) -> String {
+    format!("{}-{}", kind.id(), &sha256[..12])
+}
+
 impl Catalog {
-    /// 解析目录并逐项检查结构。任何一条结构不对，整份不用；本版本不认识的种类、格式等留到 `packs` 再筛。
+    /// 解析目录并逐项检查结构。任何一条结构不对，整份不用；本版本用不了的条目留到 `packs` 再筛。
     pub(crate) fn parse(bytes: &[u8]) -> Result<Self> {
         let raw: RawCatalog = serde_json::from_slice(bytes).map_err(|e| bad(&e.to_string()))?;
         if raw.format != CATALOG_FORMAT {
@@ -227,16 +281,12 @@ impl Catalog {
         if raw.packs.len() > ENTRY_LIMIT {
             return Err(bad("条目过多"));
         }
-        let mut entries = Vec::new();
+        let mut entries: Vec<Entry> = Vec::new();
         for raw in raw.packs {
             let entry = Self::entry(raw)?;
-            let clash = entries.iter().any(|e: &Entry| {
-                e.pack.version == entry.pack.version
-                    || e.pack.file.sha256 == entry.pack.file.sha256
-                    || (e.kind == entry.kind && e.pack.revision == entry.pack.revision)
-            });
-            if clash {
-                return Err(bad("版本、修订号或 SHA-256 重复"));
+            if entries.iter().any(|e| e.version == entry.version || (e.kind == entry.kind && e.revision == entry.revision))
+            {
+                return Err(bad("版本或修订号重复"));
             }
             entries.push(entry);
         }
@@ -244,12 +294,41 @@ impl Catalog {
     }
 
     fn entry(raw: RawEntry) -> Result<Entry> {
-        let f = &raw.file;
-        let tag = f.url.strip_prefix(RELEASE_PREFIX).and_then(|rest| rest.split_once('/'));
+        let version = raw.version.chars().take(64).collect::<String>();
         let valid = segment(&raw.kind, 32)
             && segment(&raw.version, 64)
             && raw.revision >= 1
-            && (1..=64).contains(&raw.format.len())
+            && short(&raw.license, 200)
+            && raw.note.as_ref().is_none_or(|n| short(&n.zh, 200) && short(&n.en, 200));
+        if !valid {
+            return Err(bad(&format!("条目 {version} 的字段不合法")));
+        }
+        let min_app = Version::parse(&raw.min_app).ok_or_else(|| bad("最低应用版本不是 X.Y.Z"))?;
+        let pack = match (raw.kind.as_str(), raw.components) {
+            (PACK_KIND, Some(c)) => {
+                let wd = Self::component(Kind::Wd, c.wd, raw.revision, &version)?;
+                let ccip = Self::component(Kind::Ccip, c.ccip, raw.revision, &version)?;
+                Some(CharacterPack {
+                    version: raw.version.clone(),
+                    revision: raw.revision,
+                    license: raw.license,
+                    note: raw.note.map(|n| (n.zh, n.en)),
+                    builtin: false,
+                    wd,
+                    ccip,
+                })
+            }
+            (PACK_KIND, None) => return Err(bad(&format!("条目 {version} 缺少组成部分"))),
+            // 以后的种类：上面的通用字段照查，本版本不提供。
+            _ => None,
+        };
+        Ok(Entry { kind: raw.kind, pack, version: raw.version, revision: raw.revision, min_app })
+    }
+
+    fn component(kind: Kind, raw: RawComponent, revision: u32, version: &str) -> Result<Pack> {
+        let f = &raw.file;
+        let tag = f.url.strip_prefix(RELEASE_PREFIX).and_then(|rest| rest.split_once('/'));
+        let valid = (1..=64).contains(&raw.format.len())
             && raw.format.bytes().all(|b| b.is_ascii_graphic())
             && (1..=1_000_000).contains(&raw.heads)
             && raw.candidate_only <= raw.heads
@@ -257,61 +336,67 @@ impl Catalog {
             && (1..=FILE_LIMIT).contains(&f.size)
             && hex64(&f.sha256)
             && tag.is_some_and(|(tag, name)| segment(tag, 64) && name == f.name)
-            && short(&raw.license, 200)
-            && raw.note.as_ref().is_none_or(|n| short(&n.zh, 200) && short(&n.en, 200));
+            && short(&raw.license, 200);
         if !valid {
-            let version = raw.version.chars().take(64).collect::<String>();
-            return Err(bad(&format!("条目 {version} 的字段不合法")));
+            return Err(bad(&format!("条目 {version} 的组成部分 {} 不合法", kind.key())));
         }
-        let min_app = Version::parse(&raw.min_app).ok_or_else(|| bad("最低应用版本不是 X.Y.Z"))?;
         let hex = |v: &Option<String>| v.as_deref().filter(|s| hex64(s)).map(str::to_owned);
-        let base = match Kind::parse(&raw.kind) {
-            Some(Kind::Wd) => Base::Wd {
+        let base = match kind {
+            Kind::Wd => Base::Wd {
                 model: hex(&raw.base.wd_model_sha256).ok_or_else(|| bad("缺少 WD 模型的 SHA-256"))?,
                 tags: hex(&raw.base.wd_tags_sha256).ok_or_else(|| bad("缺少 WD 标签表的 SHA-256"))?,
             },
-            Some(Kind::Ccip) => Base::Ccip {
-                model: hex(&raw.base.ccip_model_sha256).ok_or_else(|| bad("缺少 CCIP 模型的 SHA-256"))?,
-            },
-            // 以后的种类：结构照查，本版本不提供。
-            None => Base::Ccip { model: String::new() },
+            Kind::Ccip => {
+                Base::Ccip { model: hex(&raw.base.ccip_model_sha256).ok_or_else(|| bad("缺少 CCIP 模型的 SHA-256"))? }
+            }
         };
-        Ok(Entry {
-            pack: Pack {
-                kind: Kind::parse(&raw.kind).unwrap_or(Kind::Ccip),
-                revision: raw.revision,
-                version: raw.version,
-                format: raw.format,
-                heads: raw.heads,
-                candidate_only: raw.candidate_only,
-                file: File { name: raw.file.name, size: raw.file.size, sha256: raw.file.sha256, url: raw.file.url },
-                base,
-                license: raw.license,
-                note: raw.note.map(|n| (n.zh, n.en)),
-                builtin: false,
-            },
-            kind: raw.kind,
-            min_app,
+        Ok(Pack {
+            kind,
+            revision,
+            version: component_dir(kind, &raw.file.sha256),
+            format: raw.format,
+            heads: raw.heads,
+            candidate_only: raw.candidate_only,
+            file: File { name: raw.file.name, size: raw.file.size, sha256: raw.file.sha256, url: raw.file.url },
+            base,
+            license: raw.license,
+            builtin: false,
         })
     }
 
-    /// 本版本能用的条目：种类认识、格式支持、基础模型对得上、满足最低应用版本；与内置包同版本或同修订号的，
-    /// 只在就是内置包本身时算数（交给内置的那条）。
-    pub(crate) fn packs(&self, kind: Kind, context: &Context) -> Vec<Pack> {
-        let builtin = context.builtin(kind);
+    /// 本版本能用的角色资料包：种类认识，两个组成部分的格式都支持、基础模型都和这个构建的对得上，满足最低应用版本。
+    /// 组成部分的文件和内置的相同时，换成内置的那个（同一个文件夹、同一个下载地址）。和内置包同版本名或同修订号的条目
+    /// 不提供。
+    pub(crate) fn packs(&self, context: &Context) -> Vec<CharacterPack> {
+        let builtin = &context.builtin;
         self.entries
             .iter()
-            .filter(|e| Kind::parse(&e.kind) == Some(kind))
-            .filter(|e| kind.formats().contains(&e.pack.format.as_str()))
-            .filter(|e| e.pack.format != WD_FORMAT_V1 || e.pack.candidate_only == 0)
-            .filter(|e| e.pack.base == builtin.base)
             .filter(|e| context.app.core() >= e.min_app.core())
-            .filter(|e| {
-                e.pack.file.sha256 != builtin.file.sha256
-                    && e.pack.version != builtin.version
-                    && e.pack.revision != builtin.revision
+            .filter_map(|e| e.pack.clone())
+            .filter(|p| p.version != builtin.version && p.revision != builtin.revision)
+            .filter(|p| {
+                [&p.wd, &p.ccip].into_iter().all(|c| {
+                    let own = builtin.component(c.kind);
+                    c.kind.formats().contains(&c.format.as_str())
+                        && (c.format != WD_FORMAT_V1 || c.candidate_only == 0)
+                        && (c.kind == Kind::Wd || c.candidate_only == 0)
+                        && c.base == own.base
+                })
             })
-            .map(|e| e.pack.clone())
+            .map(|mut p| {
+                for kind in [Kind::Wd, Kind::Ccip] {
+                    let own = builtin.component(kind);
+                    let part = match kind {
+                        Kind::Wd => &mut p.wd,
+                        Kind::Ccip => &mut p.ccip,
+                    };
+                    if part.file.sha256 == own.file.sha256 {
+                        *part = Pack { revision: p.revision, ..own.clone() };
+                    }
+                }
+                p
+            })
+            .filter(|p| p.wd.file.sha256 != builtin.wd.file.sha256 || p.ccip.file.sha256 != builtin.ccip.file.sha256)
             .collect()
     }
 }
@@ -319,20 +404,26 @@ impl Catalog {
 /// 判断条目能不能用时对照的东西：这个构建的版本和内置包（内置包的基础模型就是这个构建的模型）。
 pub(crate) struct Context {
     pub(crate) app: Version,
-    pub(crate) wd: Pack,
-    pub(crate) ccip: Pack,
+    pub(crate) builtin: CharacterPack,
 }
 
 impl Context {
     pub(crate) fn current() -> Result<Self> {
-        Ok(Self { app: crate::app_updates::current(), wd: builtin_wd()?, ccip: builtin_ccip()? })
+        Ok(Self { app: crate::app_updates::current(), builtin: builtin()? })
     }
-    fn builtin(&self, kind: Kind) -> &Pack {
-        match kind {
-            Kind::Wd => &self.wd,
-            Kind::Ccip => &self.ccip,
-        }
-    }
+}
+
+/// 内置的角色资料包 v1：原来写死在程序里的两个包。
+pub(crate) fn builtin() -> Result<CharacterPack> {
+    Ok(CharacterPack {
+        version: BUILTIN_VERSION.into(),
+        revision: 1,
+        license: "Apache-2.0 AND MIT".into(),
+        note: None,
+        builtin: true,
+        wd: builtin_wd()?,
+        ccip: builtin_ccip()?,
+    })
 }
 
 /// 内置的 WD 角色扩展包（models.json 的 `wd_extension`，走查时可换成合成包，见 `app_models::wd_extension`）。
@@ -341,7 +432,7 @@ pub(crate) fn builtin_wd() -> Result<Pack> {
     let (name, size, sha256, url) = crate::app_models::entry_parts(&spec.file);
     Ok(Pack {
         kind: Kind::Wd,
-        revision: spec.revision,
+        revision: 1,
         version: format!("wd-extension-v{}", spec.revision),
         format: spec.format.clone(),
         heads: spec.heads,
@@ -352,7 +443,6 @@ pub(crate) fn builtin_wd() -> Result<Pack> {
             tags: spec.tags_sha256.clone().unwrap_or_else(|| WD_TAGS_SHA256.into()),
         },
         license: spec.license.clone(),
-        note: None,
         builtin: true,
     })
 }
@@ -375,7 +465,6 @@ pub(crate) fn builtin_ccip() -> Result<Pack> {
         },
         base: Base::Ccip { model: release.ccip_sha256.clone() },
         license: "MIT".into(),
-        note: None,
         builtin: true,
     })
 }
@@ -565,44 +654,144 @@ pub(crate) fn adopt_archives(resources: &Path, paths: &[PathBuf]) -> Vec<(String
 
 // ---------- 可用的包 ----------
 
-/// 某一种类可用的包，内置的在前，其余按修订号从旧到新。
-pub(crate) fn known(resources: &Path, kind: Kind) -> Result<Vec<Pack>> {
+/// 可用的角色资料包，内置的在前，其余按修订号从旧到新。
+pub(crate) fn known(resources: &Path) -> Result<Vec<CharacterPack>> {
     let context = Context::current()?;
-    let mut packs = vec![context.builtin(kind).clone()];
+    let mut packs = vec![context.builtin.clone()];
     if let Some(catalog) = cached(resources)? {
-        packs.extend(catalog.packs(kind, &context));
+        packs.extend(catalog.packs(&context));
     }
     packs.sort_by_key(|p| (!p.builtin, p.revision));
     Ok(packs)
 }
 
-/// 按包文件的 SHA-256 找可用的包（图库里记的就是它）。
-pub(crate) fn by_sha(resources: &Path, kind: Kind, sha256: &str) -> Result<Option<Pack>> {
-    Ok(known(resources, kind)?.into_iter().find(|p| p.file.sha256 == sha256))
+/// 按组成部分的 SHA-256 找它（图库里按组成部分记用的是哪个文件）；同一个文件在几个版本里都有时，取最新的那个。
+pub(crate) fn component_by_sha(resources: &Path, kind: Kind, sha256: &str) -> Result<Option<Pack>> {
+    Ok(known(resources)?.into_iter().rev().map(|p| p.component(kind).clone()).find(|c| c.file.sha256 == sha256))
 }
 
-/// 按版本名找可用的包（页面请求下载、启用或换包时带的）。
-pub(crate) fn by_version(resources: &Path, kind: Kind, version: &str) -> Result<Pack> {
-    known(resources, kind)?
+/// 按版本名找可用的角色资料包（页面请求下载、启用或换包时带的）。
+pub(crate) fn by_version(resources: &Path, version: &str) -> Result<CharacterPack> {
+    known(resources)?
         .into_iter()
         .find(|p| p.version == version)
-        .ok_or_else(|| Error::Conflict("这个版本的数据包不在可用的列表里".into()))
+        .ok_or_else(|| Error::Conflict("这个版本的角色资料包不在可用的列表里".into()))
 }
 
-/// 卡片上显示的包：本图库启用的那个；没启用时是本机已有的最新的一个，都没有就是最新的一个。
-pub(crate) fn current(packs: &[Pack], enabled: Option<&str>, present: impl Fn(&Pack) -> bool) -> Pack {
-    if let Some(pack) = enabled.and_then(|sha| packs.iter().find(|p| p.file.sha256 == sha)) {
+/// 图库启用的是哪个版本：两个组成部分各记了一个文件，找两个都对得上的。对不上时（只启用了一个组成部分，或换包时
+/// 一边没换成）先按 WD 部分、再按 CCIP 部分找含它的最新版本。
+pub(crate) fn enabled_pack<'a>(
+    packs: &'a [CharacterPack],
+    wd: Option<&str>,
+    ccip: Option<&str>,
+) -> Option<&'a CharacterPack> {
+    let has = |p: &CharacterPack, kind: Kind, sha: Option<&str>| sha.is_some_and(|s| p.component(kind).file.sha256 == s);
+    packs
+        .iter()
+        .rev()
+        .find(|p| has(p, Kind::Wd, wd) && has(p, Kind::Ccip, ccip))
+        .or_else(|| packs.iter().rev().find(|p| has(p, Kind::Wd, wd)))
+        .or_else(|| packs.iter().rev().find(|p| has(p, Kind::Ccip, ccip)))
+}
+
+/// 卡片上显示的版本：本图库启用的那个；没启用时是本机已有的最新的一个，都没有就是最新的一个。
+pub(crate) fn current(
+    packs: &[CharacterPack],
+    enabled: Option<&CharacterPack>,
+    present: impl Fn(&CharacterPack) -> bool,
+) -> CharacterPack {
+    if let Some(pack) = enabled {
         return pack.clone();
     }
-    let newest = |list: Vec<&Pack>| list.into_iter().max_by_key(|p| p.revision).cloned();
+    let newest = |list: Vec<&CharacterPack>| list.into_iter().max_by_key(|p| p.revision).cloned();
     newest(packs.iter().filter(|p| present(p)).collect())
         .or_else(|| newest(packs.iter().collect()))
         .expect("至少有内置的包")
 }
 
-/// 比卡片上的包新的最新一个（「有新版本」）。
-pub(crate) fn offer(packs: &[Pack], current: &Pack) -> Option<Pack> {
+/// 比卡片上的版本新的最新一个（「有新版本」）。
+pub(crate) fn offer(packs: &[CharacterPack], current: &CharacterPack) -> Option<CharacterPack> {
     packs.iter().filter(|p| p.revision > current.revision).max_by_key(|p| p.revision).cloned()
+}
+
+/// 本图库的角色资料包：两个组成部分各自启用的文件（图库应用库的 `meta`），和据此找到的版本。
+pub(crate) struct LibraryPack {
+    pub(crate) wd: Option<String>,
+    pub(crate) ccip: Option<String>,
+    pub(crate) enabled: Option<CharacterPack>,
+    pub(crate) card: CharacterPack,
+    pub(crate) known: Vec<CharacterPack>,
+}
+
+/// 这个版本的两个文件都在本机（只看大小，读状态时用；用的时候再核对 SHA-256）。
+pub(crate) fn present(resources: &Path, pack: &CharacterPack) -> bool {
+    let shared = crate::app_resources::shared_path(resources);
+    crate::app_models::extension_present(resources, &pack.wd).unwrap_or(false)
+        && shared.is_ok_and(|shared| crate::app_ccip_longtail::package_path(&shared, &pack.ccip).is_file())
+}
+
+/// 打开图库读一次 `library_pack`。
+pub(crate) fn for_library(resources: &Path, library: &crate::app_library::Library) -> Result<LibraryPack> {
+    let app = crate::app_library::read_connection(&library.db())?;
+    library_pack(resources, &app, |pack| present(resources, pack))
+}
+
+/// 角色资料包默认启用（2026-11-17 用户定，#602）时本图库的情况，给卡片用：
+/// - `null`：已经启用了（至少一个组成部分），或图库只读；
+/// - `"auto"`：还没有任何识别向量，等于新图库：第一次同步之前记成启用（`default_enable`），之后的识别结果照常检查；
+/// - `"ask"`：已有识别向量、还没决定过的图库（升级上来的）：卡片上提示一次，用户点了才启用，因为启用会给还没有归属的图
+///   补上机器归属；
+/// - `"declined"`：用户在提示里选了不用，或撤回过：不再提示，也不自动启用。
+pub(crate) fn default_state(
+    _resources: &Path,
+    library: &crate::app_library::Library,
+    lib: &LibraryPack,
+) -> Result<Value> {
+    if lib.wd.is_some() || lib.ccip.is_some() || library.frozen() {
+        return Ok(Value::Null);
+    }
+    let app = crate::app_library::read_connection(&library.db())?;
+    if crate::app_wd_extension::declined(&app)? {
+        return Ok("declined".into());
+    }
+    let vectors = crate::app_wd_extension::stored_vectors(library)? > 0
+        || crate::app_ccip_longtail::stored_vectors(library)? > 0;
+    Ok(if vectors { "ask" } else { "auto" }.into())
+}
+
+/// 新图库默认启用（#602）：同步开始前，图库还没有任何识别向量、也没决定过时，把卡片上的版本记成启用（不检查，没有
+/// 证据要写），这次同步交付的识别结果就照常检查。包还不在本机时不记：等用户在卡片上点。
+pub(crate) fn default_enable(resources: &Path, library: &crate::app_library::Library) -> Result<bool> {
+    let lib = for_library(resources, library)?;
+    if default_state(resources, library, &lib)? != "auto" || !present(resources, &lib.card) {
+        return Ok(false);
+    }
+    crate::app_wd_extension::mark_enabled(library, &lib.card.wd)?;
+    crate::app_ccip_longtail::mark_enabled(library, resources, &lib.card.ccip)?;
+    Ok(true)
+}
+
+/// 已有图库在提示里选了不用（`POST /api/packs {"action":"decline"}`）。
+pub(crate) fn decline(_resources: &Path, library: &crate::app_library::Library) -> Result<()> {
+    crate::app_wd_extension::set_declined(library, true)
+}
+
+/// 读本图库启用了哪个版本，算出卡片上的版本。`present` 看一个版本的两个文件是不是都在本机。
+pub(crate) fn library_pack(
+    resources: &Path,
+    app: &rusqlite::Connection,
+    present: impl Fn(&CharacterPack) -> bool,
+) -> Result<LibraryPack> {
+    use rusqlite::OptionalExtension;
+    let wd: Option<String> = app
+        .query_row("SELECT json_extract(value,'$.package_sha256') FROM meta WHERE key='wd_extension'", [], |r| r.get(0))
+        .optional()?
+        .flatten();
+    let ccip = illustash_core::ccip_longtail::enabled_package(app)?;
+    let known = known(resources)?;
+    let enabled = enabled_pack(&known, wd.as_deref(), ccip.as_deref()).cloned();
+    let card = current(&known, enabled.as_ref(), present);
+    Ok(LibraryPack { wd, ccip, enabled, card, known })
 }
 
 #[cfg(test)]

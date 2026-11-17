@@ -244,21 +244,15 @@ pub(crate) fn package_path(shared: &Path, pack: &Pack) -> PathBuf {
     shared.join("extensions").join(&pack.version).join(&pack.file.name)
 }
 
-/// 卡片上的版本（`app_packs::current`）：本图库启用的那个，否则本机已有的最新的，都没有就是最新的。
+/// 卡片上的角色资料包里的 CCIP 部分（`app_packs::library_pack`）。
 pub(crate) fn card_pack(root: &Path, library: &Library) -> Result<Pack> {
-    let app = crate::app_library::read_connection(&library.db())?;
-    let enabled = ccip_longtail::enabled_package(&app)?;
-    let shared = crate::app_resources::shared_path(root)?;
-    let packs = crate::app_packs::known(root, crate::app_packs::Kind::Ccip)?;
-    Ok(crate::app_packs::current(&packs, enabled.as_deref(), |pack| {
-        package_path(&shared, pack).try_exists().unwrap_or(false)
-    }))
+    Ok(crate::app_packs::for_library(root, library)?.card.ccip)
 }
 
-/// 本图库启用的版本（在可用列表里的话）。
+/// 本图库启用的那个文件（在可用列表里的话）。
 fn enabled_pack(root: &Path, app: &Connection) -> Result<Option<Pack>> {
     match ccip_longtail::enabled_package(app)? {
-        Some(sha) => crate::app_packs::by_sha(root, crate::app_packs::Kind::Ccip, &sha),
+        Some(sha) => crate::app_packs::component_by_sha(root, crate::app_packs::Kind::Ccip, &sha),
         None => Ok(None),
     }
 }
@@ -363,7 +357,7 @@ pub(crate) fn apply_file(
     observer: &dyn Observer,
 ) -> Result<Value> {
     let sha = crate::strict_json::sha256_hex(&crate::app_recognition::file(path, 512 << 20)?);
-    let pack = crate::app_packs::by_sha(root, crate::app_packs::Kind::Ccip, &sha)?.ok_or_else(bad)?;
+    let pack = crate::app_packs::component_by_sha(root, crate::app_packs::Kind::Ccip, &sha)?.ok_or_else(bad)?;
     apply(library, root, &pack, path, check, observer)
 }
 
@@ -424,6 +418,29 @@ pub(crate) fn apply(
     observer.publish(&mut || crate::schema::commit_writing(tx.take().expect("角色参考包只提交一次")))?;
     Ok(json!({"package_sha256":pack.file.sha256,"roles":pack.heads,"scored":count,"hits":hits.len(),"changed":changed,
         "missing":rows.missing,"incompatible":rows.incompatible,"scan_ms":scan_ms,"publish_ms":publish.elapsed().as_millis()}))
+}
+
+/// 还没有 CCIP 向量的图库启用角色资料包（新图库默认启用，#602）：只记下用哪个文件，不检查；之后识别结果交付时按批
+/// 检查（`publish_delivery`）。之前启用的是别的文件时，先撤掉它给的候选。
+pub(crate) fn mark_enabled(library: &Library, root: &Path, pack: &Pack) -> Result<Value> {
+    writable(library)?;
+    // 记下当时的角色索引版本：没有向量时不用「索引更新过、要重新检查」。
+    let generation = crate::app_resources::shared_path(root).and_then(|shared| crate::index_generation::current(&shared));
+    let mut app = writer(&library.db())?;
+    crate::schema::require_current(&app)?;
+    let tx = app.transaction_with_behavior(TransactionBehavior::Immediate)?;
+    crate::schema::begin_writing(&tx)?;
+    let changed = ccip_longtail::apply(&tx, &pack.file.sha256, &[])?;
+    tx.execute(
+        "INSERT INTO meta(key,value) VALUES (?1,json_object('enabled_at',CURRENT_TIMESTAMP,'checked_at',CURRENT_TIMESTAMP,'scored',0))
+         ON CONFLICT(key) DO UPDATE SET value=json_set(meta.value,'$.checked_at',CURRENT_TIMESTAMP,'$.scored',0)",
+        [LAST_SCAN],
+    )?;
+    if let Ok(generation) = generation {
+        tx.execute("INSERT OR REPLACE INTO meta(key,value) VALUES (?1,?2)", [INDEX_GENERATION, &generation.to_string()])?;
+    }
+    crate::schema::commit_writing(tx)?;
+    Ok(json!({"package_sha256":pack.file.sha256,"roles":pack.heads,"scored":0,"hits":0,"changed":changed}))
 }
 
 pub(crate) fn withdraw(library: &Library, observer: &dyn Observer) -> Result<Value> {

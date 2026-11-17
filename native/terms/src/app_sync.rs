@@ -156,6 +156,10 @@ impl Syncer {
         let delivered = self.wd_delivered.clone();
         self.task = Some(crate::app_tasks::Task::start_with(identity, deadline(), move |ctx| {
             let cancel = ctx.cancellation();
+            // 新图库默认启用角色资料包（#602）：还没有任何识别向量时，在这次同步之前记成启用。
+            if let Err(error) = crate::app_packs::default_enable(&root, &library) {
+                eprintln!("无法默认启用角色资料包：{error}");
+            }
             let window = crate::app_wd_extension::DeliveryWindow::start(&library).unwrap_or_else(|error| {
                 eprintln!("无法记录本次同步的 WD 扩展范围：{error}");
                 None

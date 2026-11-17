@@ -157,10 +157,37 @@ const IN_SCOPE: &str = "v.model='wd' AND a.in_scope=1 AND coalesce(a.trashed,0)=
 const VECTORS: &str = "FROM embeddings v JOIN assets a ON a.uuid=v.uuid";
 const SCOPE: &str = "AND (?1 IS NULL OR v.uuid IN (SELECT value FROM json_each(?1)))";
 const META_KEY: &str = "wd_extension";
+/// 角色资料包默认启用以后（#602），本图库明确不用：提示里选了不用，或撤回过。启用时清掉。
+const DECLINED_KEY: &str = "character_pack_declined";
+
+/// 本图库是不是明确不用角色资料包（`app_packs::default_state`）。
+pub(crate) fn declined(app: &Connection) -> Result<bool> {
+    Ok(app.query_row("SELECT EXISTS(SELECT 1 FROM meta WHERE key=?1)", [DECLINED_KEY], |r| r.get(0))?)
+}
+
+/// 记下或清掉「本图库不用角色资料包」。
+pub(crate) fn set_declined(library: &Library, declined: bool) -> Result<()> {
+    ensure_writable(library)?;
+    let mut app = writer(&library.db())?;
+    crate::schema::require_current(&app)?;
+    let tx = app.transaction_with_behavior(TransactionBehavior::Immediate)?;
+    crate::schema::begin_writing(&tx)?;
+    if declined {
+        tx.execute("INSERT OR REPLACE INTO meta(key,value) VALUES (?1,CURRENT_TIMESTAMP)", [DECLINED_KEY])?;
+    } else {
+        tx.execute("DELETE FROM meta WHERE key=?1", [DECLINED_KEY])?;
+    }
+    crate::schema::commit_writing(tx)
+}
 
 fn has_table(src: &Connection, name: &str) -> Result<bool> {
     Ok(src
         .query_row("SELECT EXISTS(SELECT 1 FROM sqlite_schema WHERE type='table' AND name=?)", [name], |r| r.get(0))?)
+}
+
+/// 本图库存着的 WD 向量张数（角色资料包启用时决定现在检查还是等识别结果，#602）。
+pub(crate) fn stored_vectors(library: &Library) -> Result<usize> {
+    vector_count(&crate::app_library::read_connection(&library.source())?, None)
 }
 
 fn vector_count(src: &Connection, scope: Option<&str>) -> Result<usize> {
@@ -239,7 +266,7 @@ pub fn apply(library: &Library, path: &Path) -> Result<Value> {
     let resources = crate::app_resources::default_root();
     let bytes = crate::app_recognition::file(path, 512 << 20)?;
     let sha = crate::strict_json::sha256_hex(&bytes);
-    let pack = crate::app_packs::by_sha(&resources, crate::app_packs::Kind::Wd, &sha)?
+    let pack = crate::app_packs::component_by_sha(&resources, crate::app_packs::Kind::Wd, &sha)?
         .ok_or_else(|| Error::invalid("WD 扩展包与可用的版本都不符"))?;
     apply_loaded(library, &Package::load(path, &pack)?, &pack.file.sha256, None, &Progress::silent())
 }
@@ -311,7 +338,8 @@ pub fn withdraw(library: &Library) -> Result<Value> {
 /// 本图库启用的、本机就位的包（自动检查和角色检查用）。启用的版本不在可用列表里、或包不在本机时为 None。
 pub(crate) fn enabled_pack(resources: &Path, app: &Connection) -> Result<Option<(Pack, PathBuf)>> {
     let Some(active) = enabled(app)? else { return Ok(None) };
-    let Some(pack) = crate::app_packs::by_sha(resources, crate::app_packs::Kind::Wd, &active.package_sha256)? else {
+    let Some(pack) = crate::app_packs::component_by_sha(resources, crate::app_packs::Kind::Wd, &active.package_sha256)?
+    else {
         return Ok(None);
     };
     Ok(crate::app_models::extension_file(resources, &pack)?.map(|path| (pack, path)))
@@ -425,12 +453,13 @@ impl Tasks {
             return Err(Error::Conflict("已有 WD 角色扩展任务正在进行".into()));
         }
         let (kind, phase) = match &operation {
-            Action::Enable(..) => ("enable", "scan"),
+            Action::Enable(..) | Action::Pack { .. } => ("enable", "scan"),
             Action::Auto(..) => ("auto", "scan"),
-            Action::Withdraw => ("withdraw", "write"),
+            Action::Withdraw | Action::PackWithdraw { .. } => ("withdraw", "write"),
         };
+        // `part` 是角色资料包正在处理的组成部分（`wd`、`ccip`），只给 WD 部分的旧任务也写 `wd`。
         let initial = json!({
-            "id":identity.task_id,"kind":kind,"phase":phase,"status":"running",
+            "id":identity.task_id,"kind":kind,"phase":phase,"status":"running","part":"wd",
             "done":0,"total":0,"message":null,"result":null,"diagnostic":null
         });
         let state = Arc::new(Mutex::new(initial.clone()));
@@ -438,12 +467,19 @@ impl Tasks {
         let library = library.clone();
         let task = Task::start(identity, None, move |ctx| {
             let progress = Progress(Some((&ctx, &shared)));
+            // 角色资料包分两步提交：WD 部分提交以后 CCIP 部分失败或取消时，结果里留着 WD 部分的（`result.wd`）。
+            let mut done = Value::Null;
             let result = match operation {
                 Action::Enable(pack, path) => check_file(&library, &pack, &path, None, &progress),
                 Action::Auto(pack, path, ids) => check_file(&library, &pack, &path, Some(&ids), &progress),
                 Action::Withdraw => withdraw(&library),
+                Action::Pack { root, wd, ccip } => pack_enable(&library, &root, wd, ccip, &progress, &mut done),
+                Action::PackWithdraw { wd, ccip } => pack_withdraw(&library, wd, ccip, &progress, &mut done),
             };
             let mut state = lock_ignoring_poison(&shared);
+            if !done.is_null() {
+                state["result"] = done;
+            }
             match result {
                 Ok(result) => {
                     state["status"] = "done".into();
@@ -479,6 +515,135 @@ pub(crate) enum Action {
     /// 同步后用本图库启用的版本检查新识别的图。
     Auto(Pack, PathBuf, Vec<String>),
     Withdraw,
+    /// 角色资料包（#602）：先用 WD 部分、再用 CCIP 部分检查整个图库，各自提交。没有对应向量的组成部分（`None`）只记下
+    /// 启用了哪个文件，等识别结果交付时再检查。
+    Pack { root: PathBuf, wd: Option<Part>, ccip: Option<Part> },
+    /// 撤回角色资料包：两个组成部分里启用了的都撤回。
+    PackWithdraw { wd: bool, ccip: bool },
+}
+
+/// 角色资料包的一个组成部分：这个文件，和要不要现在检查（图库里有这一种向量时）。
+pub(crate) struct Part {
+    pub(crate) pack: Pack,
+    pub(crate) path: PathBuf,
+    pub(crate) scan: bool,
+}
+
+impl Progress<'_> {
+    /// 换到角色资料包的下一个组成部分：回到扫描阶段，计数清零。
+    fn part(&self, part: &str) -> Result<()> {
+        self.check()?;
+        if let Some((_, state)) = self.0 {
+            let mut state = lock_ignoring_poison(state);
+            state["part"] = part.into();
+            state["phase"] = "scan".into();
+            state["done"] = 0.into();
+            state["total"] = 0.into();
+        }
+        Ok(())
+    }
+}
+
+/// CCIP 长尾部分（`app_ccip_longtail::apply`）的进度报告到同一个任务上。
+impl crate::app_imports::Observer for Progress<'_> {
+    fn stage(&self, stage: &'static str) {
+        if stage == "committing" {
+            // 取消在这之前到达时，apply 提交前的检查会停下；这里只把阶段改成写入。
+            let _ = self.begin_write();
+        }
+    }
+    fn count(&self, done: u64, total: u64) {
+        let _ = Progress::count(self, done as usize, total as usize);
+    }
+}
+
+fn changed(result: &Value) -> u64 {
+    result["changed"].as_u64().unwrap_or(0)
+}
+
+fn pack_enable(
+    library: &Library,
+    root: &Path,
+    wd: Option<Part>,
+    ccip: Option<Part>,
+    progress: &Progress<'_>,
+    done: &mut Value,
+) -> Result<Value> {
+    let mut out = json!({"wd":null,"ccip":null,"changed":0,"hits":0});
+    if let Some(part) = wd {
+        progress.part("wd")?;
+        let result = if part.scan {
+            check_file(library, &part.pack, &part.path, None, progress)?
+        } else {
+            mark_enabled(library, &part.pack)?
+        };
+        out["changed"] = (changed(&out) + changed(&result)).into();
+        out["hits"] = (out["hits"].as_u64().unwrap_or(0) + result["hits"].as_u64().unwrap_or(0)).into();
+        out["wd"] = result;
+        *done = out.clone();
+    }
+    if let Some(part) = ccip {
+        progress.part("ccip")?;
+        let result = if part.scan {
+            crate::app_ccip_longtail::apply(library, root, &part.pack, &part.path, &|| progress.check(), progress)?
+        } else {
+            crate::app_ccip_longtail::mark_enabled(library, root, &part.pack)?
+        };
+        out["changed"] = (changed(&out) + changed(&result)).into();
+        out["hits"] = (out["hits"].as_u64().unwrap_or(0) + result["hits"].as_u64().unwrap_or(0)).into();
+        out["ccip"] = result;
+    }
+    set_declined(library, false)?;
+    Ok(out)
+}
+
+fn pack_withdraw(library: &Library, wd: bool, ccip: bool, progress: &Progress<'_>, done: &mut Value) -> Result<Value> {
+    let mut out = json!({"wd":null,"ccip":null,"changed":0});
+    if wd {
+        let result = withdraw(library)?;
+        out["changed"] = changed(&result).into();
+        out["wd"] = result;
+        *done = out.clone();
+    }
+    if ccip {
+        if let Some((_, state)) = progress.0 {
+            lock_ignoring_poison(state)["part"] = "ccip".into();
+        }
+        let result = crate::app_ccip_longtail::withdraw(library, progress)?;
+        out["changed"] = (changed(&out) + changed(&result)).into();
+        out["ccip"] = result;
+    }
+    // 撤回以后不再默认启用，也不再提示。
+    set_declined(library, true)?;
+    Ok(out)
+}
+
+/// 还没有 WD 向量的图库启用角色资料包（新图库默认启用，#602）：只记下用哪个文件，不检查，没有证据要写。之后识别结果
+/// 交付时按图检查；`scored` 为 0、`pending` 为真，表示这个文件还没在整库上检查过。
+pub(crate) fn mark_enabled(library: &Library, pack: &Pack) -> Result<Value> {
+    ensure_writable(library)?;
+    let mut app = writer(&library.db())?;
+    crate::schema::require_current(&app)?;
+    let tx = app.transaction_with_behavior(TransactionBehavior::Immediate)?;
+    crate::schema::begin_writing(&tx)?;
+    let current = enabled(&tx)?;
+    let now: String = tx.query_row("SELECT datetime('now')", [], |r| r.get(0))?;
+    let changed = if current.as_ref().is_some_and(|state| state.package_sha256 != pack.file.sha256) {
+        // 换了文件：旧文件给的候选不能留着冒充新文件的。
+        wd_extension::withdraw(&tx)?
+    } else {
+        0
+    };
+    let entry = Enabled {
+        package_sha256: pack.file.sha256.clone(),
+        enabled_at: current.map_or_else(|| now.clone(), |state| state.enabled_at),
+        checked_at: now,
+        scored: 0,
+    };
+    let value = serde_json::to_string(&entry).expect("WD 扩展状态可序列化");
+    tx.execute("INSERT OR REPLACE INTO meta(key,value) VALUES (?,?)", (META_KEY, value))?;
+    crate::schema::commit_writing(tx)?;
+    Ok(json!({"package_sha256":pack.file.sha256,"scored":0,"hits":0,"changed":changed}))
 }
 
 fn check_file(
@@ -492,14 +657,9 @@ fn check_file(
     apply_loaded(library, &Package::load(path, pack)?, &pack.file.sha256, scope, progress)
 }
 
-/// 卡片上的版本（`app_packs::current`）：本图库启用的那个，否则本机已有的最新的，都没有就是最新的。
+/// 卡片上的角色资料包里的 WD 部分（`app_packs::library_pack`）。
 pub(crate) fn card_pack(resources: &Path, library: &Library) -> Result<Pack> {
-    let app = crate::app_library::read_connection(&library.db())?;
-    let active = enabled(&app)?;
-    let packs = crate::app_packs::known(resources, crate::app_packs::Kind::Wd)?;
-    Ok(crate::app_packs::current(&packs, active.as_ref().map(|a| a.package_sha256.as_str()), |pack| {
-        crate::app_models::extension_present(resources, pack).unwrap_or(false)
-    }))
+    Ok(crate::app_packs::for_library(resources, library)?.card.wd)
 }
 
 pub(crate) fn status(resources: &Path, library: &Library, tasks: &Tasks, busy: Option<&str>) -> Result<Value> {
@@ -671,7 +831,6 @@ mod tests {
             },
             base: Base::Wd { model: "model".into(), tags: "tags".into() },
             license: "Apache-2.0".into(),
-            note: None,
             builtin: false,
         }
     }

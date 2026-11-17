@@ -35,39 +35,46 @@ fn ccip_task_and_library(
     Ok((task, read_library()?))
 }
 
-/// `GET /api/packs`（#602）。`{catalog:{configured,serial,checked_at,error}, wd:{current,offer}, ccip:{current,offer}}`；
-/// `offer` 是比卡片上的版本新的最新一个（没有时为 null），带它在本机下载了多少（`status`、`have`）和正在不在下载
-/// （`downloading`）。只读，不联网：目录只跟着检查更新读（`app_updates::post`）。
-fn packs(host: &Host, session: &Session) -> Result<Json> {
-    use crate::app_packs::Kind;
-    use serde_json::json;
+/// `GET /api/packs`（#602）：本图库的角色资料包。
+/// `{catalog:{configured,serial,checked_at,error}, current, offer, download, library, task, wd, ccip}`：
+/// `current` 是卡片上的版本（本图库启用的；没启用时是本机已有的最新的，都没有就是最新的），`offer` 是比它新的最新一个
+/// （没有时为 null），两个都带两个文件在本机下载了多少（`status`、`have`），`offer` 另带 `downloading`。`download` 是
+/// 两个组成部分的下载或导入合成的一个状态，`task` 是启用、换包、撤回的任务（`part` 是正在处理的组成部分）。
+/// `library` 是本图库启用了哪个版本、两个组成部分各自启用没有，以及默认启用的提示（`prompt`，见 `app_packs::default_state`）。
+/// `wd`、`ccip` 是两个组成部分的旧路由的完整回复。只读，不联网：目录只跟着检查更新读（`app_updates::post`）。
+pub(super) fn packs(host: &Host, session: &Session) -> Result<Json> {
+    use serde_json::{json, Value};
     let (checked_at, error) = crate::app_updates::packs_state()?;
     let catalog = crate::app_packs::cached(&host.root)?;
-    let mut out = json!({"catalog":{
-        "configured":crate::app_packs::pubkey().is_some(),"serial":catalog.map(|c| c.serial),
-        "checked_at":checked_at,"error":error
-    }});
-    for kind in [Kind::Wd, Kind::Ccip] {
-        let current = match kind {
-            Kind::Wd => crate::app_wd_extension::card_pack(&host.root, &session.library)?,
-            Kind::Ccip => crate::app_ccip_longtail::card_pack(&host.root, &session.library)?,
-        };
-        let known = crate::app_packs::known(&host.root, kind)?;
-        let offer = match crate::app_packs::offer(&known, &current) {
-            Some(pack) => {
-                let mut view = pack.view();
-                let progress = crate::app_models::pack_progress(&host.root, &pack)?;
-                view["status"] = progress["status"].clone();
-                view["have"] = progress["have"].clone();
-                view["downloading"] =
-                    (crate::app_models::pack_job_version(kind).as_deref() == Some(&pack.version)).into();
-                view
-            }
-            None => serde_json::Value::Null,
-        };
-        out[kind.key()] = json!({"current":current.view(),"offer":offer});
-    }
-    Ok(out.into())
+    let lib = crate::app_packs::for_library(&host.root, &session.library)?;
+    let download = crate::app_models::pack_download();
+    let view = |pack: &crate::app_packs::CharacterPack| -> Result<Value> {
+        let mut view = pack.view();
+        let progress = crate::app_models::pack_progress(&host.root, pack)?;
+        view["status"] = progress["status"].clone();
+        view["have"] = progress["have"].clone();
+        Ok(view)
+    };
+    let offer = match crate::app_packs::offer(&lib.known, &lib.card) {
+        Some(pack) => {
+            let mut v = view(&pack)?;
+            v["downloading"] = (download["version"] == pack.version.as_str()).into();
+            v
+        }
+        None => Value::Null,
+    };
+    let wd = host.wd_status(session)?;
+    let ccip: Value = serde_json::from_str(&ccip_status(host, session, None)?.dump()).map_err(|e| Error::invalid(e.to_string()))?;
+    let prompt = crate::app_packs::default_state(&host.root, &session.library, &lib)?;
+    Ok(json!({
+        "catalog":{"configured":crate::app_packs::pubkey().is_some(),"serial":catalog.map(|c| c.serial),
+            "checked_at":checked_at,"error":error},
+        "current":view(&lib.card)?,"offer":offer,"download":download,
+        "library":{"enabled":lib.wd.is_some() || lib.ccip.is_some(),"version":lib.enabled.as_ref().map(|p| &p.version),
+            "wd":lib.wd.is_some(),"ccip":lib.ccip.is_some(),"prompt":prompt},
+        "task":wd["task"].clone(),"wd":wd,"ccip":ccip
+    })
+    .into())
 }
 
 pub(super) fn ccip_status(host: &Host, session: &Session, started: Option<Json>) -> Result<Json> {

@@ -1,13 +1,18 @@
-"""角色数据包的签名目录（#602；步骤见 docs/DEVELOPMENT.md「发布角色数据包」）。
+"""角色资料包的签名目录（#602；步骤见 docs/DEVELOPMENT.md「发布角色资料包」）。
 
     python3 tools/pack_catalog.py keygen ~/.tauri/illustash-packs.key
-    python3 tools/pack_catalog.py entry --kind wd-extension --revision 2 --file wd-extension-v2.bin \\
-        --min-app 0.3.0 --note-zh '…' --note-en '…' --output wd-extension-v2.entry.json
-    python3 tools/pack_catalog.py build --previous packs.json --entry wd-extension-v2.entry.json --output packs.json
+    python3 tools/pack_catalog.py entry --revision 2 --wd wd-extension-v2.bin \\
+        --ccip A-longtail-p75.zip --ccip-tag ccip-longtail-v1 \\
+        --min-app 0.3.0 --note-zh '…' --note-en '…' --output character-pack-v2.entry.json
+    python3 tools/pack_catalog.py build --previous packs.json --entry character-pack-v2.entry.json --output packs.json
     python3 tools/pack_catalog.py sign --key ~/.tauri/illustash-packs.key packs.json
     python3 tools/pack_catalog.py verify packs.json
     python3 tools/pack_catalog.py offline --catalog packs.json --file wd-extension-v2.bin \\
-        --output wd-extension-v2-offline.zip
+        --file A-longtail-p75.zip --output character-pack-v2-offline.zip
+
+一个角色资料包有两个组成部分：WD 扩展头（`--wd`）和 CCIP 长尾锚点（`--ccip`），各自从包文件里读格式、头数、二级头数
+和基础模型的 SHA-256。组成部分的下载地址默认在这个版本自己的 Release（tag 就是版本名）下；某个组成部分的文件和上一版
+相同时，用 `--wd-tag`、`--ccip-tag` 指向原来的 Release，不用重复上传。
 
 `keygen` 和 `sign` 调用 `cargo tauri signer`（和应用更新同一种 minisign 签名，另一把专签数据包的密钥）。私钥只在
 用户自己的电脑上，带密码；这个脚本从不读私钥，也不把它传给别的东西。`keygen` 把公钥写进
@@ -34,9 +39,11 @@ CATALOG_FORMAT = 'illustash-packs/1'
 RELEASE_PREFIX = 'https://github.com/shio-vinyl/illustash/releases/download/'
 CATALOG_NAME = 'packs.json'
 SIGNATURE_NAME = 'packs.json.sig'
-KINDS = {
-    'wd-extension': ('illustash-wd-extension/1', 'illustash-wd-extension/2'),
-    'ccip-longtail': ('illustash-557-ccip-offline/1',),
+PACK_KIND = 'character-pack'
+# 两个组成部分各自认的包格式。
+FORMATS = {
+    'wd': ('illustash-wd-extension/1', 'illustash-wd-extension/2'),
+    'ccip': ('illustash-557-ccip-offline/1',),
 }
 WD_DIM = 1024
 CCIP_DIM = 768
@@ -76,7 +83,7 @@ def inspect_wd(data):
     manifest = json.loads(data[:end])
     labels = manifest.get('labels') or []
     fmt = manifest.get('format')
-    if fmt not in KINDS['wd-extension']:
+    if fmt not in FORMATS['wd']:
         raise CatalogError(f'WD 扩展包格式 {fmt} 不是应用认识的')
     if len(data) - end - 1 != len(labels) * (WD_DIM + 1) * 4:
         raise CatalogError('WD 扩展包的系数长度和头数对不上')
@@ -104,7 +111,7 @@ def inspect_ccip(path):
         provenance = json.loads(archive.read('A-provenance.json'))
         metadata = json.loads(archive.read('A-metadata.json'))
         anchors = archive.read('A-anchors.f32')
-    if provenance.get('format') not in KINDS['ccip-longtail']:
+    if provenance.get('format') not in FORMATS['ccip']:
         raise CatalogError(f'参考包格式 {provenance.get("format")} 不是应用认识的')
     if len(anchors) != len(metadata) * CCIP_DIM * 4:
         raise CatalogError('参考包的锚点个数和角色数对不上')
@@ -116,29 +123,37 @@ def inspect_ccip(path):
     }
 
 
-def entry(*, kind, revision, path, min_app, license_text, note_zh=None, note_en=None, version=None, tag=None,
-          name=None):
-    """从包文件写出一条目录条目。版本名默认 `<种类>-v<修订号>`，Release 的 tag 默认和版本名相同，文件名默认是
-    `<版本名>` 加原来的扩展名（CCIP 的参考包照旧叫 A-longtail-p75.zip 也可以，用 --name 指定）。"""
+def component(kind, path, tag, name=None, license_text=None):
+    """一个组成部分：从包文件读字段。文件名默认就是文件现在的名字，下载地址是 `<tag>` 这个 Release 下的它。"""
     path = Path(path)
-    if kind not in KINDS:
-        raise CatalogError(f'未知的种类 {kind}')
     data = path.read_bytes()
-    info = inspect_wd(data) if kind == 'wd-extension' else inspect_ccip(path)
-    version = version or f'{kind}-v{revision}'
-    tag = tag or version
-    name = name or version + path.suffix
-    result = {
-        'kind': kind,
-        'revision': revision,
-        'version': version,
+    info = inspect_wd(data) if kind == 'wd' else inspect_ccip(path)
+    name = name or path.name
+    return {
         'format': info['format'],
         'heads': info['heads'],
         'candidate_only': info['candidate_only'],
         'file': {'name': name, 'size': len(data), 'sha256': sha256(data), 'url': f'{RELEASE_PREFIX}{tag}/{name}'},
         'base': info['base'],
+        'license': license_text or ('Apache-2.0' if kind == 'wd' else 'MIT'),
+    }
+
+
+def entry(*, revision, wd, ccip, min_app, license_text=None, note_zh=None, note_en=None, version=None,
+          wd_tag=None, ccip_tag=None, wd_name=None, ccip_name=None):
+    """从两个组成部分的包文件写出一条目录条目。版本名默认 `character-pack-v<修订号>`，两个组成部分的 Release 默认就是
+    这个版本的（tag 和版本名相同）。"""
+    version = version or f'character-pack-v{revision}'
+    result = {
+        'kind': PACK_KIND,
+        'revision': revision,
+        'version': version,
         'min_app': min_app,
-        'license': license_text,
+        'license': license_text or 'Apache-2.0 AND MIT',
+        'components': {
+            'wd': component('wd', wd, wd_tag or version, wd_name),
+            'ccip': component('ccip', ccip, ccip_tag or version, ccip_name),
+        },
     }
     if note_zh or note_en:
         if not (note_zh and note_en):
@@ -150,36 +165,51 @@ def entry(*, kind, revision, path, min_app, license_text, note_zh=None, note_en=
 
 # ---------- 目录的规则（和 native/terms/src/app_packs.rs 的 Catalog::parse 一致）----------
 
-def check_entry(e, strict=True):
-    """结构的规则和应用一致（不合法时应用整份目录不用）。`strict` 另外拒绝应用会跳过的条目（不认识的种类或格式、
-    旧格式带二级头）：发布时不该写进去，测试夹具才用。"""
-    f = e.get('file') or {}
+def check_component(key, c, version):
+    f = c.get('file') or {}
     url = f.get('url', '')
     rest = url[len(RELEASE_PREFIX):] if url.startswith(RELEASE_PREFIX) else ''
     tag, _, tail = rest.partition('/')
+    ok = (isinstance(c.get('format'), str) and 0 < len(c['format']) <= 64
+          and isinstance(c.get('heads'), int) and 1 <= c['heads'] <= 1_000_000
+          and isinstance(c.get('candidate_only', 0), int) and 0 <= c.get('candidate_only', 0) <= c['heads']
+          and segment(f.get('name'), 128) and isinstance(f.get('size'), int) and 1 <= f['size'] <= FILE_LIMIT
+          and hex64(f.get('sha256')) and segment(tag, 64) and tail == f.get('name') and short(c.get('license'), 200))
+    if not ok:
+        raise CatalogError(f'条目 {version} 的组成部分 {key} 不合法')
+    base = c.get('base') or {}
+    if key == 'wd' and not (hex64(base.get('wd_model_sha256')) and hex64(base.get('wd_tags_sha256'))):
+        raise CatalogError(f'条目 {version} 缺少 WD 模型或标签表的 SHA-256')
+    if key == 'ccip' and not hex64(base.get('ccip_model_sha256')):
+        raise CatalogError(f'条目 {version} 缺少 CCIP 模型的 SHA-256')
+
+
+def check_entry(e, strict=True):
+    """结构的规则和应用一致（不合法时应用整份目录不用）。`strict` 另外拒绝应用会跳过的条目（不认识的种类或格式、
+    旧格式带二级头）：发布时不该写进去，测试夹具才用。"""
     ok = (segment(e.get('kind'), 32) and segment(e.get('version'), 64)
           and isinstance(e.get('revision'), int) and e['revision'] >= 1
-          and isinstance(e.get('format'), str) and 0 < len(e['format']) <= 64
-          and isinstance(e.get('heads'), int) and 1 <= e['heads'] <= 1_000_000
-          and isinstance(e.get('candidate_only', 0), int) and 0 <= e.get('candidate_only', 0) <= e['heads']
-          and segment(f.get('name'), 128) and isinstance(f.get('size'), int) and 1 <= f['size'] <= FILE_LIMIT
-          and hex64(f.get('sha256')) and segment(tag, 64) and tail == f.get('name')
           and isinstance(e.get('min_app'), str) and VERSION.match(e['min_app'])
           and short(e.get('license'), 200)
           and ('note' not in e or (short(e['note'].get('zh-CN'), 200) and short(e['note'].get('en'), 200))))
     if not ok:
         raise CatalogError(f'条目 {e.get("version")} 的字段不合法')
-    base = e.get('base') or {}
-    if e['kind'] == 'wd-extension' and not (hex64(base.get('wd_model_sha256')) and hex64(base.get('wd_tags_sha256'))):
-        raise CatalogError(f'条目 {e["version"]} 缺少 WD 模型或标签表的 SHA-256')
-    if e['kind'] == 'ccip-longtail' and not hex64(base.get('ccip_model_sha256')):
-        raise CatalogError(f'条目 {e["version"]} 缺少 CCIP 模型的 SHA-256')
+    parts = e.get('components')
+    if e['kind'] == PACK_KIND:
+        if not isinstance(parts, dict) or set(parts) < {'wd', 'ccip'}:
+            raise CatalogError(f'条目 {e["version"]} 缺少组成部分')
+        for key in ('wd', 'ccip'):
+            check_component(key, parts[key], e['version'])
     if not strict:
         return
-    if e['kind'] not in KINDS or e['format'] not in KINDS[e['kind']]:
-        raise CatalogError(f'条目 {e["version"]} 的种类或格式 {e["format"]} 不是应用认识的')
-    if e['format'] == 'illustash-wd-extension/1' and e.get('candidate_only', 0):
-        raise CatalogError(f'条目 {e["version"]}：旧格式的包全部是一级头')
+    if e['kind'] != PACK_KIND:
+        raise CatalogError(f'条目 {e["version"]} 的种类 {e["kind"]} 不是应用认识的')
+    for key in ('wd', 'ccip'):
+        c = parts[key]
+        if c['format'] not in FORMATS[key]:
+            raise CatalogError(f'条目 {e["version"]} 的 {key} 格式 {c["format"]} 不是应用认识的')
+        if c.get('candidate_only', 0) and (key == 'ccip' or c['format'] == 'illustash-wd-extension/1'):
+            raise CatalogError(f'条目 {e["version"]}：这种格式的 {key} 部分全部是一级')
 
 
 def check_catalog(catalog, strict=True):
@@ -193,9 +223,9 @@ def check_catalog(catalog, strict=True):
     seen = set()
     for e in packs:
         check_entry(e, strict)
-        keys = {('version', e['version']), ('sha', e['file']['sha256']), ('revision', e['kind'], e['revision'])}
+        keys = {('version', e['version']), ('revision', e['kind'], e['revision'])}
         if keys & seen:
-            raise CatalogError(f'条目 {e["version"]} 的版本、修订号或 SHA-256 重复')
+            raise CatalogError(f'条目 {e["version"]} 的版本或修订号重复')
         seen |= keys
 
 
@@ -280,19 +310,25 @@ def check_signed(catalog_path, signature_path=None, pubkey=None):
     return verify(data, signature_path.read_text(encoding='utf-8'), pubkey)
 
 
-def offline(catalog_path, package_path, output, signature_path=None, extra=()):
+def offline(catalog_path, package_paths, output, signature_path=None, extra=()):
     """离线包：根上是 packs.json、packs.json.sig 和包文件（名字照目录里的），再加 `extra` 里的许可文本等。应用导入时
-    把认不出的成员列为「不是扩展包」，不影响包文件。"""
-    catalog_path, package_path = Path(catalog_path), Path(package_path)
+    把认不出的成员列为不认识，不影响包文件。"""
+    catalog_path = Path(catalog_path)
     signature_path = Path(signature_path or str(catalog_path) + '.sig')
     catalog = json.loads(catalog_path.read_bytes())
-    data = package_path.read_bytes()
-    found = [p for p in catalog['packs'] if p['file']['sha256'] == sha256(data)]
-    if not found:
-        raise CatalogError(f'{package_path.name} 不在这份目录里')
+    files = {}
+    for p in catalog['packs']:
+        for c in (p.get('components') or {}).values():
+            files[c['file']['sha256']] = c['file']['name']
+    packages = []
+    for path in map(Path, [package_paths] if isinstance(package_paths, (str, Path)) else package_paths):
+        data = path.read_bytes()
+        if sha256(data) not in files:
+            raise CatalogError(f'{path.name} 不在这份目录里')
+        packages.append((files[sha256(data)], data))
     with zipfile.ZipFile(output, 'w', zipfile.ZIP_DEFLATED) as archive:
-        members = [(CATALOG_NAME, catalog_path.read_bytes()), (SIGNATURE_NAME, signature_path.read_bytes()),
-                   (found[0]['file']['name'], data)] + [(Path(path).name, Path(path).read_bytes()) for path in extra]
+        members = [(CATALOG_NAME, catalog_path.read_bytes()), (SIGNATURE_NAME, signature_path.read_bytes())] + packages \
+            + [(Path(path).name, Path(path).read_bytes()) for path in extra]
         if len({name for name, _ in members}) != len(members):
             raise CatalogError('离线包里的文件重名')
         for name, body in members:
@@ -311,17 +347,19 @@ def main(argv=None):
     sub = parser.add_subparsers(dest='command', required=True)
     keygen = sub.add_parser('keygen', help='生成专签数据包的密钥对，公钥写进 native/terms/pack-key.pub')
     keygen.add_argument('key', type=Path, help='私钥写到哪里（只留在本机，例如 ~/.tauri/illustash-packs.key）')
-    make = sub.add_parser('entry', help='从包文件写出一条目录条目')
-    make.add_argument('--kind', required=True, choices=sorted(KINDS))
+    make = sub.add_parser('entry', help='从两个组成部分的包文件写出一条目录条目')
     make.add_argument('--revision', required=True, type=int)
-    make.add_argument('--file', required=True, type=Path)
+    make.add_argument('--wd', required=True, type=Path, help='WD 扩展头的包文件')
+    make.add_argument('--ccip', required=True, type=Path, help='CCIP 长尾锚点的参考包（ZIP）')
     make.add_argument('--min-app', required=True)
-    make.add_argument('--license', default=None, help='默认：WD 扩展 Apache-2.0，CCIP 长尾 MIT')
+    make.add_argument('--license', default=None, help='整个包的许可，默认 Apache-2.0 AND MIT')
     make.add_argument('--note-zh')
     make.add_argument('--note-en')
-    make.add_argument('--version')
-    make.add_argument('--tag')
-    make.add_argument('--name')
+    make.add_argument('--version', help='默认 character-pack-v<修订号>')
+    make.add_argument('--wd-tag', help='WD 部分所在的 Release，默认就是这个版本的')
+    make.add_argument('--ccip-tag', help='CCIP 部分所在的 Release，默认就是这个版本的')
+    make.add_argument('--wd-name')
+    make.add_argument('--ccip-name')
     make.add_argument('--output', type=Path, required=True)
     put = sub.add_parser('build', help='把条目并进目录，序号加一')
     put.add_argument('--previous', type=Path, help='上一份目录（第一次发布时省略）')
@@ -336,7 +374,7 @@ def main(argv=None):
     check.add_argument('--pubkey', help='默认读 native/terms/pack-key.pub')
     bundle = sub.add_parser('offline', help='把目录、签名和包文件打成离线包')
     bundle.add_argument('--catalog', type=Path, required=True)
-    bundle.add_argument('--file', type=Path, required=True)
+    bundle.add_argument('--file', type=Path, action='append', required=True, help='包文件，可重复')
     bundle.add_argument('--output', type=Path, required=True)
     bundle.add_argument('--extra', type=Path, action='append', default=[], help='一起放进去的许可文本等，可重复')
     args = parser.parse_args(argv)
@@ -351,12 +389,12 @@ def main(argv=None):
             write_pubkey(pubkey)
             print(f'公钥已写进 {PUBKEY_FILE.relative_to(ROOT)}；私钥在 {args.key}，只留在这台电脑上。')
         elif args.command == 'entry':
-            license_text = args.license or ('Apache-2.0' if args.kind == 'wd-extension' else 'MIT')
-            result = entry(kind=args.kind, revision=args.revision, path=args.file, min_app=args.min_app,
-                           license_text=license_text, note_zh=args.note_zh, note_en=args.note_en,
-                           version=args.version, tag=args.tag, name=args.name)
+            result = entry(revision=args.revision, wd=args.wd, ccip=args.ccip, min_app=args.min_app,
+                           license_text=args.license, note_zh=args.note_zh, note_en=args.note_en, version=args.version,
+                           wd_tag=args.wd_tag, ccip_tag=args.ccip_tag, wd_name=args.wd_name, ccip_name=args.ccip_name)
             args.output.write_text(json.dumps(result, ensure_ascii=False, indent=2) + '\n', encoding='utf-8')
-            print(f'已写出 {args.output}：{result["version"]}，{result["heads"]} 个头，SHA-256 {result["file"]["sha256"]}')
+            parts = result['components']
+            print(f'已写出 {args.output}：{result["version"]}，WD {parts["wd"]["heads"]} 个头、CCIP {parts["ccip"]["heads"]} 个角色')
         elif args.command == 'build':
             previous = json.loads(args.previous.read_bytes()) if args.previous else None
             entries = [json.loads(path.read_bytes()) for path in args.entry]

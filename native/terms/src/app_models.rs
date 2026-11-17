@@ -985,7 +985,7 @@ pub(crate) fn longtail_package_post(
     if body.get("action").map(Json::text) == Some("delete") && in_use {
         return Err(Error::Conflict("正在检查角色，请等任务结束后再删除参考包".into()));
     }
-    pack_post(resources, body, current, &CCIP_LONGTAIL, "未知操作")
+    pack_post(resources, body, current, "未知操作")
 }
 
 /// 「使用 GPU 加速识别」（#270）在模型卡片上：这个构建有没有加速器、开关（POST /api/preferences），
@@ -1037,7 +1037,25 @@ pub(crate) fn post(resources: &Path, body: &Json, in_use: bool) -> Result<Json> 
     let mut place = Place::app(resources)?;
     place.proxy = proxy();
     place.in_use = in_use;
-    post_at(&APP, place.clone(), body).map(|value| with_acceleration(resources, &place, value))
+    let value = post_at(&APP, place.clone(), body).map(|value| with_acceleration(resources, &place, value))?;
+    // 首次准备时角色资料包和识别模型一起下载（2026-11-17 用户定，#602）：用户点了下载识别模型，就把最新的角色资料包里
+    // 还没就位的文件一起下。它失败不影响模型下载，卡片上照样能重试。
+    if body.get("action").map(Json::text) == Some("download") {
+        if let Err(error) = download_newest_pack(resources) {
+            eprintln!("角色资料包没能和识别模型一起开始下载：{error}");
+        }
+    }
+    Ok(value)
+}
+
+fn download_newest_pack(resources: &Path) -> Result<()> {
+    let Some(pack) = crate::app_packs::known(resources)?.pop() else { return Ok(()) };
+    for kind in [PackKind::Wd, PackKind::Ccip] {
+        if !models_of(kind).running.load(Ordering::SeqCst) {
+            start_download(resources, pack.component(kind), &pack.version)?;
+        }
+    }
+    Ok(())
 }
 
 fn post_at(models: &'static Models, place: Place, body: &Json) -> Result<Json> {
@@ -1328,12 +1346,25 @@ pub(crate) fn extension_info(resources: &Path, pack: &crate::app_packs::Pack) ->
     }))
 }
 
-/// 某个版本的包下载了多少（`GET /api/packs` 的「新版本」一行）。
-pub(crate) fn pack_progress(resources: &Path, pack: &crate::app_packs::Pack) -> Result<Value> {
-    let place = match pack.kind {
-        crate::app_packs::Kind::Wd => extension_place(resources, pack)?,
-        crate::app_packs::Kind::Ccip => longtail_place(resources, pack)?,
-    };
+use crate::app_packs::{CharacterPack, Kind as PackKind, Pack};
+
+fn place_of(resources: &Path, pack: &Pack) -> Result<Place> {
+    match pack.kind {
+        PackKind::Wd => extension_place(resources, pack),
+        PackKind::Ccip => longtail_place(resources, pack),
+    }
+}
+
+fn models_of(kind: PackKind) -> &'static Models {
+    match kind {
+        PackKind::Wd => &WD_EXTENSION,
+        PackKind::Ccip => &CCIP_LONGTAIL,
+    }
+}
+
+/// 一个组成部分下载了多少：`(就位, 已有字节)`。
+fn component_progress(resources: &Path, pack: &Pack) -> Result<(bool, u64)> {
+    let place = place_of(resources, pack)?;
     let entry = &place.manifest.files[0];
     let partial = partial_dir(&place.root);
     let ready = has(&place.root, entry);
@@ -1342,40 +1373,185 @@ pub(crate) fn pack_progress(resources: &Path, pack: &crate::app_packs::Pack) -> 
     } else {
         fs::metadata(part(&partial, entry)).map_or(0, |m| m.len().min(entry.size))
     };
-    Ok(json!({"status":if ready {"ready"} else if have > 0 {"partial"} else {"missing"},"have":have}))
+    Ok((ready, have))
 }
 
-/// `POST /api/wd-extension/package`：
-/// - `download` 下载卡片上的版本，带 `version` 时下载那个版本（「有新版本」，#602）；
-/// - `import` 一起认所选文件里的所有可用版本，离线包里的目录先验签采用（`app_packs::adopt_archives`）；
-/// - `cancel`、`discard`、`delete` 针对卡片上的版本（取消针对正在进行的那个）。
-pub(crate) fn extension_post(resources: &Path, body: &Json, current: &crate::app_packs::Pack) -> Result<()> {
-    pack_post(resources, body, current, &WD_EXTENSION, "未知的 WD 角色扩展包操作")
+/// 角色资料包的两个文件下载了多少（`GET /api/packs`）：`status` 为 `ready`（两个都就位）、`partial` 或 `missing`。
+pub(crate) fn pack_progress(resources: &Path, pack: &CharacterPack) -> Result<Value> {
+    let (wd_ready, wd_have) = component_progress(resources, &pack.wd)?;
+    let (ccip_ready, ccip_have) = component_progress(resources, &pack.ccip)?;
+    let have = wd_have + ccip_have;
+    let status = if wd_ready && ccip_ready {
+        "ready"
+    } else if have > 0 {
+        "partial"
+    } else {
+        "missing"
+    };
+    Ok(json!({"status":status,"have":have}))
 }
 
-fn pack_post(
-    resources: &Path,
-    body: &Json,
-    current: &crate::app_packs::Pack,
-    models: &'static Models,
-    unknown: &str,
-) -> Result<()> {
+/// 两个组成部分的下载或导入合成一个状态（`GET /api/packs` 的 `download`）：有一个在进行就算进行中，字节数相加；
+/// 都结束了，有一个失败就算失败；导入结果按文件名合并，一边认出、一边不认识的算认出。都没有过时为 null。
+pub(crate) fn pack_download() -> Value {
+    let jobs = [WD_EXTENSION.snapshot(), CCIP_LONGTAIL.snapshot()];
+    let live = jobs.iter().filter(|j| !j.is_null()).collect::<Vec<_>>();
+    let Some(first) = live.first() else { return Value::Null };
+    let status = |s: &str| live.iter().any(|j| j["status"] == s);
+    let sum = |key: &str| live.iter().map(|j| j[key].as_u64().unwrap_or(0)).sum::<u64>();
+    let mut results: Vec<Value> = Vec::new();
+    for job in &live {
+        for r in job["results"].as_array().into_iter().flatten() {
+            match results.iter_mut().find(|x| x["name"] == r["name"]) {
+                Some(x) if x["result"] == "unknown" => *x = r.clone(),
+                Some(_) => {}
+                None => results.push(r.clone()),
+            }
+        }
+    }
+    let failed = live.iter().find(|j| j["status"] == "failed");
+    let state = if status("running") {
+        "running"
+    } else if failed.is_some() {
+        "failed"
+    } else if status("cancelled") {
+        "cancelled"
+    } else {
+        "done"
+    };
+    let failures = live.iter().flat_map(|j| j["failures"].as_array().cloned().unwrap_or_default()).collect::<Vec<_>>();
+    json!({
+        "kind":first["kind"],"status":state,"done":sum("done"),"total":sum("total"),"speed":sum("speed"),
+        "source":live.iter().find(|j| j["status"] == "running").map_or(first["source"].clone(), |j| j["source"].clone()),
+        "proxy":first["proxy"],"message":failed.map_or(Value::Null, |j| j["message"].clone()),
+        "failures":failures,"results":results,"diagnostic":failed.map_or(Value::Null, |j| j["diagnostic"].clone()),
+        "version":pack_job_version(PackKind::Wd).or_else(|| pack_job_version(PackKind::Ccip)),
+    })
+}
+
+/// 一种组成部分在所有可用版本里的文件位置（同一个文件只算一次），导入时一起认。
+fn places_of(resources: &Path, kind: PackKind) -> Result<Vec<Place>> {
+    let mut places: Vec<Place> = Vec::new();
+    for pack in crate::app_packs::known(resources)? {
+        let place = place_of(resources, pack.component(kind))?;
+        if !places.iter().any(|p| p.root == place.root) {
+            places.push(place);
+        }
+    }
+    Ok(places)
+}
+
+fn import_paths(body: &Json) -> Result<Vec<PathBuf>> {
+    let Json::Object(fields) = body else { return Err(Error::invalid("未知操作")) };
+    if fields.iter().any(|(k, _)| k != "action" && k != "paths") {
+        return Err(Error::invalid("未知参数"));
+    }
+    match body.get("paths") {
+        Some(Json::Array(list)) if !list.is_empty() && list.len() <= 64 => list
+            .iter()
+            .map(|p| match p {
+                Json::Scalar(Value::String(p)) if !p.is_empty() => Ok(PathBuf::from(p)),
+                _ => Err(Error::Invalid("文件路径不正确".into())),
+            })
+            .collect(),
+        _ => Err(Error::Invalid("请选择要导入的文件".into())),
+    }
+}
+
+/// 从文件导入：离线包里的目录先验签采用（`app_packs::adopt_archives`），再按采用后的目录，让 `kinds` 里每种组成部分
+/// 各自的导入任务认所选的文件。认不出的文件在各自的结果里是 `unknown`，页面合并时以认出的那边为准。
+fn start_import(resources: &Path, kinds: &[PackKind], paths: Vec<PathBuf>) -> Result<()> {
+    let notes = crate::app_packs::adopt_archives(resources, &paths);
+    let total = paths.iter().filter_map(|p| fs::metadata(p).ok()).map(|m| m.len()).sum();
+    for &kind in kinds {
+        let places = places_of(resources, kind)?;
+        let (paths, notes) = (paths.clone(), notes.clone());
+        models_of(kind).start("import", total, move |models| import_into(models, &places, &paths, &notes))?;
+        note_pack_job(kind, None);
+    }
+    Ok(())
+}
+
+/// 下载一个组成部分（已经就位时什么都不做），记下它属于哪个版本。
+fn start_download(resources: &Path, component: &Pack, version: &str) -> Result<bool> {
+    let mut place = place_of(resources, component)?;
+    if usable(&place.root, &place.manifest.files[0]) {
+        return Ok(false);
+    }
+    place.proxy = proxy();
+    post_at(models_of(component.kind), place, &Json::object([("action", "download".into())]))?;
+    note_pack_job(component.kind, Some(version.to_owned()));
+    Ok(true)
+}
+
+fn busy_message(kind: PackKind) -> (&'static str, &'static str) {
+    match kind {
+        PackKind::Wd => ("扩展包正在下载或导入，请等它结束", "扩展包已经就位"),
+        PackKind::Ccip => ("参考包正在下载或导入，请等它结束", "参考包已经就位"),
+    }
+}
+
+/// `POST /api/packs` 的文件操作（#602，一个角色资料包）：
+/// - `download` 下载卡片上的版本，带 `version` 时下载那个版本（「有新版本」）；两个文件里已经就位的不再下载；
+/// - `import` 一起认所选文件里的两种组成部分（`paths`，页面不带时宿主先打开选择框）；
+/// - `cancel` 停下两边正在进行的下载或导入；`discard` 删掉卡片上的版本没下完的部分；`delete` 删掉它的两个文件。
+pub(crate) fn character_pack_post(resources: &Path, body: &Json, current: &CharacterPack) -> Result<()> {
+    let action = body.get("action").map(Json::text).unwrap_or("");
+    let kinds = [PackKind::Wd, PackKind::Ccip];
+    if action != "cancel" && kinds.iter().any(|&k| models_of(k).running.load(Ordering::SeqCst)) {
+        return Err(Error::Conflict("角色资料包正在下载或导入，请等它结束".into()));
+    }
+    let Json::Object(fields) = body else { return Err(Error::invalid("未知操作")) };
+    let only = |allowed: &[&str]| fields.iter().all(|(k, _)| allowed.contains(&k.as_str()));
+    match action {
+        "download" if only(&["action", "version"]) => {
+            let pack = match body.get("version") {
+                None => current.clone(),
+                Some(Json::Scalar(Value::String(v))) if !v.is_empty() => crate::app_packs::by_version(resources, v)?,
+                Some(_) => return Err(Error::invalid("未知参数")),
+            };
+            let mut started = false;
+            for kind in kinds {
+                started |= start_download(resources, pack.component(kind), &pack.version)?;
+            }
+            if !started {
+                return Err(Error::Conflict("角色资料包已经就位".into()));
+            }
+        }
+        "import" => start_import(resources, &kinds, import_paths(body)?)?,
+        "cancel" if only(&["action"]) => {
+            for kind in kinds {
+                models_of(kind).cancel.store(true, Ordering::SeqCst);
+            }
+        }
+        "discard" | "delete" if only(&["action"]) => {
+            for kind in kinds {
+                post_at(models_of(kind), place_of(resources, current.component(kind))?, body)?;
+            }
+        }
+        "download" | "cancel" | "discard" | "delete" => return Err(Error::invalid("未知参数")),
+        _ => return Err(Error::invalid("未知的角色资料包操作")),
+    }
+    Ok(())
+}
+
+/// `POST /api/wd-extension/package`、`/api/ccip-longtail/package`：只针对一个组成部分（#550、#559 的旧路由，保留）。
+/// `download` 带 `version` 时下载那个角色资料包版本里的这个组成部分。
+pub(crate) fn extension_post(resources: &Path, body: &Json, current: &Pack) -> Result<()> {
+    pack_post(resources, body, current, "未知的 WD 角色扩展包操作")
+}
+
+fn pack_post(resources: &Path, body: &Json, current: &Pack, unknown: &str) -> Result<()> {
     let kind = current.kind;
+    let models = models_of(kind);
     let action = body.get("action").map(Json::text).unwrap_or("");
     if !matches!(action, "download" | "import" | "cancel" | "discard" | "delete") {
         return Err(Error::invalid(unknown));
     }
-    let (busy, ready) = match kind {
-        crate::app_packs::Kind::Wd => ("扩展包正在下载或导入，请等它结束", "扩展包已经就位"),
-        crate::app_packs::Kind::Ccip => ("参考包正在下载或导入，请等它结束", "参考包已经就位"),
-    };
+    let (busy, ready) = busy_message(kind);
     if action != "cancel" && models.running.load(Ordering::SeqCst) {
         return Err(Error::Conflict(busy.into()));
     }
-    let place_of = |pack: &crate::app_packs::Pack| match kind {
-        crate::app_packs::Kind::Wd => extension_place(resources, pack),
-        crate::app_packs::Kind::Ccip => longtail_place(resources, pack),
-    };
     let Json::Object(fields) = body else { return Err(Error::invalid("未知操作")) };
     let version = match fields.iter().find(|(k, _)| k == "version").map(|(_, v)| v) {
         None => None,
@@ -1385,44 +1561,17 @@ fn pack_post(
     let rest = Json::Object(fields.iter().filter(|(k, _)| k != "version").cloned().collect());
     match action {
         "download" => {
-            let pack = match &version {
-                Some(version) => crate::app_packs::by_version(resources, kind, version)?,
-                None => current.clone(),
+            let (component, label) = match &version {
+                Some(version) => (crate::app_packs::by_version(resources, version)?.component(kind).clone(), version.clone()),
+                None => (current.clone(), current.version.clone()),
             };
-            let mut place = place_of(&pack)?;
-            if usable(&place.root, &place.manifest.files[0]) {
+            if !start_download(resources, &component, &label)? {
                 return Err(Error::Conflict(ready.into()));
             }
-            place.proxy = proxy();
-            post_at(models, place, &rest)?;
-            note_pack_job(kind, Some(pack.version));
         }
-        "import" => {
-            let paths: Vec<PathBuf> = match rest.get("paths") {
-                Some(Json::Array(list)) if !list.is_empty() && list.len() <= 64 => list
-                    .iter()
-                    .map(|p| match p {
-                        Json::Scalar(Value::String(p)) if !p.is_empty() => Ok(PathBuf::from(p)),
-                        _ => Err(Error::Invalid("文件路径不正确".into())),
-                    })
-                    .collect::<Result<_>>()?,
-                _ => return Err(Error::Invalid("请选择要导入的文件".into())),
-            };
-            if fields.iter().any(|(k, _)| k != "action" && k != "paths") {
-                return Err(Error::invalid("未知参数"));
-            }
-            // 离线包里的目录先采用，再按采用后的目录认包文件。
-            let notes = crate::app_packs::adopt_archives(resources, &paths);
-            let mut places = Vec::new();
-            for pack in crate::app_packs::known(resources, kind)? {
-                places.push(place_of(&pack)?);
-            }
-            let total = paths.iter().filter_map(|p| fs::metadata(p).ok()).map(|m| m.len()).sum();
-            models.start("import", total, move |models| import_into(models, &places, &paths, &notes))?;
-            note_pack_job(kind, None);
-        }
+        "import" => start_import(resources, &[kind], import_paths(&rest)?)?,
         "cancel" => models.cancel.store(true, Ordering::SeqCst),
-        _ => post_at(models, place_of(current)?, &rest).map(|_| ())?,
+        _ => post_at(models, place_of(resources, current)?, &rest).map(|_| ())?,
     }
     Ok(())
 }

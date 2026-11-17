@@ -3,148 +3,259 @@
   "serial": 1,
   "packs": [
     {
-      "kind": "ccip-longtail",
+      "kind": "character-pack",
       "revision": 2,
-      "version": "ccip-longtail-v2",
-      "format": "illustash-557-ccip-offline/1",
-      "heads": 2,
-      "candidate_only": 0,
-      "file": {
-        "name": "ccip-longtail-v2.zip",
-        "size": 7102,
-        "sha256": "1484e78bbbc457a2ae600cb6c179928a42ee670299411ad2442f77d2d7858c3a",
-        "url": "https://github.com/shio-vinyl/illustash/releases/download/ccip-longtail-v2/ccip-longtail-v2.zip"
-      },
-      "base": {
-        "ccip_model_sha256": "4ea118d16496274f4f6e08d3afc768cc592389e8f7f32f8732ce2215c228ac5f"
-      },
+      "version": "character-pack-v2",
       "min_app": "0.2.0",
-      "license": "MIT"
-    },
-    {
-      "kind": "future-pack",
-      "revision": 1,
-      "version": "future-pack-v1",
-      "format": "illustash-future/1",
-      "heads": 1,
-      "candidate_only": 0,
-      "file": {
-        "name": "future-pack-v1.bin",
-        "size": 8,
-        "sha256": "e70c0d2f4dc8824c5bcbb5158eb37ad6fa901143c1d5b5b9677a36c24ddff525",
-        "url": "https://github.com/shio-vinyl/illustash/releases/download/future-pack-v1/future-pack-v1.bin"
+      "license": "Apache-2.0 AND MIT",
+      "components": {
+        "wd": {
+          "format": "illustash-wd-extension/1",
+          "heads": 2,
+          "candidate_only": 0,
+          "file": {
+            "name": "wd-extension-v2.bin",
+            "size": 8529,
+            "sha256": "ddf85bbb7aa4b223b8e60ad67104827fac3f65b2958763b3528de3d37040f905",
+            "url": "https://github.com/shio-vinyl/illustash/releases/download/character-pack-v2/wd-extension-v2.bin"
+          },
+          "base": {
+            "wd_model_sha256": "ae25f5f12b2d5891728fb7768fa63d65bf13a83d6d4823e3a1bf7b42875c74ff",
+            "wd_tags_sha256": "298633d94d0031d2081c0893f29c82eab7f0df00b08483ba8f29d1e979441217"
+          },
+          "license": "Apache-2.0"
+        },
+        "ccip": {
+          "format": "illustash-557-ccip-offline/1",
+          "heads": 2,
+          "candidate_only": 0,
+          "file": {
+            "name": "ccip-longtail-v1.zip",
+            "size": 7102,
+            "sha256": "8f824917803460224f6a71496d62d101d2f6f83bbfc9b75583d5d60038909f52",
+            "url": "https://github.com/shio-vinyl/illustash/releases/download/ccip-longtail-v1/ccip-longtail-v1.zip"
+          },
+          "base": {
+            "ccip_model_sha256": "4ea118d16496274f4f6e08d3afc768cc592389e8f7f32f8732ce2215c228ac5f"
+          },
+          "license": "MIT"
+        }
       },
-      "base": {},
-      "min_app": "0.2.0",
-      "license": "Apache-2.0"
-    },
-    {
-      "kind": "wd-extension",
-      "revision": 2,
-      "version": "wd-extension-v2",
-      "format": "illustash-wd-extension/1",
-      "heads": 2,
-      "candidate_only": 0,
-      "file": {
-        "name": "wd-extension-v2.bin",
-        "size": 8529,
-        "sha256": "ddf85bbb7aa4b223b8e60ad67104827fac3f65b2958763b3528de3d37040f905",
-        "url": "https://github.com/shio-vinyl/illustash/releases/download/wd-extension-v2/wd-extension-v2.bin"
-      },
-      "base": {
-        "wd_model_sha256": "ae25f5f12b2d5891728fb7768fa63d65bf13a83d6d4823e3a1bf7b42875c74ff",
-        "wd_tags_sha256": "298633d94d0031d2081c0893f29c82eab7f0df00b08483ba8f29d1e979441217"
-      },
-      "min_app": "0.2.0",
-      "license": "Apache-2.0",
       "note": {
         "zh-CN": "合成测试包 2",
         "en": "Synthetic test pack 2"
       }
     },
     {
-      "kind": "wd-extension",
+      "kind": "character-pack",
       "revision": 3,
-      "version": "wd-extension-v3",
-      "format": "illustash-wd-extension/2",
-      "heads": 3,
-      "candidate_only": 1,
-      "file": {
-        "name": "wd-extension-v3.bin",
-        "size": 12646,
-        "sha256": "a20d208015bffe18789803954261bee9df3bc29cf6640011ed4a073be85e191b",
-        "url": "https://github.com/shio-vinyl/illustash/releases/download/wd-extension-v3/wd-extension-v3.bin"
-      },
-      "base": {
-        "wd_model_sha256": "ae25f5f12b2d5891728fb7768fa63d65bf13a83d6d4823e3a1bf7b42875c74ff",
-        "wd_tags_sha256": "298633d94d0031d2081c0893f29c82eab7f0df00b08483ba8f29d1e979441217"
-      },
+      "version": "character-pack-v3",
       "min_app": "0.2.0",
-      "license": "Apache-2.0",
+      "license": "Apache-2.0 AND MIT",
+      "components": {
+        "wd": {
+          "format": "illustash-wd-extension/2",
+          "heads": 3,
+          "candidate_only": 1,
+          "file": {
+            "name": "wd-extension-v3.bin",
+            "size": 12646,
+            "sha256": "a20d208015bffe18789803954261bee9df3bc29cf6640011ed4a073be85e191b",
+            "url": "https://github.com/shio-vinyl/illustash/releases/download/character-pack-v3/wd-extension-v3.bin"
+          },
+          "base": {
+            "wd_model_sha256": "ae25f5f12b2d5891728fb7768fa63d65bf13a83d6d4823e3a1bf7b42875c74ff",
+            "wd_tags_sha256": "298633d94d0031d2081c0893f29c82eab7f0df00b08483ba8f29d1e979441217"
+          },
+          "license": "Apache-2.0"
+        },
+        "ccip": {
+          "format": "illustash-557-ccip-offline/1",
+          "heads": 2,
+          "candidate_only": 0,
+          "file": {
+            "name": "ccip-longtail-v2.zip",
+            "size": 7106,
+            "sha256": "1bcfbd4078cc7c92e6350c0b5d133e0bacfa09d95e73fdcd8b53c61dc3519db2",
+            "url": "https://github.com/shio-vinyl/illustash/releases/download/character-pack-v3/ccip-longtail-v2.zip"
+          },
+          "base": {
+            "ccip_model_sha256": "4ea118d16496274f4f6e08d3afc768cc592389e8f7f32f8732ce2215c228ac5f"
+          },
+          "license": "MIT"
+        }
+      },
       "note": {
         "zh-CN": "合成测试包 3",
         "en": "Synthetic test pack 3"
       }
     },
     {
-      "kind": "wd-extension",
+      "kind": "character-pack",
       "revision": 4,
-      "version": "wd-extension-v4",
-      "format": "illustash-wd-extension/1",
-      "heads": 1,
-      "candidate_only": 0,
-      "file": {
-        "name": "wd-extension-v4.bin",
-        "size": 8,
-        "sha256": "e465fd7e3680ba2cb0d3578762b9ecd892a6afa7a907944a657902226ed33726",
-        "url": "https://github.com/shio-vinyl/illustash/releases/download/wd-extension-v4/wd-extension-v4.bin"
-      },
-      "base": {
-        "wd_model_sha256": "ae25f5f12b2d5891728fb7768fa63d65bf13a83d6d4823e3a1bf7b42875c74ff",
-        "wd_tags_sha256": "298633d94d0031d2081c0893f29c82eab7f0df00b08483ba8f29d1e979441217"
-      },
+      "version": "character-pack-v4",
       "min_app": "99.0.0",
-      "license": "Apache-2.0"
+      "license": "Apache-2.0 AND MIT",
+      "components": {
+        "wd": {
+          "format": "illustash-wd-extension/1",
+          "heads": 1,
+          "candidate_only": 0,
+          "file": {
+            "name": "character-pack-v4-wd.bin",
+            "size": 8,
+            "sha256": "19de1124bc9d43627f8ffe2b829b8ccd78506ec733443b5ef96d212e05910081",
+            "url": "https://github.com/shio-vinyl/illustash/releases/download/character-pack-v4/character-pack-v4-wd.bin"
+          },
+          "base": {
+            "wd_model_sha256": "ae25f5f12b2d5891728fb7768fa63d65bf13a83d6d4823e3a1bf7b42875c74ff",
+            "wd_tags_sha256": "298633d94d0031d2081c0893f29c82eab7f0df00b08483ba8f29d1e979441217"
+          },
+          "license": "MIT"
+        },
+        "ccip": {
+          "format": "illustash-557-ccip-offline/1",
+          "heads": 1,
+          "candidate_only": 0,
+          "file": {
+            "name": "character-pack-v4-ccip.bin",
+            "size": 8,
+            "sha256": "24695dd180d5def9be985dd37e1fcd1341ff330856d8f38085cf1a81e5f2eca4",
+            "url": "https://github.com/shio-vinyl/illustash/releases/download/character-pack-v4/character-pack-v4-ccip.bin"
+          },
+          "base": {
+            "ccip_model_sha256": "4ea118d16496274f4f6e08d3afc768cc592389e8f7f32f8732ce2215c228ac5f"
+          },
+          "license": "MIT"
+        }
+      }
     },
     {
-      "kind": "wd-extension",
+      "kind": "character-pack",
       "revision": 5,
-      "version": "wd-extension-v5",
-      "format": "illustash-wd-extension/9",
-      "heads": 1,
-      "candidate_only": 0,
-      "file": {
-        "name": "wd-extension-v5.bin",
-        "size": 8,
-        "sha256": "913b192eb3754014dd8c1528eae5ca888508886f358283d83b95409910d49cf4",
-        "url": "https://github.com/shio-vinyl/illustash/releases/download/wd-extension-v5/wd-extension-v5.bin"
-      },
-      "base": {
-        "wd_model_sha256": "ae25f5f12b2d5891728fb7768fa63d65bf13a83d6d4823e3a1bf7b42875c74ff",
-        "wd_tags_sha256": "298633d94d0031d2081c0893f29c82eab7f0df00b08483ba8f29d1e979441217"
-      },
+      "version": "character-pack-v5",
       "min_app": "0.2.0",
-      "license": "Apache-2.0"
+      "license": "Apache-2.0 AND MIT",
+      "components": {
+        "wd": {
+          "format": "illustash-wd-extension/9",
+          "heads": 1,
+          "candidate_only": 0,
+          "file": {
+            "name": "character-pack-v5-wd.bin",
+            "size": 8,
+            "sha256": "87e45b492f5c8f203e1943ea6a8a178fa37dd11f3069dd061f2bdb1b19f6b6c9",
+            "url": "https://github.com/shio-vinyl/illustash/releases/download/character-pack-v5/character-pack-v5-wd.bin"
+          },
+          "base": {
+            "wd_model_sha256": "ae25f5f12b2d5891728fb7768fa63d65bf13a83d6d4823e3a1bf7b42875c74ff",
+            "wd_tags_sha256": "298633d94d0031d2081c0893f29c82eab7f0df00b08483ba8f29d1e979441217"
+          },
+          "license": "MIT"
+        },
+        "ccip": {
+          "format": "illustash-557-ccip-offline/1",
+          "heads": 1,
+          "candidate_only": 0,
+          "file": {
+            "name": "character-pack-v5-ccip.bin",
+            "size": 8,
+            "sha256": "de804b925f096fe961cc505a273c524afefb87f0734051a9a824d864166eea81",
+            "url": "https://github.com/shio-vinyl/illustash/releases/download/character-pack-v5/character-pack-v5-ccip.bin"
+          },
+          "base": {
+            "ccip_model_sha256": "4ea118d16496274f4f6e08d3afc768cc592389e8f7f32f8732ce2215c228ac5f"
+          },
+          "license": "MIT"
+        }
+      }
     },
     {
-      "kind": "wd-extension",
+      "kind": "character-pack",
       "revision": 6,
-      "version": "wd-extension-v6",
-      "format": "illustash-wd-extension/1",
-      "heads": 1,
-      "candidate_only": 0,
-      "file": {
-        "name": "wd-extension-v6.bin",
-        "size": 8,
-        "sha256": "b94346925e96de08ee7df70df54ce69e42b13c51f0010b8fe8aae1570072833e",
-        "url": "https://github.com/shio-vinyl/illustash/releases/download/wd-extension-v6/wd-extension-v6.bin"
-      },
-      "base": {
-        "wd_model_sha256": "ae25f5f12b2d5891728fb7768fa63d65bf13a83d6d4823e3a1bf7b42875c74ff",
-        "wd_tags_sha256": "f567e379be7f441ae566aa25d1518774edae5025d7c6e175713bf8dccebd4d6d"
-      },
+      "version": "character-pack-v6",
       "min_app": "0.2.0",
-      "license": "Apache-2.0"
+      "license": "Apache-2.0 AND MIT",
+      "components": {
+        "wd": {
+          "format": "illustash-wd-extension/1",
+          "heads": 1,
+          "candidate_only": 0,
+          "file": {
+            "name": "character-pack-v6-wd.bin",
+            "size": 8,
+            "sha256": "8d29dc8424b710e5089956ea3eba17f2ac28bab5fe6641ef952a5c2b6b5eafe7",
+            "url": "https://github.com/shio-vinyl/illustash/releases/download/character-pack-v6/character-pack-v6-wd.bin"
+          },
+          "base": {
+            "wd_model_sha256": "ae25f5f12b2d5891728fb7768fa63d65bf13a83d6d4823e3a1bf7b42875c74ff",
+            "wd_tags_sha256": "f567e379be7f441ae566aa25d1518774edae5025d7c6e175713bf8dccebd4d6d"
+          },
+          "license": "MIT"
+        },
+        "ccip": {
+          "format": "illustash-557-ccip-offline/1",
+          "heads": 1,
+          "candidate_only": 0,
+          "file": {
+            "name": "character-pack-v6-ccip.bin",
+            "size": 8,
+            "sha256": "a6c409c03c8367492e9124722630207955370f52b5c56180d8cddef488b4a5c2",
+            "url": "https://github.com/shio-vinyl/illustash/releases/download/character-pack-v6/character-pack-v6-ccip.bin"
+          },
+          "base": {
+            "ccip_model_sha256": "4ea118d16496274f4f6e08d3afc768cc592389e8f7f32f8732ce2215c228ac5f"
+          },
+          "license": "MIT"
+        }
+      }
+    },
+    {
+      "kind": "character-pack",
+      "revision": 7,
+      "version": "character-pack-v7",
+      "min_app": "0.2.0",
+      "license": "Apache-2.0 AND MIT",
+      "components": {
+        "wd": {
+          "format": "illustash-wd-extension/1",
+          "heads": 1,
+          "candidate_only": 0,
+          "file": {
+            "name": "character-pack-v7-wd.bin",
+            "size": 8,
+            "sha256": "9f5ea56bd52572c352a6c1d03f63837457a841e6334eb6f18017b73b82e740b0",
+            "url": "https://github.com/shio-vinyl/illustash/releases/download/character-pack-v7/character-pack-v7-wd.bin"
+          },
+          "base": {
+            "wd_model_sha256": "ae25f5f12b2d5891728fb7768fa63d65bf13a83d6d4823e3a1bf7b42875c74ff",
+            "wd_tags_sha256": "298633d94d0031d2081c0893f29c82eab7f0df00b08483ba8f29d1e979441217"
+          },
+          "license": "MIT"
+        },
+        "ccip": {
+          "format": "illustash-557-ccip-offline/1",
+          "heads": 1,
+          "candidate_only": 0,
+          "file": {
+            "name": "character-pack-v7-ccip.bin",
+            "size": 8,
+            "sha256": "816ca98d5d7a262b682aab0eb1797192d9df1eb554b5ef7a3f307d8c917abe04",
+            "url": "https://github.com/shio-vinyl/illustash/releases/download/character-pack-v7/character-pack-v7-ccip.bin"
+          },
+          "base": {
+            "ccip_model_sha256": "2face7d4b36f74e53b3bda3f914cc71c4f8bd804e44f0adefaf67b96b37a7b08"
+          },
+          "license": "MIT"
+        }
+      }
+    },
+    {
+      "kind": "future-pack",
+      "revision": 1,
+      "version": "future-pack-v1",
+      "min_app": "0.2.0",
+      "license": "Apache-2.0 AND MIT"
     }
   ]
 }

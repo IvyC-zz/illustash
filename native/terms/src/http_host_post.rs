@@ -1,5 +1,5 @@
 //! 会话 POST 业务路由；入口安全检查由 app_http 保持。
-use super::http_host_get::{ccip_status, expired, reply, reply_if_current, waited};
+use super::http_host_get::{ccip_status, expired, packs, reply, reply_if_current, waited};
 use super::*;
 use std::sync::RwLockWriteGuard;
 
@@ -29,6 +29,7 @@ pub(super) fn handle(request: Request, host: &Host, received: u64, text: &str, b
         "/api/wd-extension/package" => return wd_package(request, host, received, body, &translate),
         "/api/models" => return models(request, host, body, &translate),
         "/api/ccip-longtail/package" => return ccip_package(request, host, received, body, &translate),
+        "/api/packs" => return packs_post(request, host, received, body, &translate),
         url if url.starts_with("/api/files/") => return files(request, host, received, &body, &translate),
         _ => {}
     }
@@ -345,7 +346,7 @@ fn wd_extension(url: &str, host: &Host, session: &mut Session, body: &Json) -> R
         Action::Withdraw
     } else {
         let pack = match &version {
-            Some(version) => crate::app_packs::by_version(&host.root, crate::app_packs::Kind::Wd, version)?,
+            Some(version) => crate::app_packs::by_version(&host.root, version)?.wd,
             None => crate::app_wd_extension::card_pack(&host.root, &session.library)?,
         };
         let path = crate::app_models::extension_file(&host.root, &pack)?
@@ -355,6 +356,105 @@ fn wd_extension(url: &str, host: &Host, session: &mut Session, body: &Json) -> R
     let identity = crate::app_tasks::TaskIdentity::new(&session.library, session.generation, &session.token)?;
     snapshot["task"] = session.wd_extension.start_for(&session.library, identity, action)?;
     Ok(snapshot.into())
+}
+
+/// `POST /api/packs`（#602）：一个角色资料包的文件操作和开关。
+/// - 文件：`download`（可带 `version`）、`import`（可带 `paths`，不带时打开选择框）、`cancel`（不带 `id`）、`discard`、
+///   `delete`，见 `app_models::character_pack_post`；
+/// - 开关：`enable`（可带 `version`，就是换包）用两个组成部分依次检查本图库，`withdraw` 撤回启用了的组成部分，
+///   `cancel` 带 `id` 取消检查（只在扫描阶段）；`decline` 记下已有图库不要默认启用（`app_packs::decline`）。
+///
+/// 成功时回复完整的 `GET /api/packs`；选择框关掉时回复 `{cancelled:true}`。
+fn packs_post(request: Request, host: &Host, received: u64, mut body: Json, translate: Translate) {
+    let Json::Object(fields) = &body else { return failure(request, Error::invalid("未知操作"), true) };
+    let action = body.get("action").map(Json::text).unwrap_or("").to_owned();
+    if action == "import" && body.get("paths").is_none() {
+        if fields.len() != 1 {
+            return failure(request, Error::invalid("未知参数"), true);
+        }
+        match model_paths("wd-extension", translate) {
+            Ok(Some(paths)) => body.set("paths", paths),
+            Ok(None) => return cancelled(request),
+            Err(e) => return failure(request, e, true),
+        }
+    }
+    let mut session = host.session.write().expect("角色资料包会话锁中毒");
+    if !host.accepts(&session, received) || header(&request, "X-CSRF-Token") != Some(&session.token) {
+        return expired(request);
+    }
+    let result = pack_action(host, &mut session, &action, &body).and_then(|()| packs(host, &session));
+    drop(session);
+    reply(request, result, true);
+}
+
+fn pack_action(host: &Host, session: &mut Session, action: &str, body: &Json) -> Result<()> {
+    use crate::app_wd_extension::{Action, Part};
+    let Json::Object(fields) = body else { return Err(Error::invalid("未知操作")) };
+    let only = |allowed: &[&str]| fields.iter().all(|(k, _)| allowed.contains(&k.as_str()));
+    let lib = crate::app_packs::for_library(&host.root, &session.library)?;
+    match action {
+        "cancel" if body.get("id").is_some() => {
+            let Some(Json::Scalar(serde_json::Value::String(id))) = body.get("id") else {
+                return Err(Error::invalid("角色资料包任务编号不合法"));
+            };
+            if id.is_empty() || !only(&["action", "id"]) {
+                return Err(Error::invalid("角色资料包任务编号不合法"));
+            }
+            return session.wd_extension.cancel(id);
+        }
+        "download" | "import" | "cancel" | "discard" | "delete" => {
+            if action == "delete" && (session.wd_extension.running() || host.imports.recognition_running(session.generation))
+            {
+                return Err(Error::Conflict("正在检查角色，请等任务结束后再删除角色资料包".into()));
+            }
+            return crate::app_models::character_pack_post(&host.root, body, &lib.card);
+        }
+        "decline" if only(&["action"]) => return crate::app_packs::decline(&host.root, &session.library),
+        "enable" if only(&["action", "version"]) => {}
+        "withdraw" if only(&["action"]) => {}
+        "decline" | "enable" | "withdraw" => return Err(Error::invalid("角色资料包请求字段不正确")),
+        _ => return Err(Error::invalid("未知的角色资料包操作")),
+    }
+    if session.library.frozen() || session.damage().is_some() {
+        return Err(Error::Conflict("图库只读".into()));
+    }
+    if session.wd_extension.running() {
+        return Err(wd_running());
+    }
+    match host.wd_busy(session) {
+        Some("syncing") => return Err(Error::Conflict("正在同步或交付识别结果，请等它结束".into())),
+        Some(_) => return Err(Error::Conflict("图库正在导入、导出或更新角色索引，请等它结束".into())),
+        None => {}
+    }
+    let action = if action == "withdraw" {
+        Action::PackWithdraw { wd: lib.wd.is_some() || lib.ccip.is_none(), ccip: lib.ccip.is_some() }
+    } else {
+        let pack = match body.get("version") {
+            None => lib.card.clone(),
+            Some(Json::Scalar(serde_json::Value::String(v))) if !v.is_empty() => {
+                crate::app_packs::by_version(&host.root, v)?
+            }
+            Some(_) => return Err(Error::invalid("角色资料包请求字段不正确")),
+        };
+        let missing = || Error::Conflict("角色资料包还没就位".into());
+        let wd_path = crate::app_models::extension_file(&host.root, &pack.wd)?.ok_or_else(missing)?;
+        let shared = crate::app_resources::shared_path(&host.root)?;
+        let ccip_path = crate::app_ccip_longtail::package_path(&shared, &pack.ccip);
+        if !ccip_path.try_exists()? {
+            return Err(missing());
+        }
+        let wd_scan = crate::app_wd_extension::stored_vectors(&session.library)? > 0;
+        let ccip_scan = crate::app_ccip_longtail::stored_vectors(&session.library)? > 0;
+        Action::Pack {
+            root: host.root.clone(),
+            wd: Some(Part { pack: pack.wd.clone(), path: wd_path, scan: wd_scan }),
+            ccip: Some(Part { pack: pack.ccip.clone(), path: ccip_path, scan: ccip_scan }),
+        }
+    };
+    let identity = crate::app_tasks::TaskIdentity::new(&session.library, session.generation, &session.token)?;
+    session.wd_extension.start_for(&session.library, identity, action)?;
+    crate::app_ccip_longtail::clear_auto_task(&session.library);
+    Ok(())
 }
 
 fn wd_idle(session: &Session) -> Result<()> {
@@ -514,7 +614,7 @@ fn longtail(host: &Host, session: &Session, withdraw: bool, version: Option<&str
         (crate::app_imports::Kind::CcipWithdraw, None)
     } else {
         let pack = match version {
-            Some(version) => crate::app_packs::by_version(&host.root, crate::app_packs::Kind::Ccip, version)?,
+            Some(version) => crate::app_packs::by_version(&host.root, version)?.ccip,
             None => app_ccip_longtail::card_pack(&host.root, &session.library)?,
         };
         let shared = crate::app_resources::shared_path(&host.root)?;

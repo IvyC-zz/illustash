@@ -24,7 +24,7 @@ fn temp() -> PathBuf {
 }
 
 fn context(app: &str) -> Context {
-    Context { app: Version::parse(app).unwrap(), wd: builtin_wd().unwrap(), ccip: builtin_ccip().unwrap() }
+    Context { app: Version::parse(app).unwrap(), builtin: builtin().unwrap() }
 }
 
 #[test]
@@ -66,14 +66,20 @@ fn placeholder_key_file_disables_the_catalog() {
     assert_eq!(configured("# 说明\n\n  RWQabc  \n# 末尾\n").as_deref(), Some("RWQabc"));
 }
 
+fn part(name: &str, base: Value) -> Value {
+    json!({"format":if base.get("wd_model_sha256").is_some() {WD_FORMAT_V1} else {CCIP_FORMAT},"heads":2,
+        "file":{"name":name,"size":8,"sha256":crate::strict_json::sha256_hex(name.as_bytes()),
+            "url":format!("{RELEASE_PREFIX}tag/{name}")},
+        "base":base,"license":"MIT"})
+}
+
 fn entry(version: &str, revision: u32) -> Value {
+    let wd = json!({"wd_model_sha256":"ae25f5f12b2d5891728fb7768fa63d65bf13a83d6d4823e3a1bf7b42875c74ff",
+        "wd_tags_sha256":WD_TAGS_SHA256});
+    let ccip = json!({"ccip_model_sha256":"4ea118d16496274f4f6e08d3afc768cc592389e8f7f32f8732ce2215c228ac5f"});
     json!({
-        "kind":"wd-extension","revision":revision,"version":version,"format":WD_FORMAT_V1,"heads":2,
-        "file":{"name":format!("{version}.bin"),"size":8,"sha256":format!("{:064x}", revision),
-            "url":format!("{RELEASE_PREFIX}{version}/{version}.bin")},
-        "base":{"wd_model_sha256":"ae25f5f12b2d5891728fb7768fa63d65bf13a83d6d4823e3a1bf7b42875c74ff",
-            "wd_tags_sha256":WD_TAGS_SHA256},
-        "min_app":"0.2.0","license":"Apache-2.0"
+        "kind":PACK_KIND,"revision":revision,"version":version,"min_app":"0.2.0","license":"Apache-2.0 AND MIT",
+        "components":{"wd":part(&format!("{version}-wd.bin"), wd),"ccip":part(&format!("{version}-ccip.zip"), ccip)}
     })
 }
 
@@ -89,56 +95,61 @@ fn parse(value: &Value) -> Result<Catalog> {
 fn catalog_fields_are_checked_entry_by_entry() {
     let parsed = Catalog::parse(&fixture("packs.json")).unwrap();
     assert_eq!((parsed.serial, parsed.entries.len()), (1, 7));
-    let good = catalog(vec![entry("wd-extension-v2", 2), entry("wd-extension-v3", 3)]);
+    let good = catalog(vec![entry("character-pack-v2", 2), entry("character-pack-v3", 3)]);
     assert_eq!(parse(&good).unwrap().entries.len(), 2);
     // 不认识的字段照常读（以后的目录加字段时，要改含义就换格式或提高最低版本）。
     let mut extra = good.clone();
     extra["generated_by"] = "tools/pack_catalog.py".into();
     extra["packs"][0]["unknown"] = json!({"x": 1});
+    extra["packs"][0]["components"]["wd"]["unknown"] = 1.into();
     assert!(parse(&extra).is_ok());
+    // 两个版本可以共用一个组成部分的文件（下个月只换 WD 头）。
+    let mut shared = good.clone();
+    shared["packs"][1]["components"]["ccip"] = shared["packs"][0]["components"]["ccip"].clone();
+    assert!(parse(&shared).is_ok());
+    // 以后的种类：通用字段照查，没有组成部分也行。
+    let mut future = good.clone();
+    future["packs"][1] = json!({"kind":"future-pack","revision":1,"version":"future-v1","min_app":"9.0.0","license":"MIT"});
+    assert!(parse(&future).is_ok());
 
+    let wd = |c: &mut Value| c["packs"][0]["components"]["wd"].take();
     let broken: Vec<(&str, Box<dyn Fn(&mut Value)>)> = vec![
         ("目录格式", Box::new(|c| c["format"] = "illustash-packs/2".into())),
         ("序号为零", Box::new(|c| c["serial"] = 0.into())),
         ("序号不是整数", Box::new(|c| c["serial"] = "3".into())),
         ("条目不是列表", Box::new(|c| c["packs"] = json!({}))),
-        ("版本重复", Box::new(|c| c["packs"][1]["version"] = "wd-extension-v2".into())),
+        ("版本重复", Box::new(|c| c["packs"][1]["version"] = "character-pack-v2".into())),
         ("修订号重复", Box::new(|c| c["packs"][1]["revision"] = 2.into())),
-        ("SHA-256 重复", Box::new(|c| c["packs"][1]["file"]["sha256"] = c["packs"][0]["file"]["sha256"].clone())),
-        ("SHA-256 不是十六进制", Box::new(|c| c["packs"][0]["file"]["sha256"] = "x".repeat(64).into())),
-        ("SHA-256 大写", Box::new(|c| c["packs"][0]["file"]["sha256"] = "A".repeat(64).into())),
-        ("大小为零", Box::new(|c| c["packs"][0]["file"]["size"] = 0.into())),
-        ("文件过大", Box::new(|c| c["packs"][0]["file"]["size"] = (FILE_LIMIT + 1).into())),
+        ("缺组成部分", Box::new(|c| drop(c["packs"][0].as_object_mut().unwrap().remove("components")))),
+        ("缺 CCIP 部分", Box::new(|c| drop(c["packs"][0]["components"].as_object_mut().unwrap().remove("ccip")))),
+        ("SHA-256 不是十六进制", Box::new(|c| c["packs"][0]["components"]["wd"]["file"]["sha256"] = "x".repeat(64).into())),
+        ("SHA-256 大写", Box::new(|c| c["packs"][0]["components"]["ccip"]["file"]["sha256"] = "A".repeat(64).into())),
+        ("大小为零", Box::new(|c| c["packs"][0]["components"]["wd"]["file"]["size"] = 0.into())),
+        ("文件过大", Box::new(|c| c["packs"][0]["components"]["wd"]["file"]["size"] = (FILE_LIMIT + 1).into())),
         (
             "地址不在本项目的 Release",
-            Box::new(|c| {
-                c["packs"][0]["file"]["url"] = "https://example.com/wd-extension-v2/wd-extension-v2.bin".into()
-            }),
+            Box::new(|c| c["packs"][0]["components"]["wd"]["file"]["url"] = "https://example.com/tag/x.bin".into()),
         ),
         (
             "地址里的文件名和 name 不同",
-            Box::new(|c| c["packs"][0]["file"]["url"] = format!("{RELEASE_PREFIX}wd-extension-v2/other.bin").into()),
+            Box::new(|c| c["packs"][0]["components"]["wd"]["file"]["url"] = format!("{RELEASE_PREFIX}tag/other.bin").into()),
         ),
-        (
-            "地址没有 tag",
-            Box::new(|c| c["packs"][0]["file"]["url"] = format!("{RELEASE_PREFIX}wd-extension-v2.bin").into()),
-        ),
-        ("文件名带路径", Box::new(|c| c["packs"][0]["file"]["name"] = "../wd-extension-v2.bin".into())),
-        ("版本名带路径", Box::new(|c| c["packs"][0]["version"] = "wd/extension".into())),
-        ("版本名有 ..", Box::new(|c| c["packs"][0]["version"] = "wd..v2".into())),
+        ("地址没有 tag", Box::new(|c| c["packs"][0]["components"]["ccip"]["file"]["url"] = format!("{RELEASE_PREFIX}x.zip").into())),
+        ("文件名带路径", Box::new(|c| c["packs"][0]["components"]["wd"]["file"]["name"] = "../x.bin".into())),
+        ("版本名带路径", Box::new(|c| c["packs"][0]["version"] = "character/pack".into())),
+        ("版本名有 ..", Box::new(|c| c["packs"][0]["version"] = "pack..v2".into())),
         ("修订号为零", Box::new(|c| c["packs"][0]["revision"] = 0.into())),
-        ("头数为零", Box::new(|c| c["packs"][0]["heads"] = 0.into())),
-        ("二级头比头还多", Box::new(|c| c["packs"][0]["candidate_only"] = 3.into())),
+        ("头数为零", Box::new(|c| c["packs"][0]["components"]["wd"]["heads"] = 0.into())),
+        ("二级头比头还多", Box::new(|c| c["packs"][0]["components"]["wd"]["candidate_only"] = 3.into())),
         ("最低版本不是 X.Y.Z", Box::new(|c| c["packs"][0]["min_app"] = "0.3".into())),
         ("缺少许可", Box::new(|c| c["packs"][0]["license"] = " ".into())),
+        ("组成部分缺少许可", Box::new(|c| c["packs"][0]["components"]["ccip"]["license"] = "".into())),
         ("说明带控制字符", Box::new(|c| c["packs"][0]["note"] = json!({"zh-CN":"一\n行","en":"x"}))),
-        ("缺 WD 标签表", Box::new(|c| c["packs"][0]["base"] = json!({"wd_model_sha256": "a".repeat(64)}))),
-        ("CCIP 缺模型", Box::new(|c| c["packs"][0]["kind"] = "ccip-longtail".into())),
+        ("缺 WD 标签表", Box::new(|c| c["packs"][0]["components"]["wd"]["base"] = json!({"wd_model_sha256": "a".repeat(64)}))),
+        ("CCIP 缺模型", Box::new(|c| c["packs"][0]["components"]["ccip"]["base"] = json!({}))),
         ("缺字段", Box::new(|c| drop(c["packs"][0].as_object_mut().unwrap().remove("min_app")))),
-        (
-            "条目过多",
-            Box::new(|c| c["packs"] = json!((1..=65).map(|i| entry(&format!("v{i}"), i)).collect::<Vec<_>>())),
-        ),
+        ("组成部分不是对象", Box::new(move |c| drop(wd(c)))),
+        ("条目过多", Box::new(|c| c["packs"] = json!((1..=65).map(|i| entry(&format!("v{i}"), i)).collect::<Vec<_>>()))),
     ];
     for (what, change) in broken {
         let mut value = good.clone();
@@ -149,40 +160,51 @@ fn catalog_fields_are_checked_entry_by_entry() {
 }
 
 #[test]
-fn only_entries_this_build_can_use_are_offered() {
+fn only_packs_this_build_can_use_are_offered() {
     let parsed = Catalog::parse(&fixture("packs.json")).unwrap();
-    let versions = |kind, app| parsed.packs(kind, &context(app)).into_iter().map(|p| p.version).collect::<Vec<_>>();
-    // 版本过低（v4 要 99.0.0）、格式不认识（v5）、标签表不是这个构建的（v6）、不认识的种类都不提供。
-    assert_eq!(versions(Kind::Wd, "0.2.0"), ["wd-extension-v2", "wd-extension-v3"]);
-    assert_eq!(versions(Kind::Ccip, "0.2.0"), ["ccip-longtail-v2"]);
+    let versions = |app| parsed.packs(&context(app)).into_iter().map(|p| p.version).collect::<Vec<_>>();
+    // 版本过低（v4 要 99.0.0）、WD 格式不认识（v5）、标签表（v6）或 CCIP 模型（v7）不是这个构建的、不认识的种类都不提供。
+    assert_eq!(versions("0.2.0"), ["character-pack-v2", "character-pack-v3"]);
     // 最低版本只比 X.Y.Z：0.2.0 的测试版也能用；更旧的版本一个都不用。
-    assert_eq!(versions(Kind::Wd, "0.2.0-beta.1"), ["wd-extension-v2", "wd-extension-v3"]);
-    assert!(versions(Kind::Wd, "0.1.9").is_empty() && versions(Kind::Ccip, "0.1.9").is_empty());
-    assert_eq!(versions(Kind::Wd, "99.0.0"), ["wd-extension-v2", "wd-extension-v3", "wd-extension-v4"]);
+    assert_eq!(versions("0.2.0-beta.1"), ["character-pack-v2", "character-pack-v3"]);
+    assert!(versions("0.1.9").is_empty());
+    assert_eq!(versions("99.0.0"), ["character-pack-v2", "character-pack-v3", "character-pack-v4"]);
 
-    let v3 = parsed.packs(Kind::Wd, &context("0.2.0")).pop().unwrap();
-    assert_eq!((v3.revision, v3.format.as_str(), v3.heads, v3.candidate_only), (3, WD_FORMAT_V2, 3, 1));
+    let v3 = parsed.packs(&context("0.2.0")).pop().unwrap();
+    assert_eq!((v3.revision, v3.heads(), v3.wd.format.as_str(), v3.wd.candidate_only), (3, 5, WD_FORMAT_V2, 1));
+    assert_eq!((v3.wd.kind, v3.ccip.kind, v3.wd.revision), (Kind::Wd, Kind::Ccip, 3));
     assert_eq!(v3.note, Some(("合成测试包 3".into(), "Synthetic test pack 3".into())));
+    // 组成部分按 SHA-256 放：不同版本的同一个文件放在同一个文件夹。
+    assert_eq!(v3.wd.version, format!("wd-extension-{}", &v3.wd.file.sha256[..12]));
 
-    // 基础模型换了的构建（这里用改了内置包的上下文代替），目录里的 WD 包都不能用。
+    // 基础模型换了的构建（这里用改了内置包的上下文代替），目录里的包都不能用。
     let mut other = context("0.2.0");
-    other.wd.base = Base::Wd { model: "a".repeat(64), tags: WD_TAGS_SHA256.into() };
-    assert!(parsed.packs(Kind::Wd, &other).is_empty());
+    other.builtin.wd.base = Base::Wd { model: "a".repeat(64), tags: WD_TAGS_SHA256.into() };
+    assert!(parsed.packs(&other).is_empty());
     let mut other = context("0.2.0");
-    other.ccip.base = Base::Ccip { model: "b".repeat(64) };
-    assert!(parsed.packs(Kind::Ccip, &other).is_empty());
+    other.builtin.ccip.base = Base::Ccip { model: "b".repeat(64) };
+    assert!(parsed.packs(&other).is_empty());
 
-    // 旧格式的包不能带二级头；和内置包同版本名、同修订号或同文件的条目交给内置的那条。
-    let builtin = builtin_wd().unwrap();
-    let mut tiered = entry("wd-extension-v7", 7);
-    tiered["candidate_only"] = 1.into();
-    let mut same_version = entry(&builtin.version, 8);
-    same_version["file"]["url"] = format!("{RELEASE_PREFIX}x/{}.bin", builtin.version).into();
-    let same_revision = entry("wd-extension-v9", builtin.revision);
-    let mut same_file = entry("wd-extension-v10", 10);
-    same_file["file"]["sha256"] = builtin.file.sha256.clone().into();
-    let parsed = parse(&catalog(vec![tiered, same_version, same_revision, same_file])).unwrap();
-    assert!(parsed.packs(Kind::Wd, &context("0.2.0")).is_empty());
+    // 组成部分和内置的文件相同时用内置的那个（同一个文件夹、同一个下载地址）。
+    let mut same = context("0.2.0");
+    let v2 = parsed.packs(&same).remove(0);
+    same.builtin.ccip.file.sha256 = v2.ccip.file.sha256.clone();
+    let v2 = parsed.packs(&same).remove(0);
+    assert_eq!((v2.ccip.version.as_str(), v2.ccip.builtin, v2.ccip.revision), ("ccip-longtail-v1", true, 2));
+
+    // 旧格式的 WD 部分不能带二级头、CCIP 部分没有二级；和内置包同版本名、同修订号或两个文件都相同的条目交给内置的。
+    let builtin = builtin().unwrap();
+    let mut tiered = entry("character-pack-v7", 7);
+    tiered["components"]["wd"]["candidate_only"] = 1.into();
+    let mut ccip_tier = entry("character-pack-v8", 8);
+    ccip_tier["components"]["ccip"]["candidate_only"] = 1.into();
+    let same_version = entry(BUILTIN_VERSION, 9);
+    let same_revision = entry("character-pack-v10", builtin.revision);
+    let mut same_files = entry("character-pack-v11", 11);
+    same_files["components"]["wd"]["file"]["sha256"] = builtin.wd.file.sha256.clone().into();
+    same_files["components"]["ccip"]["file"]["sha256"] = builtin.ccip.file.sha256.clone().into();
+    let parsed = parse(&catalog(vec![tiered, ccip_tier, same_version, same_revision, same_files])).unwrap();
+    assert!(parsed.packs(&context("0.2.0")).is_empty());
 }
 
 #[test]
@@ -221,32 +243,47 @@ fn cache_keeps_the_newest_verified_catalog() {
     fs::remove_dir_all(dir).unwrap();
 }
 
-fn pack(version: &str, revision: u32) -> Pack {
-    let mut pack = builtin_wd().unwrap();
+fn pack(version: &str, revision: u32) -> CharacterPack {
+    let mut pack = builtin().unwrap();
     pack.version = version.into();
     pack.revision = revision;
     pack.builtin = revision == 1;
-    pack.file.sha256 = format!("{revision:064x}");
+    pack.wd.file.sha256 = format!("{revision:064x}");
+    pack.ccip.file.sha256 = format!("{:064x}", revision + 100);
     pack
 }
 
 #[test]
 fn card_shows_the_enabled_or_newest_present_version_and_offers_newer_ones() {
     let packs = vec![pack("v1", 1), pack("v2", 2), pack("v3", 3)];
-    let sha = |revision: u32| format!("{revision:064x}");
-    let present = |versions: &'static [&'static str]| move |p: &Pack| versions.contains(&p.version.as_str());
-    let card = |enabled: Option<&str>, here: &'static [&'static str]| current(&packs, enabled, present(here)).version;
+    let (wd, ccip) = (|r: u32| format!("{r:064x}"), |r: u32| format!("{:064x}", r + 100));
+    let enabled = |w: Option<u32>, c: Option<u32>| {
+        enabled_pack(&packs, w.map(wd).as_deref(), c.map(ccip).as_deref()).map(|p| p.version.clone())
+    };
+    // 两个组成部分都对得上的那个；只启用了一个，或换包时一边没换成：先按 WD、再按 CCIP 找含它的最新版本。
+    assert_eq!(enabled(Some(2), Some(2)).as_deref(), Some("v2"));
+    assert_eq!(enabled(Some(1), None).as_deref(), Some("v1"));
+    assert_eq!(enabled(None, Some(3)).as_deref(), Some("v3"));
+    assert_eq!(enabled(Some(2), Some(3)).as_deref(), Some("v2"));
+    assert_eq!(enabled(Some(9), Some(3)).as_deref(), Some("v3"));
+    assert_eq!(enabled(None, None), None);
+    // 两个版本共用一个 CCIP 文件时，只启用了 CCIP 部分的图库算较新的那个。
+    let mut shared = packs.clone();
+    shared[2].ccip.file.sha256 = ccip(2);
+    assert_eq!(enabled_pack(&shared, None, Some(&ccip(2))).map(|p| p.version.as_str()), Some("v3"));
+
+    let present = |versions: &'static [&'static str]| move |p: &CharacterPack| versions.contains(&p.version.as_str());
+    let card = |on: Option<&str>, here: &'static [&'static str]| {
+        current(&packs, packs.iter().find(|p| Some(p.version.as_str()) == on), present(here)).version
+    };
     // 启用了哪个就是哪个，不管本机有没有。
-    assert_eq!(card(Some(&sha(1)), &[]), "v1");
-    assert_eq!(card(Some(&sha(2)), &["v3"]), "v2");
+    assert_eq!(card(Some("v1"), &[]), "v1");
+    assert_eq!(card(Some("v2"), &["v3"]), "v2");
     // 没启用：本机已有的最新一个；都没有就是最新的一个（直接下载它，不用先下旧版本）。
     assert_eq!(card(None, &["v1", "v2"]), "v2");
     assert_eq!(card(None, &[]), "v3");
-    // 启用的版本不在可用列表里（目录不再列它）：按没启用算。
-    assert_eq!(card(Some(&sha(9)), &["v1"]), "v1");
 
-    let offered =
-        |version: &str| offer(&packs, packs.iter().find(|p| p.version == version).unwrap()).map(|p| p.version);
+    let offered = |version: &str| offer(&packs, packs.iter().find(|p| p.version == version).unwrap()).map(|p| p.version);
     assert_eq!(offered("v1").as_deref(), Some("v3"));
     assert_eq!(offered("v2").as_deref(), Some("v3"));
     assert_eq!(offered("v3"), None);
@@ -254,9 +291,11 @@ fn card_shows_the_enabled_or_newest_present_version_and_offers_newer_ones() {
 }
 
 #[test]
-fn offline_bundles_carry_their_catalog() {
-    // 离线包里的目录成员按名字读出来，交给 adopt；这里只核对夹具本身是一份完整的离线包。
-    for bundle in ["wd-extension-v2-offline.zip", "ccip-longtail-v2-offline.zip"] {
+fn offline_bundles_carry_their_catalog_and_both_files() {
+    for (bundle, files) in [
+        ("character-pack-v2-offline.zip", ["wd-extension-v2.bin", "ccip-longtail-v1.zip"]),
+        ("character-pack-v3-offline.zip", ["wd-extension-v3.bin", "ccip-longtail-v2.zip"]),
+    ] {
         let mut archive = zip::ZipArchive::new(std::io::Cursor::new(fixture(bundle))).unwrap();
         let mut read = |name: &str| {
             let mut bytes = Vec::new();
@@ -264,5 +303,8 @@ fn offline_bundles_carry_their_catalog() {
             bytes
         };
         verify(&read(CATALOG_NAME), &read(SIGNATURE_NAME), &key("key-a.pub")).unwrap();
+        for file in files {
+            assert_eq!(read(file), fixture(file));
+        }
     }
 }
