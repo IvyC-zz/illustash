@@ -27,6 +27,8 @@ export const state = {
 
   // ---- 人工结论快照（自动快照的状态和最近一次导出，GET /api/human-conclusions）：core/human.js ----
   human: null,
+  // ---- 用图动作（能不能拖出、最近一次导出到文件夹，GET /api/files）：core/files.js ----
+  files: null,
   // ---- 图库完整性检查的回应：core/integrity.js ----
   integrity: null,
   // ---- 识别模型的状态：core/models.js ----

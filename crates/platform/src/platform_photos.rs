@@ -22,12 +22,44 @@ pub fn path(root: &Path, uuid: &str, directory: &str, filename: &str) -> Result<
     })
 }
 
-pub fn read(raw: &str) -> Result<(PathBuf, Vec<Value>)> {
-    let root = if let Some(rest) = raw.strip_prefix("~/") {
+fn root(raw: &str) -> Result<PathBuf> {
+    Ok(if let Some(rest) = raw.strip_prefix("~/") {
         PathBuf::from(std::env::var_os("HOME").ok_or_else(|| Error::Invalid("HOME 未设置".into()))?).join(rest)
     } else {
         PathBuf::from(raw)
-    };
+    })
+}
+
+/// 一张照片在本机的原图（只在 iCloud 里、还没下载时为 None）和它在「照片」里的原文件名（没有时为空），用于导出和
+/// 打开时的副本（#450）。只读打开 Photos.sqlite。
+pub fn original(raw: &str, uuid: &str) -> Result<(Option<PathBuf>, String)> {
+    let root = root(raw)?;
+    let photos = crate::sqlite::open_with_flags(root.join("database/Photos.sqlite"), OpenFlags::SQLITE_OPEN_READ_ONLY)?;
+    photos.busy_timeout(std::time::Duration::from_millis(250))?;
+    let row: Option<(String, String, String)> = photos
+        .query_row(
+            "SELECT coalesce(a.ZDIRECTORY,''),coalesce(a.ZFILENAME,''),coalesce(d.ZORIGINALFILENAME,'') FROM ZASSET a LEFT JOIN ZADDITIONALASSETATTRIBUTES d ON a.ZADDITIONALATTRIBUTES=d.Z_PK WHERE a.ZUUID=?",
+            [uuid],
+            |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)),
+        )
+        .map(Some)
+        .or_else(|e| if e == rusqlite::Error::QueryReturnedNoRows { Ok(None) } else { Err(e) })?;
+    let Some((directory, filename, name)) = row else { return Ok((None, String::new())) };
+    // 原文件名只用来起名，不拼进路径；目录和文件名和 `path` 一样先拒绝越出目录的值。
+    let name = Path::new(&name).file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
+    if filename.is_empty()
+        || [&directory, &filename]
+            .iter()
+            .any(|v| Path::new(v.as_str()).components().any(|c| !matches!(c, std::path::Component::Normal(_))))
+    {
+        return Ok((None, name));
+    }
+    let original = root.join("originals").join(directory).join(filename);
+    Ok((original.is_file().then_some(original), name))
+}
+
+pub fn read(raw: &str) -> Result<(PathBuf, Vec<Value>)> {
+    let root = root(raw)?;
     let db = root.join("database/Photos.sqlite");
     // 打开被拒时 SQLite 只报「unable to open database file」；直接打开文件才能知道原因（#202）。
     if let Err(error) = std::fs::File::open(&db) {

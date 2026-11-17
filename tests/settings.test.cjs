@@ -112,7 +112,8 @@ test('index progress does not reload work list or rebuild the editor', async () 
 
 test('index completion fetches updated results once', async () => {
   const {calls, renders} = await indexHarness('checking', 'checked');
-  assert.deepEqual(calls, ['/api/index?progress=1', '/api/index']);
+  // 卡片重画时另读一次覆盖情况（#561，/api/index 的回复冻结，覆盖情况走单独的路由）。
+  assert.deepEqual(calls, ['/api/index?progress=1', '/api/index', '/api/index/coverage']);
   assert.deepEqual(renders, ['index', 'tasks']);
 });
 
