@@ -1,5 +1,5 @@
 //! 会话 POST 业务路由；入口安全检查由 app_http 保持。
-use super::http_host_get::{expired, reply, reply_if_current, waited};
+use super::http_host_get::{ccip_status, expired, reply, reply_if_current, waited};
 use super::*;
 use std::sync::RwLockWriteGuard;
 
@@ -26,7 +26,10 @@ pub(super) fn handle(request: Request, host: &Host, received: u64, text: &str, b
         "/api/diagnostics/open-logs" => {
             return reply(request, crate::app_desktop::request("POST", "/platform/diagnostics/open-logs", 5), false);
         }
+        "/api/wd-extension/package" => return wd_package(request, host, received, body, &translate),
         "/api/models" => return models(request, host, body, &translate),
+        "/api/ccip-longtail/package" => return ccip_package(request, host, received, body, &translate),
+        url if url.starts_with("/api/files/") => return files(request, host, received, &body, &translate),
         _ => {}
     }
     let mut body = body;
@@ -71,7 +74,8 @@ pub(super) fn handle(request: Request, host: &Host, received: u64, text: &str, b
     }
     match request.url() {
         "/api/human-conclusions/export" => {
-            let result = session.human_exports.start(&session.library, session.generation, &session.token);
+            let result = wd_idle(&session)
+                .and_then(|()| session.human_exports.start(&session.library, session.generation, &session.token));
             drop(session);
             return reply(request, result, true);
         }
@@ -81,7 +85,8 @@ pub(super) fn handle(request: Request, host: &Host, received: u64, text: &str, b
             return reply(request, result, true);
         }
         "/api/human-conclusions/import" | "/api/human-conclusions/restore" => {
-            let result = human_import(host, &session, &body, request.url().ends_with("/restore"));
+            let result = wd_idle(&session)
+                .and_then(|()| human_import(host, &session, &body, request.url().ends_with("/restore")));
             drop(session);
             return reply(request, result, true);
         }
@@ -97,19 +102,38 @@ pub(super) fn handle(request: Request, host: &Host, received: u64, text: &str, b
         "/api/relate" => return relate(request, host, received, session, &body),
         // 导入是后台任务（#26、#88）：请求做完校验、启动任务后立即应答；页面轮询 GET /api/imports，可以取消。
         // 识别结果导入始终绑定在开始时的图库上。取消、切换图库或退出，都会让两种导入在发布点之前停下。
+        "/api/ccip-longtail/enable" | "/api/ccip-longtail/withdraw" => {
+            if !matches!(&body,Json::Object(fields) if fields.is_empty()) {
+                return failure(request, Error::invalid("参考包请求字段不正确"), true);
+            }
+            let withdraw = request.url().ends_with("/withdraw");
+            let result =
+                longtail(host, &session, withdraw).and_then(|started| ccip_status(host, &session, Some(started)));
+            drop(session);
+            return reply(request, result, true);
+        }
+        "/api/ccip-longtail/cancel" => {
+            let Some(id) = body.get("id").map(Json::text).filter(|id| !id.is_empty()) else {
+                return failure(request, Error::invalid("缺少参考包任务编号"), true);
+            };
+            let generation = session.generation;
+            drop(session);
+            let result = host.imports.cancel_ccip(generation, id).and_then(|()| ccip_status_current(host, received));
+            return reply_if_current(request, host, received, result, true);
+        }
         "/api/recognition/import" => {
-            let started = recognition_import(host, &session, &body);
+            let started = wd_idle(&session).and_then(|()| recognition_import(host, &session, &body));
             drop(session);
             return reply(request, started.map(started_task), true);
         }
         "/api/libraries/import" => {
-            let started = library_import(host, &session, &body);
+            let started = wd_idle(&session).and_then(|()| library_import(host, &session, &body));
             drop(session);
             return reply(request, started.map(started_task), true);
         }
         "/api/imports/cancel" => {
             drop(session);
-            return respond(request, host.imports.cancel(crate::app_imports::CANCELLED), 200, "core");
+            return respond(request, host.imports.cancel_import(), 200, "core");
         }
         _ => {}
     }
@@ -120,6 +144,105 @@ pub(super) fn handle(request: Request, host: &Host, received: u64, text: &str, b
         }
         None => unavailable(request),
     }
+}
+/// 用图动作（#450，app_asset_files、app_asset_export）。页面只传资产 ID；先核对会话和 CSRF，再弹选择窗口或叫外壳，
+/// 这期间不持有会话锁。这些请求不写图库，图库包损坏时照样应答。
+fn files(request: Request, host: &Host, received: u64, body: &Json, translate: Translate) {
+    let (library, generation) = {
+        let session = host.session.read().expect("http_host_post session lock poisoned");
+        if !host.accepts(&session, received) || header(&request, "X-CSRF-Token") != Some(session.token.as_str()) {
+            drop(session);
+            return expired(request);
+        }
+        (session.library.clone(), session.generation)
+    };
+    let id = || match body.get("id") {
+        Some(Json::Scalar(serde_json::Value::String(id))) if !id.is_empty() => Ok(id.as_str()),
+        _ => Err(Error::invalid("请选择图片")),
+    };
+    let result: Result<Json> = match request.url() {
+        "/api/files/open" => id().and_then(|id| crate::app_asset_files::open(&library, id)).map(Into::into),
+        "/api/files/reveal" => id().and_then(|id| crate::app_asset_files::reveal(&library, id)).map(Into::into),
+        "/api/files/drag" => {
+            let ids = match body.get("ids") {
+                Some(Json::Array(ids)) => ids.iter().map(|v| v.text().to_owned()).filter(|v| !v.is_empty()).collect(),
+                _ => Vec::new(),
+            };
+            crate::app_asset_files::drag(&library, &ids, |located| {
+                crate::app_files::cached_icon(&library, &located.uuid, &located.path)
+            })
+            .map(Into::into)
+        }
+        "/api/files/export" => return export(request, host, received, body, translate),
+        "/api/files/export/cancel" => {
+            let session = host.session.read().expect("http_host_post session lock poisoned");
+            Ok(session.asset_exports.cancel())
+        }
+        "/api/files/export/reveal" => {
+            let destination = host
+                .session
+                .read()
+                .expect("http_host_post session lock poisoned")
+                .asset_exports
+                .destination(generation);
+            match destination {
+                Some(folder) => crate::app_asset_files::show_folder(&folder).map(Into::into),
+                None => Err(Error::invalid("没有导出过")),
+            }
+        }
+        _ => return unavailable(request),
+    };
+    reply_if_current(request, host, received, result, true);
+}
+/// 选中的图导出到文件夹：先在选择窗口里选目录（不持有会话），再按页面的选择（ID 或筛选条件）开后台任务。
+fn export(request: Request, host: &Host, received: u64, body: &Json, translate: Translate) {
+    let group = match crate::app_asset_export::Group::parse(body.get("group").map(Json::text).unwrap_or("")) {
+        Ok(group) => group,
+        Err(e) => return failure(request, e, true),
+    };
+    let mut selection = body.clone();
+    if let Json::Object(fields) = &mut selection {
+        fields.retain(|(k, _)| k == "ids" || k == "filter" || k == "exclude");
+    }
+    // 导出只复制、不改图库：超过 500 张也不用再确认一次。
+    selection.set("confirm", true.into());
+    if host.session.read().expect("http_host_post session lock poisoned").asset_exports.running() {
+        return failure(request, Error::invalid("正在导出，完成后再开始下一次"), true);
+    }
+    let destination = match pick_file(host, received, translate, "export") {
+        Picked::Path(path) => PathBuf::from(path.text()),
+        Picked::Cancelled => return cancelled(request),
+        Picked::Switched => return expired(request),
+        Picked::Failed(e) => return failure(request, e, true),
+    };
+    let session = host.session.read().expect("http_host_post session lock poisoned");
+    if !host.accepts(&session, received) {
+        drop(session);
+        return expired(request);
+    }
+    let context = session.context(&host.tags);
+    let ids = (|| {
+        let c = crate::sqlite::open_with_flags(
+            &context.db,
+            rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY | rusqlite::OpenFlags::SQLITE_OPEN_URI,
+        )?;
+        c.busy_timeout(std::time::Duration::from_secs(10))?;
+        crate::http_read::register_names(&c)?;
+        // 只导出选中的这几张，不带上它们的重复副本。
+        crate::app_commands::selected_scope(&c, &context, &selection, false)
+    })();
+    let result = ids.and_then(|ids| {
+        session.asset_exports.start(
+            &session.library,
+            session.generation,
+            ids,
+            group,
+            translate(group.fallback()),
+            destination,
+        )
+    });
+    drop(session);
+    reply(request, result, true);
 }
 fn cancelled(request: Request) {
     respond(request, Json::object([("cancelled", true.into())]), 200, "core");
@@ -141,12 +264,10 @@ fn choose(request: Request, host: &Host, received: u64, body: &Json, translate: 
 /// 期间不持有会话。
 fn models(request: Request, host: &Host, mut body: Json, translate: Translate) {
     if body.get("action").map(Json::text) == Some("import") && body.get("paths").is_none() {
-        match crate::app_platform::choose("models", true, &crate::platform_process::stopping, translate) {
-            Ok(picked) => match picked.get("paths") {
-                Some(paths @ Json::Array(list)) if !list.is_empty() => body.set("paths", paths.clone()),
-                _ => return cancelled(request),
-            },
-            Err(e) => return failure(request, management_error(e), true),
+        match model_paths("models", translate) {
+            Ok(Some(paths)) => body.set("paths", paths),
+            Ok(None) => return cancelled(request),
+            Err(e) => return failure(request, e, true),
         }
     }
     // 本会话的识别或角色索引正在使用模型时，删除模型会被拒绝（`app_models::post` 提示等识别结束再删）。
@@ -155,6 +276,107 @@ fn models(request: Request, host: &Host, mut body: Json, translate: Translate) {
         session.syncer.running() || session.index.writing()
     };
     reply(request, crate::app_models::post(&host.root, &body, in_use), true);
+}
+fn wd_package(request: Request, host: &Host, received: u64, mut body: Json, translate: Translate) {
+    if body.get("action").map(Json::text) == Some("import") && body.get("paths").is_none() {
+        if !matches!(&body, Json::Object(fields) if fields.len() == 1) {
+            return failure(request, Error::invalid("未知参数"), true);
+        }
+        match model_paths("wd-extension", translate) {
+            Ok(Some(paths)) => body.set("paths", paths),
+            Ok(None) => return cancelled(request),
+            Err(e) => return failure(request, e, true),
+        }
+    }
+    // 包文件全应用共用，同一宿主里的并发命令按序交给独立下载槽。
+    let session = host.session.write().expect("WD 角色扩展包会话锁中毒");
+    if !host.accepts(&session, received) || header(&request, "X-CSRF-Token") != Some(&session.token) {
+        return expired(request);
+    }
+    let result =
+        crate::app_models::extension_post(&host.root, &body).and_then(|()| host.wd_status(&session)).map(Json::from);
+    drop(session);
+    reply(request, result, true);
+}
+
+fn wd_extension(url: &str, host: &Host, session: &mut Session, body: &Json) -> Result<Json> {
+    use crate::app_wd_extension::Action;
+    if url.ends_with("/cancel") {
+        let Some(Json::Scalar(serde_json::Value::String(id))) = body.get("id") else {
+            return Err(Error::invalid("需要 WD 角色扩展任务编号"));
+        };
+        if id.is_empty() || !matches!(body, Json::Object(fields) if fields.len() == 1) {
+            return Err(Error::invalid("WD 角色扩展任务编号不合法"));
+        }
+        session.wd_extension.cancel(id)?;
+        return host.wd_status(session).map(Json::from);
+    }
+    if !matches!(body, Json::Object(fields) if fields.is_empty()) {
+        return Err(Error::invalid("WD 角色扩展请求字段不正确"));
+    }
+    if session.wd_extension.running() {
+        return Err(wd_running());
+    }
+    let mut snapshot = host.wd_status(session)?;
+    match snapshot["library"]["blocked"].as_str() {
+        Some("frozen") => return Err(Error::Conflict("图库只读".into())),
+        Some("syncing") => return Err(Error::Conflict("正在同步或交付识别结果，请等它结束".into())),
+        Some("busy") => return Err(Error::Conflict("图库正在导入、导出或更新角色索引，请等它结束".into())),
+        Some("no_vectors") if url.ends_with("/enable") => {
+            return Err(Error::Conflict("这个图库没有已保存的 WD 向量".into()));
+        }
+        _ => {}
+    }
+    let action = if url.ends_with("/withdraw") {
+        Action::Withdraw
+    } else {
+        let path =
+            crate::app_models::extension_file(&host.root)?.ok_or_else(|| Error::Conflict("扩展包还没就位".into()))?;
+        Action::Enable(path)
+    };
+    let identity = crate::app_tasks::TaskIdentity::new(&session.library, session.generation, &session.token)?;
+    snapshot["task"] = session.wd_extension.start_for(&session.library, identity, action)?;
+    Ok(snapshot.into())
+}
+
+fn wd_idle(session: &Session) -> Result<()> {
+    if session.wd_extension.running() {
+        return Err(wd_running());
+    }
+    Ok(())
+}
+
+fn wd_running() -> Error {
+    Error::Conflict("WD 角色扩展任务正在进行，请等它结束".into())
+}
+
+fn model_paths(kind: &str, translate: Translate) -> Result<Option<Json>> {
+    let picked = crate::app_platform::choose(kind, true, &crate::platform_process::stopping, translate)
+        .map_err(management_error)?;
+    Ok(picked.get("paths").filter(|v| matches!(v, Json::Array(list) if !list.is_empty())).cloned())
+}
+fn ccip_status_current(host: &Host, received: u64) -> Result<Json> {
+    let session = host.session.read().expect("http_host_post session lock poisoned");
+    if !host.accepts(&session, received) {
+        return Err(Error::Conflict("图库已切换，请重新加载页面".into()));
+    }
+    ccip_status(host, &session, None)
+}
+fn ccip_package(request: Request, host: &Host, received: u64, mut body: Json, translate: Translate) {
+    if body.get("action").map(Json::text) == Some("import") && body.get("paths").is_none() {
+        match model_paths("models", translate) {
+            Ok(Some(paths)) => body.set("paths", paths),
+            Ok(None) => return cancelled(request),
+            Err(e) => return failure(request, e, true),
+        }
+    }
+    let in_use = {
+        let session = host.session.read().expect("http_host_post session lock poisoned");
+        session.syncer.running() || host.imports.recognition_running(session.generation)
+    };
+    let result = crate::app_models::longtail_package_post(&host.root, &body, in_use)
+        .and_then(|()| ccip_status_current(host, received));
+    reply_if_current(request, host, received, result, true);
 }
 enum Picked {
     Path(Json),
@@ -250,6 +472,47 @@ fn relate(request: Request, host: &Host, received: u64, mut session: RwLockWrite
     drop(session);
     reply_if_current(request, host, received, waited(result), true);
 }
+fn longtail(host: &Host, session: &Session, withdraw: bool) -> Result<Json> {
+    use crate::app_ccip_longtail;
+    if session.library.frozen() {
+        return Err(Error::Conflict("图库只读".into()));
+    }
+    wd_idle(session)?;
+    if session.syncer.running() || session.index.writing() {
+        return Err(Error::Conflict("正在同步或更新角色索引，请稍后重试".into()));
+    }
+    let (kind, path) = if withdraw {
+        (crate::app_imports::Kind::CcipWithdraw, None)
+    } else {
+        let shared = crate::app_resources::shared_path(&host.root)?;
+        let path = app_ccip_longtail::package_path(&shared);
+        if !path.try_exists()? {
+            return Err(Error::Conflict("参考包还没就位，请先从文件导入".into()));
+        }
+        if app_ccip_longtail::stored_vectors(&session.library)? == 0 {
+            return Err(Error::Conflict("这个图库还没有 CCIP 向量，请先识别图片".into()));
+        }
+        (crate::app_imports::Kind::CcipEnable, Some(path))
+    };
+    let identity = crate::app_tasks::TaskIdentity::new(&session.library, session.generation, &session.token)?;
+    let (library, root) = (session.library.clone(), host.root.clone());
+    let started = host.imports.start(identity, kind, "", move |progress| {
+        let value = match path {
+            Some(path) => app_ccip_longtail::apply(
+                &library,
+                &root,
+                &path,
+                &|| crate::app_sync::check(progress.cancellation()),
+                progress,
+            )?,
+            None => app_ccip_longtail::withdraw(&library, progress)?,
+        };
+        Ok(value.into())
+    })?;
+    app_ccip_longtail::clear_auto_task(&session.library);
+    Ok(started)
+}
+
 fn recognition_import(host: &Host, session: &Session, body: &Json) -> Result<Json> {
     let resume = matches!(body.get("resume"), Some(Json::Scalar(serde_json::Value::Bool(true))));
     let path = match body.get("path") {
@@ -284,7 +547,7 @@ fn recognition_import(host: &Host, session: &Session, body: &Json) -> Result<Jso
             )?,
             None => {
                 progress.stage("projecting");
-                crate::app_recognition::resume(&library, cancel, &crate::app_research::dispatch)?
+                crate::app_recognition::resume_at(&library, &root, cancel, &crate::app_research::dispatch)?
             }
         };
         // 保持旧版响应的插入顺序（digest、duplicate、status、error）。
@@ -325,6 +588,8 @@ fn route(
 ) -> Option<Result<Json>> {
     Some(match url {
         "/api/tag"
+        | "/api/favorite"
+        | "/api/galleries"
         | "/api/undo"
         | "/api/artist/verdict"
         | "/api/curate"
@@ -357,7 +622,7 @@ fn route(
         }
         "/api/index" => {
             let library = session.library.clone();
-            let busy = session.syncer.running();
+            let busy = session.syncer.running() || session.wd_extension.running();
             if host.imports.recognition_running(session.generation)
                 && matches!(body.get("action").map(Json::text), Some("apply" | "drop"))
             {
@@ -369,6 +634,9 @@ fn route(
         "/api/names" => {
             let library = session.library.clone();
             session.names.post(&library, body)
+        }
+        "/api/wd-extension/enable" | "/api/wd-extension/withdraw" | "/api/wd-extension/cancel" => {
+            wd_extension(url, host, session, body)
         }
         "/api/sync" => sync(host, received, session),
         "/api/similar" | "/api/regroup" => research(url, session, body),
@@ -396,7 +664,9 @@ fn route(
         )
         .map_err(management_error),
         "/api/libraries/forget" => forget(session, body),
-        "/api/libraries/export" => host.exports.start(&session.library, session.generation),
+        "/api/libraries/export" => {
+            wd_idle(session).and_then(|()| host.exports.start(&session.library, session.generation))
+        }
         "/api/integrity" => Ok(session.check_now()),
         "/api/integrity/rescue" => crate::app_create::optional_reference(&host.reference)
             .and_then(|reference| session.start_rescue(reference.map(Path::to_owned))),
@@ -405,6 +675,7 @@ fn route(
     })
 }
 fn sync(host: &Host, received: u64, session: &mut Session) -> Result<Json> {
+    wd_idle(session)?;
     if session.index.writing() {
         return Err(Error::Invalid("角色索引正在更新，请稍后".into()));
     }
@@ -429,6 +700,7 @@ fn research(url: &str, session: &mut Session, body: &Json) -> Result<Json> {
     session.research.start(&lib, kind, serde_json::json!({}), None).map(|_| Json::object([("started", true.into())]))
 }
 fn sources(url: &str, received: u64, session: &mut Session, body: &Json) -> Result<Json> {
+    wd_idle(session)?;
     // 进行中的同步持有一份固定的来源副本；只在两次同步之间修改来源。
     if session.syncer.running() || session.index.writing() {
         return Err(Error::Invalid("正在同步或更新角色索引，请稍后再修改来源".into()));

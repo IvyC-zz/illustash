@@ -111,14 +111,27 @@ pub fn prepare(library: &Library, root: &Path, url: &str) -> Result<Prepared, Fa
     let source = source.filter(|p| !p.is_empty()).ok_or(Failure::Status(404))?;
     let source = PathBuf::from(source);
     let stat = fs::metadata(&source).map_err(|_| Failure::Status(404))?;
+    let key = cache_key(ident, &stat, size).ok_or(Failure::Status(404))?;
+    Ok(Prepared::Image { source, target: library.thumbnails().join(format!("{key}.jpg")), bound })
+}
+/// 缓存文件名：图片 ID、原文件的修改时间和大小、尺寸档。原文件改了就是新的键。
+fn cache_key(ident: &str, stat: &fs::Metadata, size: &str) -> Option<String> {
     // SystemTime 也允许纪元之前的时间戳；旧实现的 st_mtime_ns 也是有符号的。
-    let modified = stat.modified().map_err(|_| Failure::Status(404))?;
+    let modified = stat.modified().ok()?;
     let nanos = match modified.duration_since(UNIX_EPOCH) {
         Ok(d) => d.as_nanos() as i128,
         Err(e) => -(e.duration().as_nanos() as i128),
     };
-    let key = format!("{:x}", Sha256::digest(format!("{ident}:{nanos}:{}:{size}", stat.len()).as_bytes()));
-    Ok(Prepared::Image { source, target: library.thumbnails().join(format!("{key}.jpg")), bound })
+    Some(format!("{:x}", Sha256::digest(format!("{ident}:{nanos}:{}:{size}", stat.len()).as_bytes())))
+}
+/// 拖出时显示的小图（#450）：页面已经显示过的缩略图缓存，没有就是 None（不为拖动现解码原图）。
+pub(crate) fn cached_icon(library: &Library, ident: &str, source: &Path) -> Option<PathBuf> {
+    let stat = fs::metadata(source).ok()?;
+    ["thumb", "medium", "preview"]
+        .into_iter()
+        .filter_map(|size| cache_key(ident, &stat, size))
+        .map(|key| library.thumbnails().join(format!("{key}.jpg")))
+        .find(|path| path.is_file())
 }
 
 #[derive(Default)]

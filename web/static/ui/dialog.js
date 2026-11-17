@@ -5,8 +5,7 @@ import {t} from '../core/i18n.js';
 import {esc} from '../core/format.js';
 import {session} from '../core/session.js';
 import {state} from '../core/state.js';
-import {isBackdropClick, openModal} from './overlay.js';
-export {isBackdropClick};
+import {openModal} from './overlay.js';
 // 生成并显示一个模态对话框，返回它。`title` 是纯文本；`body` 和 `actions` 是 HTML（调用方已转义、翻译），分别是中间和底部一行
 // （为空则省略）。`cls` 加在 `modal` 之后。`backdropClose` 是点背景是否关闭，默认不关：只读或确认类的对话框传 true，
 // 带输入或选项的表单保持不关，免得误点丢掉填的东西；每个调用点都要写明属于哪一类。

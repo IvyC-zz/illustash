@@ -20,6 +20,7 @@ pub const CORE_ROUTES: &[&str] = &[
     "/api/ids",
     "/api/detail",
     "/api/home",
+    "/api/galleries",
     "/api/fold",
     "/api/review-pools",
     "/api/characters",
@@ -423,6 +424,7 @@ fn entities(c: &Connection, q: &str) -> Result<Json> {
     match_names(c, &q)?;
     let matched = if q.is_empty() { "" } else { "JOIN name_matches sm ON sm.entity=e.id" };
     let ranking = if q.is_empty() { "" } else { "sm.rank DESC," };
+    // 只在扩展仍提供候选，或词条已有归属或人工资料时返回扩展新建的角色。
     let sql = format!(
         "SELECT e.id,entity_name(e.id) AS name,e.work,e.kind,e.artist,e.label_only,e.mascot,e.parent_id,
            (SELECT count(*)
@@ -439,11 +441,18 @@ fn entities(c: &Connection, q: &str) -> Result<Json> {
          FROM {ENTITIES} e
          {matched}
          WHERE e.parent_id IS NULL AND e.kind<>'work' AND e.merged_into IS NULL
+           AND NOT EXISTS (
+               SELECT 1 FROM terms t WHERE t.id=e.term_id AND t.origin=?2
+               AND NOT EXISTS (SELECT 1 FROM candidates v WHERE v.entity=e.id)
+               AND NOT EXISTS (SELECT 1 FROM term_projection p WHERE p.term_id=t.id)
+               AND NOT EXISTS (SELECT 1 FROM term_names n WHERE n.term_id=t.id AND n.source='user')
+               AND NOT EXISTS (SELECT 1 FROM term_links l WHERE l.term_id=t.id AND l.source='user'))
          ORDER BY {ranking}count DESC,entity_name(e.id),e.id
          LIMIT 30",
         visible = visible("m")
     );
-    let result = rows(c, &sql, &[&like(&q)])?.into_iter().map(|v| display(c, v)).collect::<Result<Vec<_>>>()?;
+    let origin = crate::character_import::EXTENSION_CHARACTER_ORIGIN;
+    let result = rows(c, &sql, &[&like(&q), origin])?.into_iter().map(|v| display(c, v)).collect::<Result<Vec<_>>>()?;
     c.execute("DELETE FROM name_matches", [])?;
     Ok(Json::Array(result))
 }
@@ -548,10 +557,11 @@ pub(crate) fn tag_vocabulary(context: &LibraryContext) -> Result<Arc<Vec<String>
 const BROWSE_ROUTES: [&str; 7] =
     ["/api/assets", "/api/assets/count", "/api/ids", "/api/detail", "/api/home", "/api/fold", "/api/review-pools"];
 /// 会渲染名字的模块读取。计数、ID 以及原始的身份和偏好读取不渲染；它们的查询路径保持在本地。
-const NAMED_ROUTES: [&str; 8] = [
+const NAMED_ROUTES: [&str; 9] = [
     "/api/assets",
     "/api/detail",
     "/api/home",
+    "/api/galleries",
     "/api/characters",
     "/api/tagged",
     "/api/character/profile",
@@ -572,7 +582,7 @@ pub fn read(context: &LibraryContext, url: &str) -> Result<Option<(Json, u16)>> 
         Err(message) => return Ok(refused(message)),
     };
     let local = crate::http_local::ROUTES.contains(&path);
-    let browse = BROWSE_ROUTES.contains(&path);
+    let browse = BROWSE_ROUTES.contains(&path) || path == "/api/galleries";
     let characters = crate::http_characters::ROUTES.contains(&path);
     let validation = if browse {
         crate::http_browse::validate(path, &q)
@@ -680,6 +690,11 @@ fn read_library(
     let library = context.library.is_some();
     Ok(match path {
         "/api/user-tags" => {
+            let limit =
+                q.get("limit").map(|value| python_int(value).map_err(Error::Invalid)).transpose()?.unwrap_or(60);
+            if !(1..=1000).contains(&limit) {
+                return Err(Error::invalid("分页参数不正确"));
+            }
             let sql = format!(
                 "SELECT tag,count(*) AS count
                  FROM asset_tags m
@@ -687,7 +702,7 @@ fn read_library(
                  WHERE {visible} AND tag LIKE ? ESCAPE '\\'
                  GROUP BY tag
                  ORDER BY count DESC,tag
-                 LIMIT 60",
+                 LIMIT {limit}",
                 visible = visible("m")
             );
             Json::Array(rows(c, &sql, &[&like(&cut(trim(value("q")), 60))])?)

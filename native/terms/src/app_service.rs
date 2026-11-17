@@ -143,15 +143,20 @@ pub(crate) struct Session {
     pub(crate) token: String,
     pub(crate) generation: u64,
     pub(crate) syncer: crate::app_sync::Syncer,
+    pub(crate) wd_extension: crate::app_wd_extension::Tasks,
+    wd_history: std::collections::HashMap<PathBuf, serde_json::Value>,
     pub(crate) names: crate::app_names::Updater,
     pub(crate) provenance: crate::app_provenance::Runner,
     pub(crate) index: crate::app_index::Updater,
     pub(crate) auto_sync: bool,
     pub(crate) research: crate::app_research::Research,
+    pub(crate) examples: Arc<crate::example_cache::Cache>,
     pub(crate) onboarding: crate::app_onboarding::Onboarding,
     /// 与会话绑定的人工结论自动保护；关闭时取消，不等待整库哈希。
     pub(crate) human_backups: crate::app_human_conclusions::Backups,
     pub(crate) human_exports: crate::app_human_conclusions::Exports,
+    /// 选中的图导出到文件夹（#450）；换库或关闭时停下。
+    pub(crate) asset_exports: crate::app_asset_export::Exports,
     /// 打开这个图库时它为什么没能列入最近使用的图库（#176）。列入只是省得下次再选一遍，所以图库照样打开，页面提示一次。
     pub(crate) unlisted: Option<String>,
     /// 这个图库在打开时被升级过的话，升级前的备份（#193）：页面提示一次备份在哪里。
@@ -198,14 +203,18 @@ impl Session {
             generation,
             token,
             syncer: crate::app_sync::Syncer::default(),
+            wd_extension: Default::default(),
+            wd_history: Default::default(),
             names,
             provenance,
             index,
             auto_sync: true,
             research,
+            examples: Default::default(),
             onboarding,
             human_backups: Default::default(),
             human_exports: Default::default(),
+            asset_exports: Default::default(),
             unlisted: None,
             upgraded: None,
             checker: Default::default(),
@@ -365,14 +374,18 @@ impl Application {
             generation: 1,
             token,
             syncer: crate::app_sync::Syncer::default(),
+            wd_extension: Default::default(),
+            wd_history: Default::default(),
             names,
             provenance,
             index,
             auto_sync,
             research,
+            examples: Default::default(),
             onboarding,
             human_backups: Default::default(),
             human_exports: Default::default(),
+            asset_exports: Default::default(),
             unlisted: None,
             upgraded: None,
             checker: Default::default(),
@@ -471,7 +484,10 @@ impl Application {
         }
         let library = session.library.clone();
         session.provenance.recover();
-        let busy = session.syncer.running();
+        if let Err(error) = self.start_wd_auto(&mut session) {
+            eprintln!("WD 扩展自动检查未能启动：{error}");
+        }
+        let busy = session.syncer.running() || session.wd_extension.running();
         session.index.recover(&library, busy);
         session.names.recover(&library);
         if let Err(error) = session.research.recover(&library, busy) {
@@ -481,6 +497,39 @@ impl Application {
             eprintln!("native verdict事件恢复失败：{error}");
         }
     }
+    pub(crate) fn wd_busy(&self, session: &Session) -> Option<&'static str> {
+        if session.syncer.running()
+            || self.imports.active_kind(session.generation) == Some(crate::app_imports::Kind::Recognition)
+        {
+            Some("syncing")
+        } else if session.index.writing()
+            || self.imports.busy()
+            || self.exports.running()
+            || session.human_exports.running()
+        {
+            Some("busy")
+        } else {
+            None
+        }
+    }
+
+    fn start_wd_auto(&self, session: &mut Session) -> Result<()> {
+        if session.wd_extension.running() || self.wd_busy(session).is_some() {
+            return Ok(());
+        }
+        let ids = session.syncer.take_wd_deliveries();
+        if ids.is_empty() {
+            return Ok(());
+        }
+        let Some(path) = crate::app_models::extension_file(&self.root)? else { return Ok(()) };
+        if !crate::app_wd_extension::auto_enabled(&session.library)? {
+            return Ok(());
+        }
+        let identity = crate::app_tasks::TaskIdentity::new(&session.library, session.generation, &session.token)?;
+        session.wd_extension.start_for(&session.library, identity, crate::app_wd_extension::Action::Auto(path, ids))?;
+        Ok(())
+    }
+
     /// 停止当前会话的任务和导出并等待它们结束；正在进行的导入有一段有限的等待时间，用来删除它解开的文件。
     pub fn shutdown(&self) {
         let mut session = self.session.write().expect("application session lock poisoned");
@@ -523,12 +572,15 @@ impl Session {
     fn halt(&mut self) {
         self.human_backups.stop();
         self.human_exports.stop();
+        self.asset_exports.stop();
         self.provenance.stop();
         self.index.stop();
         self.onboarding.stop();
         self.research.stop();
+        self.examples.clear();
         self.names.stop();
         self.syncer.stop();
+        self.wd_extension.stop();
     }
 }
 
@@ -577,6 +629,13 @@ impl Application {
         replacement.syncer.per_run = session.syncer.per_run;
 
         session.close();
+        let wd_state = session.wd_extension.snapshot();
+        if !wd_state.is_null() {
+            let previous = session.library.instance_path().to_owned();
+            session.wd_history.insert(previous, wd_state);
+        }
+        replacement.wd_history = std::mem::take(&mut session.wd_history);
+        replacement.wd_extension.restore(replacement.wd_history.remove(replacement.library.instance_path()));
         self.exports.stop();
         // 导入不会跟着切换走：它在发布之前停止，替换后的会话从干净的状态开始。
         self.imports.cancel(crate::app_imports::SWITCHED);

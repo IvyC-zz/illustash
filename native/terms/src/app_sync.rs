@@ -17,6 +17,7 @@ use std::{
 pub(crate) struct Syncer {
     state: Arc<Mutex<State>>,
     task: Option<crate::app_tasks::Task>,
+    wd_delivered: Arc<Mutex<HashSet<String>>>,
     pub resource_root: std::path::PathBuf,
     pub per_run: usize,
     pub enabled: bool,
@@ -26,6 +27,7 @@ impl Default for Syncer {
         Self {
             state: Arc::new(Mutex::new(State::from(json!({"status":"idle"})))),
             task: None,
+            wd_delivered: Arc::default(),
             resource_root: std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../.."),
             per_run: 0,
             enabled: true,
@@ -36,44 +38,19 @@ impl Syncer {
     pub fn running(&self) -> bool {
         self.task.as_ref().is_some_and(crate::app_tasks::Task::running)
     }
+    pub(crate) fn take_wd_deliveries(&self) -> Vec<String> {
+        self.wd_delivered.lock().expect("WD 扩展交付队列锁中毒").drain().collect()
+    }
     pub fn available(library: &Library) -> bool {
         !library.frozen()
             && library.config()["sources"].as_array().is_some_and(|s| {
                 !s.is_empty() && s.iter().all(|s| matches!(s["kind"].as_str(), Some("folder" | "photos")))
             })
     }
-    pub fn status(&self, library: &Library) -> Result<crate::http_json::Json> {
+    /// 页面看到的同步状态（`GET /api/sync` 的 `state`），只读内存，不读数据库；任务面板和桌面外壳（#451）都用它。
+    pub(crate) fn snapshot(&self, library: &Library) -> crate::http_json::Json {
         use crate::http_json::Json;
-        let c = crate::app_library::read_connection(&library.db())?;
-        let mut q = c.prepare("SELECT * FROM sync_runs ORDER BY id DESC LIMIT 8")?;
-        let names: Vec<String> = q.column_names().map(str::to_owned).collect();
-        let history = q
-            .query_map([], |r| {
-                let mut row = Vec::new();
-                for (i, name) in names.iter().enumerate() {
-                    let v = match r.get_ref(i)? {
-                        rusqlite::types::ValueRef::Null => Value::Null,
-                        rusqlite::types::ValueRef::Integer(v) => v.into(),
-                        rusqlite::types::ValueRef::Real(v) => v.into(),
-                        rusqlite::types::ValueRef::Text(v) => String::from_utf8_lossy(v).into_owned().into(),
-                        _ => Value::Null,
-                    };
-                    let v: Json = if name == "sources" {
-                        match v {
-                            Value::String(s) if !s.is_empty() => {
-                                serde_json::from_str(&s).unwrap_or_else(|_| Json::from(Value::Null))
-                            }
-                            _ => Json::from(Value::Null),
-                        }
-                    } else {
-                        v.into()
-                    };
-                    row.push((name.clone(), v));
-                }
-                Ok(Json::Object(row))
-            })?
-            .collect::<rusqlite::Result<Vec<_>>>()?;
-        let state = if self.enabled && Self::available(library) {
+        if self.enabled && Self::available(library) {
             let mut state = self.state.lock().expect("sync state mutex poisoned").snapshot();
             if let Some(task) = &self.task {
                 if let crate::app_tasks::TaskOutcome::Failed(message) = task.outcome() {
@@ -113,7 +90,40 @@ impl Syncer {
             )
         } else {
             Json::object([("status", "off".into())])
-        };
+        }
+    }
+    pub fn status(&self, library: &Library) -> Result<crate::http_json::Json> {
+        use crate::http_json::Json;
+        let c = crate::app_library::read_connection(&library.db())?;
+        let mut q = c.prepare("SELECT * FROM sync_runs ORDER BY id DESC LIMIT 8")?;
+        let names: Vec<String> = q.column_names().map(str::to_owned).collect();
+        let history = q
+            .query_map([], |r| {
+                let mut row = Vec::new();
+                for (i, name) in names.iter().enumerate() {
+                    let v = match r.get_ref(i)? {
+                        rusqlite::types::ValueRef::Null => Value::Null,
+                        rusqlite::types::ValueRef::Integer(v) => v.into(),
+                        rusqlite::types::ValueRef::Real(v) => v.into(),
+                        rusqlite::types::ValueRef::Text(v) => String::from_utf8_lossy(v).into_owned().into(),
+                        _ => Value::Null,
+                    };
+                    let v: Json = if name == "sources" {
+                        match v {
+                            Value::String(s) if !s.is_empty() => {
+                                serde_json::from_str(&s).unwrap_or_else(|_| Json::from(Value::Null))
+                            }
+                            _ => Json::from(Value::Null),
+                        }
+                    } else {
+                        v.into()
+                    };
+                    row.push((name.clone(), v));
+                }
+                Ok(Json::Object(row))
+            })?
+            .collect::<rusqlite::Result<Vec<_>>>()?;
+        let state = self.snapshot(library);
         let mut fields = vec![("state", state), ("history", Json::Array(history))];
         if let Some(listing) = damaged::listing(&c)? {
             fields.push(("damaged", listing));
@@ -143,8 +153,13 @@ impl Syncer {
         let (library, state) = (library.clone(), self.state.clone());
         let root = self.resource_root.clone();
         let per_run = self.per_run;
+        let delivered = self.wd_delivered.clone();
         self.task = Some(crate::app_tasks::Task::start_with(identity, deadline(), move |ctx| {
             let cancel = ctx.cancellation();
+            let window = crate::app_wd_extension::DeliveryWindow::start(&library).unwrap_or_else(|error| {
+                eprintln!("无法记录本次同步的 WD 扩展范围：{error}");
+                None
+            });
             let result = run_with(&library, cancel, Some(&ctx), &root, per_run, &|fields| {
                 if ctx.check().is_err() {
                     return;
@@ -158,6 +173,12 @@ impl Syncer {
                 };
                 let _ = apply();
             });
+            if let Some(window) = window.filter(|_| ctx.check().is_ok() || ctx.timed_out()) {
+                match window.delivered(&library) {
+                    Ok(ids) => delivered.lock().expect("WD 扩展交付队列锁中毒").extend(ids),
+                    Err(error) => eprintln!("无法读取本次同步的 WD 识别交付：{error}"),
+                }
+            }
             match result {
                 Ok(_) => Ok(()),
                 Err(e) => {
@@ -348,7 +369,7 @@ fn run_with(
         }
         // 先扫描，避免已删除/换内容的图片被旧 pending 永久挡住；仍有效的结果再恢复。
         step.set("recognition resume, source.sqlite and library.sqlite");
-        let recovery = crate::app_recognition::resume(library, cancel, &crate::app_research::dispatch)?;
+        let recovery = crate::app_recognition::resume_at(library, root, cancel, &crate::app_research::dispatch)?;
         let deferred = crate::app_recognition::unavailable_inputs(&recovery)?;
         unreadable += deferred.len() as u64;
         step.set("sync record, library.sqlite");

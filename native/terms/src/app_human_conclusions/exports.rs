@@ -20,6 +20,10 @@ pub(crate) struct Exports {
     report: Arc<Mutex<Option<Report>>>,
 }
 impl Exports {
+    pub(crate) fn running(&self) -> bool {
+        self.tasks.busy()
+    }
+
     pub(crate) fn state(&self) -> Json {
         self.tasks.state()
     }

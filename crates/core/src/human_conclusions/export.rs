@@ -49,7 +49,7 @@ pub fn capture(c: &Connection, header: Header) -> Result<Snapshot> {
     // 旧结构没有逐字段来源。完整保留其现状并标 legacy_unknown，不能因缺少图片而丢掉 OC 或人工作品编辑。
     for key in c
         .prepare(
-            "SELECT key FROM terms WHERE origin='user' OR id IN (SELECT term_id FROM term_tree)
+            "SELECT key FROM terms WHERE (origin='user' AND kind<>'mark') OR id IN (SELECT term_id FROM term_tree)
         OR id IN (SELECT term_id FROM term_names WHERE source='user' AND (role='alias' OR preferred=1))
         OR id IN (SELECT term_id FROM term_links WHERE source='user')",
         )?

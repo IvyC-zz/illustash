@@ -102,6 +102,10 @@ pub(crate) fn create(c: &Connection, action: i64, source_library: &str, definiti
         let e = &new.definition;
         let kind = Kind::parse(&e.kind).ok_or_else(|| Error::invalid("定义类型不正确"))?;
         let id = store::create_term(c, kind, Some(&new.target_key), &e.origin)?;
+        // 公用标记词条是裁决的固定端点。撤销导入只撤裁决，保留端点供下次收藏或恢复使用。
+        if kind == Kind::Mark {
+            continue;
+        }
         c.execute("INSERT INTO human_object_contributions(kind,object_id,owner_action_id,definition_json) VALUES ('term',?1,?2,?3)",
             params![id,action,json!(e).to_string()])?;
         c.execute("INSERT INTO human_entity_origins(source_library,source_key,target_key,owner_action_id) VALUES (?1,?2,?3,?4)",
@@ -158,7 +162,7 @@ pub(crate) fn create(c: &Connection, action: i64, source_library: &str, definiti
         )?;
     }
     let mut created = Vec::new();
-    for new in definitions {
+    for new in definitions.iter().filter(|new| new.definition.kind != "mark") {
         let id = c.query_row("SELECT id FROM terms WHERE key=?1", [&new.target_key], |r| r.get(0))?;
         created.push(Created { id, key: new.target_key.clone(), signature: signature(c, id)? });
     }
@@ -209,10 +213,10 @@ pub(crate) fn check_undo(c: &Connection, action: i64, created: &[Created]) -> Re
     for object in created {
         let owner: bool = c.query_row("SELECT EXISTS(SELECT 1 FROM human_object_contributions WHERE kind='term' AND object_id=?1 AND owner_action_id=?2)",
             params![object.id,action],|r|r.get(0))?;
-        // 已失效的 WD 扩展证据仍引用物理定义，但不再依赖定义的有效贡献。
+        // 已失效的角色扩展证据仍引用物理定义，但不再依赖定义的有效贡献。
         let independent: bool = c.query_row("SELECT
             EXISTS(SELECT 1 FROM term_evidence e WHERE e.term_id=?1
-                AND (e.source<>?5 OR e.method<>?6
+                AND ((NOT ((e.source=?5 AND e.method=?6) OR (e.source=?7 AND e.method=?8)))
                     OR EXISTS(SELECT 1 FROM term_current_evidence active WHERE active.id=e.id)))
             OR EXISTS(SELECT 1 FROM term_verdicts v LEFT JOIN actions a ON a.id=v.action_id
               WHERE v.term_id=?1 AND (v.batch_id IS NOT NULL OR (v.action_id<>?2 AND a.undone=0)))
@@ -228,7 +232,7 @@ pub(crate) fn check_undo(c: &Connection, action: i64, created: &[Created]) -> Re
             OR EXISTS(SELECT 1 FROM identity_suspended WHERE entity=?3 OR EXISTS(SELECT 1 FROM json_each(options_json) WHERE value=?3))
             OR EXISTS(SELECT 1 FROM identity_uncertain WHERE EXISTS(SELECT 1 FROM json_each(options_json) WHERE value=?3))
             OR EXISTS(SELECT 1 FROM identity_anchor_decisions WHERE entity=?3)",
-            params![object.id,action,object.key,own,crate::wd_extension::SOURCE,crate::wd_extension::METHOD], |r|r.get(0))?;
+            params![object.id,action,object.key,own,crate::wd_extension::SOURCE,crate::wd_extension::METHOD,crate::ccip_longtail::SOURCE,crate::ccip_longtail::METHOD], |r|r.get(0))?;
         if !owner || independent || signature(c, object.id)? != object.signature {
             return Err(Error::Conflict("导入新建定义已有独立变化或依赖，无法安全撤销".into()));
         }

@@ -64,7 +64,7 @@ python3 tools/gen_rust_licenses.py
 
 2026-11-12 用户批准（#375）：macOS 的 WD Core ML 执行变体由本项目 GitHub 模型 Release 分发，按 Apache-2.0 附许可原文、原始来源及变换说明。它基于上述固定 WD 模型，固定 batch 为 1，降低六维形状、删除等价广播、分解 ReduceL2 并预转置常量矩阵；不量化、不训练，不改原始模型文件。构建入口 `tools/build_wd_coreml.py`，固定版本与 SHA-256 见 `native/terms/models.json`，随包声明见 `packaging/model-licenses/NOTICE.txt`。原始模型仍是 CPU 回退和结果身份的唯一依据。
 
-WD 角色扩展 v1（#534）从 Illustash 0.3 起支持，通过项目的 GitHub 模型 Release `wd-extension-v1` 单独分发 `wd-extension-v1.zip` 和 `SHA256SUMS.txt`。ZIP 内的固定模型文件 `b-534.bin` 为 940,701 字节，SHA-256 为 `9da0365457e479eff189150926289c6cf8325cd9bb98c0bd2504c26d7dcae471`，含 228 个分类头和固定阈值 `0.8008725047111511`。模型文件不随代码或安装包分发。复封入口见 [构建脚本](../tools/build_wd_extension.py)，启用与撤回见 [安装说明](INSTALL.md#可选的-wd-角色扩展包)。
+WD 角色扩展 v1（#534）从 Illustash 0.3 起支持，通过项目的 GitHub 模型 Release `wd-extension-v1` 单独分发 `wd-extension-v1.bin`（应用下载）、`wd-extension-v1.zip`（手动下载）和 `SHA256SUMS.txt`。二者中的同一冻结模型文件为 940,701 字节，SHA-256 为 `9da0365457e479eff189150926289c6cf8325cd9bb98c0bd2504c26d7dcae471`，含 228 个分类头和固定阈值 `0.8008725047111511`。随安装包提供模型公告、Apache-2.0 许可和 Character Index 声明的 MIT 许可文本。复封入口见 [构建脚本](../tools/build_wd_extension.py)，启用与撤回见 [安装说明](INSTALL.md#可选的-wd-角色扩展包)。
 
 扩展文件按 Apache-2.0 分发。分类头用公开 Danbooru 样本在冻结的 WD 向量上独立拟合，底座为 SmilingWolf 的 WD SwinV2 Tagger v3 经 DeepGHS 重导出的向量模型（固定提交 `4ec31f2aeabf66353f3ee3ccd20d2f07e716851b`）。DeepGHS Character Index（MIT，固定提交 `5ee6075ff09f82c27e23f33044b9f9cabaf1e8c3`）用于筛选原索引未覆盖的角色。扩展模型文件包含词表、参数、阈值与底座指纹。ZIP 附 Apache-2.0 原文、两份 WD 模型卡、Character Index 的归属和 MIT 许可、`NOTICE.txt` 与 `provenance.json`。原始图片的版权归各原作者。[实验输入和评测口径](https://github.com/shio-vinyl/illustash/issues/534#issuecomment-6907588551)
 
@@ -78,3 +78,5 @@ WD 角色扩展 v1（#534）从 Illustash 0.3 起支持，通过项目的 GitHub
 | Character Index | [deepghs/character_index](https://huggingface.co/datasets/deepghs/character_index) | 已有共享角色索引的来源数据；不随安装包分发，应用也不下载。新用户补充角色参考特征走「检查新角色」（Danbooru 公开图片，每次运行前确认） | MIT |
 
 应用「关于」页另列出致谢的上游项目与数据源（Danbooru、Bangumi 等）；联网获取的数据按各站点条款使用，见 [找回画师](PROVENANCE.md) 与 [名字](TERMS_NAMES.md#9-显示名来源与后台更新)。
+
+长尾参考包使用上述 CCIP 特征模型，从公开 Danbooru 缩图生成参考和锚点。原图版权归原作者；包携带特征、阈值和来源清单。冻结的 Character Index 基础索引用于筛选和评估，版权和 MIT 归属按上游保留。包版本、样本范围和复跑口径见 [#557](https://github.com/shio-vinyl/illustash/issues/557#issuecomment-6915312907)。

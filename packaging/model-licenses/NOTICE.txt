@@ -32,6 +32,16 @@ coreml/wd-swinv2-v3-v1.onnx
   SHA-256:  57344d061ecaa0b8addb9cc33ae1a133a5bb18525590fdc61edb2aacdad2e444
   License:  Apache License, Version 2.0 (wd-swinv2-tagger-v3/LICENSE-2.0.txt).
 
+wd-extension-v1.bin (separate optional download)
+  Model:    Illustash WD character extension v1 (228 linear heads).
+  Source:   wd_swinv2_v3_emb.onnx above. Illustash fit new linear heads on
+            frozen WD embeddings of public Danbooru samples.
+            DeepGHS Character Index was used to identify coverage gaps.
+  Release:  https://github.com/shio-vinyl/illustash/releases/tag/wd-extension-v1
+  License:  Apache License, Version 2.0 (wd-swinv2-tagger-v3/LICENSE-2.0.txt).
+            Character Index declares MIT (wd-extension/Character-Index-MIT.txt).
+            The original illustrations belong to their respective authors.
+
 ccip/model_feat.onnx, ccip/model_metrics.onnx, ccip/metrics.json
   Model:    CCIP (Contrastive Anime Character Image Pre-Training) by DeepGHS,
             variant ccip-caformer-24-randaug-pruned.

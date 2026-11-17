@@ -1,7 +1,7 @@
 // 页面的框架（桌面布局，#199）：按地址切到对应页面、侧栏的计数、每个页面的标题和工具栏。页面在哪由 core/route.js
 // 负责；计数的数据由 core/meta.js 负责。
 import {workKey} from '../core/catalog.js';
-import {esc, isMac, localDate, number, shortcut} from '../core/format.js';
+import {dayLabel, esc, isMac, localDate, number, shortcut} from '../core/format.js';
 import {t} from '../core/i18n.js';
 import {REASONS, nameTip} from '../core/labels.js';
 import {fetchChar, onMeta, setChar} from '../core/meta.js';
@@ -11,17 +11,31 @@ import {canGoBack, cleanup, defaultSort, go, hashFor, historyEntry, noteHistory,
 import {api, readError} from '../core/session.js';
 import {state} from '../core/state.js';
 import {cast, createWork, drawCast, drawShelf, openTagged, renderIndexBody, searchIndex, shelf} from './catalog.js';
-import {$, error, helpTip, searchIcon, wireHelpTip, workSmall} from './dom.js';
+import {$, emptyLink, error, helpTip, searchIcon, showArea, wireHelpTip, workSmall} from './dom.js';
 import {renderSettings, settingsSection} from './settings.js';
-import {artistName} from './artists.js';
 import {closeInspector, closeViewer} from './detail.js';
 import {filters, markSelectButton, placeFor, rememberPlace, reload, resetForRoute, selectAll, setNsfw, short, sweep, toggleFit, toggleSelecting} from './grid.js';
 import {guideTick} from './guide.js';
 import {createLayer} from './overlay.js';
-import {dayLabel} from './home.js';
+import {listNav} from './combo.js';
 import {editProfile, markOc, mergeCharacter, openLocalLinks, openRelate, splitOc, toggleMascot, toggleOc} from './palette.js';
-import {groupOrder, nearText} from './review.js';
 
+// 画师筛选的标题和胶囊里显示的画师名：第一次用到时去读，读到后重画标题，胶囊只换文字（整条工具栏重画会打断正在
+// 输入的搜索框）。
+const artistNames = {};
+const artistPillText = id => t('画师 · {name}', {name: short(artistName(id))});
+function artistName(id) {
+  if (!(id in artistNames)) {
+    artistNames[id] = '…';
+    api('/api/artist?' + new URLSearchParams({id})).then(r => {
+      artistNames[id] = r.name || t('未知画师');
+      if (state.route.artist !== id) return;
+      renderHeading();
+      const pill = $('artistPill'); if (pill) pill.textContent = artistPillText(id) + ' ×';
+    }).catch(e => error(readError(e)));
+  }
+  return artistNames[id];
+}
 // 搜索框和标签菜单的防抖。
 let searchTimer = 0, pickerTimer = 0;
 export const navCount = (id, n, title = '') => { $(id).textContent = n ? number(n) : ''; $(id).title = title; };
@@ -33,8 +47,8 @@ function metaShown({error: e, directory, queue}) {
   navCount('countHome', state.recentCount, t('最近一次同步新加入的图'));
   navCount('countUnmatched', state.pools.unmatched, t('还没认出角色的图'));
   navCount('countAudit', state.pools.audit, t('随机抽查还剩几张')); $('navAudit').hidden = !state.pools.audit && viewOf(state.route).nav !== 'audit';
-  navCount('countDuplicates', state.dupInfo.mixed, t('角色不一致的副本组，对齐后才会折叠'));
-  navCount('countExcluded', state.pendingCount, t('像截图、等你确认的图'));
+  navCount('countDuplicates', state.dupInfo.mixed, t('角色不一致的副本组'));
+  navCount('countExcluded', state.pendingCount, t('像截图、待确认的图'));
   $('navDuplicates').href = state.dupInfo.mixed ? hashFor({page: 'duplicates', dup: 'mixed'}) : '#/duplicates';
   $('navExcluded').href = state.pendingCount ? '#/pending' : '#/excluded';
   if (queue) { navCount('countIdentity', state.identityCount, t('长得像、可能是同一人或同一人另一个造型的角色对')); $('navIdentity').hidden = !state.identityCount && viewOf(state.route).nav !== 'identity'; }
@@ -63,14 +77,13 @@ export async function applyRoute() {
   for (const a of document.querySelectorAll('.nav')) a.classList.toggle('active', a.dataset.page === page.nav);
   $('settingsLink').classList.toggle('active', page.nav === 'settings');
   setChar(null);
-  state.groupNear = null;
   if (page.prepare && await page.prepare(route) === false) return;
   if (route.char) {
     let character; try { character = await fetchChar(route.char); } catch (e) { if (state.route === route) error(readError(e)); return; }
     if (state.route !== route) return;
     setChar(character || {id: route.char, name: t('角色'), work: '', count: 0, unchecked: 0, variants: []});
   }
-  $('homePage').hidden = page.area !== 'homePage';
+  showArea(page.area);
   if (page.guideTick) guideTick(page.guideTick);
   renderChrome();
   // 自己渲染的页面（首页、资料库、设置、按组整理……）换到时从顶部开始，不沿用上一页的滚动位置；后退、前进回到记过
@@ -96,17 +109,17 @@ function subTabs(r) {
   switch (viewOf(r).tabs) {
     case 'unmatched': return row([
       // 未识别的总数写在按组整理上：侧栏「未识别」落在这里，组里的和没成组的合起来就是它。
-      tab('#/groups', t('按组整理'), p.unmatched ? number(p.unmatched) : '', at === 'groups', t('长得像的未识别图分成一组，一组一组确认')),
+      tab('#/groups', t('按组整理'), p.unmatched ? number(p.unmatched) : '', at === 'groups', t('按长相分组的未识别图')),
       tab('#/unmatched', t('全部未识别'), '', all),
       tab('#/skipped', t('已跳过'), p.skipped ? number(p.skipped) : '', at === 'skipped')]);
     case 'duplicates': return row([
       tab('#/duplicates', t('全部'), t('{n} 组', {n: number(state.dupInfo.groups)}), all && !r.dup),
-      tab('#/duplicates?dup=mixed', t('角色不一致'), t('{n} 组', {n: number(state.dupInfo.mixed)}), all && r.dup === 'mixed', t('几份副本标的角色不同；对齐后自动折叠')),
-      tab('#/similar', t('相似的图'), '', at === 'similar', t('不是同一个文件，但画的是同一张'))]);
+      tab('#/duplicates?dup=mixed', t('角色不一致'), t('{n} 组', {n: number(state.dupInfo.mixed)}), all && r.dup === 'mixed', t('几份副本标的角色不同')),
+      tab('#/similar', t('相似的图'), '', at === 'similar', t('同一幅画的不同文件'))]);
     case 'excluded': return row([
       tab('#/excluded', t('全部'), number(state.exclInfo.count), all && !r.reason),
       ...Object.entries(REASONS).filter(([k]) => state.exclInfo.reasons?.[k]).map(([k, label]) => tab('#/excluded?reason=' + k, label, number(state.exclInfo.reasons[k]), all && r.reason === k)),
-      ...(state.pendingCount || at === 'pending' ? [tab('#/pending', t('待确认'), number(state.pendingCount), at === 'pending', t('像截图但画面里有人物，规则拿不准'))] : [])]);
+      ...(state.pendingCount || at === 'pending' ? [tab('#/pending', t('待确认'), number(state.pendingCount), at === 'pending', t('像截图，但有人物'))] : [])]);
   }
   return '';
 }
@@ -120,7 +133,7 @@ export function renderChrome() {
     const works = r.section === 'works';
     const views = `<div class="segmented lib-views" role="tablist" aria-label="${t('资料库')}">${[['', t('角色')], ['works', t('作品')]].map(([v, label]) => `<a role="tab" href="#/characters${v ? '/' + v : ''}" class="${(r.section || '') === v ? 'on' : ''}" aria-selected="${(r.section || '') === v}">${label}</a>`).join('')}</div>`;
     bar.innerHTML = views + `<div class="search-wrap wide">${searchIcon()}<input type="search" id="charSearch" spellcheck="false" autocorrect="off" autocapitalize="off" value="${esc(works ? shelf.q : '')}" placeholder="${works ? t('搜索作品') : t('搜索角色或作品')}" aria-label="${works ? t('搜索作品') : t('搜索角色')}"></div><div class="spacer"></div>` +
-      (works ? `<button class="quiet" id="newWork">${t('新建作品')}</button>` : `<button class="quiet" id="taggedButton" title="${t('吉祥物、玩家化身这类不算角色、只当标签的，在这里看全部、设置和改回')}">${t('只当标签')}${state.tagged?.length ? ` <small>${number(state.tagged.length)}</small>` : ''}</button><div class="segmented" id="charMode">${[['shelf', t('书架')], ['list', t('列表')]].map(([v, label]) => `<button data-mode="${v}" class="${cast.mode === v ? 'on' : ''}">${label}</button>`).join('')}</div>`);
+      (works ? `<button class="quiet" id="newWork">${t('新建作品')}</button>` : `<button class="quiet" id="taggedButton" title="${t('不算角色、只当标签的吉祥物和玩家化身')}">${t('只当标签')}${state.tagged?.length ? ` <small>${number(state.tagged.length)}</small>` : ''}</button><div class="segmented" id="charMode">${[['shelf', t('书架')], ['list', t('列表')]].map(([v, label]) => `<button data-mode="${v}" class="${cast.mode === v ? 'on' : ''}">${label}</button>`).join('')}</div>`);
     if (works) {
       $('charSearch').oninput = e => { shelf.q = e.target.value; drawShelf(); };
       $('newWork').onclick = createWork;
@@ -136,14 +149,14 @@ export function renderChrome() {
   const sorts = view.sorts.filter(v => !(tagPage && v === 'suspicious')).map(v => [v, SORT_LABELS[v]]);
   const skins = r.char && !r.maybe ? (state.char?.variants || []).filter(v => v.count) : [];
   const variants = skins.length ? `<div class="chips-row">${[{id: '', name: t('全部'), count: state.char.count}, ...skins].map(v => `<button class="chip-filter${(r.variant || '') === v.id ? ' on' : ''}" data-variant="${esc(v.id)}">${esc(v.name)} <span>${number(v.count)}</span></button>`).join('')}</div>` : '';
-  const maybeChip = r.char && !tagPage && (state.maybeCount || r.maybe || state.doubtCount || r.doubt) ? `<div class="chips-row">${state.maybeCount || r.maybe ? `<button class="chip-filter${r.maybe ? ' on' : ''}" id="maybeChip" title="${t('机器觉得像 TA，但算给了别人或没算：确认「是 TA」或「不是 TA」')}">${t('可能也是 TA')} <span>${number(state.maybeCount)}</span></button>` : ''}${state.doubtCount || r.doubt ? `<button class="chip-filter${r.doubt ? ' on' : ''}" id="doubtChip" title="${t('单人图里，另一个角色的证据几乎一样强：多半两个都不对，看一眼再决定')}">${t('可能认错')} <span>${number(state.doubtCount)}</span></button>` : ''}</div>` : '';
+  const maybeChip = r.char && !tagPage && (state.maybeCount || r.maybe || state.doubtCount || r.doubt) ? `<div class="chips-row">${state.maybeCount || r.maybe ? `<button class="chip-filter${r.maybe ? ' on' : ''}" id="maybeChip" title="${t('机器觉得像 TA，但算给了别人或没算的图')}">${t('可能也是 TA')} <span>${number(state.maybeCount)}</span></button>` : ''}${state.doubtCount || r.doubt ? `<button class="chip-filter${r.doubt ? ' on' : ''}" id="doubtChip" title="${t('单人图里，另一个角色的证据几乎一样强的图')}">${t('可能认错')} <span>${number(state.doubtCount)}</span></button>` : ''}</div>` : '';
   // 生效的筛选各是一个胶囊，点 × 只清它自己（#386 的 2-30）；「标签」按钮只用来打开菜单、换一个标签。
   const workName = r.work ? (state.workTree || []).find(w => w.id === r.work)?.name || t('作品筛选') : '';
   const pill = (id, label, title) => `<button class="quiet on" id="${id}" title="${title}">${label} ×</button>`;
   const filtersHTML = view.toolbar === 'library' ? `<div class="search-wrap">${searchIcon()}<input type="search" id="search" spellcheck="false" autocorrect="off" autocapitalize="off" placeholder="${t('搜索角色、别名或文件名')}" aria-label="${t('搜索图库')}" value="${esc(r.q)}"><kbd>/</kbd></div>` +
     (r.char ? pill('charPill', t('角色 · {name}', {name: esc(short(state.char?.name || ''))}), t('清除角色筛选')) : '') +
     (r.work ? pill('workPill', t('作品 · {name}', {name: esc(short(workName))}), t('清除作品筛选')) : '') +
-    (r.artist ? pill('artistPill', t('画师 · {name}', {name: esc(short(artistName(r.artist)))}), t('清除画师筛选')) : '') +
+    (r.artist ? pill('artistPill', esc(artistPillText(r.artist)), t('清除画师筛选')) : '') +
     (r.utag ? pill('utagPill', `# ${esc(r.utag)}`, t('清除标签筛选')) : '') +
     (r.tag ? pill('wdTagPill', t('标签 · {tag}', {tag: esc(r.tag.replaceAll('_', ' '))}), t('清除标签筛选')) : '') +
     (r.day ? pill('dayPill', t('{day} 加入', {day: esc(dayLabel(r.day))}), t('清除日期筛选')) : '') +
@@ -170,22 +183,24 @@ export function renderChrome() {
     $('wdTagPill')?.addEventListener('click', () => go({...r, tag: ''}));
     $('dayPill')?.addEventListener('click', () => go({...r, day: ''}));
     $('tagSearch').oninput = () => { clearTimeout(pickerTimer); pickerTimer = setTimeout(loadTagOptions, 120); };
-    $('tagOptions').onclick = e => {
-      const b = e.target.closest('[data-value],[data-utag]'); if (!b) return;
+    // 焦点留在搜索框里：↑ ↓ 在标签之间循环，↵ 或点击按这个标签筛选，Esc 关菜单、焦点回到「标签」按钮（#432）。
+    tagNav = listNav($('tagSearch'), $('tagOptions'), {shown: () => !$('tagPopover').hidden, count: () => tagCount, pick: i => {
+      const b = $('tagOptions').querySelector(`[data-i="${i}"]`); if (!b) return;
       setMenu(tagMenu, false);
       go(b.dataset.utag ? {...r, utag: b.dataset.utag} : {...r, tag: b.dataset.value});
-    };
+    }});
   }
 }
 // 标签菜单和角色页的更多菜单是非模态浮层：Esc、点外关闭由浮层管理器（ui/overlay.js）统一处理。它们的元素随工具栏
-// 和标题重画而换掉，所以层按 id 找元素；重画后旧的层自己会从栈里清掉。打开时焦点进第一项（标签菜单是搜索框），
-// ↑ ↓ 在各项之间移动（#422）。
-const menuLayer = (id, popover, button) => {
-  const layer = createLayer({kind: 'popover', id, el: () => $(popover), anchor: () => $(button), menu: true, focusIn: 'first', onDismiss: reason => setMenu(layer, false, reason)});
+// 和标题重画而换掉，所以层按 id 找元素；重画后旧的层自己会从栈里清掉。打开时焦点进第一项。更多菜单的 ↑ ↓ 在各项之间
+// 移动焦点（menu，#422）；标签菜单是搜索框加结果，焦点留在搜索框里，键盘由 ui/combo.js 的 listNav 处理（tagNav）。
+const menuLayer = (id, popover, button, menu) => {
+  const layer = createLayer({kind: 'popover', id, el: () => $(popover), anchor: () => $(button), menu, focusIn: 'first', onDismiss: reason => setMenu(layer, false, reason)});
   layer.popover = popover;
   return layer;
 };
-const tagMenu = menuLayer('tag-menu', 'tagPopover', 'tagButton'), moreMenu = menuLayer('more-menu', 'morePopover', 'moreButton');
+const tagMenu = menuLayer('tag-menu', 'tagPopover', 'tagButton', false), moreMenu = menuLayer('more-menu', 'morePopover', 'moreButton', true);
+let tagNav = null, tagCount = 0;
 function setMenu(layer, open, reason) {
   const el = $(layer.popover); if (el) el.hidden = !open;
   if (open) layer.open(); else layer.close(reason);
@@ -199,17 +214,19 @@ async function loadTagOptions() {
   const q = $('tagSearch').value.trim(), low = q.toLowerCase();
   const mine = state.userTags.filter(t => t.tag !== state.route.utag && (!q || t.tag.toLowerCase().includes(low))).slice(0, 12);
   try { const tags = await api('/api/general-tags?q=' + encodeURIComponent(q)); if (q !== $('tagSearch').value.trim()) return;
-    $('tagOptions').innerHTML = (mine.length ? `<div class="palette-label">${t('我的标签')}</div>${mine.map(x => `<button class="menu-item" data-utag="${esc(x.tag)}"># ${esc(x.tag)} <small>${number(x.count)}</small></button>`).join('')}` : '') +
-      (tags.length ? `<div class="palette-label">${t('画面标签')}</div>${tags.map(x => `<button class="menu-item" data-value="${esc(x)}">${esc(x.replaceAll('_', ' '))}</button>`).join('')}` : '') || `<p>${t('没有匹配的标签')}</p>`;
-  } catch (e) { $('tagOptions').textContent = e.message; }
+    let i = 0;
+    $('tagOptions').innerHTML = (mine.length ? `<div class="palette-label">${t('我的标签')}</div>${mine.map(x => `<button class="menu-item" data-i="${i++}" data-utag="${esc(x.tag)}"># ${esc(x.tag)} <small>${number(x.count)}</small></button>`).join('')}` : '') +
+      (tags.length ? `<div class="palette-label">${t('画面标签')}</div>${tags.map(x => `<button class="menu-item" data-i="${i++}" data-value="${esc(x)}">${esc(x.replaceAll('_', ' '))}</button>`).join('')}` : '') || `<p>${t('没有匹配的标签')}</p>`;
+    tagCount = i; tagNav?.mark(0);
+  } catch (e) { $('tagOptions').textContent = e.message; tagCount = 0; }
 }
 // 角色页的标题：名称、张数、未检查、检查日期，右侧是细分、标为已检查和 ⋯ 菜单。
 function drawCharHeading(h, r, c) {
   const tagOnly = !!c.mascot;   // 只当标签：没有要复核的，所以没有检查、清扫、OC 这些控件
   const checked = !tagOnly && c.reviewed_at ? ' · ' + t('上次检查 {date}', {date: localDate(c.reviewed_at)}) : '';   // 后端存的是 UTC（#386 的 2-15）
   const unchecked = !tagOnly && (c.unchecked || r.check) ? ` · <a class="unchecked-link${r.check ? ' on' : ''}" href="${hashFor({...r, check: r.check ? '' : '1', maybe: ''})}" title="${r.check ? t('显示全部') : t('只看机器识别、还没检查过的图')}">${t('未检查 {n}', {n: number(c.unchecked)})}${r.check ? ' ×' : ''}</a>` : '';
-  h.innerHTML = `<div class="heading-main"><h1 class="tag-title" title="${esc(nameTip(c))}">${esc(c.name)}${c.mascot ? '' : workSmall(c)}</h1><p>${c.mascot ? `<span class="oc-badge" title="${c.mascot_origin === 'default' ? t('默认设置：老师、博士、训练员这类没有固定形象的玩家化身和吉祥物，默认只当标签。') : ''}${t('不算角色：不出现在角色列表里，也不算多人图；图上仍挂着这个标签。在「⋯」里可以改回角色')}">${t('只当标签')}</span> ` : ''}${t('{n} 张', {n: number(c.count)})}${unchecked}${checked}${!c.tag && c.kind !== 'oc' && !c.label_only ? ` · <button class="link-button" id="profileNudge" title="${t('关联后自动补中文名、别名和所属作品')}">${t('关联 Danbooru…')}</button>` : ''}</p></div>
-      <div class="heading-actions">${c.label_only ? `<button class="quiet" id="splitOcButton" title="${t('把长得像的图分成一组，一组一键设为独立的原创角色')}">${t('按相似细分')}</button>` : ''}${tagOnly ? '' : `<button class="quiet" id="sweepButton" ${c.unchecked ? '' : 'disabled'} title="${t('把剩下的机器识别都记为已检查；以后新识别的图会重新计入未检查')}">${t('标为已检查')}</button>`}<div class="tag-control more-control"><button class="quiet" id="moreButton" title="${t('更多操作')}" aria-label="${t('更多操作')}">⋯</button><div id="morePopover" class="menu menu-drop more-menu" hidden>${c.label_only || tagOnly ? '' : `<button class="menu-item" id="ocButton" title="${t('画师自己的原创角色，不属于任何作品')}">${c.kind === 'oc' ? t('取消原创角色') : t('标为原创角色')}</button>`}${c.label_only ? '' : `<button class="menu-item" id="mascotButton" title="${c.mascot ? t('恢复成角色：出现在角色列表里，同框就算多人图') : t('像佩洛洛这样的吉祥物、玩家化身：不算角色，不算多人图；图上仍挂着这个标签，可以按它筛选')}">${c.mascot ? t('算作角色') : t('不算角色，只当标签')}</button>`}<button class="menu-item" id="profileButton" title="${t('名称、别名、所属作品、Danbooru 关联')}">${t('编辑资料…')}</button><button class="menu-item" id="mergeButton" title="${t('和另一个角色是同一个人：把图和人工结论都并过去（可撤销）')}">${t('合并到另一个角色…')}</button></div></div></div>`;
+  h.innerHTML = `<div class="heading-main"><h1 class="tag-title" title="${esc(nameTip(c))}">${esc(c.name)}${c.mascot ? '' : workSmall(c)}</h1><p>${c.mascot ? `<span class="oc-badge" title="${c.mascot_origin === 'default' ? t('老师、博士、训练员这类没有固定形象的玩家化身和吉祥物默认只当标签。') : ''}${t('不算角色：不出现在角色列表里，也不算多人图；图上仍挂着这个标签')}">${t('只当标签')}</span> ` : ''}${t('{n} 张', {n: number(c.count)})}${unchecked}${checked}${!c.tag && c.kind !== 'oc' && !c.label_only ? ` · <button class="link-button" id="profileNudge" title="${t('补上中文名、别名和所属作品')}">${t('关联 Danbooru…')}</button>` : ''}</p></div>
+      <div class="heading-actions">${c.label_only ? `<button class="quiet" id="splitOcButton" title="${t('按长相分组，每组设为一个新的原创角色')}">${t('按相似细分')}</button>` : ''}${tagOnly ? '' : `<button class="quiet" id="sweepButton" ${c.unchecked ? '' : 'disabled'} title="${t('把剩下的机器识别都记为已检查；以后新识别的图会重新计入未检查')}">${t('标为已检查')}</button>`}<div class="tag-control more-control"><button class="quiet" id="moreButton" title="${t('更多操作')}" aria-label="${t('更多操作')}">⋯</button><div id="morePopover" class="menu menu-drop more-menu" hidden>${c.label_only || tagOnly ? '' : `<button class="menu-item" id="ocButton" title="${t('画师自己的原创角色，不属于任何作品')}">${c.kind === 'oc' ? t('取消原创角色') : t('标为原创角色')}</button>`}${c.label_only ? '' : `<button class="menu-item" id="mascotButton" title="${c.mascot ? t('恢复成角色：出现在角色列表里，同框就算多人图') : t('像佩洛洛这样的吉祥物、玩家化身：不算角色，不算多人图；图上仍挂着这个标签，可以按它筛选')}">${c.mascot ? t('算作角色') : t('不算角色，只当标签')}</button>`}<button class="menu-item" id="profileButton" title="${t('名称、别名、所属作品、Danbooru 关联')}">${t('编辑资料…')}</button><button class="menu-item" id="mergeButton" title="${t('把这个角色的图和人工结论并到另一个角色')}">${t('合并到另一个角色…')}</button></div></div></div>`;
   $('sweepButton')?.addEventListener('click', sweep);
   $('moreButton').onclick = () => setMenu(moreMenu, $('morePopover').hidden);
   $('mergeButton').onclick = () => { setMenu(moreMenu, false); mergeCharacter(c); };
@@ -247,7 +264,7 @@ export function wireShell() {
   $('empty').addEventListener('click', e => {
     const act = e.target.closest('[data-empty]')?.dataset.empty;
     if (act === 'nsfw') setNsfw('');
-    else if (act === 'next-group') nextGroup();
+    else if (act) viewOf(state.route).emptyAct?.(act);
   });
   window.addEventListener('hashchange', applyRoute);
 }
@@ -258,14 +275,14 @@ implement({
   character: {drawHeading: drawCharHeading},
   home: {heading: (r, {n}) => [t('首页'), state.recentCount ? t('最近一次同步新加入 {n} 张', {n: number(state.recentCount)}) : '']},
   library: {heading: (r, {n}) => [r.artist ? t('画师 · {name}', {name: esc(artistName(r.artist))}) : r.day ? t('{day} 加入', {day: esc(dayLabel(r.day))}) : r.work ? esc((state.workTree || []).find(w => w.id === r.work)?.name || t('作品筛选')) : r.utag ? '# ' + esc(r.utag) : t('图库'), t('{n} 张', {n})]},
-  characters: {heading: (r, {n}) => [t('资料库'), r.section === 'works' ? t('{n} 部作品', {n: number(state.index?.works?.length || 0)}) + (state.index?.watch?.works.length ? ' · ' + t('关注 {n} 部', {n: number(state.index.watch.works.length)}) : '') : t('{n} 位角色 · {works} 部作品', {n: number(state.chars.length), works: number(new Set(state.chars.map(workKey).filter(k => k !== 'oc' && k !== 'other')).size)}), !r.section && state.localLinks?.length ? `<span class="heading-links"><button class="quiet" id="localLinksButton" title="${t('关联后自动补中文名、别名和作品；和已有角色重复的可以合并')}">${t('{n} 个自建角色能对上 Danbooru', {n: number(state.localLinks.length)})}</button></span>` : '']},
+  characters: {heading: (r, {n}) => [t('资料库'), r.section === 'works' ? t('{n} 部作品', {n: number(state.index?.works?.length || 0)}) + (state.index?.watch?.works.length ? ' · ' + t('关注 {n} 部', {n: number(state.index.watch.works.length)}) : '') : t('{n} 位角色 · {works} 部作品', {n: number(state.chars.length), works: number(new Set(state.chars.map(workKey).filter(k => k !== 'oc' && k !== 'other')).size)}), !r.section && state.localLinks?.length ? `<span class="heading-links"><button class="quiet" id="localLinksButton" title="${t('补上中文名、别名和作品，和已有角色重复的可以合并')}">${t('{n} 个自建角色能对上 Danbooru', {n: number(state.localLinks.length)})}</button></span>` : '']},
   audit: {heading: (r, {n}) => [t('随机抽查'), t('还剩 {left} / {n} 张', {left: number(state.pools.audit || 0), n}) + (state.nsfw ? ` · <b>${t('R18 筛选开着：抽查要看全部才准，按 H 切换')}</b>` : '')]},
   unmatched: {heading: (r, {n}) => [t('未识别'), '']},
   skipped: {heading: (r, {n}) => [t('未识别'), '']},
   groups: {heading: (r, {n}) => [t('未识别'), '']},
   // 一组整理完了，标题不写「0 张」，由空状态给去处（#386 的 2-12）。
   group: {heading: (r, {n}) => [t('第 {id} 组', {id: esc(r.id)}), [state.totalReady && !state.total ? '' : t('{n} 张长得像的未识别图', {n}), ...(state.groupTraits || []).map(esc)].filter(Boolean).join(' · '),
-      `<span class="heading-links">${state.total ? `<button class="quiet" id="groupOc" title="${t('整组都是同一个原创角色：新建一个原创角色，把这组图都设为它')}">${t('整组标为原创角色')}</button>` : ''}${state.groupNear ? `<a class="quiet link" href="#/g/${state.groupNearId}">${esc(state.groupNear)} →</a>` : ''}</span>`]},
+      `<span class="heading-links">${state.total ? `<button class="quiet" id="groupOc" title="${t('新建一个原创角色，把这组图都设为它')}">${t('整组标为原创角色')}</button>` : ''}${state.groupNear ? `<a class="quiet link" href="#/g/${state.groupNearId}">${esc(state.groupNear)} →</a>` : ''}</span>`]},
   duplicates: {heading: (r, {n}) => [t('重复'), r.dup ? '' : t('{n} 张', {n: number(state.dupInfo.count || 0)})]},
   similar: {heading: (r, {n}) => [t('重复'), '']},
   'artist-audit': {heading: (r, {n}) => [t('画师抽查'), state.nsfw ? `<b>${t('这页不按 R18 筛选：R18 的图也在里面')}</b>` : '']},
@@ -285,7 +302,7 @@ implement({
   skipped: {help: () => [t('选中的图可以恢复到未识别。')], helpHint: true},
   groups: {help: () => [t('按长相分组的未识别图，可以整组确认。'), t('点一下缩略图，把它排除在这组之外。'), t('长按缩略图，或鼠标停在上面按 Space，看大图。'), t('组头的按钮对整组生效。')]},
   group: {helpHint: true},
-  duplicates: {help: () => [t('同色角标是同一组。'), t('修改任一份会同步到整组。'), t('组里的角色不一致时不折叠，对齐以后折叠成一张。')]},
+  duplicates: {help: () => [t('同色角标是同一组。'), t('组里的角色不一致时不折叠，对齐以后折叠成一张。')]},
   similar: {help: () => [t('同一幅画的不同文件。'), t('点一组进去看。')]},
   'artist-audit': {help: () => [t('一组固定的随机图，逐张核对「找回画师」找到的画师。'), t('每次打开都是同一批。')]},
   identity: {help: () => [t('按涉及的图片数排序。'), t('高亮的按钮是外部资料建议的做法。')]},
@@ -298,31 +315,13 @@ implement({
   library: {onMeta: () => {}},
   characters: {onMeta: ({directory}) => { if (directory && (state.route.section || !$('charSearch')?.value)) renderIndexBody(state.chars); }},
   settings: {onMeta: () => renderSettings()},
-  // 一组图的页面要先读分组：相近的一组和这组的特征。
-  group: {prepare: async route => {
-    let result; try { result = await api('/api/clusters?nsfw=' + state.nsfw); } catch (e) { if (state.route === route) error(readError(e)); return false; }
-    if (state.route !== route) return false;  // 分组加载期间已经导航走了：这个回应不属于任何页面
-    const g = result.clusters.find(x => String(x.cid) === route.id);
-    state.groupNear = g?.near ? nearText(g) : null; state.groupNearId = g?.near || null; state.groupTraits = g?.traits || [];
-    state.groupOrder = groupOrder(result.clusters).map(x => String(x.cid));
-  }},
 });
-// 网格空了时的去处（#386 的 2-12、2-16）：一组整理完了去下一组或回到按组整理；待确认、已跳过清空了回到同一入口的
-// 主页签；「只看 R18」时图库空了给「显示全部」。按钮由 wireShell 里 #empty 的点击处理。
-const emptyLink = (href, label) => `<a class="quiet link" href="${href}">${label}</a>`;
+// 网格空了时的去处（#386 的 2-12、2-16）：待确认、已跳过清空了回到同一入口的主页签；「只看 R18」时图库空了给「显示全部」。
+// 一组整理完了的去处由 ui/review.js 登记。按钮由 wireShell 里 #empty 的点击处理。
 const showAll = r => state.nsfw === 'only' ? `<button class="quiet" data-empty="nsfw">${t('显示全部')}</button>` : '';
 implement({
   library: {emptyNext: showAll},
   character: {emptyNext: showAll},
-  group: {emptyNext: r => (state.groupOrder.some(id => id !== r.id) ? `<button class="quiet" data-empty="next-group">${t('下一组')} →</button>` : '') + emptyLink('#/groups', t('回到按组整理'))},
   skipped: {emptyNext: () => emptyLink('#/groups', t('回到按组整理'))},
   pending: {emptyNext: () => emptyLink('#/excluded', t('回到已排除'))},
 });
-// 「下一组」：重读分组，取原来排在这组后面、还在的第一组；后面都没了就取最前面那组；一组都没了回到按组整理。
-async function nextGroup() {
-  const at = state.route.id, order = state.groupOrder, from = order.indexOf(at);
-  let result; try { result = await api('/api/clusters?nsfw=' + state.nsfw); } catch (e) { error(readError(e)); return; }
-  const left = new Set(result.clusters.map(x => String(x.cid))); left.delete(at);
-  const pick = order.slice(from + 1).find(id => left.has(id)) || groupOrder(result.clusters).map(x => String(x.cid)).find(id => id !== at);
-  location.hash = pick ? '#/g/' + encodeURIComponent(pick) : '#/groups';
-}

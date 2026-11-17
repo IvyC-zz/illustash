@@ -629,6 +629,7 @@ mod tests {
         let f = Fixture::new();
         f.create().unwrap();
         let context = crate::http::LibraryContext {
+            examples: None,
             db: f.dest.join("library.sqlite"),
             generation: "synthetic".into(),
             library: Some(f.dest.clone()),

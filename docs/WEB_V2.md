@@ -109,6 +109,13 @@
 
 `unknown` 仅保留暂记未知标志，不删除现有身份。未识别池 = 没有任何当前归属，且未暂记未知。全部查询、搜索、筛选写操作共用同一套归属规则。
 
+**设置 › 角色资料 › WD 角色扩展**（#550）的开关和重扫记录按图库保存。扩展包在共享目录的 `extensions/wd-extension-v1` 下，使用与识别模型相同的续传和 SHA-256 校验，只有点击下载才请求 GitHub。下载及导入走独立任务槽；移除文件后，已有候选保留，自动检查等包重新就位后继续。
+
+- `GET /api/wd-extension` 返回 `package`、共享的 `download`、图库的 `library` 和 `task`。图库的 `vectors`、`images`、`assigned` 为现算数；`library.blocked` 为 `null`、`frozen`、`no_vectors`、`syncing` 或 `busy`。
+- `POST /api/wd-extension/package` 的 `action` 为 `download`、`import`（可选 `paths`，缺省打开原生选择器）、`cancel`、`discard` 或 `delete`。选择器取消返回 `{cancelled:true}`，其余成功应答返回完整状态。
+- `POST /api/wd-extension/enable` 和 `/withdraw` 各接收空对象并返回完整状态。同步完成后按当次交付范围启动 `kind=auto` 的后台检查。检查在 `scan` 阶段通过 `POST /api/wd-extension/cancel` 传 `id` 取消，进入 `write` 后完成事务。完成报告用 `result.changed` 表示候选有变的图片数。
+- 详情栏「也可能是」把 `WD_EXT` 候选放在原有强线索和弱线索之间。同一角色已有强线索时保留原来的候选项。CCIP 长尾候选排在 WD 扩展候选前，两种包指向同一角色时只显示 CCIP 长尾项，两条证据都保留。人工确认和否定照常保留，撤回操作通过设置完成。
+
 ### 可疑优先
 
 按以下元组升序排列，最后以 UUID 稳定打破平局：
@@ -131,10 +138,14 @@
 - `GET /api/characters?q=&min=0`：父角色数组，字段 `id,name,work,count,unchecked,cover,variants`；每个子标签含 `id,name,count,parent_id`。`unchecked` 为当前机器归属数。
 - `GET /api/assets`：`entity,variant,q,tag,pool,status,order,offset,limit`。`status=all|confirmed|machine|unknown`；`order=suspicious|newest|oldest|hinted`（`hinted`：有未被否定的机器线索的图排前面，强证据先于弱线索、分数高的在前，其余按最新）；每项带 `hint`：尚无归属的图给出最强未否定线索 `{id,name}`，否则为 `null`；`pool=unmatched`。`variant` 使用实体 ID；也兼容把变体 ID 作为 entity 传入。分页上限 200。 `count=0` 可跳过总数统计，此时 `total` 为 `null`，图片字段与排序不变；前端仅在同一列表读取周期内复用总数，重新加载时重新统计。
 - `GET /api/assets/count`：使用图库相同筛选参数（搜索使用 `q`，不接收分页参数），仅返回 `{total}`，不加载图片附属信息。
+- 组合筛选（#445）在原筛选上叠加 `has`、`not`、`from` 和 `to`。`has` 与 `not` 是 URL 编码的 JSON 字符串数组，分别要求全部满足和全部排除。可用 `char:<id>`、`work:<id>`、`artist:<key>`、`tag:<WD 标签>`、`utag:<我的标签>`、`source:pixiv|x|other` 和 `fav`。条件只按首个冒号分隔，重复项去重，合计至多 20 条，每条至多 160 字符。日期区间沿用加入日期，两端包含，可只提供一端。无出处的图归入 `other`。列表、计数、ID、按筛选选图的写入及画廊封面使用同一选区。
+- `GET /api/user-tags?limit=` 可指定 1–1,000 条，默认 60 条。
+- `GET /api/galleries?nsfw=` 按保存的顺序返回 `id,name,params,cover,cover_manual`。手动封面仍在当前选区时使用它，否则取排序第一张。空选区或失效的保存条件返回空封面，打开图片列表时沿用筛选错误响应。
 - `GET /api/identity/count?nsfw=...`：复用身份待判断队列的筛选、去重与跳过规则，仅返回 `{total}`，不排序或加载展示名称、样例图。
 - 每张图片返回 `memberships`，每个父角色包含 `status,origin,evidence:{sources,max_score},variants`。状态区分 `confirmed` 与 `machine`；`confirmed` 数组为前端兼容字段。
 - `GET /api/detail?id=` 另返回 `ownership`，包含有效归属与 `rejected` 父角色记录，每项带 origin 和证据。原始 assertions/candidates 继续返回，保留历史人工结论和逐来源证据。
 - `GET /api/ids` 使用相同筛选和排序，直接返回 UUID 数组；支持 offset/limit，limit 最大 5000，供跨区段选择使用。
+- 收藏（#447）：`has=["fav"]` 只看收藏，`not=["fav"]` 排除收藏。实际请求对 JSON 数组做 URL 编码，条件与其他筛选取交集，`has` 和 `not` 合计至多 20 条。列表、计数、ID 和按筛选选图的写入都用这一口径。图片本身或重复组内任一份有有效收藏，即算收藏。`GET /api/assets`、`GET /api/home`、`GET /api/detail` 带 `marks=fav` 时在每个图片对象末尾附布尔字段 `fav`，详情在顶层附该字段。省略 `marks` 时沿用原回复。
 - `/api/entities` 仍用于查找或创建实体；`/api/review-pools` 仅返回「未识别」。`/api/tasks` 返回 404；pending/conflicts 筛选返回 400。
 
 ### 写入与撤销
@@ -154,6 +165,10 @@ change/reassign 的选择方式二选一：
 服务端获取 `BEGIN IMMEDIATE` 后解析筛选、排除、校验并写入，选集与写入不会分离到两个事务。实际选集超过 500 张必须明确 `confirm:true`；一次只有一个 action，整批撤销。空选集或非法 ID 返回 400，不留下部分写入。筛选对象不接受未知字段，防止拼写错误意外扩大操作范围。
 
 `POST /api/sweep {"entity":"父角色 ID"}` 检查该角色全部机器归属，不受当前前端分页/筛选影响。`POST /api/undo {"id":123}` 撤销最近未撤销 action；跨重启保留。写接口继续要求同源与 CSRF token。
+
+`POST /api/favorite` 沿用 `/api/tag` 的 `ids` 或 `filter` 选图、`exclude` 与 `confirm` 规则。默认收藏，`add:false` 取消。对选中的重复组写入全部副本，提示张数按组计。回复 `{"undo":…}`，在从未建立收藏词条的库里直接取消会返回 `{"undo":null}`。人工裁决与快照规则见 [词条数据模型](TERMS_SCHEMA.md#人工标记447)。
+
+画廊将当前筛选保存到图库。对 `POST /api/galleries` 传 `action=create` 和 `params`，可带 `name`，省略时由条件生成。传 `action=update`、`id` 和待改字段 `name,params,cover,position`，其中 `cover:null` 恢复自动封面。传 `action=delete` 与 `id` 可删除。每次操作随 `undo` 返回一步历史，创建和更新另返回 `gallery`，写入回复中的封面按隐藏 R18 解析。现行存储和备份口径见 [词条 schema](TERMS_SCHEMA.md#画廊445)。
 
 ## 阶段 1.5–3（2026-09-23，Claude 直接实现）
 
@@ -194,7 +209,7 @@ change/reassign 的选择方式二选一：
 
 ## 缩放重做与 NSFW 筛选（2026-09-23）
 
-- **缩放**：原 5 档滑块有三处问题——无指针时以视口中部为锚点，反复缩放后滚动位置逐步漂移（从顶部开始也会跳到数万 px）；最大档在窄窗口下变成单列，网格高度约 4,400 万 px，超过浏览器约 3,300 万 px 上限后滚动失效；档位跳变生硬。现改为连续目标列宽（72–480 px，滑块按对数刻度），实际布局按整列吸附；每次列数变化用 FLIP 动画让卡片从旧位置滑到新位置。锚点为指针下的图片，无指针时为首个可见行；在顶部缩放保持在顶部。网格高度超过 3,000 万 px 时自动增加列数。⌘± 每次增减一列；触控板捏合按帧合并。列宽 <110 px 强制方形，<200 px 可切换方形，>260 px 使用 medium 缩略图，图库页 ≥150 px 显示角色名。
+- **缩放**：原 5 档滑块有三处问题——无指针时以视口中部为锚点，反复缩放后滚动位置逐步漂移（从顶部开始也会跳到数万 px）；最大档在窄窗口下变成单列，网格高度约 4,400 万 px，超过浏览器约 3,300 万 px 上限后滚动失效；档位跳变生硬。现改为连续目标列宽（72–480 px，滑块按对数刻度），实际布局按整列吸附；每次列数变化用 FLIP 动画让卡片从旧位置滑到新位置。锚点为指针下的图片，无指针时为首个可见行；在顶部缩放保持在顶部。网格高度超过 3,000 万 px 时自动增加列数。⌘± 每次增减一列；触控板捏合按帧合并。列宽 <110 px 强制方形，<200 px 可切换方形，列宽乘屏幕倍率（`devicePixelRatio`，按 1 封底）超过 260 物理像素使用 medium 缩略图（#452；首页按行高、详情栏按小图高度，同一个 `core/format.js` 的 `thumbSize`），图库页 ≥150 px 显示角色名。
 - **NSFW**：`asset_rating` 保存每张图 WD 评级的首位（可重建，随通用标签索引刷新；首次启动自动建立）。NSFW = `questionable` 与 `explicit`，`sensitive` 仍显示。筛选键 `nsfw=hide|only` 适用于所有列表、`/api/ids` 与按条件批量操作；隐藏模式下角色封面只取非 NSFW 图片。顶栏按钮循环「显示 → 隐藏 → 仅看」，H 键一键隐藏/显示，选择记在本机浏览器。`schema_version` 升为 5（迁移前自动备份）。
 
 ## 归属结果存表（2026-09-23）
@@ -221,7 +236,7 @@ change/reassign 的选择方式二选一：
 - **折叠**：`duplicates.rep` 为代表图（分辨率最高，同分取最早加入）；`hidden = rep=0 AND 角色一致`。隐藏的副本不出现在除「重复」页以外的任何列表、`/api/ids`、按条件批量操作，也不计入总数、角色数、子标签数、未识别/已跳过数和我的标签数。`hidden` 与归属一样在写事务内按组重算；测试 `tearDown` 核对它与重新计算的结果一致。
 - **角色不一致的组先不折叠**（方案 B）：同组全部副本继续可见，等用户在重复页对齐后自动折叠；不自动取并集。
 - **写操作同步到整组**：`change / reassign / tag` 把所选图片扩展到同组全部副本，同一事务、同一次撤销；提示条按作品计数（1 张而不是 2 张）。`reassign` 只校验用户选中的那几张原角色归属；添加子标签时，父角色已被移出的副本保持移出、不加子标签。`suggest` 不扩展。`sweep` 本来就覆盖该角色全部机器归属。
-- **前端**：其他页面有隐藏副本的卡片右上角显示 `×N`；重复页说明「修改任一份会同步到整组」。
+- **前端**：其他页面有隐藏副本的卡片右上角显示 `×N`，悬停提示操作会同步到全部副本；重复页选中图片时，选择栏写明改动会同步到同组的全部副本（#528）。
 - `schema_version` 升为 8。真实库（只读副本核对）：隐藏 1,973 份，图库约 4.7 万 → 4.5 万；未识别相应减少；4 组代表图因分辨率更高而不是最早一份；角色不一致仍为 48 组。角色列表 74 ms、可疑优先 59 ms、未识别 67 ms、侧栏计数 41 ms。
 
 ## 收录状态与排除规则（2026-09-23）
@@ -483,6 +498,14 @@ change/reassign 的选择方式二选一：
 另外把**改动面积 < 2%** 的差分单独分成一档，叫「细微差分」，包括嘴型、眼镜、签名、小物件这类改动，好和大改的差分分开看。
 
 代价是每对比较从约 0.2 秒变成约 0.5 秒。
+
+## 从例图找相似（#449）
+
+`/api/assets`、`/api/assets/count` 和 `/api/ids` 接收 `like`（含 1–20 个图片 UUID 的 JSON 字符串数组）和可选的 `like_by`（`wd` 按画面，省略时采用；`ccip` 按角色）。例图缺少该空间的特征时跳过，全部缺失时返回 400。示例和示例在「重复」里的同组副本都从候选中去掉。
+
+现有选区先应用筛选、分级、折叠与排除条件，再对有特征的候选按例图质心的余弦分数取前 500。同分按 UUID 稳定排序。`order=similar` 是相似检索的默认排序，`newest`、`oldest` 在同一批入选图片内按加入日期排序。响应仍用普通网格的形状。按 `filter` 选图的命令走同一套筛选和排名，在自己的写事务里取得选区，随后执行命令原有的选区操作。
+
+按画面读取源库现有的 WD general 标签概率，使用 IDF 加权、L2 归一化的稀疏向量。IDF 中以有原图路径的在库图数为基数，沿用离线评估口径，只有概率至少 0.35 的图片计入标签文档频次。按角色读取 CCIP，按 UUID 合并基础矩阵和 SQLite 向量，以后者为准。宿主按会话懒加载使用到的空间，切换图库或闲置 10 分钟释放。缓存会检查源库连接的 SQLite `data_version` 和基础特征文件的大小与修改时间。WD 稀疏矩阵另存为图库 `cache/` 下的派生文件，源库或 WAL 变化后重建，不随归档导出。选区排名只存于当前 SQLite 连接的临时表。整个检索使用本地已有识别结果。
 
 ## 全库找相似（2026-09-24）
 

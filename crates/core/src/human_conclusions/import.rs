@@ -133,6 +133,14 @@ fn resolve_existing(
     source: &str,
     definition: &Entity,
 ) -> Result<Resolution> {
+    // 人工标记的 key 是各图库共用的；没有名字、链接或可映射的身份结构。
+    if definition.kind == "mark" {
+        return Ok(match store::term_by_key(c, source)? {
+            Some((_, schema::Kind::Mark)) => Resolution::Existing(source.to_owned()),
+            Some(_) => Resolution::Blocked,
+            None => Resolution::New,
+        });
+    }
     let mut candidates = BTreeSet::new();
     if same_library && store::term_by_key(c, source)?.is_some() {
         candidates.insert(source.to_owned());
@@ -416,7 +424,7 @@ pub fn apply_in(
                     terms.insert(key.clone(), target);
                 }
                 Resolution::New => {
-                    let target = store::new_key()?;
+                    let target = if definition.kind == "mark" { key.clone() } else { store::new_key()? };
                     terms.insert(key.clone(), target.clone());
                     new_definitions.push(definitions::New {
                         source_key: key.clone(),
@@ -685,7 +693,7 @@ pub fn apply_in(
         let human = new.definition.tree.is_some()
             || new.definition.provenance == "user"
             || new.definition.names.iter().any(|n| matches!(n.provenance.as_str(), "user" | "legacy_merge"));
-        let keep = human || needed.contains(&new.target_key);
+        let keep = (human && new.definition.kind != "mark") || needed.contains(&new.target_key);
         *report.definitions.entry(if keep { "applied" } else { "unneeded_dependency" }.into()).or_default() += 1;
         let unsupported =
             if keep { new.definition.names.iter().filter(|name| !names::restorable(name)).count() } else { 0 };

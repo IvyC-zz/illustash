@@ -146,14 +146,14 @@ fn work_of(c: &Connection, ids: &Ids, work: &str) -> Result<Option<String>> {
 }
 
 /// `Store._entity`：链接到 (system, key) 的身份；没有就新建一个带这个链接的人物，作品按 `work_of`。
-fn entity(c: &Connection, ids: &Ids, system: &str, key: &str, name: &str, work: &str) -> Result<String> {
+fn entity(c: &Connection, ids: &Ids, system: &str, key: &str, name: &str, work: &str, origin: &str) -> Result<String> {
     if let Some(found) = linked(c, system, key)? {
         return Ok(found);
     }
     let ident = ids.get(system, key)?;
     let work_id = work_of(c, ids, work)?;
     let new = New { id: &ident, kind: "character", work, work_id: work_id.as_deref(), ..New::default() };
-    character_entities::create(c, &new, legacy_characters::ORIGIN)?;
+    character_entities::create(c, &new, origin)?;
     link(c, &ident, system, key)?;
     if !name.is_empty() && name != key {
         character_names::alias(c, &ident, name, "index", "")?;
@@ -161,9 +161,12 @@ fn entity(c: &Connection, ids: &Ids, system: &str, key: &str, name: &str, work: 
     Ok(ident)
 }
 
+/// 只有由角色扩展新建的角色词条才使用此创建来源。
+pub const EXTENSION_CHARACTER_ORIGIN: &str = "extension:character";
+
 pub(crate) fn extension_entity(c: &Connection, tag: &str) -> Result<String> {
     let work = crate::character_profile::qualifier(tag);
-    entity(c, &Ids(&Value::Null), "danbooru", tag, tag, work)
+    entity(c, &Ids(&Value::Null), "danbooru", tag, tag, work, EXTENSION_CHARACTER_ORIGIN)
 }
 
 // ---- 索引同步：`_characters`（含 `_hierarchy`、`_tags`、别名、`_default_tags`） ----
@@ -179,7 +182,8 @@ fn characters(c: &Connection, index: &Value) -> Result<(Chars, Wd)> {
     for r in &rows {
         let char_id = s(&r["char_id"]).ok_or_else(|| Error::Invalid("索引角色缺少 char_id".into()))?;
         let name = s(&r["name_zh"]).or(s(&r["name_ja"])).or(s(&r["name_en"])).unwrap_or(char_id);
-        let ident = entity(c, &ids, "ccip", char_id, name, r["copyright"].as_str().unwrap_or(""))?;
+        let ident =
+            entity(c, &ids, "ccip", char_id, name, r["copyright"].as_str().unwrap_or(""), legacy_characters::ORIGIN)?;
         if !identity {
             c.prepare_cached(&format!("UPDATE term_tree SET variant=?2 WHERE {OF}"))?
                 .execute([&ident, s(&r["skin"]).unwrap_or("")])?;
@@ -277,7 +281,7 @@ fn hierarchy(c: &Connection, rows: &[Value], ids: &Ids) -> Result<()> {
             let p = by_id[matches[0].as_str()];
             let char_id = p["char_id"].as_str().unwrap_or("");
             let name = s(&p["name_zh"]).or(s(&p["name_ja"])).or(s(&p["name_en"])).unwrap_or(char_id);
-            entity(c, ids, "ccip", char_id, name, &key.1)?
+            entity(c, ids, "ccip", char_id, name, &key.1, legacy_characters::ORIGIN)?
         } else {
             let char_id = text(&r["char_id"]);
             let base = match &key.0 {
@@ -286,7 +290,7 @@ fn hierarchy(c: &Connection, rows: &[Value], ids: &Ids) -> Result<()> {
             };
             let base = character_json::dump(&base, false);
             let name = key.0.clone().unwrap_or(char_id.clone());
-            entity(c, ids, "ccip_base", &base, &name, &key.1)?
+            entity(c, ids, "ccip_base", &base, &name, &key.1, legacy_characters::ORIGIN)?
         };
         let parent = resolve(c, &parent)?;
         c.prepare_cached(&format!("UPDATE term_tree SET parent_id=?2,variant=?3,work_id=NULL WHERE {OF}"))?
@@ -317,7 +321,7 @@ fn candidate(c: &Connection, ids: &Ids, row: &Value, chars: &Chars, wd: &Wd) -> 
     let ident = if dim == "char_ext" {
         match chars.get(value) {
             Some(i) => i.clone(),
-            None => entity(c, ids, "ccip", value, value, "")?,
+            None => entity(c, ids, "ccip", value, value, "", legacy_characters::ORIGIN)?,
         }
     } else {
         let matches = wd.get(value);
@@ -330,7 +334,7 @@ fn candidate(c: &Connection, ids: &Ids, row: &Value, chars: &Chars, wd: &Wd) -> 
                     // WD 结果没有索引给的作品文字：取 tag 末尾括号里的后缀（与索引取 `copyright` 的办法相同）。
                     None => {
                         let work = if import_builds_works() { crate::character_profile::qualifier(value) } else { "" };
-                        entity(c, ids, "wd", value, value, work)?
+                        entity(c, ids, "wd", value, value, work, legacy_characters::ORIGIN)?
                     }
                 },
             },
@@ -397,7 +401,15 @@ fn decision(c: &Connection, ids: &Ids, album: &mut Album, row: &Value, map: &Val
     let spec = &map[value];
     let ident = match spec["char_id"].as_str().and_then(|k| chars.get(k)) {
         Some(i) => i.clone(),
-        None => entity(c, ids, "photos_album", value, s(&spec["album_name_ja"]).unwrap_or(value), "")?,
+        None => entity(
+            c,
+            ids,
+            "photos_album",
+            value,
+            s(&spec["album_name_ja"]).unwrap_or(value),
+            "",
+            legacy_characters::ORIGIN,
+        )?,
     };
     let ident = resolve(c, &ident)?;
     let ident: String = c
