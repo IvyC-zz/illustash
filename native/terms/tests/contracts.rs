@@ -615,21 +615,26 @@ fn combined_gallery_http_contract() {
     assert_eq!(gallery["name"], "1girl · solo · Pixiv · 不含 审完:合成 · 2025");
     assert_eq!(gallery["params"]["has"], r#"["tag:1girl","tag:solo","source:pixiv"]"#);
     assert_eq!(gallery["cover"], "a");
+    assert!(gallery["position"].is_i64());
     let covers = |ids: &Value, nsfw: &str| url("/api/galleries/covers", &[("ids", &ids.to_string()), ("nsfw", nsfw)]);
     let first_cover = |nsfw| call(&covers(&json!([id]), nsfw), None)[0]["cover"].clone();
     assert_eq!(
         call("/api/galleries?nsfw=hide", None),
-        json!([{"id":id,"name":gallery["name"],"params":gallery["params"],"cover_manual":false}])
+        json!([{
+            "id":id,"name":gallery["name"],"params":gallery["params"],"position":gallery["position"],"cover_manual":false
+        }])
     );
     assert_eq!(first_cover(""), "b");
     let fixed =
         call("/api/galleries", Some(&json!({"action":"update","id":id,"name":"手动封面","cover":"b","position":8})));
     assert_eq!(fixed["gallery"]["cover"], "a");
     assert_eq!(fixed["gallery"]["cover_manual"], true);
+    assert_eq!(fixed["gallery"]["position"], 8);
     assert_eq!(first_cover("only"), "b");
     assert_eq!(first_cover("hide"), "a");
     let listed = call("/api/galleries?nsfw=hide", None);
     assert_eq!(listed[0]["cover_manual"], true);
+    assert_eq!(listed[0]["position"], 8);
     assert!(listed[0].get("cover").is_none());
     let cleared = call("/api/galleries", Some(&json!({"action":"update","id":id,"cover":null})));
     assert_eq!(cleared["gallery"]["cover_manual"], false);
@@ -664,6 +669,7 @@ fn combined_gallery_http_contract() {
     let listed = call("/api/galleries", None);
     assert_eq!(listed[0]["id"], invalid_id);
     assert_eq!(listed[0]["params"]["work"], "fixture-removed-work");
+    assert_eq!(listed[0]["position"], 2);
     assert_eq!(listed[1]["id"], *id);
     assert_eq!(listed[2]["id"], *empty_id);
     assert_eq!(

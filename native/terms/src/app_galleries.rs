@@ -46,7 +46,12 @@ impl Row {
     fn describe(&self) -> Result<Json> {
         let params: Value = serde_json::from_str(&self.params)
             .map_err(|e| Error::Io(std::io::Error::new(std::io::ErrorKind::InvalidData, e)))?;
-        Ok(Json::object([("id", self.id.into()), ("name", self.name.clone().into()), ("params", params.into())]))
+        Ok(Json::object([
+            ("id", self.id.into()),
+            ("name", self.name.clone().into()),
+            ("params", params.into()),
+            ("position", self.position.into()),
+        ]))
     }
 
     fn current_cover(&self, c: &Connection, context: &LibraryContext, nsfw: &str) -> Result<Option<String>> {
