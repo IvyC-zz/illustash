@@ -90,18 +90,19 @@ def ccip_pack(name, tags, seed):
     return path
 
 
-def placeholder(revision, min_app=MIN_APP, wd_format='illustash-wd-extension/1', wd_tags=WD_TAGS, ccip_model=CCIP_MODEL,
-                kind='character-pack'):
-    """不提供的条目：结构合法，但版本、格式或模型不对。没有对应的文件。"""
-    version = f'{kind}-v{revision}'
+def placeholder(version, revision, min_app=MIN_APP, wd_format='illustash-wd-extension/1', wd_tags=WD_TAGS,
+                ccip_model=CCIP_MODEL, kind='character-pack', stage=None):
+    """不提供的条目：结构合法，但最低版本、格式、模型或标记不对。没有对应的文件。"""
 
     def part(key, fmt, base):
-        name = f'{version}-{key}.bin'
+        name = f'{kind}-{version}-{key}.bin'
         return {'format': fmt, 'heads': 1, 'candidate_only': 0,
                 'file': {'name': name, 'size': 8, 'sha256': sha(name.encode()),
-                         'url': f'{pack_catalog.RELEASE_PREFIX}{version}/{name}'},
+                         'url': f'{pack_catalog.RELEASE_PREFIX}{kind}-{version}/{name}'},
                 'base': base, 'license': 'MIT'}
     entry = {'kind': kind, 'revision': revision, 'version': version, 'min_app': min_app, 'license': 'Apache-2.0 AND MIT'}
+    if stage:
+        entry['stage'] = stage
     if kind == 'character-pack':
         entry['components'] = {'wd': part('wd', wd_format, {'wd_model_sha256': WD_MODEL, 'wd_tags_sha256': wd_tags}),
                                'ccip': part('ccip', 'illustash-557-ccip-offline/1', {'ccip_model_sha256': ccip_model})}
@@ -125,17 +126,19 @@ def main():
     ccip_v1 = ccip_pack('ccip-longtail-v1.zip', ['longpack_(synthetic)', 'longpacktwo_(synthetic)'], 'pack-catalog-ccip-v1')
     ccip_v2 = ccip_pack('ccip-longtail-v2.zip', ['longpack_(synthetic)', 'longpackthree_(synthetic)'], 'pack-catalog-ccip-v2')
     note = lambda n: {'note_zh': f'合成测试包 {n}', 'note_en': f'Synthetic test pack {n}'}
+    # 0.2 是测试版（和真实发布的顺序一样），1.0 是正式版。
     good = [
-        pack_catalog.entry(revision=2, wd=HERE / 'wd-extension-v2.bin', ccip=ccip_v1, ccip_tag='ccip-longtail-v1',
-                           min_app=MIN_APP, **note(2)),
-        pack_catalog.entry(revision=3, wd=HERE / 'wd-extension-v3.bin', ccip=ccip_v2, min_app=MIN_APP, **note(3)),
+        pack_catalog.entry(version='0.2', stage='preview', revision=2, wd=HERE / 'wd-extension-v2.bin', ccip=ccip_v1,
+                           ccip_tag='ccip-longtail-v1', min_app=MIN_APP, **note(2)),
+        pack_catalog.entry(version='1.0', revision=3, wd=HERE / 'wd-extension-v3.bin', ccip=ccip_v2, min_app=MIN_APP, **note(3)),
     ]
     rejected = [
-        placeholder(4, min_app='99.0.0'),
-        placeholder(5, wd_format='illustash-wd-extension/9'),
-        placeholder(6, wd_tags=sha(b'other tags')),
-        placeholder(7, ccip_model=sha(b'other ccip')),
-        placeholder(1, kind='future-pack'),
+        placeholder('1.1', 4, min_app='99.0.0'),
+        placeholder('1.2', 5, wd_format='illustash-wd-extension/9'),
+        placeholder('1.3', 6, wd_tags=sha(b'other tags')),
+        placeholder('1.4', 7, ccip_model=sha(b'other ccip')),
+        placeholder('1.5', 8, stage='rc'),
+        placeholder('1', 1, kind='future-pack'),
     ]
     catalogs = {
         'packs.json': pack_catalog.build(good + rejected, strict=False),
@@ -147,9 +150,8 @@ def main():
         write(name, data)
         write(name + '.sig', a.sign(data))
     write('packs.json.sig-b', b.sign((HERE / 'packs.json').read_bytes()))
-    for version, files in (('character-pack-v2', [HERE / 'wd-extension-v2.bin', ccip_v1]),
-                           ('character-pack-v3', [HERE / 'wd-extension-v3.bin', ccip_v2])):
-        pack_catalog.offline(HERE / 'packs.json', files, HERE / f'{version}-offline.zip')
+    for version, files in (('0.2', [HERE / 'wd-extension-v2.bin', ccip_v1]), ('1.0', [HERE / 'wd-extension-v3.bin', ccip_v2])):
+        pack_catalog.offline(HERE / 'packs.json', files, HERE / f'character-pack-{version}-offline.zip')
     tauri = HERE / 'packs.json.tauri.sig'
     if tauri.exists():
         try:

@@ -7,7 +7,7 @@
 //! - 只跟着「检查更新」读（`app_updates` 的 check）：关掉检查更新、也没手动检查过，就从不联网读目录。读到的目录验过签、
 //!   序号不比本机已有的小，才整份存进本机缓存（`extensions/catalog.json`）。
 //! - 离线时，用包 Release 里的 `-offline.zip`（包文件加上签过名的目录）从文件导入，见 `adopt_archives`。
-//! - 应用认的包 = 内置的角色资料包 v1（就是原来写死的 `wd-extension-v1` 和 `ccip-longtail-v1`，离线也能用）加上最近一份
+//! - 应用认的包 = 内置的角色资料包 0.1（测试版，就是原来写死的 `wd-extension-v1` 和 `ccip-longtail-v1`，离线也能用）加上最近一份
 //!   验过签的目录里、本版本能用的那些：两个组成部分的格式都支持、基础模型都和这个构建的模型对得上、满足最低应用版本。
 //!   别的条目原样留在目录里，但不提供。
 //! - 组成部分的文件按 SHA-256 放：和内置文件相同的就用内置的文件夹，其余放 `extensions/<种类>-<SHA-256 前 12 位>/`。
@@ -122,13 +122,15 @@ impl Pack {
     }
 }
 
-/// 一个角色资料包：内置的 v1，或目录里本版本能用的一条。
+/// 一个角色资料包：内置的 0.1，或目录里本版本能用的一条。
 #[derive(Clone, Debug, PartialEq)]
 pub(crate) struct CharacterPack {
-    /// 页面上显示的版本，如 `character-pack-v2`。
+    /// 版本名，如 `0.2`、`1.0`：只用来显示和给 Release 打 tag（`character-pack-0.2`），比新旧只看 `revision`。
     pub(crate) version: String,
     /// 越大越新。
     pub(crate) revision: u32,
+    /// 测试版（目录条目的 `stage: "preview"`，2026-11-18 用户定）：只是显示不同，默认启用等行为和正式版一样。
+    pub(crate) preview: bool,
     pub(crate) license: String,
     /// 一行说明（中文、英文）；内置包没有。
     pub(crate) note: Option<(String, String)>,
@@ -150,7 +152,8 @@ impl CharacterPack {
     }
     pub(crate) fn view(&self) -> Value {
         json!({
-            "version":self.version,"revision":self.revision,"heads":self.heads(),
+            "version":self.version,"revision":self.revision,"stage":if self.preview {"preview"} else {"release"},
+            "heads":self.heads(),
             "candidate_only":self.wd.candidate_only + self.ccip.candidate_only,"license":self.license,"builtin":self.builtin,
             "note":self.note.as_ref().map(|(zh, en)| json!({"zh-CN":zh,"en":en})),
             "size":self.wd.file.size + self.ccip.file.size,
@@ -163,8 +166,12 @@ impl CharacterPack {
 
 /// 目录里角色资料包的种类名。以后的种类结构照查，本版本不提供。
 pub(crate) const PACK_KIND: &str = "character-pack";
-/// 内置的角色资料包 v1。
-pub(crate) const BUILTIN_VERSION: &str = "character-pack-v1";
+/// 内置的角色资料包：0.1（测试版），就是原来写死的 `wd-extension-v1` 和 `ccip-longtail-v1`。文件名、文件夹和这两个
+/// Release 的 tag 都不变，只是版本名（2026-11-18 用户定）。
+pub(crate) const BUILTIN_VERSION: &str = "0.1";
+/// 目录条目的 `stage`：没有或 `release` 是正式版，`preview` 是测试版。别的值是以后的标记，这个条目不提供。
+const STAGE_PREVIEW: &str = "preview";
+const STAGE_RELEASE: &str = "release";
 
 #[derive(Deserialize)]
 struct RawCatalog {
@@ -180,6 +187,8 @@ struct RawEntry {
     version: String,
     min_app: String,
     license: String,
+    #[serde(default)]
+    stage: Option<String>,
     #[serde(default)]
     note: Option<RawNote>,
     #[serde(default)]
@@ -301,18 +310,25 @@ impl Catalog {
             && segment(&raw.version, 64)
             && raw.revision >= 1
             && short(&raw.license, 200)
+            && raw.stage.as_deref().is_none_or(|stage| segment(stage, 32))
             && raw.note.as_ref().is_none_or(|n| short(&n.zh, 200) && short(&n.en, 200));
         if !valid {
             return Err(bad(&format!("条目 {version} 的字段不合法")));
         }
+        let stage = raw.stage.as_deref().unwrap_or(STAGE_RELEASE);
+        let known_stage = matches!(stage, STAGE_PREVIEW | STAGE_RELEASE);
         let min_app = Version::parse(&raw.min_app).ok_or_else(|| bad("最低应用版本不是 X.Y.Z"))?;
         let pack = match (raw.kind.as_str(), raw.components) {
+            (PACK_KIND, None) => return Err(bad(&format!("条目 {version} 缺少组成部分"))),
+            // 不认识的标记：结构照查，本版本不提供。
+            (PACK_KIND, Some(_)) if !known_stage => None,
             (PACK_KIND, Some(c)) => {
                 let wd = Self::component(Kind::Wd, c.wd, raw.revision, &version)?;
                 let ccip = Self::component(Kind::Ccip, c.ccip, raw.revision, &version)?;
                 Some(CharacterPack {
                     version: raw.version.clone(),
                     revision: raw.revision,
+                    preview: stage == STAGE_PREVIEW,
                     license: raw.license,
                     note: raw.note.map(|n| (n.zh, n.en)),
                     builtin: false,
@@ -320,7 +336,6 @@ impl Catalog {
                     ccip,
                 })
             }
-            (PACK_KIND, None) => return Err(bad(&format!("条目 {version} 缺少组成部分"))),
             // 以后的种类：上面的通用字段照查，本版本不提供。
             _ => None,
         };
@@ -420,6 +435,7 @@ pub(crate) fn builtin() -> Result<CharacterPack> {
     Ok(CharacterPack {
         version: BUILTIN_VERSION.into(),
         revision: 1,
+        preview: true,
         license: "Apache-2.0 AND MIT".into(),
         note: None,
         builtin: true,

@@ -94,8 +94,8 @@ fn parse(value: &Value) -> Result<Catalog> {
 #[test]
 fn catalog_fields_are_checked_entry_by_entry() {
     let parsed = Catalog::parse(&fixture("packs.json")).unwrap();
-    assert_eq!((parsed.serial, parsed.entries.len()), (1, 7));
-    let good = catalog(vec![entry("character-pack-v2", 2), entry("character-pack-v3", 3)]);
+    assert_eq!((parsed.serial, parsed.entries.len()), (1, 8));
+    let good = catalog(vec![entry("0.2", 2), entry("1.0", 3)]);
     assert_eq!(parse(&good).unwrap().entries.len(), 2);
     // 不认识的字段照常读（以后的目录加字段时，要改含义就换格式或提高最低版本）。
     let mut extra = good.clone();
@@ -120,7 +120,10 @@ fn catalog_fields_are_checked_entry_by_entry() {
         ("序号为零", Box::new(|c| c["serial"] = 0.into())),
         ("序号不是整数", Box::new(|c| c["serial"] = "3".into())),
         ("条目不是列表", Box::new(|c| c["packs"] = json!({}))),
-        ("版本重复", Box::new(|c| c["packs"][1]["version"] = "character-pack-v2".into())),
+        ("版本重复", Box::new(|c| c["packs"][1]["version"] = "0.2".into())),
+        ("标记是空的", Box::new(|c| c["packs"][0]["stage"] = "".into())),
+        ("标记带空格", Box::new(|c| c["packs"][0]["stage"] = "pre view".into())),
+        ("标记不是文字", Box::new(|c| c["packs"][0]["stage"] = true.into())),
         ("修订号重复", Box::new(|c| c["packs"][1]["revision"] = 2.into())),
         ("缺组成部分", Box::new(|c| drop(c["packs"][0].as_object_mut().unwrap().remove("components")))),
         ("缺 CCIP 部分", Box::new(|c| drop(c["packs"][0]["components"].as_object_mut().unwrap().remove("ccip")))),
@@ -146,8 +149,8 @@ fn catalog_fields_are_checked_entry_by_entry() {
             Box::new(|c| c["packs"][0]["components"]["ccip"]["file"]["url"] = format!("{RELEASE_PREFIX}x.zip").into()),
         ),
         ("文件名带路径", Box::new(|c| c["packs"][0]["components"]["wd"]["file"]["name"] = "../x.bin".into())),
-        ("版本名带路径", Box::new(|c| c["packs"][0]["version"] = "character/pack".into())),
-        ("版本名有 ..", Box::new(|c| c["packs"][0]["version"] = "pack..v2".into())),
+        ("版本名带路径", Box::new(|c| c["packs"][0]["version"] = "0/2".into())),
+        ("版本名有 ..", Box::new(|c| c["packs"][0]["version"] = "0..2".into())),
         ("修订号为零", Box::new(|c| c["packs"][0]["revision"] = 0.into())),
         ("头数为零", Box::new(|c| c["packs"][0]["components"]["wd"]["heads"] = 0.into())),
         ("二级头比头还多", Box::new(|c| c["packs"][0]["components"]["wd"]["candidate_only"] = 3.into())),
@@ -179,14 +182,21 @@ fn catalog_fields_are_checked_entry_by_entry() {
 fn only_packs_this_build_can_use_are_offered() {
     let parsed = Catalog::parse(&fixture("packs.json")).unwrap();
     let versions = |app| parsed.packs(&context(app)).into_iter().map(|p| p.version).collect::<Vec<_>>();
-    // 版本过低（v4 要 99.0.0）、WD 格式不认识（v5）、标签表（v6）或 CCIP 模型（v7）不是这个构建的、不认识的种类都不提供。
-    assert_eq!(versions("0.2.0"), ["character-pack-v2", "character-pack-v3"]);
+    // 最低版本不够（1.1 要 99.0.0）、WD 格式不认识（1.2）、标签表（1.3）或 CCIP 模型（1.4）不是这个构建的、不认识的
+    // 标记（1.5）、不认识的种类都不提供。
+    assert_eq!(versions("0.2.0"), ["0.2", "1.0"]);
     // 最低版本只比 X.Y.Z：0.2.0 的测试版也能用；更旧的版本一个都不用。
-    assert_eq!(versions("0.2.0-beta.1"), ["character-pack-v2", "character-pack-v3"]);
+    assert_eq!(versions("0.2.0-beta.1"), ["0.2", "1.0"]);
     assert!(versions("0.1.9").is_empty());
-    assert_eq!(versions("99.0.0"), ["character-pack-v2", "character-pack-v3", "character-pack-v4"]);
+    assert_eq!(versions("99.0.0"), ["0.2", "1.0", "1.1"]);
 
-    let v3 = parsed.packs(&context("0.2.0")).pop().unwrap();
+    // 0.2 是测试版，1.0 是正式版：只是显示不同。
+    let offered = parsed.packs(&context("0.2.0"));
+    let stages = offered.iter().map(|p| (p.version.as_str(), p.preview)).collect::<Vec<_>>();
+    assert_eq!(stages, [("0.2", true), ("1.0", false)]);
+    assert_eq!(offered[0].view()["stage"], "preview");
+    assert_eq!(offered[1].view()["stage"], "release");
+    let v3 = offered[1].clone();
     assert_eq!((v3.revision, v3.heads(), v3.wd.format.as_str(), v3.wd.candidate_only), (3, 5, WD_FORMAT_V2, 1));
     assert_eq!((v3.wd.kind, v3.ccip.kind, v3.wd.revision), (Kind::Wd, Kind::Ccip, 3));
     assert_eq!(v3.note, Some(("合成测试包 3".into(), "Synthetic test pack 3".into())));
@@ -210,17 +220,37 @@ fn only_packs_this_build_can_use_are_offered() {
 
     // 旧格式的 WD 部分不能带二级头、CCIP 部分没有二级；和内置包同版本名、同修订号或两个文件都相同的条目交给内置的。
     let builtin = builtin().unwrap();
-    let mut tiered = entry("character-pack-v7", 7);
+    let mut tiered = entry("1.7", 7);
     tiered["components"]["wd"]["candidate_only"] = 1.into();
-    let mut ccip_tier = entry("character-pack-v8", 8);
+    let mut ccip_tier = entry("1.8", 8);
     ccip_tier["components"]["ccip"]["candidate_only"] = 1.into();
     let same_version = entry(BUILTIN_VERSION, 9);
-    let same_revision = entry("character-pack-v10", builtin.revision);
-    let mut same_files = entry("character-pack-v11", 11);
+    let same_revision = entry("1.10", builtin.revision);
+    let mut same_files = entry("1.11", 11);
     same_files["components"]["wd"]["file"]["sha256"] = builtin.wd.file.sha256.clone().into();
     same_files["components"]["ccip"]["file"]["sha256"] = builtin.ccip.file.sha256.clone().into();
     let parsed = parse(&catalog(vec![tiered, ccip_tier, same_version, same_revision, same_files])).unwrap();
     assert!(parsed.packs(&context("0.2.0")).is_empty());
+}
+
+#[test]
+fn stage_marks_preview_packs_and_defaults_to_release() {
+    // 内置的 0.1 是测试版。
+    let builtin = builtin().unwrap();
+    assert_eq!((builtin.version.as_str(), builtin.preview, builtin.revision), ("0.1", true, 1));
+    assert_eq!(builtin.view()["stage"], "preview");
+    let stage = |value: Option<&str>| {
+        let mut e = entry("0.2", 2);
+        if let Some(value) = value {
+            e["stage"] = value.into();
+        }
+        parse(&catalog(vec![e])).unwrap().packs(&context("0.2.0")).into_iter().map(|p| p.preview).collect::<Vec<_>>()
+    };
+    // 没写就是正式版；写了 preview 是测试版；release 也是正式版；以后的标记结构照查，本版本不提供。
+    assert_eq!(stage(None), [false]);
+    assert_eq!(stage(Some("preview")), [true]);
+    assert_eq!(stage(Some("release")), [false]);
+    assert_eq!(stage(Some("rc")), Vec::<bool>::new());
 }
 
 #[test]
@@ -305,13 +335,20 @@ fn card_shows_the_enabled_or_newest_present_version_and_offers_newer_ones() {
     assert_eq!(offered("v2").as_deref(), Some("v3"));
     assert_eq!(offered("v3"), None);
     assert_eq!(offer(&packs[..1], &packs[0]), None);
+
+    // 比新旧只看修订号，不看版本名怎么写，也不看是不是测试版。
+    let mut named = vec![pack("1.0", 2), pack("0.9", 3), pack("0.2", 1)];
+    named[1].preview = true;
+    assert_eq!(offer(&named, &named[0]).map(|p| p.version).as_deref(), Some("0.9"));
+    assert_eq!(current(&named, None, |_| false).version, "0.9");
+    assert_eq!(current(&named, None, |p| p.version != "0.9").version, "1.0");
 }
 
 #[test]
 fn offline_bundles_carry_their_catalog_and_both_files() {
     for (bundle, files) in [
-        ("character-pack-v2-offline.zip", ["wd-extension-v2.bin", "ccip-longtail-v1.zip"]),
-        ("character-pack-v3-offline.zip", ["wd-extension-v3.bin", "ccip-longtail-v2.zip"]),
+        ("character-pack-0.2-offline.zip", ["wd-extension-v2.bin", "ccip-longtail-v1.zip"]),
+        ("character-pack-1.0-offline.zip", ["wd-extension-v3.bin", "ccip-longtail-v2.zip"]),
     ] {
         let mut archive = zip::ZipArchive::new(std::io::Cursor::new(fixture(bundle))).unwrap();
         let mut read = |name: &str| {

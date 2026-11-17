@@ -1,14 +1,17 @@
 """角色资料包的签名目录（#602；步骤见 docs/DEVELOPMENT.md「发布角色资料包」）。
 
     python3 tools/pack_catalog.py keygen ~/.tauri/illustash-packs.key
-    python3 tools/pack_catalog.py entry --revision 2 --wd wd-extension-v2.bin \\
+    python3 tools/pack_catalog.py entry --version 0.2 --stage preview --revision 2 --wd wd-extension-v2.bin \\
         --ccip A-longtail-p75.zip --ccip-tag ccip-longtail-v1 \\
-        --min-app 0.3.0 --note-zh '…' --note-en '…' --output character-pack-v2.entry.json
-    python3 tools/pack_catalog.py build --previous packs.json --entry character-pack-v2.entry.json --output packs.json
+        --min-app 0.3.0 --note-zh '…' --note-en '…' --output character-pack-0.2.entry.json
+    python3 tools/pack_catalog.py build --previous packs.json --entry character-pack-0.2.entry.json --output packs.json
     python3 tools/pack_catalog.py sign --key ~/.tauri/illustash-packs.key packs.json
     python3 tools/pack_catalog.py verify packs.json
     python3 tools/pack_catalog.py offline --catalog packs.json --file wd-extension-v2.bin \\
-        --file A-longtail-p75.zip --output character-pack-v2-offline.zip
+        --file A-longtail-p75.zip --output character-pack-0.2-offline.zip
+
+版本名（`--version`，如 0.2、1.0、1.1）只用来显示和给 Release 打 tag（`character-pack-<版本名>`）；应用比新旧只看修订号
+（`--revision`，每次加一的整数）。测试版加 `--stage preview`，卡片上版本号后面写「（测试版）」，行为和正式版一样。
 
 一个角色资料包有两个组成部分：WD 扩展头（`--wd`）和 CCIP 长尾锚点（`--ccip`），各自从包文件里读格式、头数、二级头数
 和基础模型的 SHA-256。组成部分的下载地址默认在这个版本自己的 Release（tag 就是版本名）下；某个组成部分的文件和上一版
@@ -40,6 +43,8 @@ RELEASE_PREFIX = 'https://github.com/shio-vinyl/illustash/releases/download/'
 CATALOG_NAME = 'packs.json'
 SIGNATURE_NAME = 'packs.json.sig'
 PACK_KIND = 'character-pack'
+# 目录条目的 `stage`：不写或 release 是正式版，preview 是测试版。
+STAGES = ('preview', 'release')
 # 两个组成部分各自认的包格式。
 FORMATS = {
     'wd': ('illustash-wd-extension/1', 'illustash-wd-extension/2'),
@@ -139,11 +144,11 @@ def component(kind, path, tag, name=None, license_text=None):
     }
 
 
-def entry(*, revision, wd, ccip, min_app, license_text=None, note_zh=None, note_en=None, version=None,
+def entry(*, version, revision, wd, ccip, min_app, stage=None, license_text=None, note_zh=None, note_en=None,
           wd_tag=None, ccip_tag=None, wd_name=None, ccip_name=None):
-    """从两个组成部分的包文件写出一条目录条目。版本名默认 `character-pack-v<修订号>`，两个组成部分的 Release 默认就是
-    这个版本的（tag 和版本名相同）。"""
-    version = version or f'character-pack-v{revision}'
+    """从两个组成部分的包文件写出一条目录条目。两个组成部分的 Release 默认就是这个版本的（tag 是
+    `character-pack-<版本名>`）。`stage` 为 `preview` 时是测试版，不写就是正式版。"""
+    tag = f'character-pack-{version}'
     result = {
         'kind': PACK_KIND,
         'revision': revision,
@@ -151,10 +156,12 @@ def entry(*, revision, wd, ccip, min_app, license_text=None, note_zh=None, note_
         'min_app': min_app,
         'license': license_text or 'Apache-2.0 AND MIT',
         'components': {
-            'wd': component('wd', wd, wd_tag or version, wd_name),
-            'ccip': component('ccip', ccip, ccip_tag or version, ccip_name),
+            'wd': component('wd', wd, wd_tag or tag, wd_name),
+            'ccip': component('ccip', ccip, ccip_tag or tag, ccip_name),
         },
     }
+    if stage:
+        result['stage'] = stage
     if note_zh or note_en:
         if not (note_zh and note_en):
             raise CatalogError('说明要中英文都写')
@@ -191,6 +198,7 @@ def check_entry(e, strict=True):
           and isinstance(e.get('revision'), int) and e['revision'] >= 1
           and isinstance(e.get('min_app'), str) and VERSION.match(e['min_app'])
           and short(e.get('license'), 200)
+          and ('stage' not in e or segment(e['stage'], 32))
           and ('note' not in e or (short(e['note'].get('zh-CN'), 200) and short(e['note'].get('en'), 200))))
     if not ok:
         raise CatalogError(f'条目 {e.get("version")} 的字段不合法')
@@ -204,6 +212,8 @@ def check_entry(e, strict=True):
         return
     if e['kind'] != PACK_KIND:
         raise CatalogError(f'条目 {e["version"]} 的种类 {e["kind"]} 不是应用认识的')
+    if e.get('stage', 'release') not in STAGES:
+        raise CatalogError(f'条目 {e["version"]} 的标记 {e["stage"]} 不是应用认识的')
     for key in ('wd', 'ccip'):
         c = parts[key]
         if c['format'] not in FORMATS[key]:
@@ -348,14 +358,15 @@ def main(argv=None):
     keygen = sub.add_parser('keygen', help='生成专签数据包的密钥对，公钥写进 native/terms/pack-key.pub')
     keygen.add_argument('key', type=Path, help='私钥写到哪里（只留在本机，例如 ~/.tauri/illustash-packs.key）')
     make = sub.add_parser('entry', help='从两个组成部分的包文件写出一条目录条目')
-    make.add_argument('--revision', required=True, type=int)
+    make.add_argument('--version', required=True, help='版本名，如 0.2、1.0；Release 的 tag 是 character-pack-<版本名>')
+    make.add_argument('--revision', required=True, type=int, help='比新旧用的整数，每次发布加一')
+    make.add_argument('--stage', choices=STAGES, help='测试版写 preview；不写就是正式版')
     make.add_argument('--wd', required=True, type=Path, help='WD 扩展头的包文件')
     make.add_argument('--ccip', required=True, type=Path, help='CCIP 长尾锚点的参考包（ZIP）')
     make.add_argument('--min-app', required=True)
     make.add_argument('--license', default=None, help='整个包的许可，默认 Apache-2.0 AND MIT')
     make.add_argument('--note-zh')
     make.add_argument('--note-en')
-    make.add_argument('--version', help='默认 character-pack-v<修订号>')
     make.add_argument('--wd-tag', help='WD 部分所在的 Release，默认就是这个版本的')
     make.add_argument('--ccip-tag', help='CCIP 部分所在的 Release，默认就是这个版本的')
     make.add_argument('--wd-name')
@@ -389,8 +400,8 @@ def main(argv=None):
             write_pubkey(pubkey)
             print(f'公钥已写进 {PUBKEY_FILE.relative_to(ROOT)}；私钥在 {args.key}，只留在这台电脑上。')
         elif args.command == 'entry':
-            result = entry(revision=args.revision, wd=args.wd, ccip=args.ccip, min_app=args.min_app,
-                           license_text=args.license, note_zh=args.note_zh, note_en=args.note_en, version=args.version,
+            result = entry(version=args.version, revision=args.revision, stage=args.stage, wd=args.wd, ccip=args.ccip,
+                           min_app=args.min_app, license_text=args.license, note_zh=args.note_zh, note_en=args.note_en,
                            wd_tag=args.wd_tag, ccip_tag=args.ccip_tag, wd_name=args.wd_name, ccip_name=args.ccip_name)
             args.output.write_text(json.dumps(result, ensure_ascii=False, indent=2) + '\n', encoding='utf-8')
             parts = result['components']

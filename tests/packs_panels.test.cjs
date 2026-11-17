@@ -18,7 +18,7 @@ before(async () => {
 });
 const part = (path, heads) => ({format: 'x', heads, candidate_only: 0, license: 'MIT', file: {path, size: 1000, sha256: 'ab'.repeat(32)}});
 const READY = {catalog: {configured: true, serial: null, checked_at: null, error: null},
-  current: {version: 'character-pack-v1', revision: 1, heads: 282, candidate_only: 0, license: 'Apache-2.0 AND MIT', size: 2214393,
+  current: {version: '0.1', stage: 'preview', revision: 1, heads: 282, candidate_only: 0, license: 'Apache-2.0 AND MIT', size: 2214393,
     status: 'ready', have: 2214393, components: {wd: part('wd-extension-v1.bin', 228), ccip: part('A-longtail-p75.zip', 54)}},
   offer: null, download: null, task: null,
   library: {enabled: false, version: null, wd: false, ccip: false, prompt: 'declined', images: 0, assigned: 0, vectors: 12, checked_at: null, blocked: null},

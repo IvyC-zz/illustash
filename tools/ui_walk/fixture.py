@@ -278,7 +278,7 @@ def wd_extension_walk(fixture: Fixture, directory: Path, origin: str) -> Path:
 
 
 def pack_catalog_walk(fixture: Fixture, directory: Path, ccip: Path) -> tuple[dict[str, bytes], str]:
-    """走查用的签名包目录（#602）：角色资料包的新版本 `character-pack-v2`。WD 部分在内置合成包的三个头之外多一个一级头
+    """走查用的签名包目录（#602）：角色资料包的新版本 0.2（测试版）。WD 部分在内置合成包的三个头之外多一个一级头
     （group-3）和一个只给候选的二级头（group-4）；CCIP 部分原样用内置的合成长尾包（`ccip`）。用测试密钥 A 签名
     （tests/fixtures/pack_catalog/make.py，要装 cryptography）。返回替身服务的「路径 → 字节」和测试公钥。"""
     import sys
@@ -298,14 +298,15 @@ def pack_catalog_walk(fixture: Fixture, directory: Path, ccip: Path) -> tuple[di
     directory.mkdir(parents=True, exist_ok=True)
     package = directory / 'wd-extension-v2.bin'
     package.write_bytes(contents)
-    entry = pack_catalog.entry(revision=2, wd=package, ccip=ccip, ccip_tag='ccip-longtail-v1', min_app='0.2.0',
+    entry = pack_catalog.entry(version='0.2', stage='preview', revision=2, wd=package, ccip=ccip, ccip_tag='ccip-longtail-v1',
+                               min_app='0.2.0',
                                note_zh='合成走查包：多两个角色，其中一个只给候选',
                                note_en='Synthetic walk pack: two more characters, one of them suggestion-only')
     catalog = pack_catalog.dumps(pack_catalog.build([entry]))
     key = make.Key('A')
     prefix = '/shio-vinyl/illustash/releases/download/'
     files = {prefix + 'packs/packs.json': catalog, prefix + 'packs/packs.json.sig': key.sign(catalog),
-             prefix + 'character-pack-v2/wd-extension-v2.bin': contents}
+             prefix + 'character-pack-0.2/wd-extension-v2.bin': contents}
     return files, key.pubkey()
 
 

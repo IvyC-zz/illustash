@@ -15,52 +15,58 @@ FIXTURES = Path(__file__).resolve().parent / 'fixtures' / 'pack_catalog'
 
 class PackCatalogToolTest(unittest.TestCase):
     def test_entry_reads_both_components_from_their_packages(self):
-        e = pack_catalog.entry(revision=3, wd=FIXTURES / 'wd-extension-v3.bin', ccip=FIXTURES / 'ccip-longtail-v2.zip',
+        e = pack_catalog.entry(version='1.0', revision=3, wd=FIXTURES / 'wd-extension-v3.bin', ccip=FIXTURES / 'ccip-longtail-v2.zip',
                                min_app='0.3.0')
-        self.assertEqual((e['kind'], e['version'], e['license']), ('character-pack', 'character-pack-v3', 'Apache-2.0 AND MIT'))
+        self.assertEqual((e['kind'], e['version'], e['license']), ('character-pack', '1.0', 'Apache-2.0 AND MIT'))
+        self.assertNotIn('stage', e, '不写就是正式版')
         wd, ccip = e['components']['wd'], e['components']['ccip']
         self.assertEqual((wd['format'], wd['heads'], wd['candidate_only'], wd['license']),
                          ('illustash-wd-extension/2', 3, 1, 'Apache-2.0'))
-        self.assertEqual(wd['file']['url'], pack_catalog.RELEASE_PREFIX + 'character-pack-v3/wd-extension-v3.bin')
+        self.assertEqual(wd['file']['url'], pack_catalog.RELEASE_PREFIX + 'character-pack-1.0/wd-extension-v3.bin')
         self.assertEqual(set(wd['base']), {'wd_model_sha256', 'wd_tags_sha256'})
         self.assertEqual((ccip['format'], ccip['heads'], ccip['license']), ('illustash-557-ccip-offline/1', 2, 'MIT'))
         self.assertEqual(set(ccip['base']), {'ccip_model_sha256'})
         # 和上一版相同的组成部分指向原来的 Release，可以换发布用的名字。
-        e = pack_catalog.entry(revision=2, wd=FIXTURES / 'wd-extension-v2.bin', ccip=FIXTURES / 'ccip-longtail-v1.zip',
-                               ccip_tag='ccip-longtail-v1', ccip_name='A-longtail-p75.zip', min_app='0.3.0')
+        e = pack_catalog.entry(version='0.2', stage='preview', revision=2, wd=FIXTURES / 'wd-extension-v2.bin',
+                               ccip=FIXTURES / 'ccip-longtail-v1.zip', ccip_tag='ccip-longtail-v1', ccip_name='A-longtail-p75.zip',
+                               min_app='0.3.0')
+        self.assertEqual(e['stage'], 'preview')
+        self.assertTrue(e['components']['wd']['file']['url'].endswith('/character-pack-0.2/wd-extension-v2.bin'))
         self.assertTrue(e['components']['ccip']['file']['url'].endswith('/ccip-longtail-v1/A-longtail-p75.zip'))
         with self.assertRaises(pack_catalog.CatalogError):
-            pack_catalog.entry(revision=2, wd=FIXTURES / 'wd-extension-v2.bin', ccip=FIXTURES / 'ccip-longtail-v1.zip',
-                               min_app='0.3')
+            pack_catalog.build([{**e, 'stage': 'rc'}])
         with self.assertRaises(pack_catalog.CatalogError):
-            pack_catalog.entry(revision=2, wd=FIXTURES / 'wd-extension-v2.bin', ccip=FIXTURES / 'ccip-longtail-v1.zip',
-                               min_app='0.3.0', note_zh='只有中文')
+            pack_catalog.entry(version='0.2', revision=2, wd=FIXTURES / 'wd-extension-v2.bin',
+                               ccip=FIXTURES / 'ccip-longtail-v1.zip', min_app='0.3')
+        with self.assertRaises(pack_catalog.CatalogError):
+            pack_catalog.entry(version='0.2', revision=2, wd=FIXTURES / 'wd-extension-v2.bin',
+                               ccip=FIXTURES / 'ccip-longtail-v1.zip', min_app='0.3.0', note_zh='只有中文')
         # 组成部分放反了：包文件读不出来。
         with self.assertRaises(Exception):
-            pack_catalog.entry(revision=2, wd=FIXTURES / 'ccip-longtail-v1.zip', ccip=FIXTURES / 'wd-extension-v2.bin',
-                               min_app='0.3.0')
+            pack_catalog.entry(version='0.2', revision=2, wd=FIXTURES / 'ccip-longtail-v1.zip',
+                               ccip=FIXTURES / 'wd-extension-v2.bin', min_app='0.3.0')
 
     def test_build_merges_by_version_and_bumps_the_serial(self):
-        entry = lambda revision, wd, ccip: pack_catalog.entry(revision=revision, wd=FIXTURES / wd, ccip=FIXTURES / ccip,
-                                                              min_app='0.3.0')
-        v2 = entry(2, 'wd-extension-v2.bin', 'ccip-longtail-v1.zip')
+        entry = lambda version, revision, wd, ccip: pack_catalog.entry(version=version, revision=revision, wd=FIXTURES / wd,
+                                                                       ccip=FIXTURES / ccip, min_app='0.3.0')
+        v2 = entry('0.2', 2, 'wd-extension-v2.bin', 'ccip-longtail-v1.zip')
         first = pack_catalog.build([v2])
-        self.assertEqual((first['serial'], [p['version'] for p in first['packs']]), (1, ['character-pack-v2']))
+        self.assertEqual((first['serial'], [p['version'] for p in first['packs']]), (1, ['0.2']))
         # 两个版本共用一个 CCIP 文件可以。
-        v3 = entry(3, 'wd-extension-v3.bin', 'ccip-longtail-v1.zip')
+        v3 = entry('1.0', 3, 'wd-extension-v3.bin', 'ccip-longtail-v1.zip')
         second = pack_catalog.build([v3, {**v2, 'license': 'Apache-2.0'}], first)
         self.assertEqual(second['serial'], 2)
         self.assertEqual([(p['version'], p['license']) for p in second['packs']],
-                         [('character-pack-v2', 'Apache-2.0'), ('character-pack-v3', 'Apache-2.0 AND MIT')])
+                         [('0.2', 'Apache-2.0'), ('1.0', 'Apache-2.0 AND MIT')])
         # 同一个修订号不能出现两次。
         with self.assertRaises(pack_catalog.CatalogError):
-            pack_catalog.build([{**v3, 'version': 'character-pack-v3b'}], second)
+            pack_catalog.build([{**v3, 'version': '1.0b'}], second)
         # 发布时拒绝应用会跳过的条目；测试夹具用 strict=False 才能写进去。
         future = {**v2, 'version': 'future-v1', 'kind': 'future-pack', 'revision': 9}
         with self.assertRaises(pack_catalog.CatalogError):
             pack_catalog.build([future])
         self.assertEqual(len(pack_catalog.build([future], strict=False)['packs']), 1)
-        tiered_v1 = {**v2, 'version': 'character-pack-v8', 'revision': 8,
+        tiered_v1 = {**v2, 'version': '1.8', 'revision': 8,
                      'components': {**v2['components'], 'wd': {**v2['components']['wd'], 'candidate_only': 1}}}
         with self.assertRaises(pack_catalog.CatalogError):
             pack_catalog.build([tiered_v1])

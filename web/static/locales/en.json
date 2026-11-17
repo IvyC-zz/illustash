@@ -3111,8 +3111,6 @@
   "许可": "License",
   "WD 角色扩展": "WD character extension",
   "没有变化": "No changes",
-  "有新版本：{n} 个角色": "New version: {n} characters",
-  "有新版本：{n} 个角色，其中 {m} 个只给候选": "New version: {n} characters, {m} of them as suggestions only",
   "正在下载或检查，等它结束": "Downloading or checking; wait for it to finish",
   "换成新版本…": "Switch to new version…",
   "换成新版本": "Switch to new version",
@@ -3278,5 +3276,11 @@
   "去掉本图库里角色资料包给出的全部候选。": "Removes every suggestion the character pack gave in this library.",
   "已撤回角色资料包": "Character pack withdrawn",
   "启用角色资料包": "Turn on character pack",
-  "撤回角色资料包": "Withdraw character pack"
+  "撤回角色资料包": "Withdraw character pack",
+  "{version}（测试版）": "{version} (Preview)",
+  "有新版本 {version}：{n} 个角色": {
+    "one": "New version {version}: {n} character",
+    "other": "New version {version}: {n} characters"
+  },
+  "有新版本 {version}：{n} 个角色，其中 {m} 个只给候选": "New version {version}: {n} characters, {m} of them as suggestions only"
 }

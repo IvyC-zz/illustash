@@ -13,7 +13,7 @@ before(async () => {
 
 const part = (fields = {}) => ({format: 'illustash-wd-extension/1', heads: 228, candidate_only: 0, license: 'Apache-2.0',
   file: {path: 'wd-extension-v1.bin', size: 940701, sha256: 'ab'.repeat(32)}, ...fields});
-const cur = (fields = {}) => ({version: 'character-pack-v1', revision: 1, heads: 282, candidate_only: 0, license: 'Apache-2.0 AND MIT',
+const cur = (fields = {}) => ({version: '0.1', stage: 'preview', revision: 1, heads: 282, candidate_only: 0, license: 'Apache-2.0 AND MIT',
   builtin: true, note: null, size: 2214393, status: 'missing', have: 0,
   components: {wd: part(), ccip: part({format: 'illustash-557-ccip-offline/1', heads: 54, license: 'MIT',
     file: {path: 'A-longtail-p75.zip', size: 1273692, sha256: 'd3'.repeat(32)}})}, ...fields});
@@ -26,7 +26,7 @@ const pack = ({current: p = {}, library: l = {}, download = null, task = null, o
     location: '/Users/synthetic/Library/Application Support/Illustash/Shared/extensions/wd-extension-v1'}},
   ccip: {library: {needs_scan: false, error: null, ...ccip}}});
 const READY = {status: 'ready', have: 2214393};
-const ENABLED = {enabled: true, version: 'character-pack-v1', wd: true, ccip: true, images: 7, assigned: 3, checked_at: '2026-11-16 08:00:00'};
+const ENABLED = {enabled: true, version: '0.1', wd: true, ccip: true, images: 7, assigned: 3, checked_at: '2026-11-16 08:00:00'};
 const buttons = html => [...html.matchAll(/<button class="([^"]+)" data-pack="([^"]+)"([^>]*)>([^<]*)</g)].map(m => ({cls: m[1], act: m[2], attrs: m[3], label: m[4]}));
 const labels = html => buttons(html).map(b => b.label);
 beforeEach(() => { c.state.pack = null; c.session.token = 'library-a'; c.session.stale = false; });
@@ -141,13 +141,14 @@ test('折叠区：存放位置、两个组成部分的文件、版本和许可�
   assert.match(html, /Illustash\/Shared\/extensions · 所有图库共用/);
   assert.match(html, /WD 扩展头<\/td><td class="mono" title="SHA-256 (ab)+"><bdi>wd-extension-v1.bin<\/bdi> · 941 KB · abababababab… · 228 个角色/);
   assert.match(html, /CCIP 长尾锚点<\/td>.*<bdi>A-longtail-p75.zip<\/bdi> · 1.3 MB · d3d3d3d3d3d3… · 54 个角色/);
-  assert.match(html, /character-pack-v1 · 282 个角色/);
+  assert.match(html, /<td>0\.1（测试版） · 282 个角色<\/td>/);
+  assert.match(c.packInfo(pack({current: {...READY, version: '1.0', stage: 'release'}})), /<td>1\.0 · 282 个角色<\/td>/);
   assert.match(html, /data-pack="delete"/);
   assert.match(c.packInfo(pack({current: READY, task: {id: 't', kind: 'enable', status: 'running', phase: 'scan'}})), /data-pack="delete" disabled/);
   assert.equal(c.packInfo({}), '');
 });
 
-const OFFER = (fields = {}) => ({version: 'character-pack-v2', revision: 2, heads: 311, candidate_only: 0, license: 'Apache-2.0 AND MIT',
+const OFFER = (fields = {}) => ({version: '0.2', stage: 'preview', revision: 2, heads: 311, candidate_only: 0, license: 'Apache-2.0 AND MIT',
   builtin: false, note: {'zh-CN': '比第一版多认 29 个角色', en: '29 more characters than the first version'}, size: 2338740,
   status: 'missing', have: 0, downloading: false, ...fields});
 
@@ -160,7 +161,7 @@ test('卡片正文：还没读到时只有省略号；新版本一行在按钮�
 test('有新版本：没下载时下载，下了一部分接着下，正在下载时进度在状态行，下好后已启用的图库可以换', () => {
   const enabled = fields => pack({current: READY, library: ENABLED, offer: OFFER(fields)});
   const html = c.packOfferLine(enabled());
-  assert.match(html, /^<div class="setting-line"><span>有新版本：311 个角色<small class="line-hint"><bdi>比第一版多认 29 个角色<\/bdi><\/small><\/span><\/div>/);
+  assert.match(html, /^<div class="setting-line"><span>有新版本 0\.2（测试版）：311 个角色<small class="line-hint"><bdi>比第一版多认 29 个角色<\/bdi><\/small><\/span><\/div>/);
   assert.deepEqual(buttons(html).map(b => [b.act, b.label, b.cls]), [['offer-download', '下载新版本（约 2.3 MB）', 'quiet small']]);
   assert.match(buttons(c.packOfferLine(pack({current: READY, offer: OFFER()})))[0].cls, /primary/, '没启用的图库下载是主按钮');
   assert.deepEqual(labels(c.packOfferLine(enabled({status: 'partial', have: 338740}))), ['继续下载新版本（还差 2.0 MB）']);
@@ -171,7 +172,8 @@ test('有新版本：没下载时下载，下了一部分接着下，正在下�
   assert.match(buttons(c.packOfferLine(pack({current: READY, library: ENABLED, offer: OFFER(), task: {id: 't', kind: 'enable', status: 'running', phase: 'scan'}})))[0].attrs, /disabled/);
   assert.deepEqual(buttons(c.packOfferLine(enabled({status: 'ready'}))).map(b => [b.act, b.label, b.cls]), [['offer-switch', '换成新版本…', 'primary small']]);
   assert.match(buttons(c.packOfferLine(pack({current: READY, library: {...ENABLED, blocked: 'busy'}, offer: OFFER({status: 'ready'})})))[0].attrs, /disabled title="图库正在导入或导出"/);
-  assert.match(c.packOfferLine(enabled({heads: 2100, candidate_only: 1872, note: null})), /<span>有新版本：2,100 个角色，其中 1,872 个只给候选<\/span>/);
+  assert.match(c.packOfferLine(enabled({version: '1.0', stage: 'release', heads: 2100, candidate_only: 1872, note: null})),
+    /<span>有新版本 1\.0：2,100 个角色，其中 1,872 个只给候选<\/span>/);
   assert.equal(c.packOfferLine(pack({current: READY})), '');
   assert.equal(c.packOfferLine(null), '');
 });
@@ -231,15 +233,15 @@ test('读取和每个 POST 的请求体；关掉选择框的导入不改状态�
   const calls = server(Array.from({length: 12}, () => ({body: x})));
   await c.loadPack();
   for (const action of ['download', 'import', 'cancel', 'discard', 'delete']) await c.packAction(action);
-  await c.packAction('download', 'character-pack-v2');
-  await c.enablePack(); await c.enablePack('character-pack-v2'); await c.withdrawPack(); await c.declinePack();
+  await c.packAction('download', '0.2');
+  await c.enablePack(); await c.enablePack('0.2'); await c.withdrawPack(); await c.declinePack();
   c.state.pack = pack({task: {id: 't9', kind: 'enable', status: 'done'}});
   await c.cancelPack();
   assert.deepEqual(calls.map(([m, p, b]) => [m, p, b]), [['GET', '/api/packs', null],
     ['POST', '/api/packs', {action: 'download'}], ['POST', '/api/packs', {action: 'import'}], ['POST', '/api/packs', {action: 'cancel'}],
     ['POST', '/api/packs', {action: 'discard'}], ['POST', '/api/packs', {action: 'delete'}],
-    ['POST', '/api/packs', {action: 'download', version: 'character-pack-v2'}],
-    ['POST', '/api/packs', {action: 'enable'}], ['POST', '/api/packs', {action: 'enable', version: 'character-pack-v2'}],
+    ['POST', '/api/packs', {action: 'download', version: '0.2'}],
+    ['POST', '/api/packs', {action: 'enable'}], ['POST', '/api/packs', {action: 'enable', version: '0.2'}],
     ['POST', '/api/packs', {action: 'withdraw'}], ['POST', '/api/packs', {action: 'decline'}], ['POST', '/api/packs', {action: 'cancel', id: 't9'}]]);
   c.state.pack = x;
   server([{body: {cancelled: true}}]);
@@ -248,7 +250,7 @@ test('读取和每个 POST 的请求体；关掉选择框的导入不改状态�
   globalThis.fetch = async () => { c.session.token = 'library-b'; return {status: 200, ok: true, headers: {get: () => null}, json: async () => pack()}; };
   await c.loadPack();
   assert.equal(c.state.pack, x);
-  assert.equal(c.packOffer(pack({offer: OFFER()})).version, 'character-pack-v2');
+  assert.equal(c.packOffer(pack({offer: OFFER()})).version, '0.2');
   assert.equal(c.packOffer(pack()), null);
 });
 
@@ -301,7 +303,7 @@ test('启用、撤回、删除、换成新版本都先确认；取消什么都�
   answers.push('ok', 'ok', 'ok', 'ok');
   await click('settingsPage', 'enable-confirm'); await click('settingsPage', 'withdraw'); await click('taskPanel', 'delete');
   await click('settingsPage', 'offer-switch');
-  assert.deepEqual(calls.map(x => x[2]), [{action: 'enable'}, {action: 'withdraw'}, {action: 'delete'}, {action: 'enable', version: 'character-pack-v2'}]);
+  assert.deepEqual(calls.map(x => x[2]), [{action: 'enable'}, {action: 'withdraw'}, {action: 'delete'}, {action: 'enable', version: '0.2'}]);
   titles.length = 0;
   calls.length = 0;
   c.state.pack = pack({current: READY, library: ENABLED, offer: OFFER()});
@@ -311,13 +313,13 @@ test('启用、撤回、删除、换成新版本都先确认；取消什么都�
   await click('settingsPage', 'offer-download');
   assert.deepEqual(titles, []);
   assert.deepEqual(calls.map(x => x[2]), [{action: 'enable'}, {action: 'enable'}, {action: 'decline'}, {action: 'cancel'},
-    {action: 'download', version: 'character-pack-v2'}]);
+    {action: 'download', version: '0.2'}]);
 });
 
 test('这个页面导入以后逐个列出所选文件的结果，包括离线包里的包目录；关掉选择框和别的动作以后不列', async () => {
-  const download = {kind: 'import', status: 'done', results: [{name: 'character-pack-v2-offline.zip/packs.json', result: 'catalog'},
+  const download = {kind: 'import', status: 'done', results: [{name: 'character-pack-0.2-offline.zip/packs.json', result: 'catalog'},
     {name: 'old-offline.zip/packs.json', result: 'catalog_old'}, {name: 'bad-offline.zip/packs.json', result: 'catalog_invalid'},
-    {name: 'character-pack-v2-offline.zip/wd-extension-v2.bin', result: 'accepted'}, {name: 'edited.bin', result: 'mismatch'},
+    {name: 'character-pack-0.2-offline.zip/wd-extension-v2.bin', result: 'accepted'}, {name: 'edited.bin', result: 'mismatch'},
     {name: 'notes.txt', result: 'unknown'}, {name: 'again.bin', result: 'already'}]};
   const imported = pack({current: READY, download});
   const page = web.fakePage();
@@ -333,7 +335,7 @@ test('这个页面导入以后逐个列出所选文件的结果，包括离线�
   assert.equal(c.packImportSummary(imported), '', '关掉选择框不算导入');
   await click('import');
   const html = c.packImportSummary(imported);
-  assert.match(html, /character-pack-v2-offline.zip\/packs.json<\/bdi> · 包目录，已读取/);
+  assert.match(html, /character-pack-0.2-offline.zip\/packs.json<\/bdi> · 包目录，已读取/);
   assert.match(html, /old-offline.zip\/packs.json<\/bdi> · 包目录比本机的旧，没有采用/);
   assert.match(html, /bad-offline.zip\/packs.json<\/bdi> · 包目录签名不对，已拒绝/);
   assert.match(html, /wd-extension-v2.bin<\/bdi> · 已接收/);

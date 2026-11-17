@@ -29,6 +29,8 @@ export const blockedReason = (x = current()) => {
   return !b || b === 'no_vectors' ? '' : BLOCKED[b]?.() || b;
 };
 const partNote = task => task?.result?.wd ? t('；') + t('WD 扩展部分已经更新') : '';
+// 版本号：测试版（stage 为 preview，2026-11-18 用户定）后面写「（测试版）」，只是显示不同。纯文本，调用方转义。
+export const packVersion = p => p?.stage === 'preview' ? t('{version}（测试版）', {version: p.version}) : p?.version || '';
 
 // 已启用时的一行：扩展候选覆盖几张图，其中几张的归属由它补上。两个数字每次读取时现算，两个组成部分合在一起按图去重。
 function enabledLine(x) {
@@ -161,15 +163,16 @@ export function packInfo(x = current()) {
   return fold('pack', t('角色资料包'), `<table class="settings-table models-files">
     ${location ? `<tr><td>${t('存放位置')}</td><td class="mono" title="${esc(location)}">${esc(home(location))} · ${t('所有图库共用')}</td></tr>` : ''}
     ${file(t('WD 扩展头'), p.components.wd)}${file(t('CCIP 长尾锚点'), p.components.ccip)}
-    <tr><td>${t('版本')}</td><td>${esc(p.version)} · ${t('{n} 个角色', {n: number(p.heads || 0)})}</td></tr>
+    <tr><td>${t('版本')}</td><td>${esc(packVersion(p))} · ${t('{n} 个角色', {n: number(p.heads || 0)})}</td></tr>
     <tr><td>${t('许可')}</td><td>${esc(tb(p.license || ''))}</td></tr></table>${del}`);
 }
 // 「有新版本」一行（#602）：签名目录里比卡片上的版本新的最新一个。没下载时可以下载；正在下载时进度在上面的状态行；
 // 下好以后已启用的图库可以换成它（没启用的图库卡片上直接就是它）。没有新版本时为空。
 export function packOfferLine(x = current(), offer = packOffer(x)) {
   if (!x || !offer) return '';
-  const n = number(offer.heads || 0), m = offer.candidate_only || 0;
-  const what = m ? t('有新版本：{n} 个角色，其中 {m} 个只给候选', {n, m: number(m)}) : t('有新版本：{n} 个角色', {n});
+  const n = number(offer.heads || 0), m = offer.candidate_only || 0, version = packVersion(offer);
+  const what = m ? t('有新版本 {version}：{n} 个角色，其中 {m} 个只给候选', {version, n, m: number(m)})
+    : t('有新版本 {version}：{n} 个角色', {version, n});
   const note = offer.note && (I18N.language === 'zh-CN' ? offer.note['zh-CN'] : offer.note.en);
   const downloading = offer.downloading && packDownloading(x);
   const failed = offer.downloading && x.download?.kind === 'download' && x.download.status === 'failed' && offer.status !== 'ready';

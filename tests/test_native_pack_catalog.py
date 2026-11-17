@@ -161,9 +161,9 @@ class NativePackCatalogTest(unittest.TestCase):
     def serve(self, origin):
         files = {DOWNLOAD + 'packs/packs.json': (FIXTURES / 'packs.json').read_bytes(),
                  DOWNLOAD + 'packs/packs.json.sig': (FIXTURES / 'packs.json.sig').read_bytes()}
-        for path, name in (('character-pack-v3/wd-extension-v3.bin', 'wd-extension-v3.bin'),
-                           ('character-pack-v3/ccip-longtail-v2.zip', 'ccip-longtail-v2.zip'),
-                           ('character-pack-v2/wd-extension-v2.bin', 'wd-extension-v2.bin')):
+        for path, name in (('character-pack-1.0/wd-extension-v3.bin', 'wd-extension-v3.bin'),
+                           ('character-pack-1.0/ccip-longtail-v2.zip', 'ccip-longtail-v2.zip'),
+                           ('character-pack-0.2/wd-extension-v2.bin', 'wd-extension-v2.bin')):
             files[DOWNLOAD + path] = (FIXTURES / name).read_bytes()
         wd, ccip, wd_bytes, ccip_bytes = builtin_v1(self.root / 'builtin', origin)
         files['/builtin/wd-extension-v1.bin'] = wd_bytes
@@ -198,8 +198,8 @@ class NativePackCatalogTest(unittest.TestCase):
             self.restart()
             packs = self.packs()
             self.assertEqual((packs['catalog']['configured'], packs['catalog']['serial']), (True, None))
-            self.assertEqual((packs['current']['version'], packs['current']['status'], packs['offer']),
-                             ('character-pack-v1', 'missing', None))
+            self.assertEqual((packs['current']['version'], packs['current']['stage'], packs['current']['status'], packs['offer']),
+                             ('0.1', 'preview', 'missing', None))
             self.assertEqual(packs['current']['heads'], 3)
             # 已有识别向量、还没决定过：提示一次，不自动启用。
             self.assertEqual((packs['library']['enabled'], packs['library']['prompt']), (False, 'ask'))
@@ -213,7 +213,7 @@ class NativePackCatalogTest(unittest.TestCase):
             self.packs({'action': 'enable'})
             enabled = self.settle('task')
             self.assertEqual(enabled['task']['status'], 'done', enabled)
-            self.assertLessEqual({'enabled': True, 'version': 'character-pack-v1', 'wd': True, 'ccip': True,
+            self.assertLessEqual({'enabled': True, 'version': '0.1', 'wd': True, 'ccip': True,
                                   'prompt': None, 'images': 1, 'assigned': 1}.items(), enabled['library'].items())
             self.assertEqual(self.members(), (self.ids[:1], self.ids[:1]))
             before = {route: self.request(route)['body'] for route in ('/api/wd-extension', '/api/ccip-longtail')}
@@ -224,36 +224,36 @@ class NativePackCatalogTest(unittest.TestCase):
             self.assertEqual(seen, [RELEASES, DOWNLOAD + 'packs/packs.json', DOWNLOAD + 'packs/packs.json.sig'])
             packs = self.packs()
             self.assertEqual((packs['catalog']['serial'], packs['catalog']['error']), (1, None))
-            self.assertEqual(packs['current']['version'], 'character-pack-v1')
+            self.assertEqual(packs['current']['version'], '0.1')
             offer = packs['offer']
-            self.assertEqual((offer['version'], offer['heads'], offer['candidate_only'], offer['status']),
-                             ('character-pack-v3', 5, 1, 'missing'))
+            self.assertEqual((offer['version'], offer['stage'], offer['heads'], offer['candidate_only'], offer['status']),
+                             ('1.0', 'release', 5, 1, 'missing'))
             self.assertEqual(offer['note'], {'zh-CN': '合成测试包 3', 'en': 'Synthetic test pack 3'})
             # 读到目录以后、用户点之前，两个组成部分的旧接口逐字节不变。
             for route, body in before.items():
                 self.assertEqual(self.request(route)['body'], body, route)
 
             # 目录里没有的版本、格式不对的请求都不认。
-            self.packs({'action': 'enable', 'version': 'character-pack-v4'}, 409)
+            self.packs({'action': 'enable', 'version': '1.1'}, 409)
             self.packs({'action': 'enable', 'version': 3}, 400)
-            self.packs({'action': 'withdraw', 'version': 'character-pack-v3'}, 400)
-            self.packs({'action': 'download', 'version': 'character-pack-v9'}, 409)
-            self.packs({'action': 'delete', 'version': 'character-pack-v3'}, 400)
+            self.packs({'action': 'withdraw', 'version': '1.0'}, 400)
+            self.packs({'action': 'download', 'version': '9.9'}, 409)
+            self.packs({'action': 'delete', 'version': '1.0'}, 400)
             self.packs({'action': 'nope'}, 400)
-            self.packs({'action': 'enable', 'version': 'character-pack-v3'}, 409)  # 还没下载
+            self.packs({'action': 'enable', 'version': '1.0'}, 409)  # 还没下载
             self.assertEqual(self.members(), (self.ids[:1], self.ids[:1]))
 
             # 下载新版本：两个文件都下，卡片上仍是已启用的 v1。
-            self.packs({'action': 'download', 'version': 'character-pack-v3'})
+            self.packs({'action': 'download', 'version': '1.0'})
             done = self.settle('download')
             self.assertEqual(done['download']['status'], 'done', done)
-            self.assertEqual((done['current']['version'], done['offer']['status']), ('character-pack-v1', 'ready'))
+            self.assertEqual((done['current']['version'], done['offer']['status']), ('0.1', 'ready'))
 
             # 换成新版本：两个组成部分都换；二级头（第三张图）只出候选，不补归属。
-            self.packs({'action': 'enable', 'version': 'character-pack-v3'})
+            self.packs({'action': 'enable', 'version': '1.0'})
             switched = self.settle('task')
             self.assertEqual(switched['task']['status'], 'done', switched)
-            self.assertEqual(switched['library']['version'], 'character-pack-v3')
+            self.assertEqual(switched['library']['version'], '1.0')
             self.assertEqual(switched['wd']['library']['package_sha256'], sha((FIXTURES / 'wd-extension-v3.bin').read_bytes()))
             self.assertEqual(switched['ccip']['library']['package_sha256'], sha((FIXTURES / 'ccip-longtail-v2.zip').read_bytes()))
             self.assertEqual(self.members(), (self.ids[:2], self.ids))
@@ -264,12 +264,12 @@ class NativePackCatalogTest(unittest.TestCase):
 
             # 重启以后照样记得用的是哪个版本。
             self.restart()
-            self.assertEqual(self.packs()['library']['version'], 'character-pack-v3')
+            self.assertEqual(self.packs()['library']['version'], '1.0')
 
             # 换回 v1，再撤回；撤回以后不再提示，也不自动启用。
-            self.packs({'action': 'enable', 'version': 'character-pack-v1'})
+            self.packs({'action': 'enable', 'version': '0.1'})
             back = self.settle('task')
-            self.assertEqual((back['task']['status'], back['library']['version']), ('done', 'character-pack-v1'), back)
+            self.assertEqual((back['task']['status'], back['library']['version']), ('done', '0.1'), back)
             self.assertEqual(self.members(), (self.ids[:1], self.ids[:1]))
             self.assertEqual(back['offer']['status'], 'ready')
             self.packs({'action': 'withdraw'})
@@ -279,7 +279,7 @@ class NativePackCatalogTest(unittest.TestCase):
             self.assertLessEqual({'enabled': False, 'version': None, 'wd': False, 'ccip': False, 'prompt': 'declined',
                                   'images': 0, 'assigned': 0}.items(), withdrawn['library'].items())
             # 没启用时卡片上是本机已有的最新版本。
-            self.assertEqual(withdrawn['current']['version'], 'character-pack-v3')
+            self.assertEqual(withdrawn['current']['version'], '1.0')
 
             # 目录读不到时只记一句话，已有的缓存照用；签名对不上的目录整份不用。
             files.pop(DOWNLOAD + 'packs/packs.json.sig')
@@ -300,7 +300,7 @@ class NativePackCatalogTest(unittest.TestCase):
             files.update(self.serve(origin))
             self.restart()
             # 签名不对的离线包：目录不采用，包文件也就不认。
-            bad = self.root / 'character-pack-v3-offline.zip'
+            bad = self.root / 'character-pack-1.0-offline.zip'
             with zipfile.ZipFile(bad, 'w') as archive:
                 archive.writestr('packs.json', (FIXTURES / 'packs.json').read_bytes())
                 archive.writestr('packs.json.sig', (FIXTURES / 'packs.json.sig-b').read_bytes())
@@ -309,30 +309,30 @@ class NativePackCatalogTest(unittest.TestCase):
             self.packs({'action': 'import', 'paths': [str(bad)]})
             results = self.settle('download')['download']['results']
             self.assertEqual({r['name']: r['result'] for r in results}, {
-                'character-pack-v3-offline.zip/packs.json': 'catalog_invalid',
-                'character-pack-v3-offline.zip/packs.json.sig': 'catalog_invalid',
-                'character-pack-v3-offline.zip/wd-extension-v3.bin': 'unknown',
-                'character-pack-v3-offline.zip/ccip-longtail-v2.zip': 'unknown'})
+                'character-pack-1.0-offline.zip/packs.json': 'catalog_invalid',
+                'character-pack-1.0-offline.zip/packs.json.sig': 'catalog_invalid',
+                'character-pack-1.0-offline.zip/wd-extension-v3.bin': 'unknown',
+                'character-pack-1.0-offline.zip/ccip-longtail-v2.zip': 'unknown'})
             self.assertIsNone(self.packs()['catalog']['serial'])
 
-            good = FIXTURES / 'character-pack-v3-offline.zip'
+            good = FIXTURES / 'character-pack-1.0-offline.zip'
             self.packs({'action': 'import', 'paths': [str(good)]})
             packs = self.settle('download')
             self.assertEqual({r['name']: r['result'] for r in packs['download']['results']}, {
-                'character-pack-v3-offline.zip/packs.json': 'catalog',
-                'character-pack-v3-offline.zip/packs.json.sig': 'catalog',
-                'character-pack-v3-offline.zip/wd-extension-v3.bin': 'accepted',
-                'character-pack-v3-offline.zip/ccip-longtail-v2.zip': 'accepted'})
+                'character-pack-1.0-offline.zip/packs.json': 'catalog',
+                'character-pack-1.0-offline.zip/packs.json.sig': 'catalog',
+                'character-pack-1.0-offline.zip/wd-extension-v3.bin': 'accepted',
+                'character-pack-1.0-offline.zip/ccip-longtail-v2.zip': 'accepted'})
             self.assertEqual(packs['catalog']['serial'], 1)
             # 没启用：卡片上是本机已有的 v3；已有识别向量，提示一次。
             self.assertEqual((packs['current']['version'], packs['current']['status'], packs['offer']),
-                             ('character-pack-v3', 'ready', None))
+                             ('1.0', 'ready', None))
             self.assertEqual(packs['library']['prompt'], 'ask')
             self.assertEqual(self.packs({'action': 'decline'})['library']['prompt'], 'declined')
             self.packs({'action': 'enable'})
             enabled = self.settle('task')
             self.assertEqual(enabled['task']['status'], 'done', enabled)
-            self.assertEqual((enabled['library']['version'], enabled['library']['prompt']), ('character-pack-v3', None))
+            self.assertEqual((enabled['library']['version'], enabled['library']['prompt']), ('1.0', None))
             self.assertEqual(self.members(), (self.ids[:2], self.ids))
             self.assertTrue((self.root / 'shared/extensions' / ('ccip-longtail-' + sha(
                 (FIXTURES / 'ccip-longtail-v2.zip').read_bytes())[:12]) / 'ccip-longtail-v2.zip').is_file())
@@ -357,7 +357,7 @@ class NativePackCatalogTest(unittest.TestCase):
             self.assertEqual(self.request('/api/sync', {})['status'], 200)
             wait_until(lambda: json.loads(self.request('/api/sync')['body'])['state']['status'] not in ('scanning', 'running'))
             packs = self.packs()
-            self.assertLessEqual({'enabled': True, 'version': 'character-pack-v1', 'wd': True, 'ccip': True,
+            self.assertLessEqual({'enabled': True, 'version': '0.1', 'wd': True, 'ccip': True,
                                   'prompt': None, 'images': 0}.items(), packs['library'].items())
             # 只记下启用了哪个文件：没有证据，也没有归属。
             with sqlite3.connect(self.lib.db) as app:
