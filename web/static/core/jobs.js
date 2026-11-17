@@ -200,7 +200,8 @@ export async function provenanceAction(body) {
 }
 
 // ---------- 导入（#88）：归档或识别结果，一次一个 ----------
-const IMPORT_ACTIVE = ['running', 'stopping'];
+// 和其余 *_ACTIVE 一样保留 export：native/terms 的 app_activity 测试按 `export const X = [...]` 这一行核对后端的进行中状态。
+export const IMPORT_ACTIVE = ['running', 'stopping'];
 export const importActive = () => IMPORT_ACTIVE.includes(state.importTask?.status);
 export const IMPORT_STAGES = {
   archive: {reading: t('正在读取归档'), unpacking: t('正在解压'), cleaning: t('正在清除模型连接设置和联网授权'), checking: t('正在检查新图库能否打开'), publishing: t('正在登记新图库')},
