@@ -116,10 +116,12 @@ pub(crate) fn forget_content(tx: &Connection, src: &Connection, changed: &[Strin
     crate::character_projection::fold(tx)
 }
 /// 没有任何研究计算器、学习戳或结果检查会读的应用表（#29）：偏好设置、名称来源设置（模型密钥、流量计数）、
-/// 名称缓存、同步历史和研究队列本身，以及画廊和相似组的「看过了」。写这些表从不会让结果失效。其他所有表，包括以后新增的表，都仍是学习的输入。
+/// 名称缓存、同步历史、人工结论备份的状态与图片摘要、研究队列，以及画廊和相似组的「看过了」。写这些表从不会让结果失效。其他所有表，包括以后新增的表，都仍是学习的输入。
 const UNREAD: &[&str] = &[
     "backend_effects",
     "galleries",
+    "human_asset_hashes",
+    "human_backup_state",
     "name_cache",
     "name_settings",
     "prefs",
@@ -128,8 +130,8 @@ const UNREAD: &[&str] = &[
     "sync_added",
     "sync_runs",
 ];
-/// 不算输入的 `meta` 行：names version 统计对名称表的写入次数（触发器）。
-const UNREAD_META: &str = "'names_version'";
+/// 名称写入计数和人工结论备份修订号。学习分别核验其实际读取的名称、裁决等行。
+const UNREAD_META: &str = "'names_version','human_revision'";
 /// 某一种研究的结果由什么算出（#29，docs/ARCHITECTURE_DIRECTION.md）。
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum Scope {
@@ -1930,6 +1932,17 @@ mod tests {
             ),
             ("sync history", Box::new(|| app("INSERT INTO sync_runs(status) VALUES ('done')")), &[]),
             ("pending event", Box::new(|| app("INSERT INTO backend_effects(kind) VALUES ('verdict')")), &[]),
+            (
+                "backup digest, state and revision",
+                Box::new(|| {
+                    app("CREATE TABLE human_asset_hashes(asset_key TEXT,digest TEXT);
+                    CREATE TABLE human_backup_state(id INTEGER,state_json TEXT);
+                    INSERT INTO human_asset_hashes VALUES ('a','synthetic');
+                    INSERT INTO human_backup_state VALUES (1,'{}');
+                    INSERT INTO meta VALUES ('human_revision','1');")
+                }),
+                &[],
+            ),
             ("human verdict", Box::new(|| app("INSERT INTO assertions VALUES ('a','e1','confirmed')")), &[Learning]),
             (
                 "identity policy",
