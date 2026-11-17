@@ -58,7 +58,7 @@ async function renderIndex() {
   showNav(); drawHeading();
   if (!list.length) { box.innerHTML = `<p class="empty">${t('还没有画廊。在图库里加上条件，点「保存为画廊」。')}</p>`; return; }
   const poster = g => `<a class="cast-poster" href="#/gallery/${encodeURIComponent(g.id)}" data-gallery="${esc(g.id)}">` +
-    `<span class="img"></span><span class="cap"><b>${esc(g.name)}</b><small>…</small></span></a>`;
+    `<span class="img"></span><span class="cap"><b title="${esc(g.name)}">${esc(g.name)}</b><small>…</small></span></a>`;
   box.innerHTML = `<div class="cast-posters">${list.map(poster).join('')}</div>`;
   const nsfw = state.nsfw, route = state.route, here = () => state.route === route && state.nsfw === nsfw;
   const card = id => box.querySelector(`[data-gallery="${CSS.escape(String(id))}"]`);
