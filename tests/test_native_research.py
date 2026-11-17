@@ -178,6 +178,7 @@ note('正常结束')
 
     def test_inflight_human_change_cancel_switch_exit_no_process_group(self):
         self.mode.write_text('held')
+        self.pid.unlink(missing_ok=True)
         self.request('/api/regroup',{})
         self.wait(lambda:self.pid.exists() and self.state()['status']=='learning')
         self.request('/api/tag',{'ids':['a'],'tag':'合成'})
