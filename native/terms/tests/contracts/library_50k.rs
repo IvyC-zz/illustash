@@ -251,17 +251,22 @@ fn benchmark_galleries_http() {
     let date = [("from", "2025-01-01"), ("to", "2025-12-31")];
     let sql = "INSERT INTO galleries(name,params,position,created_at,updated_at)
                VALUES (?,?,?,CURRENT_TIMESTAMP,CURRENT_TIMESTAMP)";
-    let db = Connection::open(package.join("library.sqlite")).unwrap();
-    for i in 0..20 {
-        let params = match i % 4 {
-            0 => json!({"has":single}),
-            1 => json!({"has":positive,"not":negative,"from":date[0].1,"to":date[1].1}),
-            2 => json!({"has":"[\"fav\"]"}),
-            _ => json!({"has":"[\"source:x\"]","from":"2024-10-01"}),
-        };
-        db.execute(sql, params![format!("合成画廊 {i}"), params.to_string(), i]).unwrap();
-    }
-    drop(db);
+    let add_galleries = |positions: std::ops::Range<i64>| {
+        let db = Connection::open(package.join("library.sqlite")).unwrap();
+        for i in positions {
+            let params = match i % 4 {
+                0 => json!({"has":single}),
+                1 => json!({"has":positive,"not":negative,"from":date[0].1,"to":date[1].1}),
+                2 => json!({"has":"[\"fav\"]"}),
+                _ => json!({"has":"[\"source:x\"]","from":"2024-10-01"}),
+            };
+            db.execute(sql, params![format!("合成画廊 {i}"), params.to_string(), i]).unwrap();
+        }
+    };
+    add_galleries(0..20);
+    let list_url = filter_url("/api/galleries", &[common]);
+    // 原夹具前四个位置分别使用四组选区，模拟只请求当前可见画廊的封面。
+    let covers_url = filter_url("/api/galleries/covers", &[("ids", "[1,2,3,4]"), common]);
     let old_page = filter_url("/api/assets", &[("tag", &tags[0]), common]);
     let old_count = filter_url("/api/assets/count", &[("tag", &tags[0]), common]);
     let legacy = [("page", old_page.as_str()), ("count", old_count.as_str()), ("detail", "/api/detail?id=img-00013")];
@@ -289,11 +294,25 @@ fn benchmark_galleries_http() {
                             .push(measure(&origin, &token, &url));
                     }
                 }
-                let url = "/api/galleries?nsfw=hide";
-                samples.entry("candidate_list_20_ms".into()).or_default().push(measure(&origin, &token, url));
+                for (name, url, count) in
+                    [("candidate_list_20_ms", list_url.as_str(), 20), ("candidate_covers_4_ms", covers_url.as_str(), 4)]
+                {
+                    samples.entry(name.into()).or_default().push(measure(&origin, &token, url));
+                    let (status, body, _) = request_json(&origin, url, None, &token);
+                    assert_eq!(status, 200, "{url}: {body}");
+                    assert_eq!(body.as_array().unwrap().len(), count);
+                }
             }
         }
         println!("TRIAL {trial} complete");
+    }
+    add_galleries(20..100);
+    for _ in 0..3 {
+        let (_host, origin, token) = launch(&root, &package, "gallery-bench", false, candidate);
+        samples.entry("candidate_list_100_ms".into()).or_default().push(measure(&origin, &token, &list_url));
+        let (status, body, _) = request_json(&origin, &list_url, None, &token);
+        assert_eq!(status, 200, "{list_url}: {body}");
+        assert_eq!(body.as_array().unwrap().len(), 100);
     }
     medians(samples);
 }
