@@ -5,6 +5,7 @@
 """
 from tests.native_worker_fixture import command as worker_command, source as worker_source, exists as worker_exists
 
+from contextlib import closing
 import json
 import os
 import shutil
@@ -61,7 +62,21 @@ class NativeFolderScanTest(unittest.TestCase):
         ids = [u for u, in self.rows('SELECT uuid FROM assets ORDER BY rowid') if u not in before]
         expected = self.rec.value('old scan')
         self.assertEqual(new, expected['result'])
-        self.assertEqual(snapshot(self.lib.source), expected['source'])
+        # #439 改了链接表的唯一键并新增内容链接。其余表仍逐表比较旧的有类型 / rowid 摘要。
+        actual = snapshot(self.lib.source)
+        recorded = expected['source']
+        self.assertEqual({k: v for k, v in actual.items() if k not in ('schema', 'asset_links')},
+                         {k: v for k, v in recorded.items() if k not in ('schema', 'asset_links')})
+        with sqlite3.connect(self.lib.source) as c, sqlite3.connect(old) as previous:
+            # 只有链接表和两个显式索引允许和旧结构不同。
+            ddl = """SELECT type,name,tbl_name,sql FROM sqlite_schema WHERE tbl_name<>'asset_links'
+                     AND name<>'files_asset' ORDER BY type,name"""
+            self.assertEqual(c.execute(ddl).fetchall(), previous.execute(ddl).fetchall())
+            keys = {r[1]: r[5] for r in c.execute('PRAGMA table_info(asset_links)')}
+            self.assertEqual(keys, {'asset': 4, 'system': 1, 'key': 2, 'source_id': 3, 'current': 0})
+            self.assertEqual(c.execute("SELECT asset,system,key,source_id,current FROM asset_links ORDER BY 1,2,3").fetchall(),
+                             c.execute("""SELECT asset,'file',path,source_id,1 FROM files UNION ALL
+                                          SELECT asset,'md5',md5,source_id,1 FROM files ORDER BY 1,2,3""").fetchall())
         return new
 
     @unittest.skipIf(os.name == 'nt', '固定期望录自 macOS：资产键序与文件元数据随平台不同')
@@ -190,6 +205,91 @@ class NativeFolderHTTPTest(unittest.TestCase):
         with sqlite3.connect(self.lib.db) as c:
             self.assertEqual(c.execute("SELECT uuid FROM assets WHERE filename='back.png'").fetchone()[0], asset)
         self.assertFalse(self.sentinel.exists())
+
+    def source_action(self, action, **args):
+        response = self.request('/api/libraries/sources/' + action, args)
+        self.assertEqual(response['status'], 200, response['body'])
+        return json.loads(response['body'])
+
+    def file_ids(self):
+        with closing(sqlite3.connect(self.lib.source)) as c:
+            return {(s, p): u for s, p, u in c.execute('SELECT source_id,path,asset FROM files')}
+
+    def test_native_library_new_move_from_old_file_records_and_undo_offline(self):
+        folder = self.new_folder
+        image(folder / 'first.png', 'red')
+        shutil.copyfile(folder / 'first.png', folder / 'copy.png')
+        image(folder / 'sub' / 'unique.png', 'green')
+        self.sync()
+        original = self.file_ids()
+        tagged = original['s1', 'first.png']
+        self.assertEqual(self.request('/api/tag', {'ids': [tagged], 'tag': '整理过'})['status'], 200)
+        # 模拟在已有数据的旧文件表上首次使用新版，旧磁盘下线前没有机会重新扫描。
+        with closing(sqlite3.connect(self.lib.source)) as c, c:
+            c.executescript("""ALTER TABLE asset_links RENAME TO saved_links;
+                CREATE TABLE asset_links(asset TEXT NOT NULL,system TEXT NOT NULL,key TEXT NOT NULL,
+                    source_id TEXT NOT NULL,current INTEGER NOT NULL DEFAULT 1,PRIMARY KEY(system,key,source_id));
+                INSERT INTO asset_links SELECT * FROM saved_links WHERE system<>'md5';
+                DROP TABLE saved_links; CREATE INDEX asset_links_asset ON asset_links(asset);""")
+        target = self.root / 'relocated'
+        folder.rename(target)
+        (target / 'sub' / 'unique.png').rename(target / 'renamed.png')
+        self.assertTrue(self.source_action('move', source='s1', path=str(target))['sync'])
+        self.assertNotEqual(self.finish()['state']['status'], 'error')
+        moved = self.file_ids()
+        expected = dict(original)
+        expected['s1', 'renamed.png'] = expected.pop(('s1', 'sub/unique.png'))
+        self.assertEqual(moved, expected)
+        with closing(sqlite3.connect(self.lib.db)) as c:
+            self.assertEqual(c.execute('SELECT src_path FROM assets WHERE uuid=?', (tagged,)).fetchone(), (str(target / 'first.png'),))
+            self.assertEqual(c.execute('SELECT tag FROM asset_tags WHERE uuid=?', (tagged,)).fetchone(), ('整理过',))
+        self.stop(self.process)
+        self.process, self.log = self.start(self.lib.path)
+        self.token = json.loads(self.request('/api/bootstrap')['body'])['token']
+        change, = json.loads(self.request('/api/libraries')['body'])['folder_changes']
+        self.assertEqual((change['kept'], change['new']), (len(original), 0))
+        self.source_action('undo', source='s1', token=change['token'])
+        self.assertNotEqual(self.finish()['state']['status'], 'error')
+        self.assertEqual(self.file_ids(), original)
+        with closing(sqlite3.connect(self.lib.db)) as c:
+            self.assertEqual(c.execute('SELECT src_path FROM assets WHERE uuid=?', (tagged,)).fetchone(), (str(folder / 'first.png'),))
+            self.assertEqual(c.execute('SELECT tag FROM asset_tags WHERE uuid=?', (tagged,)).fetchone(), ('整理过',))
+        self.assertFalse(folder.exists())
+        self.assertTrue(target.is_dir())
+
+    def test_native_library_new_confirm_cross_source_and_undo(self):
+        old = self.new_folder / 'one.png'
+        image(old, 'red')
+        self.sync()
+        old_id = self.file_ids()['s1', 'one.png']
+        self.assertEqual(self.request('/api/tag', {'ids': [old_id], 'tag': '原位置'})['status'], 200)
+        dest = self.root / 'copy'
+        dest.mkdir()
+        shutil.copy2(old, dest / 'copy.png')
+        sid = self.source_action('add', kind='folder', path=str(dest), preset='x')['id']
+        self.finish()
+        original = self.file_ids()
+        self.assertNotEqual(original[sid, 'copy.png'], old_id)
+        self.assertEqual(self.source_action('recognize', source=sid)['files'], [])
+        self.new_folder.rename(self.root / 'offline')
+        ask = self.source_action('recognize', source=sid)
+        self.assertEqual(ask['files'], [{'old': str(old), 'new': str(dest / 'copy.png')}])
+        self.assertEqual(self.file_ids(), original)
+        # 用户确认时，原件又上线：旧确认已失效，两份 ID 都保留。
+        (self.root / 'offline').rename(self.new_folder)
+        stale = self.request('/api/libraries/sources/recognize', {'source': sid, 'digest': ask['digest']})
+        self.assertNotEqual(stale['status'], 200)
+        self.assertEqual(self.file_ids(), original)
+        self.new_folder.rename(self.root / 'offline')
+        answer = self.source_action('recognize', source=sid, digest=ask['digest'])
+        self.assertEqual(answer['kept'], 1)
+        self.finish()
+        self.assertEqual(self.file_ids()[sid, 'copy.png'], old_id)
+        with closing(sqlite3.connect(self.lib.db)) as c:
+            self.assertEqual(c.execute('SELECT tag FROM asset_tags WHERE uuid=?', (old_id,)).fetchone(), ('原位置',))
+        self.source_action('undo', source=sid, token=answer['token'])
+        self.finish()
+        self.assertEqual(self.file_ids(), original)
 
     def test_native_library_new_folder_written_back_file_returns_in_one_sync(self):
         # #44：写回原先被移走路径的文件，第一次同步后就再次显示。

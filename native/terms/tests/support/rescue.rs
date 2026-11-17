@@ -138,13 +138,16 @@ fn pictures_get_their_ids_back_by_path_and_content_and_stale_results_go() {
     let rebuilt = rebuild_quietly(&library).unwrap();
     let building = f.package.join(BUILDING);
     let after = Fixture::ids(&building);
-    let expected =
+    let mut expected =
         [("a.png", "a.png"), ("b.png", "b.png"), ("moved/c2.png", "sub/c.png"), ("d.png", "d.png"), ("e.png", "e.png")]
             .into_iter()
             .map(|(now, was)| (now.to_owned(), id(was)))
             .collect::<BTreeMap<_, _>>();
+    // 原路径换成了其他内容。旧 ID 及其原有结果留给旧内容，新文件单独等待识别。
+    assert_ne!(after["b.png"], before["b.png"]);
+    expected.insert("b.png".into(), after["b.png"].clone());
     assert_eq!(after, expected);
-    assert_eq!((rebuilt.report.kept, rebuilt.report.new), (5, 0), "{:?}", rebuilt.report);
+    assert_eq!((rebuilt.report.kept, rebuilt.report.new), (4, 1), "{:?}", rebuilt.report);
     // b 的结果描述的是旧内容，d 的结果已经丢失：这两张等待识别，不带账本条目。
     assert_eq!(rebuilt.report.pending, 2, "{:?}", rebuilt.report);
     for (rel, results) in [("a.png", 1), ("b.png", 0), ("moved/c2.png", 1), ("d.png", 0), ("e.png", 1)] {

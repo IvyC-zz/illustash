@@ -47,6 +47,7 @@ export async function afterJob(job, change) {
       if (!pageOf(state.route).panel && !selCount()) reload();
       else if (!SYNC_ACTIVE.includes(state.sync.status)) pageOf(state.route).refresh?.('sync');
     }
+    if (change.ended && state.libraries?.folder_changes?.some(c => c.state === 'pending')) await loadLibraries();
     guideRefresh(change.ended);
     // 同步期间撤销或确认的角色，同步结束后研究才学（#404）：落定后重读一次。
     if (change.ended) afterSync().catch(e => error(readError(e)));

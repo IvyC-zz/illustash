@@ -547,6 +547,8 @@ class NativeLibraryUpgradeTest(unittest.TestCase):
                 self.assertEqual(tuple(run[k] for k in ('found', 'removed', 'imported', 'failed')), (1, 0, 1, 0))
                 self.assertIn('本次启动没有识别 worker', run['message'])
                 with closing(sqlite3.connect(lib.source)) as c:
+                    self.assertEqual(c.execute("SELECT key,asset FROM asset_links WHERE system='md5'").fetchall(),
+                                     c.execute('SELECT md5,asset FROM files').fetchall())
                     self.assertEqual(c.execute('SELECT stable_hash,width,height,src_path FROM assets').fetchall(),
                                      [(hashlib.md5(image.read_bytes()).hexdigest(), 4, 3, str(image))])
                 with closing(sqlite3.connect(lib.db)) as c:

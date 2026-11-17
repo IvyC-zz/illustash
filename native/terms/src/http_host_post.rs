@@ -658,9 +658,11 @@ fn route(
         "/api/backup" => crate::app_settings::backup(&session.library)
             .map(|path| Json::object([("path", path.to_string_lossy().as_ref().into())])),
         "/api/libraries/new" => create_library(host, body),
-        "/api/libraries/sources/add" | "/api/libraries/sources/remove" => {
-            sources(url, received, session, body).map_err(management_error)
-        }
+        "/api/libraries/sources/add"
+        | "/api/libraries/sources/remove"
+        | "/api/libraries/sources/move"
+        | "/api/libraries/sources/recognize"
+        | "/api/libraries/sources/undo" => sources(url, received, session, body).map_err(management_error),
         "/api/libraries/preset" => crate::app_settings::preset(
             &mut session.library,
             body.get("source").map(Json::text).unwrap_or(""),
@@ -711,6 +713,24 @@ fn sources(url: &str, received: u64, session: &mut Session, body: &Json) -> Resu
     }
     let mut result = if url == "/api/libraries/sources/add" {
         add_sources(received, session, body)?
+    } else if url != "/api/libraries/sources/remove" {
+        let action = url.rsplit('/').next().expect("来源操作有末段");
+        let field = match action {
+            "move" => "path",
+            "undo" => "token",
+            _ => "digest",
+        };
+        let argument = body.get(field).map(Json::text).unwrap_or("");
+        let result = crate::app_sources::relocation(
+            &mut session.library,
+            action,
+            body.get("source").map(Json::text).unwrap_or(""),
+            argument,
+        )?;
+        if action == "recognize" && argument.is_empty() {
+            return Ok(result);
+        }
+        result
     } else {
         let confirm = body.get("confirm").is_some_and(truthy);
         let result = crate::app_sources::remove(

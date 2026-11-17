@@ -76,9 +76,9 @@ export async function pollExport() {
   for (let i = 0; i < 2400 && state.libraries?.export?.status === 'running'; i++) { await new Promise(r => setTimeout(r, 1500)); await loadLibraries(); }
 }
 // 系统的文件夹选择框，可一次选多个；没有选择框的地方抛出「Unsupported…」。
-export async function chooseFolders() {
-  const r = await api('/api/libraries/choose', {method: 'POST', body: JSON.stringify({kind: 'folder', multiple: true})});
-  return r?.paths || [];
+export async function chooseFolders(multiple = true) {
+  const r = await api('/api/libraries/choose', {method: 'POST', body: JSON.stringify({kind: 'folder', multiple})});
+  return multiple ? r?.paths || [] : r?.path ? [r.path] : [];
 }
 // 打开另一个图库会让服务在它上面重启。`agreed` 是用户事先同意的事：'upgrade' 升级旧图库（#193），或 'rescue' 抢救它
 // 损坏的 source.sqlite（#228）。之后这个页面属于它离开的那个图库：立即停止读写。后端拒绝时抛出拒绝的内容。
