@@ -36,15 +36,6 @@
       "expires": "2026-11-29"
     },
     {
-      "kind": "rust",
-      "crate": "desktop",
-      "id": "server::tests::forced_cleanup_includes_descendants_and_leaves_bystander_alive",
-      "platforms": ["macos"],
-      "issue": 474,
-      "added": "2026-11-15",
-      "expires": "2026-11-29"
-    },
-    {
       "kind": "python",
       "id": "test_native_names.NativeNamesTest.test_busy_refresh_cancel_switch_same_id_and_late_result",
       "platforms": ["macos"],

@@ -627,6 +627,10 @@ fn exit_code(status: &std::process::ExitStatus) -> Option<i32> {
     }
 }
 
+#[cfg(all(test, unix))]
+#[path = "../../native/terms/tests/common/wait.rs"]
+mod test_wait;
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -701,24 +705,47 @@ mod tests {
     #[cfg(unix)]
     #[test]
     fn forced_cleanup_includes_descendants_and_leaves_bystander_alive() {
-        use std::os::unix::process::CommandExt;
+        // wait 会先关闭 stdin：断言失败时 cat 也能读到 EOF，shell 的 wait 随它结束。
+        struct Fixture(std::process::Child);
+        impl Drop for Fixture {
+            fn drop(&mut self) {
+                let _ = self.0.wait();
+            }
+        }
+
         let mut command = Command::new("/bin/sh");
-        command.args(["-c", "/bin/sleep 60 & echo $!; wait"]).stdout(Stdio::piped()).process_group(0);
-        let mut host = command.spawn().unwrap();
+        // 后台命令默认从 /dev/null 读，显式传给 cat 一份夹具管道，直到断言结束都保持写端打开。
+        command
+            .args(["-c", "exec 3<&0; /bin/cat <&3 >/dev/null & echo $!; wait"])
+            .stdin(Stdio::piped())
+            .stdout(Stdio::piped());
+        illustash_platform::platform_process::prepare_desktop(&mut command);
+        let mut host = Fixture(command.spawn().unwrap());
         let mut line = String::new();
-        BufReader::new(host.stdout.take().unwrap()).read_line(&mut line).unwrap();
-        let descendant: i32 = line.trim().parse().unwrap();
-        let mut bystander = Command::new("/bin/sleep").arg("60").spawn().unwrap();
-        illustash_platform::platform_process::kill_owned_tree(host.id());
-        host.wait().unwrap();
-        // 被杀掉的后代进程不可能还在执行；可能有一个等待回收的短暂僵尸进程。
-        let state = Command::new("/bin/ps").args(["-o", "stat=", "-p", &descendant.to_string()]).output().unwrap();
-        assert!(
-            String::from_utf8_lossy(&state.stdout).trim().is_empty()
-                || String::from_utf8_lossy(&state.stdout).trim().starts_with('Z')
-        );
-        assert!(bystander.try_wait().unwrap().is_none());
-        bystander.kill().unwrap();
-        bystander.wait().unwrap();
+        BufReader::new(host.0.stdout.take().unwrap()).read_line(&mut line).unwrap();
+        let descendant: u32 = line.trim().parse().unwrap();
+        let mut bystander = Fixture(Command::new("/bin/cat").stdin(Stdio::piped()).spawn().unwrap());
+
+        illustash_platform::platform_process::kill_owned_tree(host.0.id());
+        let deadline = test_wait::deadline();
+        loop {
+            // try_wait 不会关闭 stdin。即使宿主先退出，漏杀的 cat 也不会自行结束。
+            let host_status = host.0.try_wait().unwrap();
+            let ps = Command::new("/bin/ps").args(["-o", "stat=", "-p", &descendant.to_string()]).output().unwrap();
+            let state = String::from_utf8(ps.stdout).unwrap();
+            let state = state.trim();
+            let gone = ps.status.code() == Some(1) && state.is_empty() && ps.stderr.is_empty();
+            assert!(
+                gone || (ps.status.success() && !state.is_empty()),
+                "ps 查询失败：{}",
+                String::from_utf8_lossy(&ps.stderr)
+            );
+            if host_status.is_some() && (gone || state.starts_with('Z')) {
+                break;
+            }
+            assert!(Instant::now() < deadline, "宿主 {host_status:?}，后代 {descendant} 状态 {state:?}");
+            thread::sleep(Duration::from_millis(10));
+        }
+        assert!(bystander.0.try_wait().unwrap().is_none(), "无关进程已退出");
     }
 }
