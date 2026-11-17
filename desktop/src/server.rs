@@ -585,7 +585,10 @@ fn run(app: &AppHandle, main: &WebviewWindow, library: Option<PathBuf>, start: S
                 return;
             }
         }
-        if start == Start::Open && !ready.load(Ordering::SeqCst) {
+        if start == Start::Open
+            && matches!(&status, Ok(Some(s)) if s.code() == Some(i32::from(illustash_terms::desktop_shell::UPGRADE_NEEDED_EXIT)))
+            && !ready.load(Ordering::SeqCst)
+        {
             if let Some(name) = target.as_deref().and_then(illustash_terms::desktop_shell::upgrade_needed) {
                 show_upgrade(&main, &name);
                 return;
