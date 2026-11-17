@@ -11,7 +11,7 @@ import {adoptToken, onPost, api} from './core/session.js';
 import {setLatest} from './core/edits.js';
 import {onJob} from './core/jobs.js';
 import {$, platformHints, toast, wireToast, error, wireDom} from './ui/dom.js';
-import {wireTasks, taskTick} from './ui/tasks.js';
+import {wireTasks, taskTick, openTasks} from './ui/tasks.js';
 import {confirmAction} from './ui/dialog.js';
 import {openModal, wireOverlays} from './ui/overlay.js';
 import {wireSettings} from './ui/settings.js';
@@ -41,6 +41,8 @@ wireOverlays();
 wireShell();
 // 桌面 App 菜单的「后退／前进」（desktop/src/main.rs）调它。
 window.illustashHistory = stepHistory;
+// 点系统通知时外壳调它：回到窗口并打开任务面板（desktop/src/background.rs，#451）。
+window.illustashOpenTasks = () => openTasks();
 wireGrid();
 wirePalette();
 wireDetail();
@@ -73,7 +75,7 @@ $('sidebarToggle').onclick = () => { if (innerWidth <= 760) $('sidebar').classLi
     pollIntegrity();
     // 图库打开了，但没能记进最近图库（#176）：提示一次。
     api('/api/libraries').then(x => {
-      if (x?.unlisted) error(t('没能把这个图库记进最近图库：{why}。图库照常可用，只是下次启动时可能不会自动打开它。', {why: x.unlisted}));
+      if (x?.unlisted) error(t('没能把这个图库记进最近图库：{why}。下次启动时可能不会自动打开它。', {why: x.unlisted}));
       // 在这个浏览器里每次升级提示一次：备份比生成它的会话活得久（#193）。
       if (x?.upgraded && prefs.get('upgradeNoticed', '') !== x.upgraded.backup) {
         prefs.set('upgradeNoticed', x.upgraded.backup);
