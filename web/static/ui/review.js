@@ -306,7 +306,8 @@ implement({
   // 撤销之后重画（#386 的 2-41）：撤销的可能就是「看过了」。
   similar: {render: () => renderSimilar(), refresh: why => { if (why === 'undo' || why === 'learned' || why === 'nsfw') return renderSimilar(); }},
   sgroup: {prepare: readSeen, heading: sgroupHeading, wireHeading: () => $('sgroupSeen')?.addEventListener('click', toggleSeen),
-    refresh: async why => { if (why === 'undo' || why === 'learned') { await readSeen(state.route); renderHeading(); } }},
+    // 改动、撤销、同步之后组里看得到的张数可能变了，重读一次，免得点「看过了」时张数对不上。
+    refresh: async why => { if (why !== 'view' && why !== 'ask') { const route = state.route; if (await readSeen(route) !== false) renderHeading(); } }},
   identity: {render: () => renderIdentity(), refresh: why => { if (why === 'undo') renderIdentity('keep'); else if (why === 'nsfw') renderIdentity(); }},
   // 画师抽查不按 R18 筛选（固定的一批随机图）：切换 R18 只重画标题里的提醒（#386 的 2-35）。
   'artist-audit': {render: () => renderArtistAudit(), refresh: why => { if (why === 'undo') renderArtistAudit(); else if (why === 'nsfw') renderHeading(); }},
