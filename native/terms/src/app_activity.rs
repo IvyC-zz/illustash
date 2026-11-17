@@ -103,6 +103,8 @@ pub(crate) fn snapshot(app: &Application) -> Option<(u64, Vec<Task>)> {
     tasks.push(item);
 
     tasks.push(task("export", RUNNING, &app.exports.state(&session.library, generation)));
+    // 选中的图导出到文件夹（#450）：进行中关窗也要等它做完。
+    tasks.push(task("files", RUNNING, &session.asset_exports.state(generation)));
     drop(session);
 
     tasks.push(task("import", IMPORT_ACTIVE, &app.imports.state()));

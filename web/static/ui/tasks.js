@@ -15,6 +15,7 @@ import {createLayer} from './overlay.js';
 import {openIndexAdd} from './catalog.js';
 import {modelsLine, modelsBar, modelsActions} from './models.js';
 import {home} from '../core/human.js';
+import {cancelExport, exportActive, exportLine, loadFiles, onFiles, revealExport, revealLabel} from '../core/files.js';
 import {loadModels, onModels} from '../core/models.js';
 // 「开始」先显示有哪些内容会离开本机；授权只覆盖这一次运行。
 let provenanceArmed = false;
@@ -74,6 +75,14 @@ export function taskList() {
     active: m.job?.status === 'running', warn: m.job?.status === 'failed', line: modelsLine(m), body: modelsBar(m), action: modelsActions(m, true)});
   if (['running', 'done', 'error'].includes(ex.status)) list.push({key: 'export', name: t('导出图库'), busy: t('导出图库中'), active: ex.status === 'running', warn: ex.status === 'error',
     line: ex.status === 'running' ? t('正在导出…') : ex.status === 'done' ? t('已导出 {mb} MB', {mb: (ex.bytes / 1048576).toFixed(0)}) : t('导出失败：{error}', {error: tb(ex.error || '')}), body: '', action: ''});
+  // 选中的图导出到文件夹（#450）：运行中可以取消，结束后可以打开那个文件夹。
+  const fx = state.files?.export;
+  if (['running', 'done', 'error', 'cancelled'].includes(fx?.status)) {
+    const action = exportActive() ? `<button class="quiet small" data-task="export-cancel">${t('取消导出')}</button>`
+      : fx.status !== 'error' ? `<button class="quiet small" data-task="export-reveal">${revealLabel()}</button>` : '';
+    list.push({key: 'files', name: t('导出图片'), busy: t('导出图片中'), active: exportActive(), warn: fx.status === 'error',
+      line: exportLine(fx), body: exportActive() ? bar(fx.done, fx.total) : '', action});
+  }
   // 导入（图库归档、识别结果、人工结论共用一个槽；#386 的 2-37）：和导出一样，运行中、结束后都在这里有一行，运行时可以取消。
   const im = state.importTask;
   if (['running', 'stopping', 'done', 'error', 'cancelled'].includes(im?.status)) list.push({key: 'import',
@@ -139,6 +148,8 @@ export async function taskTick() {
   if (taskPanel.open && Date.now() - taskPanel.settingsAt > (SIMILAR_ACTIVE.includes(state.settings?.tasks?.similar?.status) ? 2500 : 15000)) { taskPanel.settingsAt = Date.now(); jobs.push(shared('/api/settings').then(s => { setSettings(s); }).catch(e => error(readError(e)))); }
   // 面板开着时发现在别的窗口里启动的导入；运行中的导入有自己的轮询。
   if (taskPanel.open && !importActive()) jobs.push(pollImports());
+  // 用图动作的状态（#450）：第一次读来知道能不能拖出；面板开着时发现在别的窗口里开始的导出，运行中的导出有自己的轮询。
+  if (!state.files || (taskPanel.open && !exportActive())) jobs.push(loadFiles());
   // 面板打开后读一次图库列表（同步任务的名字和导出的进度）。
   if (taskPanel.open && !state.libraries) jobs.push(loadLibraries());
   await Promise.allSettled(jobs);
@@ -159,6 +170,7 @@ export function toggleTasks(open = !taskPanel.open, reason) {
 export function wireTasks() {
   // 模型下载（#168）有自己的轮询：按钮和面板跟着每次读取变。
   onModels(() => renderTasks());
+  onFiles(() => renderTasks());
   onJob(async (job, change) => {
     if (job === 'sync' && change.ended && state.sync.status === 'done' && state.sync.imported) toast(syncDoneText(state.sync));
     if (job === 'index' && change.ended && indexEndText(state.index.state)) toast(indexEndText(state.index.state));
@@ -188,6 +200,8 @@ export function wireTasks() {
         else if (act === 'index-resume') { if (!await resumeIndex(confirmAction)) return false; pollIndex(); }
         else if (act === 'index-discard') return await discardIndex(confirmAction);
         else if (act === 'import-cancel') await cancelImport();
+        else if (act === 'export-cancel') await cancelExport();
+        else if (act === 'export-reveal') await revealExport();
         else if (act === 'names') { await refreshNames(); toast(t('已开始重新获取角色名称')); }
         else if (act === 'similar') { await post('/api/similar', {}); setSettings(await api('/api/settings')); }
       } catch (err) { toast(err.message); }

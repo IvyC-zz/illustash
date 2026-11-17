@@ -6,6 +6,7 @@ mod background;
 mod bridge;
 #[cfg(any(windows, target_os = "macos", test))]
 mod bundled_workers;
+mod drag;
 mod i18n;
 mod notify;
 mod picker;

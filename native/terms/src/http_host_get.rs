@@ -177,6 +177,14 @@ fn read(request: &Request, host: &Host, session: &Session, path: &str) -> Result
             crate::app_onboarding::Onboarding::read(session, &host.root, &session.context(&host.tags), works)
                 .map(|p| Some((p, 200)))
         }
+        // 用图动作（#450）：能不能拖出（只在桌面 App 里），以及最近一次导出到文件夹的状态。
+        "/api/files" => Ok(Some((
+            Json::object([
+                ("drag", crate::app_desktop::available().into()),
+                ("export", session.asset_exports.state(session.generation)),
+            ]),
+            200,
+        ))),
         // 导入槽位属于应用：切换图库后，页面仍能读到上一次导入为什么停下。
         "/api/imports" => Ok(Some((host.imports.state(), 200))),
         "/api/human-conclusions" => Ok(Some((

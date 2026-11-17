@@ -17,6 +17,8 @@ import {offerWatch} from './catalog.js';
 import {$, error, toast} from './dom.js';
 import {renderChrome, renderHeading} from './shell.js';
 import {findArtists} from './artists.js';
+import {openExport, startDrag} from './files.js';
+import {canDrag, exportActive} from '../core/files.js';
 import {answerAsk, closeInspector, closeViewer, ensureVisible, indexOf, inspect, openViewer, peek, pickAlternative, showViewer, singleAction, step, zoomView} from './detail.js';
 import {jumpToCharacter, markOc, newIds, openPicker, openRelate, targets} from './palette.js';
 import {createLayer, inPopover, popoverOpen} from './overlay.js';
@@ -524,6 +526,7 @@ export function renderSelection() {
   if (!['excluded', 'pending'].includes(kind)) buttons += `<button class="quiet${arm('exclude')}" data-act="exclude" title="${t('把截图、照片等不是插画的图移到「已排除」')}">${state.armed === 'exclude' ? t('再点一次：排除 {n} 张', {n: number(n)}) : t('排除')} <kbd>X</kbd></button>`;
   buttons += `<button class="quiet" data-act="tag">${t('标签')} <kbd>G</kbd></button>`;
   buttons += `<button class="quiet" data-act="findartist" title="${t('用像素哈希和 IQDB 查这些图的画师（只发哈希文本，不发图片；一次最多 500 张）')}">${t('查找画师')}</button>`;
+  buttons += `<button class="quiet" data-act="export" ${exportActive() ? `disabled title="${t('正在导出，完成后再开始下一次')}"` : `title="${t('把原图复制到一个文件夹')}"`}>${t('导出…')}</button>`;
   if (!state.sel.all && n >= 2 && n <= 12) buttons += `<button class="quiet" data-act="relate" title="${t('两两比较，判断是同一张图、裁剪、差分、局部编辑，还是不同的图')}">${t('判断关系')}</button>`;
   const note = kind === 'audit' ? t('一次最多回答 500 张，这次答前 500 张') : t('超过 500 张需再点一次确认');
   // 重复页上改哪一份都会同步到整组副本：这件事放在动手的地方，不写在副本页常驻的说明里（#528）。
@@ -574,6 +577,7 @@ function runBarAction(act) {
   const n = selCount(), r = state.route; if (!n || edits.busy) return;
   const payload = () => ({...selectionPayload(), confirm: n > 500});
   if (act === 'audit_yes' || act === 'audit_no') { answerAudit(act === 'audit_yes'); return; }
+  if (act === 'export') { openExport(selectionPayload(), n); return; }
   if (act === 'findartist') {
     const sel = state.sel;
     (sel.all ? api('/api/ids?' + new URLSearchParams({...filters(), limit: 500})).then(ids => ids.filter(u => !sel.exclude.has(u))) : Promise.resolve([...sel.ids].slice(0, 500)))
@@ -836,6 +840,9 @@ export function wireGrid() {
     drag.lastX = e.clientX; drag.lastY = e.clientY;
     if (!drag.moved && Math.hypot(e.clientX - drag.x, e.clientY - drag.y) < 6) return;
     if (!drag.moved) {
+      // 按住一张已选中的图拖动：把选中的图拖到别的应用（#450 的方案 ①），不再是拖动选择。全选时没有展开的 ID，不拖。
+      const held = drag.start !== null ? state.items[drag.start] : null;
+      if (held && canDrag() && !state.sel.all && isSelected(held.uuid)) { drag = null; startDrag([...state.sel.ids]); return; }
       drag.moved = true; state.selecting = state.selecting || browsing();
       drag.base = {all: state.sel.all, ids: new Set(state.sel.ids), exclude: new Set(state.sel.exclude)};
       const startItem = drag.start !== null ? state.items[drag.start] : null;
