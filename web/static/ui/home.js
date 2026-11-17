@@ -1,6 +1,6 @@
 // 首页（桌面布局，#199）：按加入日期分组的最新图片、同步条，以及「认一认」卡片。
 import {edits} from '../core/edits.js';
-import {dateText, esc, number} from '../core/format.js';
+import {dateText, esc, number, thumbSize} from '../core/format.js';
 import {I18N, t} from '../core/i18n.js';
 import {nameWithWork} from '../core/labels.js';
 import {implement, onPage} from '../core/pages.js';
@@ -60,10 +60,11 @@ export async function moreHome() {
   }
 }
 export const ratio = x => x.width && x.height ? Math.min(2.4, Math.max(.4, x.width / x.height)) : .75;
-function homeTile(x, style, big = false) {
+// rowH 是这一行的名义高度（CSS 像素），按它选缩略图档位（#452）。
+function homeTile(x, style, rowH) {
   const names = x.memberships.map(m => m.name), ids = x.memberships.map(m => m.id).join(' ');
   const badge = viewOpts.marks && x.dup ? `<span class="home-badge" title="${t('共 {n} 份副本', {n: x.dup.size})}">×${x.dup.size}</span>` : '';
-  return `<button class="home-j${state.focused === x.uuid ? ' on' : ''}" data-id="${esc(x.uuid)}" data-chars="${esc(ids)}" style="${style}"${names.length ? ` title="${esc(x.memberships.map(nameWithWork).join(t('、')))}"` : ''}><img src="/image?id=${encodeURIComponent(x.uuid)}&size=${big ? 'medium' : 'thumb'}" alt="" loading="lazy" decoding="async" draggable="false">${badge}${big ? '' : `<span class="home-ov">${names.length ? names.map(esc).join(' · ') : x.unknown ? t('已跳过') : t('未识别')}</span>`}</button>`;
+  return `<button class="home-j${state.focused === x.uuid ? ' on' : ''}" data-id="${esc(x.uuid)}" data-chars="${esc(ids)}" style="${style}"${names.length ? ` title="${esc(x.memberships.map(nameWithWork).join(t('、')))}"` : ''}><img src="/image?id=${encodeURIComponent(x.uuid)}&size=${thumbSize(rowH)}" alt="" loading="lazy" decoding="async" draggable="false">${badge}<span class="home-ov">${names.length ? names.map(esc).join(' · ') : x.unknown ? t('已跳过') : t('未识别')}</span></button>`;
 }
 // 整行拉伸到满宽（比目标高度略矮）；需要长到目标高度 ROW_GROW 倍以上的行（图片少的一天、一天的最后一行）保持目标
 // 高度，右侧留空。
@@ -73,17 +74,17 @@ export function homeRows(items, width, target) {
   for (const x of items) { row.push(x); sum += ratio(x); if (sum * target + G * (row.length - 1) >= width) { rows.push(row); row = []; sum = 0; } }
   if (row.length) rows.push(row);
   return rows.map(r => { const s = r.reduce((a, x) => a + ratio(x), 0), fit = (width - G * (r.length - 1)) / s, full = fit <= target * ROW_GROW, h = full ? fit : target;
-    return `<div class="home-row" style="height:${Math.round(h)}px">${r.map(x => homeTile(x, full ? `flex:${ratio(x)} 1 0` : `flex:none;width:${Math.round(ratio(x) * h)}px`)).join('')}</div>`; }).join('');
+    return `<div class="home-row" style="height:${Math.round(h)}px">${r.map(x => homeTile(x, full ? `flex:${ratio(x)} 1 0` : `flex:none;width:${Math.round(ratio(x) * h)}px`, target)).join('')}</div>`; }).join('');
 }
 function heroTile(hero, w, h) {
   const top = hero.memberships[0];
-  return `<button class="home-j home-hero${state.focused === hero.uuid ? ' on' : ''}" data-id="${esc(hero.uuid)}" data-chars="${esc(hero.memberships.map(m => m.id).join(' '))}" style="width:${w}px;height:${h}px"><img src="/image?id=${encodeURIComponent(hero.uuid)}&size=medium" alt="" loading="lazy" decoding="async" draggable="false">${top ? `<span class="home-cap"><b>${esc(top.name)}${workSmall(top)}</b>${top.tag && top.tag !== top.name ? `<small>${esc(top.tag.replaceAll('_', ' '))}</small>` : ''}</span>` : ''}</button>`;
+  return `<button class="home-j home-hero${state.focused === hero.uuid ? ' on' : ''}" data-id="${esc(hero.uuid)}" data-chars="${esc(hero.memberships.map(m => m.id).join(' '))}" style="width:${w}px;height:${h}px"><img src="/image?id=${encodeURIComponent(hero.uuid)}&size=${thumbSize(h)}" alt="" loading="lazy" decoding="async" draggable="false">${top ? `<span class="home-cap"><b>${esc(top.name)}${workSmall(top)}</b>${top.tag && top.tag !== top.name ? `<small>${esc(top.tag.replaceAll('_', ' '))}</small>` : ''}</span>` : ''}</button>`;
 }
 // 宽度放不下的一天横向滚动：先是大图，然后是按最短优先填充的两行。
 function stripRows(items, rowH) {
   const rows = [[], []], w = [0, 0];
   for (const x of items) { const i = w[0] <= w[1] ? 0 : 1; rows[i].push(x); w[i] += ratio(x) * rowH + 6; }
-  return rows.map(r => `<div class="home-row strip-row" style="height:${rowH}px">${r.map(x => homeTile(x, `flex:none;width:${Math.round(ratio(x) * rowH)}px`)).join('')}</div>`).join('');
+  return rows.map(r => `<div class="home-row strip-row" style="height:${rowH}px">${r.map(x => homeTile(x, `flex:none;width:${Math.round(ratio(x) * rowH)}px`, rowH)).join('')}</div>`).join('');
 }
 function homeSizes() {
   const i = viewOpts.homeSize in [0, 1, 2] ? viewOpts.homeSize : 1;
@@ -102,7 +103,7 @@ export function homeDay(g, width) {
     const heroH = Math.round(rowH * 2 + 6);
     body = `<div class="home-strip-wrap"><button class="strip-nav prev" data-strip="-1" aria-label="${t('向左')}" hidden>${INSP_ICONS.prev}</button>
       <div class="home-strip" data-day="${g.day}">${hero ? heroTile(hero, heroW, heroH) : ''}<div class="strip-rows">${stripRows(rest, Math.round(rowH))}</div>
-        ${g.count > g.items.length ? `<a class="strip-more" href="${hashFor({page: 'library', day: g.day})}" style="height:${heroH}px">${t('{n} 张没显示', {n: `<b>${number(g.count - g.items.length)}</b>`})}<small>${t('继续往右滑自动加载 · 或在图库里看全部')}</small></a>` : ''}</div>
+        ${g.count > g.items.length ? `<a class="strip-more" href="${hashFor({page: 'library', day: g.day})}" style="height:${heroH}px">${t('{n} 张没显示', {n: `<b>${number(g.count - g.items.length)}</b>`})}<small>${t('在图库里看全部')}</small></a>` : ''}</div>
       <button class="strip-nav next" data-strip="1" aria-label="${t('向右')}">${INSP_ICONS.next}</button></div>`;
   } else {
     // 大图旁边的两行拉伸到它的高度和侧边的宽度；第二行会大半空着时（图片少的一天），这一天改为不带大图排版（#293）。
@@ -110,7 +111,7 @@ export function homeDay(g, width) {
     let r = 0, used = 0;
     if (hero) for (const x of rest) { if (r > 1) break; side[r].push(x); fill[r] += ratio(x) * rowH + 6; used++; if (fill[r] - 6 >= sideW) r++; }
     body = hero && fill[1] - 6 >= sideW * .75
-      ? `<div class="home-top">${heroTile(hero, heroW, heroH)}<div class="home-side">${side.map(rw => `<div class="home-row">${rw.map(x => homeTile(x, `flex:${ratio(x)} 1 0`)).join('')}</div>`).join('')}</div></div>${homeRows(rest.slice(used), width, target)}`
+      ? `<div class="home-top">${heroTile(hero, heroW, heroH)}<div class="home-side">${side.map(rw => `<div class="home-row">${rw.map(x => homeTile(x, `flex:${ratio(x)} 1 0`, rowH)).join('')}</div>`).join('')}</div></div>${homeRows(rest.slice(used), width, target)}`
       : homeRows(g.items, width, target);
   }
   const more = g.people - g.characters.length;
@@ -165,7 +166,7 @@ async function nextAsk() {
 }
 function askCardHTML() {
   const b = home.ask; if (!b || !viewOpts.ask || !b.items.length) return '';
-  const off = home.askOff.size, why = b.kind === 'hint' ? t('和你确认过的 TA 很像 · 点对了就能认出更多') : b.kind === 'seed' ? t('再确认 {n} 张就能学会认 TA', {n: Math.max(1, 5 - b.confirmed)}) : t('抽查一下认得准不准');
+  const off = home.askOff.size, why = b.kind === 'hint' ? t('和你确认过的 TA 很像') : b.kind === 'seed' ? '' : t('随机抽查');
   return `<section class="ask-card" id="askCard"><div class="ask-head"><b>${t('认一认')}</b><span>${t('这些是 {name} 吗？', {name: `<a href="${charHash(b.entity)}">${esc(b.name)}</a>${workSmall({id: b.entity, name: b.name})}`})}</span><small>${why}</small></div>
     <div class="ask-row">${b.items.map(x => `<button class="ask-img${home.askOff.has(x.uuid) ? ' off' : ''}" data-askimg="${esc(x.uuid)}" data-peek="${esc(x.uuid)}" title="${home.askOff.has(x.uuid) ? t('点一下：改回「是」') : t('点一下：不是 TA')} · ${t('长按或 Space 看大图')}" style="aspect-ratio:${ratio(x)}"><img src="/image?id=${encodeURIComponent(x.uuid)}&size=thumb" alt="" loading="lazy" draggable="false"><i aria-hidden="true">✕</i></button>`).join('')}</div>
     <div class="ask-foot"><span>${off ? t('{n} 张不是 TA', {n: off}) : t('点掉不是 TA 的')}</span><button class="secondary" data-askcard="later">${t('以后再说')}</button><button class="primary" data-askcard="ok">${off === b.items.length ? t('都不是') : off ? t('其余 {n} 张是', {n: b.items.length - off}) : t('都对')}</button></div></section>`;

@@ -210,6 +210,11 @@ fn read(request: &Request, host: &Host, session: &Session, path: &str) -> Result
         }
         "/api/settings" => host.library_settings(&session.library).map(|mut p| {
             p.set("tasks", Json::object([("similar", session.research.similar_state())]));
+            // 只有桌面外壳读的全应用设置（#451）：浏览器里打开的图库页没有这一节。
+            if crate::app_desktop::available() {
+                let after = crate::app_preferences::after_tasks();
+                p.set("desktop", Json::object([(crate::app_preferences::AFTER_TASKS, after.into())]));
+            }
             Some((p, 200))
         }),
         "/api/libraries" => libraries(host, session).map(|p| Some((p, 200))),

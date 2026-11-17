@@ -33,8 +33,8 @@ function metaShown({error: e, directory, queue}) {
   navCount('countHome', state.recentCount, t('最近一次同步新加入的图'));
   navCount('countUnmatched', state.pools.unmatched, t('还没认出角色的图'));
   navCount('countAudit', state.pools.audit, t('随机抽查还剩几张')); $('navAudit').hidden = !state.pools.audit && viewOf(state.route).nav !== 'audit';
-  navCount('countDuplicates', state.dupInfo.mixed, t('角色不一致的副本组，对齐后才会折叠'));
-  navCount('countExcluded', state.pendingCount, t('像截图、等你确认的图'));
+  navCount('countDuplicates', state.dupInfo.mixed, t('角色不一致的副本组'));
+  navCount('countExcluded', state.pendingCount, t('像截图、待确认的图'));
   $('navDuplicates').href = state.dupInfo.mixed ? hashFor({page: 'duplicates', dup: 'mixed'}) : '#/duplicates';
   $('navExcluded').href = state.pendingCount ? '#/pending' : '#/excluded';
   if (queue) { navCount('countIdentity', state.identityCount, t('长得像、可能是同一人或同一人另一个造型的角色对')); $('navIdentity').hidden = !state.identityCount && viewOf(state.route).nav !== 'identity'; }
@@ -96,17 +96,17 @@ function subTabs(r) {
   switch (viewOf(r).tabs) {
     case 'unmatched': return row([
       // 未识别的总数写在按组整理上：侧栏「未识别」落在这里，组里的和没成组的合起来就是它。
-      tab('#/groups', t('按组整理'), p.unmatched ? number(p.unmatched) : '', at === 'groups', t('长得像的未识别图分成一组，一组一组确认')),
+      tab('#/groups', t('按组整理'), p.unmatched ? number(p.unmatched) : '', at === 'groups', t('按长相分组的未识别图')),
       tab('#/unmatched', t('全部未识别'), '', all),
       tab('#/skipped', t('已跳过'), p.skipped ? number(p.skipped) : '', at === 'skipped')]);
     case 'duplicates': return row([
       tab('#/duplicates', t('全部'), t('{n} 组', {n: number(state.dupInfo.groups)}), all && !r.dup),
-      tab('#/duplicates?dup=mixed', t('角色不一致'), t('{n} 组', {n: number(state.dupInfo.mixed)}), all && r.dup === 'mixed', t('几份副本标的角色不同；对齐后自动折叠')),
-      tab('#/similar', t('相似的图'), '', at === 'similar', t('不是同一个文件，但画的是同一张'))]);
+      tab('#/duplicates?dup=mixed', t('角色不一致'), t('{n} 组', {n: number(state.dupInfo.mixed)}), all && r.dup === 'mixed', t('几份副本标的角色不同')),
+      tab('#/similar', t('相似的图'), '', at === 'similar', t('同一幅画的不同文件'))]);
     case 'excluded': return row([
       tab('#/excluded', t('全部'), number(state.exclInfo.count), all && !r.reason),
       ...Object.entries(REASONS).filter(([k]) => state.exclInfo.reasons?.[k]).map(([k, label]) => tab('#/excluded?reason=' + k, label, number(state.exclInfo.reasons[k]), all && r.reason === k)),
-      ...(state.pendingCount || at === 'pending' ? [tab('#/pending', t('待确认'), number(state.pendingCount), at === 'pending', t('像截图但画面里有人物，规则拿不准'))] : [])]);
+      ...(state.pendingCount || at === 'pending' ? [tab('#/pending', t('待确认'), number(state.pendingCount), at === 'pending', t('像截图，但有人物'))] : [])]);
   }
   return '';
 }
@@ -120,7 +120,7 @@ export function renderChrome() {
     const works = r.section === 'works';
     const views = `<div class="segmented lib-views" role="tablist" aria-label="${t('资料库')}">${[['', t('角色')], ['works', t('作品')]].map(([v, label]) => `<a role="tab" href="#/characters${v ? '/' + v : ''}" class="${(r.section || '') === v ? 'on' : ''}" aria-selected="${(r.section || '') === v}">${label}</a>`).join('')}</div>`;
     bar.innerHTML = views + `<div class="search-wrap wide">${searchIcon()}<input type="search" id="charSearch" spellcheck="false" autocorrect="off" autocapitalize="off" value="${esc(works ? shelf.q : '')}" placeholder="${works ? t('搜索作品') : t('搜索角色或作品')}" aria-label="${works ? t('搜索作品') : t('搜索角色')}"></div><div class="spacer"></div>` +
-      (works ? `<button class="quiet" id="newWork">${t('新建作品')}</button>` : `<button class="quiet" id="taggedButton" title="${t('吉祥物、玩家化身这类不算角色、只当标签的，在这里看全部、设置和改回')}">${t('只当标签')}${state.tagged?.length ? ` <small>${number(state.tagged.length)}</small>` : ''}</button><div class="segmented" id="charMode">${[['shelf', t('书架')], ['list', t('列表')]].map(([v, label]) => `<button data-mode="${v}" class="${cast.mode === v ? 'on' : ''}">${label}</button>`).join('')}</div>`);
+      (works ? `<button class="quiet" id="newWork">${t('新建作品')}</button>` : `<button class="quiet" id="taggedButton" title="${t('不算角色、只当标签的吉祥物和玩家化身')}">${t('只当标签')}${state.tagged?.length ? ` <small>${number(state.tagged.length)}</small>` : ''}</button><div class="segmented" id="charMode">${[['shelf', t('书架')], ['list', t('列表')]].map(([v, label]) => `<button data-mode="${v}" class="${cast.mode === v ? 'on' : ''}">${label}</button>`).join('')}</div>`);
     if (works) {
       $('charSearch').oninput = e => { shelf.q = e.target.value; drawShelf(); };
       $('newWork').onclick = createWork;
@@ -136,7 +136,7 @@ export function renderChrome() {
   const sorts = view.sorts.filter(v => !(tagPage && v === 'suspicious')).map(v => [v, SORT_LABELS[v]]);
   const skins = r.char && !r.maybe ? (state.char?.variants || []).filter(v => v.count) : [];
   const variants = skins.length ? `<div class="chips-row">${[{id: '', name: t('全部'), count: state.char.count}, ...skins].map(v => `<button class="chip-filter${(r.variant || '') === v.id ? ' on' : ''}" data-variant="${esc(v.id)}">${esc(v.name)} <span>${number(v.count)}</span></button>`).join('')}</div>` : '';
-  const maybeChip = r.char && !tagPage && (state.maybeCount || r.maybe || state.doubtCount || r.doubt) ? `<div class="chips-row">${state.maybeCount || r.maybe ? `<button class="chip-filter${r.maybe ? ' on' : ''}" id="maybeChip" title="${t('机器觉得像 TA，但算给了别人或没算：确认「是 TA」或「不是 TA」')}">${t('可能也是 TA')} <span>${number(state.maybeCount)}</span></button>` : ''}${state.doubtCount || r.doubt ? `<button class="chip-filter${r.doubt ? ' on' : ''}" id="doubtChip" title="${t('单人图里，另一个角色的证据几乎一样强：多半两个都不对，看一眼再决定')}">${t('可能认错')} <span>${number(state.doubtCount)}</span></button>` : ''}</div>` : '';
+  const maybeChip = r.char && !tagPage && (state.maybeCount || r.maybe || state.doubtCount || r.doubt) ? `<div class="chips-row">${state.maybeCount || r.maybe ? `<button class="chip-filter${r.maybe ? ' on' : ''}" id="maybeChip" title="${t('机器觉得像 TA，但算给了别人或没算的图')}">${t('可能也是 TA')} <span>${number(state.maybeCount)}</span></button>` : ''}${state.doubtCount || r.doubt ? `<button class="chip-filter${r.doubt ? ' on' : ''}" id="doubtChip" title="${t('单人图里，另一个角色的证据几乎一样强的图')}">${t('可能认错')} <span>${number(state.doubtCount)}</span></button>` : ''}</div>` : '';
   // 生效的筛选各是一个胶囊，点 × 只清它自己（#386 的 2-30）；「标签」按钮只用来打开菜单、换一个标签。
   const workName = r.work ? (state.workTree || []).find(w => w.id === r.work)?.name || t('作品筛选') : '';
   const pill = (id, label, title) => `<button class="quiet on" id="${id}" title="${title}">${label} ×</button>`;
@@ -208,8 +208,8 @@ function drawCharHeading(h, r, c) {
   const tagOnly = !!c.mascot;   // 只当标签：没有要复核的，所以没有检查、清扫、OC 这些控件
   const checked = !tagOnly && c.reviewed_at ? ' · ' + t('上次检查 {date}', {date: localDate(c.reviewed_at)}) : '';   // 后端存的是 UTC（#386 的 2-15）
   const unchecked = !tagOnly && (c.unchecked || r.check) ? ` · <a class="unchecked-link${r.check ? ' on' : ''}" href="${hashFor({...r, check: r.check ? '' : '1', maybe: ''})}" title="${r.check ? t('显示全部') : t('只看机器识别、还没检查过的图')}">${t('未检查 {n}', {n: number(c.unchecked)})}${r.check ? ' ×' : ''}</a>` : '';
-  h.innerHTML = `<div class="heading-main"><h1 class="tag-title" title="${esc(nameTip(c))}">${esc(c.name)}${c.mascot ? '' : workSmall(c)}</h1><p>${c.mascot ? `<span class="oc-badge" title="${c.mascot_origin === 'default' ? t('默认设置：老师、博士、训练员这类没有固定形象的玩家化身和吉祥物，默认只当标签。') : ''}${t('不算角色：不出现在角色列表里，也不算多人图；图上仍挂着这个标签。在「⋯」里可以改回角色')}">${t('只当标签')}</span> ` : ''}${t('{n} 张', {n: number(c.count)})}${unchecked}${checked}${!c.tag && c.kind !== 'oc' && !c.label_only ? ` · <button class="link-button" id="profileNudge" title="${t('关联后自动补中文名、别名和所属作品')}">${t('关联 Danbooru…')}</button>` : ''}</p></div>
-      <div class="heading-actions">${c.label_only ? `<button class="quiet" id="splitOcButton" title="${t('把长得像的图分成一组，一组一键设为独立的原创角色')}">${t('按相似细分')}</button>` : ''}${tagOnly ? '' : `<button class="quiet" id="sweepButton" ${c.unchecked ? '' : 'disabled'} title="${t('把剩下的机器识别都记为已检查；以后新识别的图会重新计入未检查')}">${t('标为已检查')}</button>`}<div class="tag-control more-control"><button class="quiet" id="moreButton" title="${t('更多操作')}" aria-label="${t('更多操作')}">⋯</button><div id="morePopover" class="menu menu-drop more-menu" hidden>${c.label_only || tagOnly ? '' : `<button class="menu-item" id="ocButton" title="${t('画师自己的原创角色，不属于任何作品')}">${c.kind === 'oc' ? t('取消原创角色') : t('标为原创角色')}</button>`}${c.label_only ? '' : `<button class="menu-item" id="mascotButton" title="${c.mascot ? t('恢复成角色：出现在角色列表里，同框就算多人图') : t('像佩洛洛这样的吉祥物、玩家化身：不算角色，不算多人图；图上仍挂着这个标签，可以按它筛选')}">${c.mascot ? t('算作角色') : t('不算角色，只当标签')}</button>`}<button class="menu-item" id="profileButton" title="${t('名称、别名、所属作品、Danbooru 关联')}">${t('编辑资料…')}</button><button class="menu-item" id="mergeButton" title="${t('和另一个角色是同一个人：把图和人工结论都并过去（可撤销）')}">${t('合并到另一个角色…')}</button></div></div></div>`;
+  h.innerHTML = `<div class="heading-main"><h1 class="tag-title" title="${esc(nameTip(c))}">${esc(c.name)}${c.mascot ? '' : workSmall(c)}</h1><p>${c.mascot ? `<span class="oc-badge" title="${c.mascot_origin === 'default' ? t('老师、博士、训练员这类没有固定形象的玩家化身和吉祥物默认只当标签。') : ''}${t('不算角色：不出现在角色列表里，也不算多人图；图上仍挂着这个标签')}">${t('只当标签')}</span> ` : ''}${t('{n} 张', {n: number(c.count)})}${unchecked}${checked}${!c.tag && c.kind !== 'oc' && !c.label_only ? ` · <button class="link-button" id="profileNudge" title="${t('补上中文名、别名和所属作品')}">${t('关联 Danbooru…')}</button>` : ''}</p></div>
+      <div class="heading-actions">${c.label_only ? `<button class="quiet" id="splitOcButton" title="${t('按长相分组，每组设为一个新的原创角色')}">${t('按相似细分')}</button>` : ''}${tagOnly ? '' : `<button class="quiet" id="sweepButton" ${c.unchecked ? '' : 'disabled'} title="${t('把剩下的机器识别都记为已检查；以后新识别的图会重新计入未检查')}">${t('标为已检查')}</button>`}<div class="tag-control more-control"><button class="quiet" id="moreButton" title="${t('更多操作')}" aria-label="${t('更多操作')}">⋯</button><div id="morePopover" class="menu menu-drop more-menu" hidden>${c.label_only || tagOnly ? '' : `<button class="menu-item" id="ocButton" title="${t('画师自己的原创角色，不属于任何作品')}">${c.kind === 'oc' ? t('取消原创角色') : t('标为原创角色')}</button>`}${c.label_only ? '' : `<button class="menu-item" id="mascotButton" title="${c.mascot ? t('恢复成角色：出现在角色列表里，同框就算多人图') : t('像佩洛洛这样的吉祥物、玩家化身：不算角色，不算多人图；图上仍挂着这个标签，可以按它筛选')}">${c.mascot ? t('算作角色') : t('不算角色，只当标签')}</button>`}<button class="menu-item" id="profileButton" title="${t('名称、别名、所属作品、Danbooru 关联')}">${t('编辑资料…')}</button><button class="menu-item" id="mergeButton" title="${t('把这个角色的图和人工结论并到另一个角色')}">${t('合并到另一个角色…')}</button></div></div></div>`;
   $('sweepButton')?.addEventListener('click', sweep);
   $('moreButton').onclick = () => setMenu(moreMenu, $('morePopover').hidden);
   $('mergeButton').onclick = () => { setMenu(moreMenu, false); mergeCharacter(c); };
@@ -258,14 +258,14 @@ implement({
   character: {drawHeading: drawCharHeading},
   home: {heading: (r, {n}) => [t('首页'), state.recentCount ? t('最近一次同步新加入 {n} 张', {n: number(state.recentCount)}) : '']},
   library: {heading: (r, {n}) => [r.artist ? t('画师 · {name}', {name: esc(artistName(r.artist))}) : r.day ? t('{day} 加入', {day: esc(dayLabel(r.day))}) : r.work ? esc((state.workTree || []).find(w => w.id === r.work)?.name || t('作品筛选')) : r.utag ? '# ' + esc(r.utag) : t('图库'), t('{n} 张', {n})]},
-  characters: {heading: (r, {n}) => [t('资料库'), r.section === 'works' ? t('{n} 部作品', {n: number(state.index?.works?.length || 0)}) + (state.index?.watch?.works.length ? ' · ' + t('关注 {n} 部', {n: number(state.index.watch.works.length)}) : '') : t('{n} 位角色 · {works} 部作品', {n: number(state.chars.length), works: number(new Set(state.chars.map(workKey).filter(k => k !== 'oc' && k !== 'other')).size)}), !r.section && state.localLinks?.length ? `<span class="heading-links"><button class="quiet" id="localLinksButton" title="${t('关联后自动补中文名、别名和作品；和已有角色重复的可以合并')}">${t('{n} 个自建角色能对上 Danbooru', {n: number(state.localLinks.length)})}</button></span>` : '']},
+  characters: {heading: (r, {n}) => [t('资料库'), r.section === 'works' ? t('{n} 部作品', {n: number(state.index?.works?.length || 0)}) + (state.index?.watch?.works.length ? ' · ' + t('关注 {n} 部', {n: number(state.index.watch.works.length)}) : '') : t('{n} 位角色 · {works} 部作品', {n: number(state.chars.length), works: number(new Set(state.chars.map(workKey).filter(k => k !== 'oc' && k !== 'other')).size)}), !r.section && state.localLinks?.length ? `<span class="heading-links"><button class="quiet" id="localLinksButton" title="${t('补上中文名、别名和作品，和已有角色重复的可以合并')}">${t('{n} 个自建角色能对上 Danbooru', {n: number(state.localLinks.length)})}</button></span>` : '']},
   audit: {heading: (r, {n}) => [t('随机抽查'), t('还剩 {left} / {n} 张', {left: number(state.pools.audit || 0), n}) + (state.nsfw ? ` · <b>${t('R18 筛选开着：抽查要看全部才准，按 H 切换')}</b>` : '')]},
   unmatched: {heading: (r, {n}) => [t('未识别'), '']},
   skipped: {heading: (r, {n}) => [t('未识别'), '']},
   groups: {heading: (r, {n}) => [t('未识别'), '']},
   // 一组整理完了，标题不写「0 张」，由空状态给去处（#386 的 2-12）。
   group: {heading: (r, {n}) => [t('第 {id} 组', {id: esc(r.id)}), [state.totalReady && !state.total ? '' : t('{n} 张长得像的未识别图', {n}), ...(state.groupTraits || []).map(esc)].filter(Boolean).join(' · '),
-      `<span class="heading-links">${state.total ? `<button class="quiet" id="groupOc" title="${t('整组都是同一个原创角色：新建一个原创角色，把这组图都设为它')}">${t('整组标为原创角色')}</button>` : ''}${state.groupNear ? `<a class="quiet link" href="#/g/${state.groupNearId}">${esc(state.groupNear)} →</a>` : ''}</span>`]},
+      `<span class="heading-links">${state.total ? `<button class="quiet" id="groupOc" title="${t('新建一个原创角色，把这组图都设为它')}">${t('整组标为原创角色')}</button>` : ''}${state.groupNear ? `<a class="quiet link" href="#/g/${state.groupNearId}">${esc(state.groupNear)} →</a>` : ''}</span>`]},
   duplicates: {heading: (r, {n}) => [t('重复'), r.dup ? '' : t('{n} 张', {n: number(state.dupInfo.count || 0)})]},
   similar: {heading: (r, {n}) => [t('重复'), '']},
   'artist-audit': {heading: (r, {n}) => [t('画师抽查'), state.nsfw ? `<b>${t('这页不按 R18 筛选：R18 的图也在里面')}</b>` : '']},
@@ -285,7 +285,7 @@ implement({
   skipped: {help: () => [t('选中的图可以恢复到未识别。')], helpHint: true},
   groups: {help: () => [t('按长相分组的未识别图，可以整组确认。'), t('点一下缩略图，把它排除在这组之外。'), t('长按缩略图，或鼠标停在上面按 Space，看大图。'), t('组头的按钮对整组生效。')]},
   group: {helpHint: true},
-  duplicates: {help: () => [t('同色角标是同一组。'), t('修改任一份会同步到整组。'), t('组里的角色不一致时不折叠，对齐以后折叠成一张。')]},
+  duplicates: {help: () => [t('同色角标是同一组。'), t('组里的角色不一致时不折叠，对齐以后折叠成一张。')]},
   similar: {help: () => [t('同一幅画的不同文件。'), t('点一组进去看。')]},
   'artist-audit': {help: () => [t('一组固定的随机图，逐张核对「找回画师」找到的画师。'), t('每次打开都是同一批。')]},
   identity: {help: () => [t('按涉及的图片数排序。'), t('高亮的按钮是外部资料建议的做法。')]},

@@ -177,6 +177,11 @@ fn import_archive(app: &AppHandle, import: &Import, path: String) -> Result<(), 
     }
 }
 
+/// 启动页上有没有导入在进行（关窗时算在跑的任务，#451）。
+pub fn importing(app: &AppHandle) -> bool {
+    app.state::<Import>().cancel.lock().expect("lock poisoned by an earlier panic").is_some()
+}
+
 /// 正在进行的导入的阶段和字节数（没有导入在运行时为 `{}`）。
 #[tauri::command]
 pub fn welcome_import_status(import: State<'_, Import>) -> Value {

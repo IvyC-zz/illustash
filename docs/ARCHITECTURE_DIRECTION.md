@@ -141,6 +141,18 @@ Python 合成测试在导入 `tests` 时为 `urllib.request.OpenerDirector.open`
 Tauri 桌面外壳（`desktop/`）只负责启动核心 HTTP 命令、管理窗口、Pixiv 请求通道和用图动作的系统调用（见下文「用图动作」），不承载业务逻辑。
 桌面直接调用自身链接的 `http --native --no-open` 命令，透传图库、端口及网络授权参数，保留原生账号模块实际使用的 `ILLUSTASH_DESKTOP_BRIDGE/TOKEN` 登录桥。资源优先使用显式 `--root` / `ILLUSTASH_ROOT`，安装包使用 Tauri `resource_dir()/resources`，仅 debug 构建允许源码根回退；启动前检查 `web/static/index.html` 和 `tags/tags_v3.csv`。核心链接进外壳，无额外核心边车；资源或执行文件缺失、启动失败、端口冲突与服务异常退出显示本地错误页及重装、检查参数后重启的操作提示。
 
+### 关窗、后台任务与窗口记忆（#451）
+
+宿主（`native/terms/src/app_activity.rs`）每秒读一次各任务在内存里的状态，「进行中」的判断与任务面板相同（`web/static/core/jobs.js` 的 `*_ACTIVE`，单元测试对照两边的列表）。有任务开始、结束或进度变化时，经登录桥 `POST /platform/activity` 告诉外壳：在跑的任务（种类、状态、进度），以及刚结束的任务（状态、数字、失败原因前 200 字），不含路径和图库内容。换图库时上一个图库的任务不算结束。外壳（`desktop/src/background.rs`）据此：
+
+- 关主窗口时，宿主报告有任务在跑或启动页正在导入图库，就隐藏窗口，任务继续；否则照旧退出。隐藏期间宿主出错退出时，窗口重新显示出错页。
+- 隐藏期间任务都结束、又安静 10 秒（同步做完会接着找回画师之类），按 `preferences.json` 的 `after_tasks` 办：`quit`（默认）退出，`stay` 留在后台。设置在「设置 › 通用 › 关闭窗口」，只在桌面 App 里显示（`GET /api/settings` 的 `desktop`）。
+- 窗口隐藏、最小化或不在前台时，任务结束发系统通知（`desktop/src/notify.rs`）：同步（有新图或识别了图）、找回画师、检查新角色（发现可添加的角色）、添加角色、导入、导出和识别模型的完成或失败；角色名称和相似图片不发。点通知回到窗口并打开任务面板（图库页的 `window.illustashOpenTasks`）。macOS 用 UNUserNotificationCenter，第一次转到后台时请求权限，被拒绝就不发，只有从 .app 包运行时才有；Windows 用 toast，按应用 ID `app.illustash.desktop`（安装包给开始菜单快捷方式设了同一个 ID）发，没装的开发构建不显示。
+- macOS 隐藏后留在 Dock，点 Dock 图标回到窗口；有任务时向系统声明用户发起的活动，免得 App Nap 拖慢 Pixiv 窗口里的请求，不阻止睡眠。Windows 隐藏时任务栏按钮消失，通知区域出现托盘图标（提示进行中的任务，单击回到窗口，右键「打开 Illustash」「退出」），窗口回来后收起；再次打开 Illustash 回到已在运行的那一个（`tauri-plugin-single-instance`）。
+- 退出（⌘Q、托盘「退出」、任务做完后自动退出）与关窗退出相同：关 stdin，宿主停任务、收尾 worker，10 秒后强制结束进程树。
+
+主窗口的位置、大小和是否最大化（macOS 不记最大化：铺满屏幕的窗口也被报成缩放）存在外壳自己的配置目录（`app_config_dir()/window.json`，物理像素），不进图库；移动、缩放停下 0.8 秒后写一次，退出时再写一次（`desktop/src/window_state.rs`）。打开时记下的窗口顶部要有一块标题栏落在某个显示器的可用区域里才放回原处，放到重叠最多的显示器上，比它大就缩小、超出就挪进来；否则（显示器拔掉了、分辨率改了）按默认大小居中。Pixiv 登录窗口不记。
+
 ### 启动信号与会话 cookie
 
 原生宿主完成启动恢复和自动任务初始化后输出并 flush `图库已启动：http://127.0.0.1:PORT/?k=<一次性码>`；外壳只接受当前端口的精确本机 ready URL，加上 `launched=1` 后让主窗口打开它。本机宿主的每个请求（含 GET、静态文件和 `/image`）都要带会话 cookie（2026-10-21 用户定，发布前安全自查）：127.0.0.1 对本机所有进程和用户开放，Host/Origin 检查只挡得住浏览器里的网页。宿主启动时生成会话秘密和一次性码；`GET /?k=<码>` 第一次访问时设置 `illustash-<端口>=<秘密>; HttpOnly; SameSite=Strict; Path=/`（cookie 不分端口，名字带端口免得两个宿主互相覆盖），码随即作废，回复一个用 meta refresh 转到去掉 `k` 的同一地址的页面。不用 302：桌面启动页（`tauri://localhost`）发起的是跨站导航，302 续上的请求按 SameSite=Strict 不带 cookie，刷新则是 127.0.0.1 页面自己发起的导航。缺 cookie 或不对一律 403（「请用启动时显示的地址打开图库」），检查在 Host/Origin 之后、会话与 CSRF 之前；写请求照旧另要 Origin 和 `X-CSRF-Token`。宿主重启（换库、升级、抢救、重新打开 App）就换新秘密和新码，外壳照常从新的就绪行进入；同一进程里切换图库不换 cookie。CLI 由 `start-web.command` 加 `--open` 用默认浏览器打开带码的地址；浏览器丢了 cookie（关掉重开）要重启宿主拿新地址。测试客户端走同一条路（`tools/verify_read_http.py` 的 `enter()`、`native/terms/tests/common/entry.rs`）。

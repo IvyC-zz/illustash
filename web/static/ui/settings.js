@@ -11,7 +11,7 @@ import {state} from '../core/state.js';
 import {REASONS, FOLD_OPTIONS} from '../core/labels.js';
 import {SYNC_ACTIVE, INDEX_ACTIVE, NAMES_ACTIVE, PROV_ACTIVE, syncLine, indexLine, namesLine, importLine, importActive, pollSync, pollIndex,
   pollNamesSoon, loadProvenance, importStarted, pollImports, cancelImport, indexAction, setIndex, setNames} from '../core/jobs.js';
-import {onSettings, allowNames, loadSettingsData, saveStartup, saveFold, backupNow, clearCache, saveLanguage, loadAbout, saveModelApi, testModelApi,
+import {onSettings, allowNames, loadSettingsData, saveStartup, saveFold, backupNow, clearCache, saveLanguage, saveAfterTasks, loadAbout, saveModelApi, testModelApi,
   loadLibraries, libraryRequest, pollExport, chooseFolders, openLibraryRequest, libraryOpened, loadAccounts, accountRequest,
   waitPixivLogin, stopPixivLogin, checkUpdates, updatesPost, updatesTick} from '../core/settings.js';
 import {$, toast, error, readFailure, fold, wireFolds, redraw, setDrawn, busy} from './dom.js';
@@ -131,13 +131,15 @@ function patchSettingsPage(html, section) {
   for (const card of template.content.querySelectorAll('.settings-card')) {
     // 这些卡片自己负责渲染、表单和异步生命周期。
     if (OWN_CARDS.includes(card.id)) continue;
+    // 没有内容的卡片隐藏着（如浏览器里的「关闭窗口」）；数据到了以后再显示。
+    $(card.id).hidden = card.hidden;
     setSettingsHTML($(card.id), card.innerHTML);
   }
 }
 // 用户带来的每个问题一页：看起来怎样、图片从哪来、图里是谁、谁画的、什么会离开本机、数据存在哪。每页列出它显示的
 // 卡片（#/settings/<id>）。
 const SETTINGS_SECTIONS = [
-  ['general', t('通用'), t('语言、外观、图片网格与默认排序'), ['setDisplay', 'setLanguage']],
+  ['general', t('通用'), t('语言、外观、图片网格与默认排序'), ['setDisplay', 'setLanguage', 'setWindow']],
   ['library', t('图库'), t('当前图库、来源、同步与排除'), ['setLibraries', 'setSync', 'setExclude', 'setFold']],
   ['characters', t('角色资料'), t('新角色检查、角色名称与翻译'), ['indexCard', 'namesCard', 'modelCard']],
   ['artists', t('画师'), t('找回画师与绑定的账号'), ['setProvenance', 'setAccounts']],
@@ -187,7 +189,7 @@ async function renderAbout() {
   const diag = [[t('应用'), a.name], [t('版本'), version], [t('构建'), a.build || '—'], [t('数据库架构'), a.schema], [a.runtime ? t('运行时') : 'Python', a.runtime || a.python], [t('系统'), a.platform],
     ...Object.entries(a.libraries || {}).map(([k, v]) => [tb(k), tb(v) || t('未安装')])];
   card.innerHTML = `<div class="about-head"><img src="/favicon.svg" alt="" width="44" height="44"><div><h2 class="about-name">${esc(a.name)}</h2><p class="muted-note">${t('版本 {v}', {v: esc(version)})}${a.build ? ' · ' + t('构建 {build}', {build: esc(a.build)}) : ''}</p></div></div>
-    <p class="settings-note">${t('在本机识别、整理收藏的插画和里面的角色。图片和识别数据都只在这台电脑上。')}</p>
+    <p class="settings-note">${t('在本机识别、整理收藏的插画和里面的角色。')}</p>
     <div class="setting-line" id="aboutUpdates">${updatesLine()}</div>
     <div class="about-actions">
       <button class="quiet" id="aboutGuide">${t('新手引导')}</button>
@@ -226,7 +228,7 @@ function networkCard() {
   const up = state.settings?.startup || {}, p = state.provenance, acct = state.accounts, model = state.names?.model_api;
   const net = state.names?.network, names = !net ? '' : net.granted_at ? t('已允许（{time} 起）', {time: esc(net.granted_at)}) : net.this_run ? t('本次启动已允许（命令行）') : t('未允许，不联网');
   const row = (section, name, to, what, now) => `<tr><td><a class="link-button strong" href="#/settings/${section}">${name}</a></td><td>${to}</td><td>${what}</td><td>${now}</td></tr>`;
-  return cardHead(t('会访问网络的功能'), t('图片本身和由图片算出的特征，任何时候都不会发出去。下面是全部会联网的功能和它们发送的内容。')) +
+  return cardHead(t('会访问网络的功能'), t('图片本身和由图片算出的特征不会发出去。')) +
     `<table class="settings-table net-table"><tr><th>${t('功能')}</th><th>${t('服务')}</th><th>${t('发送的内容')}</th><th>${t('现在')}</th></tr>
       ${row('characters', t('检查新角色'), 'Danbooru', t('关注作品的名称；添加角色时下载约 20 张公开参考图'), t('每次运行前确认'))}
       ${row('characters', t('角色名称'), t('Bangumi、Danbooru'), t('tag、作品名、日文名'), net && !net.authorized ? names : up.names ? t('启动时自动（只查新角色）') : t('手动'))}
@@ -276,11 +278,15 @@ export async function renderSettings(fetchMissing = true, refresh = false) {
     // 里的表（#182），每个用它自己的语言命名。
     setLanguage: () => cardHead(t('语言'), '', 'shared') + `
       <div class="setting-line"><span>${t('界面语言')}<small class="line-hint">${t('切换后页面会重新载入')}</small></span>${segment('language', [['system', t('跟随系统')], ...I18N.languages.map(([code, name]) => [code, esc(name)])], I18N.preference)}</div>`,
-    setSync: () => cardHead(t('同步'), t('只读读取来源里的图片，新增的导入并在本机识别；来源里删掉的图会从图库移除，人工整理记录保留。同步不联网。'), 'library') + `
+    // 只在桌面 App 里有（GET /api/settings 的 desktop，#451）：关窗时有任务在跑就在后台做完，这里定做完以后怎样。
+    setWindow: () => info?.desktop ? cardHead(t('关闭窗口'), '', 'shared') + `
+      <div class="setting-line"><span>${t('任务做完以后')}<small class="line-hint">${t('有任务在跑时关窗，窗口隐藏，任务在后台继续')}</small></span>
+        ${segment('afterTasks', [['quit', t('退出')], ['stay', t('留在后台')]], info.desktop.after_tasks)}</div>` : '',
+    setSync: () => cardHead(t('同步'), t('读取来源里的图片，新增的导入并识别；来源里删掉的图会从图库移除，人工整理记录保留。'), 'library') + `
       ${taskLink(s.status === 'off' ? t('这次启动没有开同步') : syncLine(s), SYNC_ACTIVE.includes(s.status) ? 'busy' : ['error', 'needs_recognition'].includes(s.status) ? 'warn' : s.status === 'off' ? 'off' : '')}
       ${startupSwitch('sync', t('启动时同步'), t('检查来源里新增和删除的图'))}
       ${photos && apps.length ? fold('sourcesApps', t('iCloud 照片按存图的 App 统计（{n} 个 App）', {n: number(apps.length)}), `<p class="muted-note">${t('iCloud 照片里只导入 X 和 Pixiv 存下的图。')}</p><table class="settings-table"><tr><th>App</th><th>${t('照片里')}</th><th>${t('已导入')}</th></tr>${apps.map(appRow).join('')}</table>`) : ''}`,
-    setExclude: () => cardHead(t('排除规则'), photos ? t('照片、截图、文字图这类不是插画的图不算进图库。只是做标记，不改动照片图库；你的判断优先于自动规则。') : t('照片、截图、文字图这类不是插画的图不算进图库。只是做标记，不改动来源文件；你的判断优先于自动规则。'), 'library') + `
+    setExclude: () => cardHead(t('排除规则'), t('照片、截图、文字图这类不是插画的图不算进图库。你的判断优先于自动规则。'), 'library') + `
       <div class="rule-row">${Object.entries(REASONS).map(([k, label]) => `<a class="rule" href="#/excluded?reason=${k}"><b>${number(reasons[k] || 0)}</b><span>${label}</span></a>`).join('')}<a class="rule" href="#/pending"><b>${number(state.pendingCount)}</b><span>${t('待确认')}</span></a></div>`,
     setFold: () => cardHead(t('重复与相似'), `${t('勾选的关系会合并显示：图库里只留分辨率最高的一张，整组在「重复」页查看。')}<span class="hint-more" title="${t('改动组里任一张会同步到整组。组里角色不一致时不合并，留在「重复」页等你处理。字节完全相同的副本总是合并。')}">${t('了解详情')}</span>`, 'library') + `
       ${startupSwitch('similar', t('启动时检测相似图片'), t('只比较新导入的图'))}
@@ -301,10 +307,11 @@ export async function renderSettings(fetchMissing = true, refresh = false) {
       <p class="set-sub-note">${t('每次打开图库后会在后台检查识别结果数据库，整理记录数据库每 7 天检查一次；上次没有正常关闭时，打开前先检查两个库。')}</p>
       <div class="setting-line" id="integrityLine"></div>
       <div class="setting-line"><span>${t('缩略图缓存')}<small class="line-hint">${info ? t('{n} 个文件，{size}；清除后浏览时会重新生成', {n: number(info.thumbnails.files), size: bytes(info.thumbnails.bytes)}) : ''}</small></span><button class="quiet small" id="clearCache" ${info?.thumbnails.files ? '' : 'disabled'}>${t('清除')}</button></div>
-      ${info ? fold('dataPaths', t('存储位置'), `<table class="settings-table">${[[t('源数据库（识别结果，可以重建）'), info.source], [t('应用数据库（人工整理，不要删）'), info.library], [t('缩略图缓存（可以放心删）'), info.thumbnails]].map(([label, d]) => `<tr><td>${label}</td><td class="mono" title="${esc(d.path)}">${esc(home(d.path))}</td><td>${bytes(d.bytes)}</td></tr>`).join('')}</table>`) : ''}`,
+      ${info ? fold('dataPaths', t('存储位置'), `<table class="settings-table">${[[t('源数据库（识别结果，可以重建）'), info.source], [t('应用数据库（人工整理，不要删）'), info.library], [t('缩略图缓存（可以删）'), info.thumbnails]].map(([label, d]) => `<tr><td>${label}</td><td class="mono" title="${esc(d.path)}">${esc(home(d.path))}</td><td>${bytes(d.bytes)}</td></tr>`).join('')}</table>`) : ''}`,
   };
   patchSettingsPage(`<nav class="settings-nav" aria-label="${t('设置')}">${SETTINGS_SECTIONS.map(([id, title]) => `<a href="#/settings/${id}" class="${id === section ? 'on' : ''}"${id === section ? ' aria-current="page"' : ''}>${title}</a>`).join('')}</nav>
-    <div class="settings-main" data-section="${section}">${cards.map(id => `<section class="settings-card" id="${id}">${body[id] ? body[id]() : ''}</section>`).join('')}</div>`, section);
+    <div class="settings-main" data-section="${section}">${cards.map(id => [id, body[id] ? body[id]() : ''])
+      .map(([id, html]) => `<section class="settings-card" id="${id}"${body[id] && !html ? ' hidden' : ''}>${html}</section>`).join('')}</div>`, section);
   const page = $('settingsPage');
   renderAbout();
   renderModelsCard();
@@ -328,6 +335,7 @@ export async function renderSettings(fetchMissing = true, refresh = false) {
   for (const g of page.querySelectorAll('[data-setting]')) for (const b of g.querySelectorAll('button')) b.onclick = () => {
     const key = g.dataset.setting, v = b.dataset.value;
     if (key === 'language') { setLanguage(v); return; }
+    if (key === 'afterTasks') { saveAfterTasks(v).then(renderSettings, e => toast(e.message)); return; }
     if (key === 'fit') setFit(v === '1');
     if (key === 'nsfw') setNsfw(v);
     if (key === 'theme') { prefs.set('theme', v); window.applyTheme?.(); }
@@ -393,7 +401,7 @@ export function renderLibrariesCard() {
         <p class="muted-note">${t('打开它会再试一次加入列表；再点创建会另建一个带编号的图库。')}</p>
         <p><button class="primary" data-open-library="${esc(f.created.path)}" data-name="${esc(f.created.name)}">${t('打开这个图库')}</button> <button class="quiet" data-lib-again>${t('仍然新建一个')}</button></p></div>`
         : `<p><button class="primary" data-lib-create>${t('创建并打开')}</button> <button class="quiet" data-lib-cancel>${t('取消')}</button></p>`}</div>`;
-  setSettingsHTML(card, `${cardHead(t('图库'), t('每个图库各自保存识别结果和人工整理记录，图片本身留在原处、不复制。切换图库时后台会重启，几秒后自动刷新。'))}
+  setSettingsHTML(card, `${cardHead(t('图库'), t('每个图库各自保存识别结果和人工整理记录，图片本身留在原处、不复制。'))}
     ${cur ? `<div class="setting-line"><span><b>${esc(cur.name)}</b><small class="lib-path-hint">${esc(home(cur.path))}</small></span><span class="tag-on">${t('当前图库')}</span></div>
     ${sources}` : `<p class="muted-note">${t('当前是旧的数据布局（不是图库包）。')}</p>`}
     <h3 class="set-sub">${t('图库管理')}</h3>
@@ -504,11 +512,11 @@ export function renderProvenanceCard() {
   const s = p.state || {}, working = PROV_ACTIVE.includes(s.status), cov = p.coverage;
   const covLine = (label, key) => cov?.pictures?.[key] ? `<div class="prov-stat"><b>${pct(cov.with_artist?.[key] || 0, cov.pictures[key])}</b><span>${label}<small>${t('{done}/{total} 张', {done: number(cov.with_artist?.[key] || 0), total: number(cov.pictures[key])})}</small></span></div>` : '';
   const total = cov ? Object.values(cov.pictures || {}).reduce((a, b) => a + b, 0) : 0;
-  const html = cardHead(t('找回画师'), t('逐张查图的画师：用像素哈希和 IQDB 签名（只发哈希文本，不发图片）在 Danbooru 查原帖，并比对你关注的画师。结果在详情面板的「画师」里，可以点「不是 TA」纠正。')) + `
+  const html = cardHead(t('找回画师'), t('逐张查图的画师：用像素哈希和 IQDB 签名（只发哈希文本，不发图片）在 Danbooru 查原帖，并比对你关注的画师。结果在详情面板的「画师」里。')) + `
     ${cov ? `<div class="prov-stats">${covLine(t('X 的图有画师'), 'x')}${covLine(t('Pixiv 的图有画师'), 'pixiv')}${covLine(t('其他来源有画师'), 'other')}<div class="prov-stat"><b>${pct(cov.with_original_post || 0, total)}</b><span>${t('能对到原帖')}<small>${t('{n} 张', {n: number(cov.with_original_post || 0)})}</small></span></div></div>` : ''}
     <div class="setting-line set-status"><span><span class="local-dot${working ? ' busy' : s.status === 'failed' ? ' warn' : ''}"></span>${working ? t('正在查找…') : s.status === 'failed' && s.reason ? t('上次出错：{reason}', {reason: esc(tb(s.reason))}) : p.runs?.[0] ? t('上次 {time} · 新找到 {n}', {time: esc(localTime(p.runs[0].started_at)), n: number(p.runs[0].found || 0)}) : t('还没有查过')}</span>${working ? `<button class="quiet small" data-open-tasks>${t('在任务面板查看')}</button>` : `<button class="quiet small" data-open-tasks="provenance">${t('找回全库画师…')}</button>`}</div>
     <label class="switch-line"><span><b>${t('同步后自动查新图')}${scope('library')}</b><small>${p.auto_network ? t('新加入的图做签名识别、查像素哈希、比对新找到的画师；每次最多 {mb} MB', {mb: number(p.budgets?.new || 50)}) : t('新加入的图只在本机做签名识别；要联网查，在任务面板里每次授权')}${p.frozen ? ' · ' + t('测试图库不同步，这个开关不起作用') : ''}</small></span><input type="checkbox" class="switch" id="provAuto" ${p.auto ? 'checked' : ''}></label>
-    ${cov ? `<a class="setting-line set-link" href="#/artist-audit"><span>${t('画师抽查')}<small class="line-hint">${t('随机抽 50 张，逐张判断找到的画师对不对')}</small></span><span>›</span></a>` : ''}
+    ${cov ? `<a class="setting-line set-link" href="#/artist-audit"><span>${t('画师抽查')}<small class="line-hint">${t('50 张随机图，逐张核对找到的画师')}</small></span><span>›</span></a>` : ''}
     ${state.accounts && !state.accounts.pixiv?.bound ? `<p class="settings-note net-foot">${t('登录 Pixiv 后才能比对 R18 作品（见下方「账号」）。')}</p>` : ''}`;
   // 运行期间会轮询：只在有变化时重画，这样点击绝不会因为按钮被替换而丢失。
   if (!redraw(card, html)) return;
