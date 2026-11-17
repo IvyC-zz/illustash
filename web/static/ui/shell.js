@@ -222,7 +222,7 @@ export function renderHeading() {
   const hints = view.helpHint ? (view.hint?.(r) || '').split(' · ').filter(Boolean).map(x => esc(x.charAt(0).toLocaleUpperCase() + x.slice(1))) : [];
   const [helpButton, helpPop] = helpTip([...(view.help?.(r) || []), ...hints]);
   h.innerHTML = `<div class="heading-main"><h1>${title}${helpButton}</h1><p>${sub}</p>${helpPop}</div>${links}`;
-  wireHelpTip();
+  wireHelpTip(); view.wireHeading?.(h, r);
   $('localLinksButton')?.addEventListener('click', openLocalLinks);
   $('sgroupRelate')?.addEventListener('click', async () => openRelate(await api('/api/ids?' + new URLSearchParams({...filters(), limit: 12}))));
   $('groupOc')?.addEventListener('click', () => markOc({filter: filters(), exclude: [], confirm: state.total > 500}, false, true));
@@ -265,7 +265,6 @@ implement({
   similar: {heading: (r, {n}) => [t('重复'), '']},
   'artist-audit': {heading: (r, {n}) => [t('画师抽查'), state.nsfw ? `<b>${t('这页不按 R18 筛选：R18 的图也在里面')}</b>` : '']},
   identity: {heading: (r, {n}) => [t('身份整理'), t('{n} 对长得像的角色', {n: number(state.identityCount || 0)})]},
-  sgroup: {heading: (r, {n}) => [t('相似组 {id}', {id: esc(r.id)}), t('{n} 张', {n}), state.total >= 2 && state.total <= 12 ? `<span class="heading-links"><button class="quiet" id="sgroupRelate">${t('判断关系')}</button></span>` : '']},
   excluded: {heading: (r, {n}) => [t('已排除'), '']},
   pending: {heading: (r, {n}) => [t('已排除'), '']},
   settings: {heading: (r, {n}) => [t('设置'), settingsSection()[2]]},

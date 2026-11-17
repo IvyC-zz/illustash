@@ -101,7 +101,7 @@ pub(crate) fn forget_content(tx: &Connection, src: &Connection, changed: &[Strin
     crate::character_projection::fold(tx)
 }
 /// 没有任何研究计算器、学习戳或结果检查会读的应用表（#29）：偏好设置、名称来源设置（模型密钥、流量计数）、
-/// 名称缓存、同步历史和研究队列本身。写这些表从不会让结果失效。其他所有表，包括以后新增的表，都仍是学习的输入。
+/// 名称缓存、同步历史和研究队列本身，以及画廊和相似组的「看过了」。写这些表从不会让结果失效。其他所有表，包括以后新增的表，都仍是学习的输入。
 const UNREAD: &[&str] = &[
     "backend_effects",
     "galleries",
@@ -109,6 +109,7 @@ const UNREAD: &[&str] = &[
     "name_settings",
     "prefs",
     "research_runs",
+    "similar_seen",
     "sync_added",
     "sync_runs",
 ];
@@ -248,7 +249,8 @@ fn hash_table(c: &Connection, h: &mut Sha256, table: &str, check: &dyn Fn() -> R
     let filter = match table {
         "meta" => format!(" WHERE key NOT IN ({UNREAD_META})"),
         "actions" => " WHERE CASE WHEN json_valid(before_json)
-                       THEN json_type(before_json,'$[0].gallery') IS NOT 'object' ELSE 1 END"
+                       THEN json_type(before_json,'$[0].gallery') IS NOT 'object'
+                         AND json_type(before_json,'$[0].similar_seen') IS NOT 'object' ELSE 1 END"
             .into(),
         _ => String::new(),
     };
@@ -1500,6 +1502,30 @@ mod tests {
         assert_eq!(digest(), before);
         c.execute_batch("INSERT INTO actions VALUES (2,0,'[]');").unwrap();
         assert_ne!(digest(), before);
+    }
+
+    #[test]
+    fn similar_seen_and_its_history_are_ignored_by_learning_fingerprint() {
+        let c = Connection::open_in_memory().unwrap();
+        c.execute_batch(
+            "CREATE TABLE similar_seen(id INTEGER,uuid TEXT,seen_at TEXT);
+             CREATE TABLE actions(id INTEGER,undone INTEGER,before_json TEXT);",
+        )
+        .unwrap();
+        let digest = || {
+            let mut h = Sha256::new();
+            hash_db(&c, &mut h, Scope::Learning.app(), UNREAD, &|| Ok(())).unwrap();
+            h.finalize()
+        };
+        let before = digest();
+        c.execute_batch(
+            "INSERT INTO similar_seen VALUES (1,'a','t'),(1,'b','t');
+             INSERT INTO actions VALUES (1,0,'[{\"similar_seen\":{\"id\":1,\"rows\":null}}]');",
+        )
+        .unwrap();
+        assert_eq!(digest(), before);
+        c.execute_batch("DELETE FROM similar_seen; UPDATE actions SET undone=1 WHERE id=1;").unwrap();
+        assert_eq!(digest(), before);
     }
 
     #[test]

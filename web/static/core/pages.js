@@ -122,6 +122,7 @@ export const poolIs = (route, ...pools) => pools.includes(pageOf(route).pool);
 //   render({samePage})   进入本页时画主区；没有的页面是网格页，由 shell 调 reload(true)
 //   prepare(route)       进入本页前要先读的数据；返回 false 表示已经导航走了
 //   heading(r, ctx)      [标题, 副标题, 右侧链接 HTML]；角色页另用 drawHeading。副标题只放数量、状态和必须一眼看到的警告
+//   wireHeading(h, r)    heading 画好之后给右侧的按钮挂上处理函数（相似组页的「看过了」）
 //   help(r), helpHint    标题旁「?」里的说明（一行一句）；helpHint 为真时再接上本页的 hint，一个「·」一行（#527）
 //   onMeta(info)         计数等元数据到达后重画什么；没有的页面重画工具栏
 //   emptyNext(r)         网格空了时空状态下面的去处（链接或 data-empty 按钮的 HTML，#386 的 2-12）；没有的页面只有一句话

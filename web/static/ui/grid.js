@@ -622,10 +622,13 @@ function runBarAction(act) {
     pick: list => mutate('/api/change', {...payload(), action: 'confirmed', ...targets(list)}, false)});
   else if (act === 'assign') {
     // 默认选择栏（图库、重复、相似组）里选中的图已有角色时，按钮是「加角色…」，原有的角色保留；否则是给还没有角色的图设角色（#423）。
-    const chars = viewOf(r).bar === 'default' ? selectedChars() : {all: new Map()}, adding = !chars || chars.all.size > 0;
+    // 默认选择栏的页设了角色图还在本页，不淡出（#386 的 2-22：相似组是整理型的页，原来按浏览页判断，卡片闪一下）；
+    // 未识别、已跳过这类页设了角色图就离开。
+    const stays = viewOf(r).bar === 'default';
+    const chars = stays ? selectedChars() : {all: new Map()}, adding = !chars || chars.all.size > 0;
     openPicker({title: adding ? t('给 {n} 张加角色', {n: number(n)}) : t('把 {n} 张设为…', {n: number(n)}),
       sentence: e => adding ? t('给 {n} 张加上 {name}', {n: number(n), name: e.name}) : t('把 {n} 张设为 {name}', {n: number(n), name: e.name}), suggest: selectionPayload(), multi: true,
-      pick: list => mutate('/api/change', {...payload(), action: 'confirmed', ...targets(list)}, !browsing())});
+      pick: list => mutate('/api/change', {...payload(), action: 'confirmed', ...targets(list)}, !stays)});
   }
   else if (act === 'oc') markOc(payload(), true);
   else if (act === 'relate') openRelate([...state.sel.ids]);

@@ -46,6 +46,7 @@ mod app_rescue;
 pub mod app_research;
 pub mod app_resources;
 mod app_settings;
+mod app_similar_seen;
 mod app_sources;
 mod app_sync;
 pub mod app_tasks;

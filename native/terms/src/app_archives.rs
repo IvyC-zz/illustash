@@ -704,6 +704,11 @@ mod tests {
             "INSERT INTO galleries VALUES (12,'合成收藏',?,'synthetic-cover',2,'2026-11-01 00:00:00','2026-11-02 00:00:00')",
             [params],
         ).unwrap();
+        // 相似组的「看过了」（#427）同样随归档走。
+        crate::open(&library.db())
+            .unwrap()
+            .execute("INSERT INTO similar_seen VALUES (3,'synthetic-a','2026-11-03 00:00:00')", [])
+            .unwrap();
         let cancel = Arc::new(AtomicBool::new(false));
         let archive = export(&library, &root.join("export.pilib.zip"), &cancel).unwrap();
         let (restored, _) = import(&archive, &cancel, &crate::app_imports::Silent).unwrap();
@@ -725,6 +730,10 @@ mod tests {
                 "2026-11-02 00:00:00".into()
             )
         );
+        let seen: (i64, String, String) = c
+            .query_row("SELECT id,uuid,seen_at FROM similar_seen", [], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)))
+            .unwrap();
+        assert_eq!(seen, (3, "synthetic-a".into(), "2026-11-03 00:00:00".into()));
     }
 
     #[test]

@@ -75,14 +75,14 @@ class HistoricalAdditions(unittest.TestCase):
         root = Path(__file__).resolve().parents[1]
         additions = _baseline_additions()
         self.assertEqual({e['name'] for e in additions['tables']}, {
-            'galleries', 'human_state_marks', 'human_state_mark_undo', 'human_object_contributions', 'human_entity_origins',
+            'galleries', 'similar_seen', 'human_state_marks', 'human_state_mark_undo', 'human_object_contributions', 'human_entity_origins',
             'human_relation_review_context', 'human_asset_hashes', 'human_backup_state',
             'human_import_reports', 'human_import_report_rows'})
         self.assertEqual({e['name'] for e in additions['meta_keys']}, {'human_revision'})
         self.assertEqual({(e['physical'], e['view']) for e in additions['physical_views']}, {
             ('term_records', 'terms'), ('term_relation_records', 'term_relations')})
         for entry in additions['tables'] + additions['meta_keys'] + additions['physical_views']:
-            self.assertEqual(entry['introduced_in'], 10 if entry.get('name') == 'galleries' else 9)
+            self.assertEqual(entry['introduced_in'], 10 if entry.get('name') in ('galleries', 'similar_seen') else 9)
             for check in entry['checks']:
                 path, function = check.rsplit('::', 1)
                 self.assertRegex((root / path).read_text(), rf'fn {re.escape(function)}\(')
