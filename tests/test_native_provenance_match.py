@@ -93,9 +93,10 @@ class NativeProvenanceMatchTest(unittest.TestCase):
             with closing(sqlite3.connect(folder/'provenance.sqlite')) as cache, cache:
                 cache.executescript("""
                     CREATE TABLE native_delivery(task_id TEXT PRIMARY KEY,package TEXT NOT NULL,
-                        status TEXT NOT NULL DEFAULT 'pending',error TEXT NOT NULL DEFAULT '');
+                        status TEXT NOT NULL DEFAULT 'pending',error TEXT NOT NULL DEFAULT '',
+                        parts INTEGER NOT NULL DEFAULT 1 CHECK(parts>=1));
                     CREATE TABLE native_meta(key TEXT PRIMARY KEY,value TEXT NOT NULL);
-                    INSERT INTO native_delivery VALUES ('synthetic-existing','unchanged','done','');
+                    INSERT INTO native_delivery VALUES ('synthetic-existing','unchanged','done','',1);
                     INSERT INTO native_meta VALUES ('synthetic','unchanged');
                 """)
         expected = []

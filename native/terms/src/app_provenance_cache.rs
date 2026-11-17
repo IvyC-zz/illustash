@@ -633,7 +633,7 @@ mod tests {
         std::fs::remove_dir_all(&root).unwrap();
     }
     #[test]
-    fn earlier_delivery_queue_gains_the_error_column_and_keeps_its_rows() {
+    fn earlier_delivery_queue_keeps_its_single_packages() {
         let root = std::env::temp_dir().join(format!(
             "illustash-provenance-delivery-{}-{}",
             std::process::id(),
@@ -650,12 +650,12 @@ mod tests {
             )
             .unwrap();
         let c = connect(&path).unwrap();
-        let row: (String, String, String) = c
-            .query_row("SELECT package,status,error FROM native_delivery", [], |r| {
-                Ok((r.get(0)?, r.get(1)?, r.get(2)?))
+        let row: (String, String, String, usize) = c
+            .query_row("SELECT package,status,error,parts FROM native_delivery", [], |r| {
+                Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?))
             })
             .unwrap();
-        assert_eq!(row, ("p".into(), "pending".into(), String::new()));
+        assert_eq!(row, ("p".into(), "pending".into(), String::new(), 1));
         drop(c);
         std::fs::remove_dir_all(&root).unwrap();
     }

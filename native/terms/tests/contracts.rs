@@ -273,9 +273,12 @@ fn launch_inner(
         .env("ILLUSTASH_APP_SUPPORT", root.join("support"))
         .env("ILLUSTASH_NO_KEYCHAIN", "1")
         .env("ILLUSTASH_SHARED", root.join("shared"))
-        .env("ILLUSTASH_PYTHON_SENTINEL", root.join("python-launched"))
-        .env("ILLUSTASH_TEST_VERIFY_INCREMENTAL", root.join("verified"))
-        .env("ILLUSTASH_TEST_KEY_COUNTER", root.join("key-counter"));
+        .env("ILLUSTASH_PYTHON_SENTINEL", root.join("python-launched"));
+    if category != "scale" {
+        command
+            .env("ILLUSTASH_TEST_VERIFY_INCREMENTAL", root.join("verified"))
+            .env("ILLUSTASH_TEST_KEY_COUNTER", root.join("key-counter"));
+    }
     #[cfg(windows)]
     command.env("SystemRoot", std::env::var_os("SystemRoot").expect("SystemRoot"));
     command
