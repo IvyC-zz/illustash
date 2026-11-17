@@ -3089,7 +3089,6 @@
   "删除参考包": "Delete reference pack",
   "参考包已删除": "Reference pack deleted",
   "参考包已就位": "Reference pack in place",
-  "删除参考包？已启用的图库保留现有的扩展候选，新识别的图不再检查；再用要重新导入。": "Delete the reference pack? Libraries where it is enabled keep their existing extension candidates, but newly recognized pictures are no longer checked. Using it again requires importing it again.",
   "这个图库还没有 CCIP 识别结果": "This library has no CCIP recognition results yet",
   "导入 CCIP 长尾包中": "Importing CCIP long-tail pack",
   "检查 CCIP 长尾包中": "Checking with CCIP long-tail pack",
@@ -3125,5 +3124,11 @@
     "one": "Check {n} picture in this library with the reference pack. ",
     "other": "Check {n} pictures in this library with the reference pack. "
   },
-  "用参考包检查本图库的图。": "Check the pictures in this library with the reference pack. "
+  "用参考包检查本图库的图。": "Check the pictures in this library with the reference pack. ",
+  "删除参考包？已启用的图库保留现有的扩展候选，新识别的图不再检查；再用要重新下载或导入。": "Delete the reference pack? Libraries where it is enabled keep their existing extension candidates, but newly recognized pictures are no longer checked. Using it again requires downloading or importing it again.",
+  "参考包还没下载（约 {size}）": "Reference pack not downloaded (about {size})",
+  "参考包还没下载完（已有 {have}，共 {size}）": "Reference pack partly downloaded ({have} of {size})",
+  "下载 CCIP 长尾包中": "Downloading CCIP long-tail pack",
+  "导入 WD 角色扩展包中": "Importing WD character extension package",
+  "见来源与许可": "See sources and licenses"
 }

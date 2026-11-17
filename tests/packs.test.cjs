@@ -317,7 +317,7 @@ test('CCIP 长尾包：不能下载，只能从文件导入；导入是主按钮
   assert.deepEqual(ccipButtons(c.packActions('ccip', x, true)).map(b => b.act), ['import']);
   assert.equal(c.packNote('ccip', x), '多认 54 个图片较少、WD 和精选索引都没有的角色。');
   // 存放位置写「本图库」；导入结果里不认识的文件写「不是参考包」。
-  assert.match(c.packInfo('ccip', ccip({package: {status: 'ready'}})), /\/synthetic\/library.pilib\/instance · 本图库/);
+  assert.match(c.packInfo('ccip', ccip({package: {status: 'ready'}})), /\/synthetic\/library.pilib\/instance · 所有图库共用/);
   // 没有 CCIP 向量的图库：启用按钮的提示写 CCIP。
   assert.match(c.packActions('ccip', ccip({package: {status: 'ready'}, library: {blocked: 'no_vectors'}})), /disabled title="这个图库还没有 CCIP 识别结果"/);
   assert.equal(c.packTask('ccip', ccip({download: {kind: 'import', status: 'running', done: 1, total: 2}})).busy, '导入 CCIP 长尾包中');
@@ -332,6 +332,16 @@ test('CCIP 长尾包：导入结果里不认识的文件写「不是参考包」
   for (const fn of page.el('settingsPage').listeners.click) fn({target: {closest: () => ({dataset: {pack: 'ccip:import'}, disabled: false})}});
   await new Promise(resolve => setTimeout(resolve, 10));
   assert.match(c.packImportSummary('ccip', imported), /x.zip<\/bdi> · 不是参考包/);
+});
+
+test('CCIP 长尾包：有下载地址时和 WD 扩展一样能下载；许可文字经后端翻译', () => {
+  const x = ccip({package: {sources: ['github.com']}});
+  assert.equal(c.packLine('ccip', x), '参考包还没下载（约 1.3 MB）');
+  assert.deepEqual(ccipButtons(c.packActions('ccip', x)).map(b => [b.act, b.label, b.cls]),
+    [['download', '下载参考包（约 1.3 MB）', 'primary small'], ['import', '从文件导入…', 'quiet small']]);
+  assert.equal(c.packLine('ccip', ccip({package: {sources: ['github.com'], status: 'partial', have: 600000, partial: true}})), '参考包还没下载完（已有 600 KB，共 1.3 MB）');
+  assert.equal(c.packTask('ccip', ccip({package: {sources: ['github.com']}, download: {kind: 'download', status: 'running', done: 1, total: 2}})).busy, '下载 CCIP 长尾包中');
+  assert.match(c.packInfo('ccip', ccip({package: {status: 'ready', license: '见来源与许可'}})), /<td>许可<\/td><td>见来源与许可<\/td>/);
 });
 
 test('CCIP 长尾包：索引更新过要重新检查，自动检查的错误写在状态行下面', () => {
@@ -350,7 +360,7 @@ test('CCIP 长尾包：结束提示带名字，没有兼容向量的图一并说
   assert.equal(c.finishedText('ccip', {id: 'c', kind: 'withdraw', status: 'done', result: {changed: 3}}, after, before), '已撤回 CCIP 长尾包');
   assert.equal(c.finishedText('ccip', {id: 'c', kind: 'auto', status: 'done', result: {changed: 0}}, after, after), '');
   assert.equal(c.enableMessage('ccip', before), '用参考包检查本图库 120 张图。还没有归属、也没有人工确认的图会补上一个机器归属，已有的归属和人工结论不变。以后可以撤回。');
-  assert.equal(c.PACK_UI.ccip.removeNote(), '删除参考包？已启用的图库保留现有的扩展候选，新识别的图不再检查；再用要重新导入。');
+  assert.equal(c.PACK_UI.ccip.removeNote(), '删除参考包？已启用的图库保留现有的扩展候选，新识别的图不再检查；再用要重新下载或导入。');
 });
 
 test('两个包各走各的路由，状态互不覆盖', async () => {

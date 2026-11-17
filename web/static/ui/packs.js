@@ -10,7 +10,8 @@ import {packDownloading, packRunning, packFinished, packDownloadFinished, loadPa
 import {$, toast, fold, busy} from './dom.js';
 import {confirmAction} from './dialog.js';
 
-// 每个包的名字和只属于它的几句文字。`shared` 是包文件是不是所有图库共用一份（WD 扩展包是；CCIP 长尾包存在每个图库里）。
+// 每个包的名字和只属于它的几句文字。`shared` 是包文件是不是所有图库共用一份（两个包都是，放在共享数据的 extensions/ 下；
+// 启用状态和候选按图库保存）。
 export const PACK_UI = {
   wd: {
     name: () => t('WD 角色扩展'), card: 'wdExtCard', shared: true,
@@ -26,23 +27,26 @@ export const PACK_UI = {
     remove: () => t('删除扩展包'), removed: () => t('扩展包已删除'), arrived: () => t('扩展包已就位'),
     removeNote: () => t('删除扩展包？已启用的图库保留现有的扩展候选，新识别的图不再检查；再用要重新下载。'),
     noVectors: () => t('这个图库还没有 WD 识别结果'),
-    busy: {download: () => t('下载 WD 角色扩展包中'), check: () => t('检查 WD 角色扩展中'), withdraw: () => t('撤回 WD 角色扩展中')},
+    busy: {download: () => t('下载 WD 角色扩展包中'), import: () => t('导入 WD 角色扩展包中'), check: () => t('检查 WD 角色扩展中'),
+      withdraw: () => t('撤回 WD 角色扩展中')},
   },
   ccip: {
-    name: () => t('CCIP 长尾包'), card: 'ccipCard', shared: false,
+    name: () => t('CCIP 长尾包'), card: 'ccipCard', shared: true,
     note: n => t('多认 {n} 个图片较少、WD 和精选索引都没有的角色。', {n}),
     file: () => t('参考包'),
     scan: n => n != null ? t('用参考包检查本图库 {n} 张图。', {n}) : t('用参考包检查本图库的图。'),
-    missing: () => t('参考包还没导入'),
-    partial: () => t('参考包还没导入'),
+    // 还没定下载地址的构建（package.sources 为空）只能从文件导入。
+    missing: (size, downloadable) => downloadable ? t('参考包还没下载（约 {size}）', {size}) : t('参考包还没导入'),
+    partial: (have, size) => t('参考包还没下载完（已有 {have}，共 {size}）', {have, size}),
     failed: reason => t('参考包没能下载：{reason}', {reason}),
     download: size => t('下载参考包（约 {size}）', {size}),
     absent: () => t('参考包不在这台电脑上，新识别的图不检查'),
     unknown: () => t('不是参考包'),
     remove: () => t('删除参考包'), removed: () => t('参考包已删除'), arrived: () => t('参考包已就位'),
-    removeNote: () => t('删除参考包？已启用的图库保留现有的扩展候选，新识别的图不再检查；再用要重新导入。'),
+    removeNote: () => t('删除参考包？已启用的图库保留现有的扩展候选，新识别的图不再检查；再用要重新下载或导入。'),
     noVectors: () => t('这个图库还没有 CCIP 识别结果'),
-    busy: {download: () => t('导入 CCIP 长尾包中'), check: () => t('检查 CCIP 长尾包中'), withdraw: () => t('撤回 CCIP 长尾包中')},
+    busy: {download: () => t('下载 CCIP 长尾包中'), import: () => t('导入 CCIP 长尾包中'), check: () => t('检查 CCIP 长尾包中'),
+      withdraw: () => t('撤回 CCIP 长尾包中')},
   },
 };
 export const PACK_KEYS = Object.keys(PACK_UI);
@@ -94,7 +98,7 @@ export function packLine(key, x = current(key)) {
   if (l.enabled) return enabledLine(x);
   if (!ready(x) && d?.kind === 'download' && d.status === 'failed') return u.failed(tb(d.message || '') || t('每个来源都试过了'));
   if (!ready(x) && d?.kind === 'download' && d.status === 'cancelled') return t('已取消');
-  if (!ready(x)) return pkg(x).have ? u.partial(bytes(pkg(x).have), size(x)) : u.missing(size(x));
+  if (!ready(x)) return pkg(x).have ? u.partial(bytes(pkg(x).have), size(x)) : u.missing(size(x), downloadable(x));
   return t('本图库未启用');
 }
 // 状态行左边的圆点：进行中、出错、没有启用。
@@ -171,7 +175,7 @@ export function packInfo(key, x = current(key)) {
     <tr><td>${t('存放位置')}</td><td class="mono" title="${esc(p.location)}">${esc(home(p.location))} · ${u.shared ? t('所有图库共用') : t('本图库')}</td></tr>
     <tr><td class="mono">${esc(f.path)}</td><td class="mono" title="SHA-256 ${esc(f.sha256)}">${bytes(f.size)} · ${esc(String(f.sha256).slice(0, 12))}…</td></tr>
     <tr><td>${t('版本')}</td><td>${esc(p.version)} · ${t('{n} 个角色', {n: number(p.heads || 0)})}</td></tr>
-    <tr><td>${t('许可')}</td><td>${esc(p.license)}</td></tr></table>${del}`);
+    <tr><td>${t('许可')}</td><td>${esc(tb(p.license || ''))}</td></tr></table>${del}`);
 }
 // 卡片的状态行：和别的任务卡片一样带圆点；有过下载或任务时可以转到任务面板。
 export function packStatus(key, x = current(key)) {
@@ -189,7 +193,8 @@ export const packNote = (key, x = current(key)) => ui(key).note(number(pkg(x).he
 export function packTask(key, x = current(key)) {
   if (!x || !(x.download || x.task)) return null;
   const running = packRunning(x), downloading = packDownloading(x), u = ui(key);
-  const busyText = running && x.task.kind === 'withdraw' ? u.busy.withdraw() : running ? u.busy.check() : u.busy.download();
+  const busyText = running && x.task.kind === 'withdraw' ? u.busy.withdraw() : running ? u.busy.check()
+    : x.download?.kind === 'import' ? u.busy.import() : u.busy.download();
   const failed = x.task?.status === 'failed' ? x.task : !ready(x) && x.download?.status === 'failed' ? x.download : null;
   return {key: `pack-${key}`, name: u.name(), busy: busyText, active: running || downloading, warn: !!failed, off: packDot(key, x) === 'off',
     line: packLine(key, x), body: packBar(key, x), action: packActions(key, x, true), diagnostic: failed?.diagnostic};
