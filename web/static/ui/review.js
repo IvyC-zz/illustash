@@ -264,7 +264,7 @@ implement({
   // 在这页开的大图里改了图（'edit' 时大图还开着）：重读分组，免得组里还留着已经设了角色、跳过或排除的图。组头按钮的写入
   // 不走这里，它们自己把答过的组从页面上拿掉。
   groups: {render: () => renderGroups(), reveal: revealThumb,
-    refresh: why => { if (why === 'undo' || why === 'learned' || why === 'edit' && state.viewer >= 0) renderGroups(true); else if (why === 'nsfw') renderGroups(); }},
+    refresh: why => { if (why === 'undo' || why === 'learned' || why === 'edit' && state.viewer >= 0) return renderGroups(true); else if (why === 'nsfw') renderGroups(); }},
   similar: {render: () => renderSimilar(), refresh: why => { if (why === 'nsfw') renderSimilar(); }},
   identity: {render: () => renderIdentity(), refresh: why => { if (why === 'undo') renderIdentity('keep'); else if (why === 'nsfw') renderIdentity(); }},
   // 画师抽查不按 R18 筛选（固定的一批随机图）：切换 R18 只重画标题里的提醒（#386 的 2-35）。

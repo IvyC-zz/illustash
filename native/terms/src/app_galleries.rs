@@ -43,26 +43,28 @@ impl Row {
             .map_err(|e| Error::Io(std::io::Error::new(std::io::ErrorKind::InvalidData, e)))
     }
 
-    fn display(&self, c: &Connection, context: &LibraryContext, nsfw: &str) -> Result<Json> {
-        let mut filter = self.params()?;
-        if !nsfw.is_empty() {
-            filter.insert("nsfw".into(), nsfw.into());
-        }
-        let cover = match http_browse::selection(c, context, &filter) {
-            Ok((where_, args, order)) => self.resolve_cover(c, &where_, &args, &order)?,
-            // 旧条件失效时仍能列出画廊供用户编辑，打开图片列表会按原接口报告具体的 400。
-            Err(Error::Invalid(_)) => None,
-            Err(error) => return Err(error),
-        };
+    fn describe(&self) -> Result<Json> {
         let params: Value = serde_json::from_str(&self.params)
             .map_err(|e| Error::Io(std::io::Error::new(std::io::ErrorKind::InvalidData, e)))?;
         Ok(Json::object([
             ("id", self.id.into()),
             ("name", self.name.clone().into()),
             ("params", params.into()),
-            ("cover", cover.into()),
-            ("cover_manual", self.cover.is_some().into()),
+            ("position", self.position.into()),
         ]))
+    }
+
+    fn current_cover(&self, c: &Connection, context: &LibraryContext, nsfw: &str) -> Result<Option<String>> {
+        let mut filter = self.params()?;
+        if !nsfw.is_empty() {
+            filter.insert("nsfw".into(), nsfw.into());
+        }
+        match http_browse::selection(c, context, &filter) {
+            Ok((where_, args, order)) => self.resolve_cover(c, &where_, &args, &order),
+            // 条件失效时仍能列出画廊供用户编辑，打开图片列表会按原接口报告具体的 400。
+            Err(Error::Invalid(_)) => Ok(None),
+            Err(error) => Err(error),
+        }
     }
 
     fn resolve_cover(&self, c: &Connection, where_: &str, args: &[SqlValue], order: &str) -> Result<Option<String>> {
@@ -78,13 +80,32 @@ impl Row {
     }
 }
 
-pub(crate) fn read(c: &Connection, context: &LibraryContext, nsfw: &str) -> Result<Json> {
+pub(crate) fn read(c: &Connection, nsfw: &str) -> Result<Json> {
     crate::sql_fragments::rating("a", nsfw)?;
-    let galleries = c
-        .prepare(&format!("SELECT {COLUMNS} FROM galleries ORDER BY position,id"))?
+    let mut statement = c.prepare(&format!("SELECT {COLUMNS} FROM galleries ORDER BY position,id"))?;
+    let galleries = statement
         .query_map([], Row::load)?
-        .collect::<rusqlite::Result<Vec<_>>>()?;
-    Ok(Json::Array(galleries.iter().map(|row| row.display(c, context, nsfw)).collect::<Result<_>>()?))
+        .map(|row| {
+            let row = row?;
+            let mut gallery = row.describe()?;
+            gallery.set("cover_manual", row.cover.is_some().into());
+            Ok(gallery)
+        })
+        .collect::<Result<_>>()?;
+    Ok(Json::Array(galleries))
+}
+
+pub(crate) fn covers(c: &Connection, context: &LibraryContext, nsfw: &str, ids: &str) -> Result<Json> {
+    crate::sql_fragments::rating("a", nsfw)?;
+    serde_json::from_str::<Vec<i64>>(ids).map_err(|_| Error::invalid("画廊编号应为整数数组"))?;
+    let sql =
+        format!("SELECT {COLUMNS} FROM galleries WHERE id IN (SELECT value FROM json_each(?)) ORDER BY position,id");
+    let galleries = c.prepare(&sql)?.query_map([ids], Row::load)?.collect::<rusqlite::Result<Vec<_>>>()?;
+    let covers = galleries
+        .iter()
+        .map(|row| Ok(Json::object([("id", row.id.into()), ("cover", row.current_cover(c, context, nsfw)?.into())])))
+        .collect::<Result<_>>()?;
+    Ok(Json::Array(covers))
 }
 
 fn stored(c: &Connection, id: i64) -> Result<Row> {
@@ -246,8 +267,12 @@ pub(crate) fn write(c: &mut Connection, context: &LibraryContext, body: &Json) -
     let undo = app_commands::last_action(&tx)?;
     let mut result = Json::object([("undo", undo)]);
     if action != "delete" {
-        // 写请求没有界面分级状态，返回隐藏 R18 的封面；列表按当前界面分级状态读取。
-        result.set("gallery", stored(&tx, id)?.display(&tx, context, "hide")?);
+        // 写请求没有界面分级状态，返回隐藏 R18 的封面；按需封面读取使用调用方分级。
+        let row = stored(&tx, id)?;
+        let mut gallery = row.describe()?;
+        gallery.set("cover", row.current_cover(&tx, context, "hide")?.into());
+        gallery.set("cover_manual", row.cover.is_some().into());
+        result.set("gallery", gallery);
     }
     tx.commit()?;
     Ok(result)

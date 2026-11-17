@@ -1,0 +1,146 @@
+// 筛选条（#445）：图库、角色页和画廊页工具栏里的条件胶囊和「＋ 条件」选择器。条件怎么读写在 core/filters.js；
+// 这里只画胶囊、读名字、开选择器。胶囊的名字是链接：点一下在「含」和「不含」之间切换；× 去掉。
+import {loadWorkTree} from '../core/catalog.js';
+import {dayLabel, esc, number} from '../core/format.js';
+import {I18N, t} from '../core/i18n.js';
+import {addCondition, conditions, count, datesLabel, dropCondition, flipCondition, kindOf, LIMIT, setDates, SOURCES, validDates, valueOf, yearDates} from '../core/filters.js';
+import {go, hashFor} from '../core/route.js';
+import {api} from '../core/session.js';
+import {state} from '../core/state.js';
+import {listNav} from './combo.js';
+import {openDialog} from './dialog.js';
+import {$, toast} from './dom.js';
+import {createLayer} from './overlay.js';
+
+// ---------- 条件的文字 ----------
+// 角色、作品、画师、画面标签的名字第一次用到时去读；读到后只换胶囊上的文字（整条工具栏重画会打断正在输入的搜索框）。
+const names = new Map();
+const SOURCE_NAMES = {pixiv: 'Pixiv', x: 'X', other: t('其他出处')};
+const tagText = key => key.replaceAll('_', ' ');
+// 一个条件的文字；还没读到名字时先用 id。
+export function conditionLabel(c) {
+  const kind = kindOf(c), value = valueOf(c);
+  if (kind === 'fav') return t('收藏');
+  if (kind === 'source') return SOURCE_NAMES[value] || value;
+  if (kind === 'utag') return '# ' + value;
+  if (kind === 'char') { const found = state.charMap.get(value); if (found) return found.name; }
+  if (names.has(c)) return names.get(c) || (kind === 'tag' ? tagText(value) : value);
+  lookUp(c);
+  return kind === 'tag' ? tagText(value) : value;
+}
+// 读一个条件的名字，读到后换掉胶囊上的文字。读不到就一直用 id（作品或画师删了，后端会在读图时说明）。
+async function lookUp(c) {
+  names.set(c, '');
+  const kind = kindOf(c), value = valueOf(c);
+  let name = '';
+  try {
+    if (kind === 'tag' && I18N.language === 'zh-CN') name = (await api('/api/general-tags?' + new URLSearchParams({q: value, format: 'menu'}))).find(x => x.tag === value)?.zh || '';
+    else if (kind === 'work') { if (!state.workTree) await loadWorkTree(); name = state.workTree.find(w => w.id === value)?.name || ''; }
+    else if (kind === 'artist') name = (await api('/api/artist?' + new URLSearchParams({id: value}))).name || '';
+    else if (kind === 'char') name = (await api('/api/characters?' + new URLSearchParams({id: value})))[0]?.name || '';
+  } catch { return; }
+  if (!name) return;
+  names.set(c, name);
+  for (const a of document.querySelectorAll('[data-cond]')) if (a.dataset.cond === c) a.textContent = pillText(c, a.dataset.neg === '1');
+}
+const pillText = (c, negated) => negated ? t('不含 {name}', {name: conditionLabel(c)}) : conditionLabel(c);
+
+// ---------- 筛选条 ----------
+// 工具栏里搜索框后面的一段：每个条件一枚胶囊，日期一枚，最后是「＋ 条件」和它的选择器。
+export function filterBar(r) {
+  const x = conditions(r);
+  const pill = (c, negated) => `<span class="variant-chip">` +
+    `<a href="${esc(hashFor(flipCondition(r, c)))}" data-cond="${esc(c)}" data-neg="${negated ? 1 : 0}" title="${negated ? t('点一下改回包含') : t('点一下改成不含')}">${esc(pillText(c, negated))}</a>` +
+    `<button data-drop="${esc(c)}" title="${t('去掉条件')}" aria-label="${t('去掉条件')}">×</button></span>`;
+  const when = x.from || x.to ? datesLabel(x.from, x.to) : x.day ? t('{day} 加入', {day: dayLabel(x.day)}) : '';
+  const dates = when ? `<span class="variant-chip"><span>${esc(when)}</span><button data-drop-dates title="${t('去掉日期')}" aria-label="${t('去掉日期')}">×</button></span>` : '';
+  const full = count(r) >= LIMIT;
+  return [...x.has.map(c => pill(c, false)), ...x.not.map(c => pill(c, true))].join('') + dates +
+    `<div class="tag-control"><button id="condButton" class="quiet"${full ? ` disabled title="${t('最多 {n} 个条件', {n: LIMIT})}"` : ''}>＋ ${t('条件')}</button>` +
+    `<div id="condPopover" class="menu menu-drop" hidden>` +
+    `<input id="condSearch" type="search" spellcheck="false" autocorrect="off" autocapitalize="off" placeholder="${t('标签、角色、作品、画师、出处或年份')}" aria-label="${t('搜索条件')}">` +
+    `<div id="condOptions"></div></div></div>`;
+}
+// 画好以后接上事件；r 是画的时候的路由。
+export function wireFilterBar(r) {
+  const bar = $('toolbar');
+  for (const b of bar.querySelectorAll('[data-drop]')) b.onclick = () => go(dropCondition(r, b.dataset.drop));
+  bar.querySelector('[data-drop-dates]')?.addEventListener('click', () => go(setDates(r)));
+  $('condButton').onclick = () => { setMenu($('condPopover').hidden); if (!$('condPopover').hidden) { userTags = null; $('condSearch').focus(); loadOptions(); } };
+  $('condSearch').oninput = () => { clearTimeout(timer); timer = setTimeout(loadOptions, 120); };
+  // 焦点留在搜索框里：↑ ↓ 在选项之间循环，↵ 或点击加上这个条件，Esc 关菜单、焦点回到按钮（同标签菜单，#432）。
+  nav = listNav($('condSearch'), $('condOptions'), {shown: () => !$('condPopover').hidden, count: () => options.length, pick: i => choose(options[i])});
+}
+// 选择器是非模态浮层，Esc、点外关闭由浮层管理器处理；元素随工具栏重画换掉，所以按 id 找。
+const layer = createLayer({kind: 'popover', id: 'condition-menu', el: () => $('condPopover'), anchor: () => $('condButton'), focusIn: 'first', onDismiss: reason => setMenu(false, reason)});
+function setMenu(open, reason) {
+  const el = $('condPopover'); if (el) el.hidden = !open;
+  if (open) layer.open(); else layer.close(reason);
+}
+let timer = 0, nav = null, options = [], userTags = null;
+
+// ---------- 选择器 ----------
+// 选项：{label, detail, section, cond} 或 {label, section, dates: true}（开起止日期对话框）、{label, year}。
+const fold = s => s.toLocaleLowerCase(I18N.locale).normalize('NFKC');
+const SECTION_NAMES = () => ({source: t('出处'), date: t('时间'), mine: t('我的标签'), tag: t('画面标签'), char: t('角色'), work: t('作品'), artist: t('画师'), other: t('其他')});
+async function candidates(q) {
+  const r = state.route, x = conditions(r), taken = new Set([...x.has, ...x.not]), low = fold(q), hit = s => !q || fold(s).includes(low);
+  const free = o => !o.cond || !taken.has(o.cond), out = [];
+  const now = new Date().getFullYear();
+  userTags ||= api('/api/user-tags?limit=1000').catch(() => state.userTags);
+  const [mine, tags, artists] = await Promise.all([userTags,
+    q ? api('/api/general-tags?' + new URLSearchParams({q, format: 'menu'})).catch(() => []) : [],
+    q ? api('/api/artist-directory?' + new URLSearchParams({q, limit: 6})).then(d => d.items).catch(() => []) : []]);
+  for (const s of SOURCES) if (hit(SOURCE_NAMES[s]) || hit(s)) out.push({section: 'source', label: SOURCE_NAMES[s], cond: `source:${s}`});
+  const years = /^\d{4}$/.test(q) ? [Number(q)] : q ? [] : [now, now - 1, now - 2];
+  for (const y of years) out.push({section: 'date', label: t('{year} 年', {year: y}), year: y});
+  if (!q || hit(t('起止日期…')) || hit(t('日期'))) out.push({section: 'date', label: t('起止日期…'), dates: true});
+  if (hit(t('收藏')) || hit('fav')) out.push({section: 'other', label: t('收藏'), cond: 'fav'});
+  out.push(...(mine || []).filter(m => hit(m.tag)).slice(0, q ? 12 : 6).map(m => ({section: 'mine', label: '# ' + m.tag, detail: number(m.count), cond: `utag:${m.tag}`})));
+  if (q) {
+    // 中文页面上画面标签显示中文名（#446），后面小字是原来的标签。
+    const zh = x => I18N.language === 'zh-CN' && x.zh;
+    out.push(...tags.slice(0, 12).map(x => ({section: 'tag', label: zh(x) || tagText(x.tag), detail: zh(x) ? tagText(x.tag) : '', cond: `tag:${x.tag}`})));
+    out.push(...state.chars.filter(c => hit(c.name) || (c.tag && hit(c.tag))).slice(0, 8).map(c => ({section: 'char', label: c.name, detail: number(c.count), cond: `char:${c.id}`})));
+    if (!state.workTree) await loadWorkTree().catch(() => {});
+    out.push(...(state.workTree || []).filter(w => hit(w.name)).slice(0, 6).map(w => ({section: 'work', label: w.name, detail: w.qualifier || '', cond: `work:${w.id}`})));
+    out.push(...artists.map(a => ({section: 'artist', label: a.name, detail: number(a.count), cond: `artist:${a.id}`})));
+  }
+  return out.filter(free);
+}
+async function loadOptions() {
+  const q = $('condSearch').value.trim();
+  let found; try { found = await candidates(q); } catch (e) { $('condOptions').textContent = e.message; options = []; return; }
+  if (q !== $('condSearch')?.value.trim()) return;
+  options = found;
+  const sections = SECTION_NAMES();
+  let last = '', html = '';
+  found.forEach((o, i) => {
+    if (o.section !== last) { html += `<div class="palette-label">${esc(sections[o.section])}</div>`; last = o.section; }
+    html += `<button class="menu-item" data-i="${i}">${esc(o.label)}${o.detail ? ` <small>${esc(o.detail)}</small>` : ''}</button>`;
+  });
+  $('condOptions').innerHTML = html || `<p>${t('没有匹配的条件')}</p>`;
+  nav?.mark(0);
+}
+function choose(o) {
+  if (!o) return;
+  setMenu(false);
+  const r = state.route;
+  if (o.cond) go(addCondition(r, o.cond));
+  else if (o.year) go(setDates(r, ...yearDates(o.year)));
+  else if (o.dates) askDates(r);
+}
+// 起止日期：两格日期，可以只填一格。表单，点背景不关。
+function askDates(r) {
+  const x = conditions(r);
+  openDialog({title: t('加入日期'), backdropClose: false, focus: '[name="from"]',
+    body: `<label class="field"><span>${t('从')}</span><input type="date" name="from" value="${esc(x.from)}"></label>` +
+      `<label class="field"><span>${t('到')}</span><input type="date" name="to" value="${esc(x.to)}"></label>`,
+    actions: `<button value="cancel" class="quiet">${t('取消')}</button><button value="ok" class="primary">${t('确认')}</button>`,
+    onClose: d => {
+      if (d.returnValue !== 'ok' || state.route !== r) return;
+      const from = d.querySelector('[name="from"]').value, to = d.querySelector('[name="to"]').value;
+      if (!validDates(from, to)) { toast(t('开始日期不能晚于结束日期，两格至少填一格。')); return; }
+      go(setDates(r, from, to));
+    }});
+}
