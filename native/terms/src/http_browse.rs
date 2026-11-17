@@ -9,6 +9,7 @@ use crate::{
     },
     Error, Result,
 };
+use illustash_core::{error::invalid, schema::FAVORITE_KEY};
 use rusqlite::{types::Value, Connection, OptionalExtension};
 use std::collections::{HashMap, HashSet};
 /// 重复图 `d` 所在的组里，各份副本所属的身份不完全相同。
@@ -138,7 +139,7 @@ fn preflight(path: &str, q: &HashMap<String, String>) -> Result<()> {
 fn attach_provenance(c: &Connection, context: &LibraryContext) -> Result<()> {
     if let Some(library) = &context.library {
         let path = library.join("provenance.sqlite");
-        if path.exists() {
+        if path.exists() && !attached(c, "prov")? {
             c.execute("ATTACH DATABASE ? AS prov", [crate::http_read::sqlite_uri(&path)])?;
         }
     }
@@ -171,10 +172,201 @@ fn digit_extra(c: char) -> bool {
     R.iter().any(|&(a, b)| (a..=b).contains(&(c as u32)))
 }
 /// /api/assets（以及作用于浏览选区的命令）接受的筛选参数。
-const FILTERS: [&str; 15] = [
+const FILTERS: [&str; 21] = [
     "entity", "variant", "status", "q", "tag", "utag", "pool", "order", "nsfw", "dup", "reason", "cluster", "work",
-    "day", "artist",
+    "day", "artist", "has", "not", "from", "to", "like", "like_by",
 ];
+const FAVORITE_TERM: &str = "(SELECT id FROM terms WHERE key=? AND kind='mark')";
+
+/// 解析、限长和去重用于浏览与持久化，保留条件的输入顺序。
+pub(crate) fn condition_lists(f: &HashMap<String, String>) -> Result<[Vec<String>; 2]> {
+    let mut lists = [Vec::new(), Vec::new()];
+    let mut count = 0;
+    for (key, list) in ["has", "not"].into_iter().zip(&mut lists) {
+        let Some(raw) = f.get(key) else { continue };
+        let conditions: Vec<String> = serde_json::from_str(raw).map_err(|_| Error::invalid("筛选参数不正确"))?;
+        count += conditions.len();
+        if count > 20 || conditions.iter().any(|s| s.is_empty() || s.chars().count() > 160) {
+            return invalid("筛选参数不正确");
+        }
+        let mut seen = HashSet::new();
+        list.extend(conditions.into_iter().filter(|s| seen.insert(s.clone())));
+    }
+    Ok(lists)
+}
+
+// 只读附件每次连接挂一次；一个列表请求可在同一快照里计算多个画廊封面。
+fn attached(c: &Connection, db: &str) -> Result<bool> {
+    exists(c, "SELECT 1 FROM pragma_database_list WHERE name=?", &[db])
+}
+
+fn condition_filter(
+    c: &Connection,
+    context: &LibraryContext,
+    f: &HashMap<String, String>,
+    filter: &mut Filter,
+) -> Result<()> {
+    let [has, not] = condition_lists(f)?;
+    let mut tags = Vec::new();
+    let mut blocked_tags = Vec::new();
+    for (negated, conditions, tags) in [(false, &has, &mut tags), (true, &not, &mut blocked_tags)] {
+        for condition in conditions {
+            let mut clause = Filter { clauses: Vec::new(), args: Vec::new(), numeric_index: None };
+            if condition == "fav" {
+                clause.add(format!(
+                    "a.uuid IN (
+                       WITH favorites AS MATERIALIZED (
+                         SELECT x.key FROM term_projection p JOIN term_assets x ON x.id=p.asset_id
+                         WHERE p.term_id={FAVORITE_TERM} AND p.state='confirmed' AND x.namespace='library')
+                       SELECT key FROM favorites
+                       UNION ALL
+                       SELECT y.uuid FROM favorites f JOIN duplicates d ON d.uuid=f.key JOIN duplicates y ON y.grp=d.grp)"
+                ), [FAVORITE_KEY.to_owned()]);
+            } else {
+                let Some((kind, key)) = condition.split_once(':').filter(|(_, key)| !key.is_empty()) else {
+                    return invalid("筛选参数不正确");
+                };
+                match kind {
+                    "char" => {
+                        identity_filter(c, &HashMap::from([("entity".into(), key.into())]), &mut clause)?;
+                    }
+                    "work" => {
+                        let ids = crate::http_read::work_tree(c, key)?;
+                        let marks = vec!["?"; ids.len()].join(",");
+                        clause.add(
+                            format!(
+                                "a.uuid IN (SELECT m.uuid FROM memberships m JOIN {ENTITIES} e
+                                         ON e.id=m.entity WHERE e.work_id IN ({marks}))"
+                            ),
+                            ids,
+                        );
+                    }
+                    "artist" => artist_filter(c, context, key, &mut clause)?,
+                    "tag" => {
+                        if !crate::http_read::tag_vocabulary(context)?.iter().any(|tag| tag == key) {
+                            return invalid("请选择已有的通用标签");
+                        }
+                        tags.push(key.to_owned());
+                        continue;
+                    }
+                    "utag" => clause.add("a.uuid IN (SELECT uuid FROM asset_tags WHERE tag=?)", [key.into()]),
+                    "source" => source_filter(c, context, key, &mut clause)?,
+                    _ => return invalid("筛选参数不正确"),
+                }
+            }
+            let sql = clause.clauses.join(" AND ");
+            filter.add(if negated { format!("NOT ({sql})") } else { sql }, clause.args);
+        }
+    }
+    for (op, tags) in [("IN", tags), ("NOT IN", blocked_tags)] {
+        if !tags.is_empty() {
+            let marks = vec!["?"; tags.len()].join(",");
+            let every = if op == "IN" {
+                format!(" GROUP BY p.asset_id HAVING count(DISTINCT l.key)={}", tags.len())
+            } else {
+                String::new()
+            };
+            filter.add(
+                format!(
+                    "a.uuid {op} (
+                   SELECT x.key FROM term_links l
+                   JOIN terms t ON t.id=l.term_id AND t.kind='topic'
+                   JOIN term_projection p ON p.term_id=l.term_id AND p.state IN ('confirmed','machine')
+                   JOIN term_assets x ON x.id=p.asset_id AND x.namespace='library'
+                   WHERE l.system='wd' AND l.key IN ({marks}){every})"
+                ),
+                tags,
+            );
+        }
+    }
+    for (key, lower) in [("from", true), ("to", false)] {
+        let Some(day) = f.get(key) else { continue };
+        // 组合条件用固定宽度日期，才能直接比较两个输入的先后。
+        if !day.as_bytes().iter().enumerate().all(
+            |(i, ch)| {
+                if i == 4 || i == 7 {
+                    *ch == b'-'
+                } else {
+                    ch.is_ascii_digit()
+                }
+            },
+        ) || day.len() != 10
+        {
+            return invalid("日期不正确");
+        }
+        let (lo, hi) = day_bounds(day)?;
+        if lower {
+            filter.add("a.added_at>=?", [lo]);
+        } else {
+            filter.add("a.added_at<?", [hi]);
+        }
+    }
+    if matches!((f.get("from"), f.get("to")), (Some(from), Some(to)) if from > to) {
+        return invalid("日期不正确");
+    }
+    Ok(())
+}
+
+fn source_filter(c: &Connection, context: &LibraryContext, key: &str, filter: &mut Filter) -> Result<()> {
+    if !matches!(key, "pixiv" | "x" | "other") {
+        return invalid("筛选参数不正确");
+    }
+    let Some(path) = &context.source else {
+        filter.add(if key == "other" { "1" } else { "0" }, []);
+        return Ok(());
+    };
+    if !attached(c, "src")? {
+        c.execute("ATTACH DATABASE ? AS src", [crate::http_read::sqlite_uri(path)])?;
+    }
+    if key == "other" {
+        filter
+            .add("a.uuid NOT IN (SELECT uuid FROM src.assets WHERE preset IN ('pixiv','x') AND uuid IS NOT NULL)", []);
+    } else {
+        filter.add("a.uuid IN (SELECT uuid FROM src.assets WHERE preset=?)", [key.into()]);
+    }
+    Ok(())
+}
+
+fn artist_filter(c: &Connection, context: &LibraryContext, key: &str, filter: &mut Filter) -> Result<()> {
+    if context.library.is_none() {
+        return invalid("这个图库还没有画师数据");
+    }
+    if !flag(c, "terms_artists")? {
+        attach_provenance(c, context)?;
+    }
+    let assets = crate::http_artists::assets_of(c, true, key)?;
+    let assets = Json::Array(assets.into_iter().map(Into::into).collect()).dump();
+    filter.add("a.uuid IN (SELECT value FROM json_each(?))", [assets]);
+    Ok(())
+}
+fn marks_favorite(q: &HashMap<String, String>) -> bool {
+    value(q, "marks").split(',').any(|mark| mark == "fav")
+}
+
+/// 展开当前页的副本再查裁决。标记显示只需查这些图，不必读全库收藏。
+fn decorate_favorite(c: &Connection, items: &mut [Json]) -> Result<()> {
+    if items.is_empty() {
+        return Ok(());
+    }
+    let page = Json::Array(items.iter().map(|item| get(item, "uuid")).collect()).dump();
+    let sql = format!(
+        "WITH page AS MATERIALIZED (SELECT value AS uuid FROM json_each(?)),
+         copies(uuid, member) AS (
+           SELECT uuid,uuid FROM page
+           UNION ALL
+           SELECT p.uuid,y.uuid FROM page p JOIN duplicates d ON d.uuid=p.uuid
+           JOIN duplicates y ON y.grp=d.grp AND y.uuid<>p.uuid)
+         SELECT DISTINCT y.uuid FROM copies y
+         CROSS JOIN term_assets x ON x.namespace='library' AND x.key=y.member
+         CROSS JOIN term_projection p ON p.asset_id=x.id AND p.term_id={FAVORITE_TERM}
+         WHERE p.state='confirmed'"
+    );
+    let favorites: HashSet<_> = strings(c, &sql, &[&page, FAVORITE_KEY])?.into_iter().collect();
+    for item in items {
+        item.set("fav", favorites.contains(get(item, "uuid").text()).into());
+    }
+    Ok(())
+}
 /// 正在构建的浏览选区：针对图片 `a` 的 SQL 子句及其参数，其中可能有一个是聚类或相似组的 id，按整数绑定。
 struct Filter {
     clauses: Vec<String>,
@@ -203,15 +395,7 @@ pub(crate) fn selection(
         filter.add("a.added_at>=? AND a.added_at<?", [lo, hi]);
     }
     if !v("artist").is_empty() {
-        if context.library.is_none() {
-            return Err(Error::Invalid("这个图库还没有画师数据".into()));
-        }
-        if !flag(c, "terms_artists")? {
-            attach_provenance(c, context)?;
-        }
-        let assets = crate::http_artists::assets_of(c, true, v("artist"))?;
-        let assets = Json::Array(assets.into_iter().map(Into::into).collect()).dump();
-        filter.add("a.uuid IN (SELECT value FROM json_each(?))", [assets]);
+        artist_filter(c, context, v("artist"), &mut filter)?;
     }
     if !v("work").is_empty() {
         let ids = crate::http_read::work_tree(c, v("work"))?;
@@ -252,10 +436,26 @@ pub(crate) fn selection(
     if !v("utag").is_empty() {
         filter.add("a.uuid IN (SELECT uuid FROM asset_tags WHERE tag=?)", [v("utag").into()]);
     }
-    let order = f.get("order").map(String::as_str).unwrap_or("newest");
-    let ordering = ordering(order, pool, dup, status, &entity)?;
+    condition_filter(c, context, f, &mut filter)?;
+    let like = crate::http_example_search::Search::parse(f)?;
+    let order = f.get("order").map(String::as_str).unwrap_or(if like.is_some() { "similar" } else { "newest" });
+    let ordering = if like.is_some() {
+        match order {
+            "similar" => "(SELECT rank FROM temp.like_rank WHERE uuid=a.uuid)".into(),
+            "oldest" => "a.added_at ASC,a.uuid".into(),
+            _ => "a.added_at DESC,a.uuid".into(),
+        }
+    } else {
+        ordering(order, pool, dup, status, &entity)?
+    };
     let args = bound(filter.args, filter.numeric_index, v("cluster"))?;
-    Ok((filter.clauses.join(" AND "), args, ordering))
+    let conditions = filter.clauses.join(" AND ");
+    if let Some(like) = like {
+        like.rank(c, context, &conditions, &args)?;
+        // 本事务的全部条件已经应用于临时表，不再执行一次分级或搜索子查询。
+        return Ok(("a.uuid IN (SELECT uuid FROM temp.like_rank)".into(), Vec::new(), ordering));
+    }
+    Ok((conditions, args, ordering))
 }
 /// 角色（及皮肤）筛选：已合并的角色沿合并关系找到它被并入的角色；皮肤则选中它所属的角色，并以该皮肤作为
 /// variant。返回选中的角色（如果有）。
@@ -1139,6 +1339,9 @@ fn home(c: &Connection, q: &HashMap<String, String>) -> Result<Json> {
         ]));
     }
     decorate(c, &mut all)?;
+    if marks_favorite(q) {
+        decorate_favorite(c, &mut all)?;
+    }
     let mut at = 0;
     for (g, n) in result.iter_mut().zip(lengths) {
         let items = all[at..at + n].to_vec();
@@ -1211,7 +1414,14 @@ pub fn read(c: &Connection, context: &LibraryContext, path: &str, q: &HashMap<St
             Json::object([("kinds", kinds)])
         }
         "/api/review-pools" => pools(c, value(q, "nsfw"))?,
-        "/api/detail" => detail(c, context, value(q, "id"))?,
+        "/api/galleries" => crate::app_galleries::read(c, context, value(q, "nsfw"))?,
+        "/api/detail" => {
+            let mut item = detail(c, context, value(q, "id"))?;
+            if marks_favorite(q) {
+                decorate_favorite(c, std::slice::from_mut(&mut item))?;
+            }
+            item
+        }
         "/api/home" => home(c, q)?,
         "/api/assets" | "/api/assets/count" | "/api/ids" => assets(c, context, path, q)?,
         _ => return Err(Error::Invalid("未迁移浏览接口".into())),
@@ -1256,7 +1466,7 @@ fn assets(c: &Connection, context: &LibraryContext, path: &str, q: &HashMap<Stri
         && order.starts_with("a.added_at ")
         && f.iter().all(|(k, v)| k == "nsfw" || k == "order" || v.is_empty())
         && date_page_pays(c, offset, limit)?;
-    let (total, sql) = if total_needed && !nsfw.is_empty() && !date_page {
+    let (total, sql) = if total_needed && !nsfw.is_empty() && !date_page && !f.contains_key("like") {
         let copy = format!(
             "CREATE TEMP TABLE selected_assets AS
              SELECT a.uuid,a.width,a.height,a.added_at FROM assets a WHERE {where_}"
@@ -1275,6 +1485,9 @@ fn assets(c: &Connection, context: &LibraryContext, path: &str, q: &HashMap<Stri
     args.extend([Value::Integer(limit), Value::Integer(offset)]);
     let mut items = typed_rows(c, &sql, &args)?;
     decorate(c, &mut items)?;
+    if marks_favorite(q) {
+        decorate_favorite(c, &mut items)?;
+    }
     Ok(Json::object([("items", Json::Array(items)), ("total", total), ("offset", offset.into())]))
 }
 
@@ -1627,6 +1840,7 @@ mod tests {
         }
         drop(c);
         let context = crate::http::LibraryContext {
+            examples: None,
             db: dest.join("library.sqlite"),
             generation: "synthetic".into(),
             library: Some(dest.clone()),

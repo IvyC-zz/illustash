@@ -150,6 +150,7 @@ pub(crate) struct Session {
     pub(crate) index: crate::app_index::Updater,
     pub(crate) auto_sync: bool,
     pub(crate) research: crate::app_research::Research,
+    pub(crate) examples: Arc<crate::example_cache::Cache>,
     pub(crate) onboarding: crate::app_onboarding::Onboarding,
     /// 与会话绑定的人工结论自动保护；关闭时取消，不等待整库哈希。
     pub(crate) human_backups: crate::app_human_conclusions::Backups,
@@ -209,6 +210,7 @@ impl Session {
             index,
             auto_sync: true,
             research,
+            examples: Default::default(),
             onboarding,
             human_backups: Default::default(),
             human_exports: Default::default(),
@@ -379,6 +381,7 @@ impl Application {
             index,
             auto_sync,
             research,
+            examples: Default::default(),
             onboarding,
             human_backups: Default::default(),
             human_exports: Default::default(),
@@ -574,6 +577,7 @@ impl Session {
         self.index.stop();
         self.onboarding.stop();
         self.research.stop();
+        self.examples.clear();
         self.names.stop();
         self.syncer.stop();
         self.wd_extension.stop();

@@ -90,10 +90,28 @@ fn dot(a: &[f64], b: &[f64]) -> f64 {
 
 /// 从零开始的批量 L-BFGS；每个角色返回一个 d+1 的参数向量。
 fn fit(rows: &Rows, labels: &Labels) -> Result<Vec<Vec<f64>>> {
-    let e = labels.e;
+    fit_with(rows.d, labels.e, |which, p| evaluate(rows, labels, which, p))
+}
+
+/// 例图线性头使用同一优化器，目标函数直接扫稀疏特征。
+pub(crate) fn fit_single(width: usize, evaluate: impl Fn(&[f64]) -> (f64, Vec<f64>)) -> Vec<f64> {
+    fit_with(width, 1, |_, p| {
+        let (f, g) = evaluate(&p[0]);
+        Ok::<_, std::convert::Infallible>(Objective { f: vec![f], g: vec![g] })
+    })
+    .unwrap_or_else(|never| match never {})
+    .pop()
+    .expect("one fitted example head")
+}
+
+fn fit_with<E>(
+    width: usize,
+    e: usize,
+    evaluate: impl Fn(&[usize], &[Vec<f64>]) -> std::result::Result<Objective, E>,
+) -> std::result::Result<Vec<Vec<f64>>, E> {
     let all: Vec<usize> = (0..e).collect();
-    let mut x = vec![vec![0.0f64; rows.d + 1]; e];
-    let start = evaluate(rows, labels, &all, &x)?;
+    let mut x = vec![vec![0.0f64; width + 1]; e];
+    let start = evaluate(&all, &x)?;
     let (mut f, mut g) = (start.f, start.g);
     let mut history: Vec<Memory> = vec![vec![]; e];
     let mut active = vec![true; e];
@@ -132,7 +150,7 @@ fn fit(rows: &Rows, labels: &Labels) -> Result<Vec<Vec<f64>>> {
                 .iter()
                 .map(|j| x[*j].iter().zip(&direction[j]).map(|(x, d)| x + step[j] * d).collect())
                 .collect();
-            let next = evaluate(rows, labels, &waiting, &trial)?;
+            let next = evaluate(&waiting, &trial)?;
             let mut still = vec![];
             for (c, &j) in waiting.iter().enumerate() {
                 let slope = dot(&g[j], &direction[&j]);

@@ -140,6 +140,7 @@ impl Session {
             library: Some(self.library.instance_path().to_owned()),
             tags: tags.to_owned(),
             source: Some(self.library.source()),
+            examples: Some(self.examples.clone()),
             token: Some(self.token.clone()),
             read_only: None,
         }

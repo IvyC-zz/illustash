@@ -1,5 +1,6 @@
 //! 原生应用的 POST 包装：目标选择和历史记录都留在命令事务里。
 use crate::{http::LibraryContext, http_json::Json, http_read, store, Error, Result};
+use illustash_core::{error::invalid, schema::FAVORITE_KEY};
 use rusqlite::{
     params, params_from_iter, types::Value as SqlValue, Connection, OpenFlags, OptionalExtension, TransactionBehavior,
 };
@@ -15,11 +16,14 @@ pub(crate) fn request_prepared(
     body: &Json,
     prepared: Option<&crate::app_profiles::Prepared>,
 ) -> Result<Json> {
-    let mut c = crate::sqlite::open_with_flags(&context.db, OpenFlags::SQLITE_OPEN_READ_WRITE)?;
+    let mut c =
+        crate::sqlite::open_with_flags(&context.db, OpenFlags::SQLITE_OPEN_READ_WRITE | OpenFlags::SQLITE_OPEN_URI)?;
     crate::configure(&c)?;
     http_read::register_names(&c)?;
     let result = match path {
         "/api/tag" => tag(&mut c, context, body),
+        "/api/favorite" => favorite(&mut c, context, body),
+        "/api/galleries" => crate::app_galleries::write(&mut c, context, body),
         "/api/undo" => undo(&mut c, body),
         "/api/artist/verdict" => artist(&mut c, body),
         "/api/change" | "/api/audit/answer" | "/api/ask/answer" | "/api/reassign" | "/api/sweep" => {
@@ -172,38 +176,63 @@ fn tag(c: &mut Connection, context: &LibraryContext, body: &Json) -> Result<Json
     let name = trimmed.split(http_read::whitespace).filter(|s| !s.is_empty()).collect::<Vec<_>>().join(" ");
     let add = !matches!(body.get("add"), Some(Json::Scalar(Value::Bool(false))));
     let tx = c.transaction_with_behavior(TransactionBehavior::Immediate).map_err(core_error)?;
-    let ids = selected(&tx, context, body)?;
+    let (ids, n) = mark_selection(&tx, context, body)?;
+    let label =
+        if add { format!("已给 {n} 张加上标签 {name}") } else { format!("已从 {n} 张去掉标签 {name}") };
+    let term = crate::legacy_labels::concept_by_name(&tx, &name, add.then_some("user"))
+        .map_err(core_error)?
+        .ok_or_else(|| Error::Invalid(format!("没有标签「{name}」")))?;
+    judge_marks(&tx, &ids, term, add, &label)?;
+    tx.commit().map_err(core_error)?;
+    http_read::register_names(c)?;
+    let action = last_action(c)?;
+    Ok(Json::object([("undo", action)]))
+}
+fn favorite(c: &mut Connection, context: &LibraryContext, body: &Json) -> Result<Json> {
+    initialized(c)?;
+    let add = !matches!(body.get("add"), Some(Json::Scalar(Value::Bool(false))));
+    let tx = c.transaction_with_behavior(TransactionBehavior::Immediate).map_err(core_error)?;
+    let (ids, n) = mark_selection(&tx, context, body)?;
+    let term = match store::term_by_key(&tx, FAVORITE_KEY)? {
+        Some((id, crate::Kind::Mark)) => id,
+        Some(_) => return invalid("收藏词条键已被占用"),
+        None if add => store::create_term(&tx, crate::Kind::Mark, Some(FAVORITE_KEY), "user")?,
+        None => return Ok(Json::object([("undo", None::<String>.into())])),
+    };
+    let label = if add { format!("已收藏 {n} 张") } else { format!("已取消收藏 {n} 张") };
+    judge_marks(&tx, &ids, term, add, &label)?;
+    // 在提交前读取本步，避免后台任务先写入另一条历史。
+    let action = last_action(&tx)?;
+    tx.commit().map_err(core_error)?;
+    Ok(Json::object([("undo", action)]))
+}
+fn mark_selection(c: &Connection, context: &LibraryContext, body: &Json) -> Result<(Vec<String>, usize)> {
+    let ids = selected(c, context, body)?;
+    if ids.len() > 5000 {
+        return invalid("一次 1–5000 张图");
+    }
     let encoded = serde_json::to_string(&ids).map_err(|e| Error::Invalid(e.to_string()))?;
-    let groups: HashMap<String, Option<String>> = tx
+    let groups: HashMap<String, Option<String>> = c
         .prepare("SELECT uuid,grp FROM duplicates WHERE uuid IN (SELECT value FROM json_each(?))")?
         .query_map([encoded], |r| Ok((r.get(0)?, r.get(1)?)))?
         .collect::<rusqlite::Result<_>>()?;
     let n =
         ids.iter().map(|id| groups.get(id).cloned().unwrap_or_else(|| Some(id.clone()))).collect::<HashSet<_>>().len();
-    let label =
-        if add { format!("已给 {n} 张加上标签 {name}") } else { format!("已从 {n} 张去掉标签 {name}") };
-    // 现有 CLI 在查找或创建概念之前就拒绝展开后的批次。
-    if ids.len() > 5000 {
-        return Err(Error::Invalid("一次 1–5000 张图".into()));
-    }
-    let term = crate::legacy_labels::concept_by_name(&tx, &name, add.then_some("user"))
-        .map_err(core_error)?
-        .ok_or_else(|| Error::Invalid(format!("没有标签「{name}」")))?;
+    Ok((ids, n))
+}
+fn judge_marks(c: &Connection, ids: &[String], term: store::TermId, add: bool, label: &str) -> Result<()> {
     let mut targets = Vec::new();
-    for id in &ids {
-        if let Some(asset) = store::library_asset(&tx, id).map_err(core_error)? {
+    for id in ids {
+        if let Some(asset) = store::library_asset(c, id).map_err(core_error)? {
             targets.push(store::VerdictTarget::Image { asset, term });
         }
     }
     if targets.is_empty() {
         return Err(Error::Invalid("图片不存在".into()));
     }
-    store::judge_in(&tx, &targets, if add { store::Verdict::Yes } else { store::Verdict::Clear }, "user", "", &label)
+    store::judge_in(c, &targets, if add { store::Verdict::Yes } else { store::Verdict::Clear }, "user", "", label)
         .map_err(core_error)?;
-    tx.commit().map_err(core_error)?;
-    http_read::register_names(c)?;
-    let action = last_action(c)?;
-    Ok(Json::object([("undo", action)]))
+    Ok(())
 }
 fn artist(c: &mut Connection, body: &Json) -> Result<Json> {
     initialized(c)?;
@@ -238,9 +267,12 @@ fn artist(c: &mut Connection, body: &Json) -> Result<Json> {
         store::Verdict::Clear => format!("已清除 {n} 张对 {name} 的判断"),
     };
     // 现有 CLI 在这里接受任何已有的词条键；保留这个公开契约。
-    let (term, _) = store::term_by_key(&tx, artist)
+    let (term, kind) = store::term_by_key(&tx, artist)
         .map_err(core_error)?
         .ok_or_else(|| Error::Invalid(format!("词条不存在：{artist}")))?;
+    if kind == crate::Kind::Mark {
+        return invalid("画师不正确");
+    }
     let mut targets = Vec::new();
     for id in &ids {
         if let Some(asset) = store::library_asset(&tx, id).map_err(core_error)? {
@@ -333,8 +365,17 @@ fn restore_application(c: &Connection, bound: &SqlValue, before: &Value) -> Resu
         return Err(Error::Invalid(store::HISTORY_CHANGED.into()));
     }
     let id = last.expect("app_commands internal invariant");
-    c.execute("DELETE FROM asked WHERE action_id=?", [id])?;
     let items = before.as_array().ok_or_else(|| Error::Io(std::io::Error::other("未知历史")))?;
+    let gallery = match items.as_slice() {
+        [item] if item.as_object().is_some_and(|o| o.len() == 1) => item.get("gallery"),
+        _ => None,
+    };
+    if let Some(gallery) = gallery {
+        crate::app_galleries::restore(c, gallery)?;
+        c.execute("UPDATE actions SET undone=1 WHERE id=?", [id])?;
+        return Ok(());
+    }
+    c.execute("DELETE FROM asked WHERE action_id=?", [id])?;
     let mut touched = Vec::new();
     for item in items {
         if let Some(skip) = item.get("identity_skip") {
@@ -409,6 +450,7 @@ mod tests {
             c.execute_batch("CREATE TABLE entities(id TEXT PRIMARY KEY); CREATE TABLE links(entity_id TEXT); INSERT INTO meta VALUES ('names_version','0'),('names_projected','0');").unwrap();
             c.execute_batch(crate::legacy_labels::VIEWS).unwrap();
             let context = LibraryContext {
+                examples: None,
                 db,
                 generation: "synthetic".into(),
                 library: Some(root.clone()),
