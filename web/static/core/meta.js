@@ -23,35 +23,51 @@ export function metaSoon(tagsOnly) {
   metaTagsOnly &&= tagsOnly; clearTimeout(metaTimer);
   metaTimer = setTimeout(() => { const t = metaTagsOnly; metaTagsOnly = true; refreshMeta({tagsOnly: t}).catch(failed); }, 700);
 }
-// 后台学习收尾（#400）：确认或撤销角色之后，服务端在下一次恢复检查（约每秒一次，native/terms/src/app_http.rs）时
-// 才开始学习（app_research.rs），学到的结果发布之后，未识别计数和分组才是最终的样子；写入请求返回时还没到这一步。
-// 能等的信号是 /api/clusters 带回的 learner 状态：idle（带上次学完的时间 at）、learning / importing / grouping /
-// waiting（进行中）、error、off（没有学习 worker，写入时已同步处理完，不用等）。
-export const learnerState = () => api('/api/clusters?nsfw=' + state.nsfw).then(r => r.learner || null);
-const LEARNER_BUSY = ['learning', 'importing', 'grouping', 'waiting'];
-// 一直空闲这么久就认为这次写入没有触发学习（撤销不涉及角色时就不会）；学习本身最多等 LEARN_LIMIT，之后由下一次
-// 写入、同步结束或换页再读。按累计的等待时间算，不读时钟。
-export const LEARN_QUIET = 3000, LEARN_LIMIT = 60000;
-let learnRun = 0;
-// before：写入发出前读到的 learner 状态（读不到为 null）。学到的结果已经发布时解析为 true；没有学习、学习失败、
-// 超时，或更新的一次写入接手了等待（每次调用都会让之前的等待作废）时解析为 false。
-export async function learningSettled(before) {
+// 后台学习落定（#400、#404）：确认或撤销角色之后，服务端还要在后台学习，学到的结果发布以后，未识别计数和分组才是最终的
+// 样子；写入请求返回时还没到这一步。GET /api/learning 回答编号不超过 upto 的这类写入是否都已处理完（契约见 #404）：
+// done（已发布，或者没有学习 worker、写入时就处理完了）、pending（会自己继续）、sync（同步结束后才开始）、
+// error（失败，稍后自动重试）、stopped（本次打开图库不会再自己继续）。服务端从不等待，等由这里轮询。
+// 写入回复之后先读一次（learningNow），不带 upto：那时读到的最大编号一定不小于这次写入的编号，以后都带上它。
+export const learningNow = () => api('/api/learning').catch(() => null);
+const learningAt = upto => api('/api/learning?upto=' + upto);
+// 最多等这么久（按累计的等待时间算，不读时钟）；前 2 秒每 250 ms 读一次，之后每秒一次。
+export const LEARN_LIMIT = 60000;
+const LEARN_FAST = 2000;
+let learnRun = 0, syncWait = null;
+// 等待期间计数旁显示「正在更新」（state.learning，ui/shell.js 的标题读它）。这里只改字段、不重画，设上时由调用方重画。
+// 等待结束时不去掉：调用方重读完列表、计数和分组以后再调 learningShown，免得分组还没重画，标记先没了。
+const mark = on => { state.learning = on; };
+export const learningShown = () => mark(false);
+// 从 learningNow 读到的 first 接着等，解析为：
+//   'done'        学到的结果已经发布，现在重读就是最终值；
+//   'sync'        同步进行中，同步结束后才学，afterSyncLearning 接着等同一个 upto；
+//   'error'       学习失败或停下了，或者读不到状态：重读一次当前值，不再等；
+//   'timeout'     等满 LEARN_LIMIT 还没落定：重读一次当前值，不再等；
+//   'superseded'  更新的一次调用接手了等待（每次调用都会让之前的作废），什么也不用做。
+// marking：还要等时，等待期间显示「正在更新」。
+export async function learningSettled(first, {marking = false} = {}) {
   const run = ++learnRun;
-  let busySeen = LEARNER_BUSY.includes(before?.status), baseAt = before?.status === 'idle' ? before.at ?? null : undefined;
-  if (before?.status === 'off') return false;
-  for (let waited = 0, step = 400; waited < LEARN_LIMIT; step = Math.min(2000, Math.round(step * 1.5))) {
+  syncWait = null; mark(false);
+  let s = first;
+  for (let waited = 0; ; ) {
+    if (!s) return 'error';
+    if (s.state === 'done') return 'done';
+    if (s.state === 'sync') { syncWait = {upto: s.upto, marking}; return 'sync'; }
+    if (s.state !== 'pending') return 'error';
+    if (waited >= LEARN_LIMIT) return 'timeout';
+    if (marking) mark(true);
+    const step = waited < LEARN_FAST ? 250 : 1000;
     await new Promise(done => setTimeout(done, step)); waited += step;
-    if (run !== learnRun) return false;
-    let s; try { s = await learnerState(); } catch { return false; }
-    if (run !== learnRun || !s || s.status === 'off' || s.status === 'error') return false;
-    if (LEARNER_BUSY.includes(s.status)) { busySeen = true; continue; }
-    if (s.status !== 'idle') return false;
-    // 空闲：学过一轮（看到过进行中，或学完的时间变了）就是落定了；写入前的状态没读到时，第一次读到的空闲作为基准。
-    if (busySeen || (baseAt !== undefined && (s.at ?? null) !== baseAt)) return true;
-    if (baseAt === undefined) baseAt = s.at ?? null;
-    if (waited >= LEARN_QUIET) return false;
+    if (run !== learnRun) return 'superseded';
+    try { s = await learningAt(first.upto); } catch { s = null; }
+    if (run !== learnRun) return 'superseded';
   }
-  return false;
+}
+// 同步结束了：之前因为同步而没等完的那次（learningSettled 解析为 'sync'），用同一个 upto 接着等，返回它的 promise；没有就返回 null。
+export function afterSyncLearning() {
+  const wait = syncWait; syncWait = null;
+  if (!wait) return null;
+  return learningSettled({upto: wait.upto, state: 'pending'}, {marking: wait.marking});
 }
 export function refreshMeta({tagsOnly = false, boot = null} = {}) {
   metaRevision++; metaFull ||= !tagsOnly;

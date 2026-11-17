@@ -687,6 +687,17 @@ impl Research {
         }
         value
     }
+    /// 本会话里不会再自己启动（`GET /api/learning` 的 `stopped`，#404）：用户取消过，或者自动重试用完后
+    /// 恢复检查已经把它停下。要等显式的启动或重新打开图库。
+    pub fn halted(&self) -> bool {
+        self.paused
+    }
+    /// 下一次恢复检查会马上启动待处理的工作：没有在运行、不在重试等待、没有停下（#404 的提前恢复检查）。
+    pub fn ready(&self) -> bool {
+        !self.paused
+            && !self.task.as_ref().is_some_and(Task::running)
+            && self.retry_at.is_none_or(|t| std::time::Instant::now() >= t)
+    }
     pub fn stop(&mut self) {
         if let Some(mut t) = self.task.take() {
             t.stop();

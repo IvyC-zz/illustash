@@ -6,11 +6,12 @@ import {t} from '../core/i18n.js';
 import {composing} from '../core/keys.js';
 import {REASONS, nameWithWork} from '../core/labels.js';
 import {undoRefusal} from '../core/human.js';
-import {learnerState, learningSettled, metaSoon, refreshMeta} from '../core/meta.js';
+import {afterSyncLearning, learningNow, learningSettled, learningShown, metaSoon, refreshMeta} from '../core/meta.js';
 import {prefs} from '../core/prefs.js';
 import {SHORTCUTS, currentSource, keyAction, keySelection, modes, selectionSize, shownUuid, viewerTarget} from '../core/modes.js';
 import {keyScope, pageOf, viewOf} from '../core/pages.js';
-import {browsing, cleanup, defaultSort, hashFor, stepHistory} from '../core/route.js';
+import {browsing, cleanup, defaultSort, go, hashFor, stepHistory} from '../core/route.js';
+import {canLike, likeRoute} from '../core/like.js';
 import {api, post, readError} from '../core/session.js';
 import {state} from '../core/state.js';
 import {offerWatch} from './catalog.js';
@@ -98,7 +99,18 @@ export async function reload(reset = false, place = null) {
     $('empty').innerHTML = next ? `<div>${text}<div>${next}</div></div>` : text;
     renderHeading();
     if (state.route.char) refreshMaybe(gen);
-  } catch (e) { if (e.name !== 'AbortError' && gen === state.generation && route === state.route) { error(e.message); $('resultCount').textContent = t('读取失败'); } }
+  } catch (e) {
+    if (e.name === 'AbortError' || gen !== state.generation || route !== state.route) return;
+    const text = viewOf(route).readFailed?.(e);   // 这一页认得的失败当作没有结果（core/pages.js 的 readFailed）
+    if (text) { showNone(text); return; }
+    error(e.message); $('resultCount').textContent = t('读取失败');
+  }
+}
+function showNone(text) {
+  state.total = 0; state.totalReady = true; state.countDirty = false; state.items = []; state.pages = new Set(); state.dataVersion++; state.gridKey = '';
+  renderGrid(); updateCount(); renderSelection();
+  $('empty').hidden = false; $('empty').textContent = text;
+  renderHeading();
 }
 // 首页借用网格的列表放它自己的图（详情栏翻页、大图都按这个列表走）。
 // 面板页看一组图的大图（previewList：按组整理、首页「认一认」、身份整理、画师抽查，#424 的 2-2、2-34）时列表先换成那一组，
@@ -527,6 +539,7 @@ export function renderSelection() {
   buttons += `<button class="quiet" data-act="tag">${t('标签')} <kbd>G</kbd></button>`;
   buttons += `<button class="quiet" data-act="findartist" title="${t('用像素哈希和 IQDB 查这些图的画师（只发哈希文本，不发图片；一次最多 500 张）')}">${t('查找画师')}</button>`;
   buttons += `<button class="quiet" data-act="export" ${exportActive() ? `disabled title="${t('正在导出，完成后再开始下一次')}"` : `title="${t('把原图复制到一个文件夹')}"`}>${t('导出…')}</button>`;
+  if (!state.sel.all && canLike(n)) buttons += `<button class="quiet" data-act="like">${n === 1 ? t('更多像这张的') : t('更多像这些的')}</button>`;
   if (!state.sel.all && n >= 2 && n <= 12) buttons += `<button class="quiet" data-act="relate" title="${t('两两比较，判断是同一张图、裁剪、差分、局部编辑，还是不同的图')}">${t('判断关系')}</button>`;
   const note = kind === 'audit' ? t('一次最多回答 500 张，这次答前 500 张') : t('超过 500 张需再点一次确认');
   // 重复页上改哪一份都会同步到整组副本：这件事放在动手的地方，不写在副本页常驻的说明里（#528）。
@@ -578,6 +591,7 @@ function runBarAction(act) {
   const payload = () => ({...selectionPayload(), confirm: n > 500});
   if (act === 'audit_yes' || act === 'audit_no') { answerAudit(act === 'audit_yes'); return; }
   if (act === 'export') { openExport(selectionPayload(), n); return; }
+  if (act === 'like') { if (!state.sel.all) go(likeRoute([...state.sel.ids])); return; }
   if (act === 'findartist') {
     const sel = state.sel;
     (sel.all ? api('/api/ids?' + new URLSearchParams({...filters(), limit: 500})).then(ids => ids.filter(u => !sel.exclude.has(u))) : Promise.resolve([...sel.ids].slice(0, 500)))
@@ -670,8 +684,6 @@ async function write(path, body, leaving, advance) {
   if (advance) kept.hold = null; else holdCurrent();
   const gone = leaving ? new Set(body.ids || state.items.filter(x => x && isSelected(x.uuid)).map(x => x.uuid)) : null;
   if (gone) for (const el of $('grid').children) if (gone.has(el.dataset.id)) el.classList.add('leaving');
-  // 确认角色之后后台会学习，学完未识别计数和分组还会变（#400）：写入前先记下学习的状态，好知道之后要不要再读。
-  const learner = path === '/api/change' && body.action === 'confirmed' ? learnerState().catch(() => null) : null;
   try {
     const r = await post(path, body);
     quitSelecting();
@@ -685,7 +697,9 @@ async function write(path, body, leaving, advance) {
       else if (advance || !kept.hold) showViewer(Math.min(state.viewer, state.total - 1));
       else { const i = indexOf(kept.hold.uuid); showViewer(i >= 0 ? i : state.viewer, i >= 0 ? state.items[i] : state.viewerItem); }
     }
-    if (learner) learner.then(afterLearning);
+    // 确认角色之后后台会学习，学完未识别计数和分组还会变（#400）：图片离开列表这一步已经是对的，照旧立即重读，
+    // 学到的结果发布以后再读一次。
+    if (path === '/api/change' && body.action === 'confirmed') learningNow().then(afterLearning);
     return true;
   } catch (e) { toast(e.message); for (const el of $('grid').querySelectorAll('.leaving')) el.classList.remove('leaving'); }
 }
@@ -706,24 +720,58 @@ async function reread(why) {
   if (state.focused) inspect(state.focused, true);
   if (state.viewer >= 0) { const i = indexOf(state.viewerItem?.uuid); showViewer(i >= 0 ? i : state.viewer, i >= 0 ? state.items[i] : state.viewerItem); }
 }
-// 写入或撤销之后等后台学习收尾，学到的结果发布了就再读一次（#400，等法见 core/meta.js 的 learningSettled）。那时正有
-// 别的写入在进行，就交给它自己的重读。
-async function afterLearning(before) {
-  if (await learningSettled(before) && !edits.busy) await reread('learned');
+// 确认角色之后等后台学习落定（#404，等法见 core/meta.js 的 learningSettled）。学到的结果发布了，或者等满时限，就再读一次；
+// 学习只会让计数接着往同一个方向变，不会显示错误的结论，所以等待期间不加标记。那时正有别的写入在进行，就交给它自己的重读。
+async function afterLearning(first) {
+  const outcome = await learningSettled(first);
+  if ((outcome === 'done' || outcome === 'timeout') && !edits.busy) await reread('learned');
 }
+// 同步进行中撤销提示的文字（#404 的 Q2）。
+const syncUndone = () => t('已撤销，计数在同步结束后更新');
+// 撤销之后（#404 的 Q1、Q2）：先读一次学习状态。已经落定（没有学习 worker，或者学得快）就立即重读，这次就是最终值；
+// 还在学习就先不重读，计数旁显示「正在更新」，落定后一次重读成最终结果，不显示中间值；同步进行中则立即重读一次，
+// 提示计数在同步结束后更新，同步结束后再重读一次（afterSync）；学习失败、停下或读不到状态时立即重读当前值。
 export async function undo() {
   if (!edits.latest) return;
-  return exclusive(async () => {
-    const learner = learnerState().catch(() => null);
-    try {
-      toast(undoneText(await undoLatest())); await reread('undo');
-      learner.then(afterLearning);
-    } catch (e) {
+  const waiting = await exclusive(async () => {
+    let label;
+    try { label = await undoLatest(); } catch (e) {
       // 历史可能已经往前走了（另一个窗口，或服务端提交之后才失败）：显示它最新的一步。
       // 撤销一次人工结论导入被拒（后面有改动依赖它）时，说清楚为什么（core/human.js）。
       toast(undoRefusal(e, edits.latest)); refreshMeta().catch(err => error(readError(err)));
+      return null;
     }
+    const first = await learningNow();
+    if (first?.state === 'pending') {
+      const settled = learningSettled(first, {marking: true});
+      toast(undoneText(label)); renderHeading();
+      return settled;
+    }
+    // 同步进行中：同步结束后接着等的那一段也显示「正在更新」。
+    learningSettled(first, {marking: true});
+    toast(first?.state === 'sync' ? syncUndone() : undoneText(label)); await reread('undo');
+    return null;
   });
+  if (!waiting) return;
+  const outcome = await waiting;
+  if (outcome === 'superseded') return;
+  if (outcome === 'sync') toast(syncUndone());
+  // 落定时正有别的写入在进行：它自己的重读会读到落定后的值。
+  await exclusive(() => reread('undo'));
+  settled();
+}
+// 等待结束、重读完：去掉「正在更新」。
+function settled() { learningShown(); renderHeading(); }
+// 同步结束（ui/effects.js 的 afterJob）：之前因为同步没等完的学习，用同一个编号接着等，落定后重读一次。
+// 同步结束时没有新图，也要靠这里重读。
+export async function afterSync() {
+  const waiting = afterSyncLearning();
+  if (!waiting) return;
+  renderHeading();
+  const outcome = await waiting;
+  if (outcome === 'superseded') return;
+  if (outcome !== 'sync') await exclusive(() => reread('learned'));
+  settled();
 }
 export async function sweep() {
   const c = state.char; if (!c?.unchecked) return;

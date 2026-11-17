@@ -1,5 +1,6 @@
 // 页面在哪（#199）：把地址（#/page/section?query）读成路由再写回去，以及一个路由是哪类页面。不碰 DOM：它读写
 // location.hash 和 history。
+import {readLike} from './like.js';
 import {prefs} from './prefs.js';
 import {matchPath, pageOf, pathFor, viewOf} from './pages.js';
 import {state} from './state.js';
@@ -18,11 +19,15 @@ export function parseHash() {
   Object.assign(route, matchPath(parts, !!query));
   // 角色、画师和检查筛选只属于图库（有图库工具栏的页面）。
   if (pageOf(route).toolbar !== 'library') Object.assign(route, {char: '', variant: '', check: '', doubt: '', artist: '', has: [], not: [], from: '', to: ''});
+  // 「更多像这张的」（#449）只属于图库本身，不和角色页叠在一起。
+  Object.assign(route, readLike(q, pageOf(route).toolbar === 'library' && !route.char));
+  if (!route.like && route.sort === 'similar') route.sort = '';   // 「最相似」离开例图就没有意义
   return route;
 }
 export function hashFor(r) {
   const path = pathFor(r);
   const q = new URLSearchParams();
+  if (r.like) { q.set('like', r.like); if (r.by) q.set('by', r.by); }
   if (r.work) q.set('work', r.work); if (r.day) q.set('day', r.day); if (r.artist) q.set('artist', r.artist);
   if (r.char) q.set('char', r.char); if (r.variant) q.set('variant', r.variant); if (r.check) q.set('check', r.check); if (r.doubt) q.set('doubt', r.doubt);
   if (r.q) q.set('q', r.q); if (r.dup) q.set('dup', r.dup); if (r.reason) q.set('reason', r.reason); if (r.kind) q.set('kind', r.kind); if (r.maybe) q.set('maybe', r.maybe); if (r.tag) q.set('tag', r.tag); if (r.utag) q.set('utag', r.utag); if (r.sort && r.sort !== defaultSort(r)) q.set('sort', r.sort);
@@ -34,9 +39,9 @@ export function hashFor(r) {
 // 排序记在哪个偏好里（#386 的 2-26）：每一类页面一个键，下拉改了就写进去，离开再回来还是它。图库和角色页的键就是
 // 设置 › 通用里那两项默认排序，所以在页面上改和在设置里改是同一回事；未识别一类共用一个键，其余各页各一个。键由
 // core/pages.js 的 sortPref 登记。
-// 没改过排序的页面跟着设置里的图库默认排序。
+// 没改过排序的页面跟着设置里的图库默认排序；注册表写了 sortDefault 的（相似结果的「最相似」）跟着它。
 export const sortKey = r => viewOf(r).sortPref || 'sort.' + pageOf(r).name;
-export const defaultSort = r => r.char ? prefs.get('sortCharacter', 'suspicious') : prefs.get(sortKey(r), prefs.get('sortLibrary', 'newest'));
+export const defaultSort = r => r.char ? prefs.get('sortCharacter', 'suspicious') : prefs.get(sortKey(r), viewOf(r).sortDefault || prefs.get('sortLibrary', 'newest'));
 export function go(route) { location.hash = hashFor(route); }
 // 加一个图库筛选（标签、我的标签）要去的地址：在有图库工具栏的页面（图库、角色页）上叠加到现有的筛选上，在别的
 // 页面去图库只按它筛选（#386 的 2-30）。工具栏和详情栏都用它。
