@@ -166,10 +166,10 @@ fn seed(root: &Path, size: usize) -> (PathBuf, PathBuf) {
     (package, photos)
 }
 
-fn measured<T>(size: usize, name: &str, run: impl FnOnce() -> T) -> T {
+fn measured<T>(size: usize, name: &str, calls: usize, run: impl FnOnce() -> T) -> T {
     let start = Instant::now();
     let result = run();
-    println!("BENCH {size} {name} {:.3} ms", start.elapsed().as_secs_f64() * 1000.0);
+    println!("BENCH {size} {name} {:.3} ms/op ({calls} 次)", start.elapsed().as_secs_f64() * 1000.0 / calls as f64);
     result
 }
 
@@ -183,6 +183,40 @@ fn benchmark() {
     assert!(size >= 100);
     let (_sandbox, root, _) = materialize(&json!({"input":{}}), "scale");
     let (package, photos) = seed(&root, size);
+    let (host, origin, token) =
+        measured(size, "open", 1, || launch(&root, &package, "scale", false, Path::new(BINARY)));
+    let get = |url: &str, body: Option<&Value>| {
+        let (status, v, _) = request_json(&origin, url, body, &token);
+        assert_eq!(status, 200, "{url} {v}");
+        v
+    };
+    assert_eq!(get("/api/assets/count", None)["total"], size);
+    let page = get("/api/assets?limit=100", None);
+    assert_eq!(page["items"].as_array().unwrap().len(), 100);
+    let tagged = get("/api/assets/count?tag=1girl", None)["total"].as_u64().unwrap();
+    assert!(tagged > 0 && tagged < size as u64);
+    for (metric, url) in [
+        ("page", "/api/assets?limit=100&offset=2000"),
+        ("count", "/api/assets/count"),
+        ("detail", "/api/detail?id=IMG-0000001"),
+        ("tag_count", "/api/assets/count?tag=1girl"),
+    ] {
+        get(url, None);
+        measured(size, metric, 10, || {
+            for _ in 0..10 {
+                get(url, None);
+            }
+        });
+    }
+    let changed = get("/api/favorite", Some(&json!({"ids":["IMG-0000001"],"confirm":true})));
+    let action = changed["undo"]["id"].as_i64().unwrap();
+    measured(size, "undo", 1, || get("/api/undo", Some(&json!({"id":action}))));
+    assert_eq!(get("/api/detail?id=IMG-0000001&marks=fav", None)["fav"], false);
+    drop(host);
+    let names = measured(size, "names_project", 1, || {
+        cli(&root, &["names-project", "--db"], &package.join("library.sqlite"), None)
+    });
+    assert!(names["shown"].as_u64().unwrap() > 0, "{names}");
     for (metric, delta) in [("sync_unchanged", 0), ("sync_added", NEW)] {
         if delta > 0 {
             add_photos(&photos, size + 1, size + NEW);
@@ -196,7 +230,7 @@ fn benchmark() {
                 .unwrap();
             }
         }
-        let result = measured(size, metric, || cli(&root, &["library-scan", "--library"], &package, None));
+        let result = measured(size, metric, 1, || cli(&root, &["library-scan", "--library"], &package, None));
         assert_eq!(result, json!({"added":delta,"removed":0,"pending":0}));
         let c = Connection::open(package.join("library.sqlite")).unwrap();
         let counts: (usize, usize, String) = c
@@ -206,36 +240,4 @@ fn benchmark() {
             .unwrap();
         assert_eq!(counts, (delta, delta, "done".into()));
     }
-    let names = measured(size, "names_project", || {
-        cli(&root, &["names-project", "--db"], &package.join("library.sqlite"), None)
-    });
-    assert!(names["shown"].as_u64().unwrap() > 0, "{names}");
-    let (_host, origin, token) = measured(size, "open", || launch(&root, &package, "scale", false, Path::new(BINARY)));
-    let get = |url: &str, body: Option<&Value>| {
-        let (status, v, _) = request_json(&origin, url, body, &token);
-        assert_eq!(status, 200, "{url} {v}");
-        v
-    };
-    assert_eq!(get("/api/assets/count", None)["total"], size + NEW);
-    let page = get("/api/assets?limit=100", None);
-    assert_eq!(page["items"].as_array().unwrap().len(), 100);
-    let tagged = get("/api/assets/count?tag=1girl", None)["total"].as_u64().unwrap();
-    assert!(tagged > 0 && tagged < size as u64);
-    for (metric, url) in [
-        ("page", "/api/assets?limit=100&offset=2000"),
-        ("count", "/api/assets/count"),
-        ("detail", "/api/detail?id=IMG-0000001"),
-        ("tag_count", "/api/assets/count?tag=1girl"),
-    ] {
-        get(url, None);
-        measured(size, metric, || {
-            for _ in 0..10 {
-                get(url, None);
-            }
-        });
-    }
-    let changed = get("/api/favorite", Some(&json!({"ids":["IMG-0000001"],"confirm":true})));
-    let action = changed["undo"]["id"].as_i64().unwrap();
-    measured(size, "undo", || get("/api/undo", Some(&json!({"id":action}))));
-    assert_eq!(get("/api/detail?id=IMG-0000001&marks=fav", None)["fav"], false);
 }
