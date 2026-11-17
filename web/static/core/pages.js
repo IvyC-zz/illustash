@@ -40,7 +40,7 @@ const libraryBase = {
     return f;
   },
   // 「只看 R18」时没有图，多半是这个筛选造成的：写明，旁边给「显示全部」（#386 的 2-16）。
-  empty: (r, {nsfw} = {}) => nsfw === 'only' ? t('「只看 R18」开着，没有符合条件的 R18 图片。') : t('没有符合条件的图片。试试别的搜索或标签。'),
+  empty: (r, {nsfw} = {}) => nsfw === 'only' ? t('「只看 R18」开着，没有符合条件的 R18 图片。') : t('没有符合条件的图片。'),
   hint: () => t('点击查看 · 拖动或 {key} 点击多选 · Space 看大图', {key: isMac ? '⌘' : 'Ctrl'}),
   bar: 'default',
 };
@@ -52,7 +52,7 @@ const list = [
   {name: 'settings', sections: true, area: 'settingsPage', panel: true, click: 'own', nav: 'settings', toolbar: 'none'},
   {name: 'unmatched', sortPref: 'sortUnmatched', area: 'grid', panel: false, click: 'cleanup', nav: 'unmatched', lead: true, tabs: 'unmatched', tab: 'all',
     toolbar: 'grid', sorts: ['hinted', ...NEWEST], pool: 'unmatched', bar: 'unmatched', skip: true,
-    empty: () => t('全部认出来了 🎉'), hint: () => t('点击或拖动选择 · Space 看大图 · C 设为角色 · S 跳过'), card: {hintMin: 70}},
+    empty: () => t('没有未识别的图。'), hint: () => t('点击或拖动选择 · Space 看大图 · C 设为角色 · S 跳过'), card: {hintMin: 70}},
   {name: 'skipped', sortPref: 'sortUnmatched', area: 'grid', panel: false, click: 'cleanup', nav: 'unmatched', lead: true, tabs: 'unmatched', tab: 'skipped',
     toolbar: 'grid', sorts: ['hinted', ...NEWEST], pool: 'skipped', bar: 'skipped',
     empty: () => t('没有跳过的图片。'), hint: () => t('点击或拖动选择 · Space 看大图')},
@@ -64,7 +64,7 @@ const list = [
   {name: 'duplicates', area: 'grid', panel: false, click: 'browse', nav: 'duplicates', tabs: 'duplicates', tab: 'all',
     toolbar: 'grid', sorts: NEWEST, pool: 'duplicates', bar: 'default', card: {dup: true},
     params: r => r.dup ? {dup: r.dup} : {}, empty: r => r.dup ? t('所有副本的角色都一致。') : t('没有重复的图片。'),
-    hint: () => t('同色角标为同一组 · 修改会同步到整组 · 角色不一致的组对齐后自动折叠')},
+    hint: () => t('同色角标是同一组')},
   {name: 'similar', area: 'groupsPage', panel: true, click: 'own', nav: 'duplicates', tabs: 'duplicates', tab: 'similar', toolbar: 'tabs'},
   {name: 'sgroup', prefix: 's', area: 'grid', panel: false, click: 'cleanup', nav: 'duplicates', tabs: 'duplicates', tab: 'similar',
     toolbar: 'grid', sorts: NEWEST, pool: 'similar', params: r => ({cluster: r.id}), bar: 'default', empty: () => t('这一组已经没有图片了。'),
@@ -75,7 +75,7 @@ const list = [
   {name: 'pending', area: 'grid', panel: false, click: 'cleanup', nav: 'excluded', tabs: 'excluded', tab: 'pending', toolbar: 'grid', sorts: NEWEST, pool: 'pending', bar: 'pending',
     empty: () => t('没有待确认的图片。'), hint: () => t('点击或拖动选择 · Space 看大图 · X 排除')},
   {name: 'audit', area: 'grid', panel: false, click: 'cleanup', nav: 'audit', toolbar: 'grid', sorts: NEWEST, pool: 'audit', bar: 'audit', card: {audit: true},
-    empty: () => t('抽查做完了，谢谢！结果会用来衡量认人准不准。'), hint: () => t('点一张或 Space 看大图 · Y 是 · N 不是 · 看不清可以跳过，换一张')},
+    empty: () => t('抽查做完了。'), hint: () => t('点一张或 Space 看大图 · Y 是 · N 不是 · 看不清可以跳过，换一张')},
   {name: 'identity', area: 'groupsPage', panel: true, click: 'own', nav: 'identity', toolbar: 'none'},
   {name: 'artist-audit', area: 'groupsPage', panel: true, click: 'own', nav: '', toolbar: 'none'},
 ];

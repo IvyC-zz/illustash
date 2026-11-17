@@ -114,7 +114,7 @@ export function renderModelsCard() {
   const card = $('setModels'), m = state.models; if (!card) return;
   if (!m) { redraw(card, `<h2>${t('识别模型')}</h2><p class="muted-note">…</p>`); return; }
   const html = `<h2>${t('识别模型')}<span class="set-scope" title="${t('保存在这台电脑上，所有图库共用')}">${t('所有图库共用')}</span></h2>
-    <p class="settings-note">${m.on_demand ? t('图片识别要用 WD 和 CCIP 两个模型，安装包里没有带，第一次使用时下载。每个文件都按应用里写好的大小和 SHA-256 核对，对不上就不用，从哪里下载都一样安全。') : t('这个安装自带识别模型。')}</p>
+    <p class="settings-note">${m.on_demand ? t('图片识别要用 WD 和 CCIP 两个模型，安装包里没有带，第一次使用时下载。每个文件都按应用里写好的大小和 SHA-256 核对，对不上就不用。') : t('这个安装自带识别模型。')}</p>
     <div class="setting-line"><span>${esc(modelsLine(m))}${m.status === 'ready' && extra(m) !== 'download' ? '' : `<small class="line-hint">${manualLink(m)}</small>`}</span></div>
     ${modelsBar(m)}${modelsFailures(m)}${importSummary(m.job)}<div class="models-acts">${modelsActions(m)}</div>${deleteButton(m)}
     ${accelerationLine(m)}

@@ -73,7 +73,7 @@ async function paletteSearch() {
     if (!p.jump) {
       // 还不在图库里：Danbooru 角色（只用输入的文字）稍后就到；只在本地新建的一项留在最后。
       const create = list.some(e => e.name.toLowerCase() === q.toLowerCase()) ? [] : [{create: q, name: q, hint: t('只在本地新建，不关联 Danbooru')}, {create: q, oc: true, name: q, hint: t('画师的原创角色，不属于任何作品')}];
-      const remote = {label: t('Danbooru 角色 · 选中即新建并关联'), items: [], note: t('正在查 Danbooru…（只发送你输入的文字）')};
+      const remote = {label: t('Danbooru 角色 · 选中即新建并关联'), items: [], note: t('正在查 Danbooru…')};
       sections.push(remote, {label: '', items: create});
       clearTimeout(p.remoteTimer);
       p.remoteTimer = setTimeout(async () => {
@@ -180,7 +180,7 @@ async function choose(i, more = false, explicit = false) {
 }
 export function mergeCharacter(c) {
   openPicker({title: t('把 {name} 合并到…', {name: c.name}), placeholder: t('输入同一个人的另一个角色'), jump: true, exclude: [c.id],
-    sentence: e => t('把 {name} 并入 {target}：图、人工结论、造型和别名都过去，可撤销', {name: c.name, target: e.name}),
+    sentence: e => t('把 {name} 并入 {target}：图、人工结论、造型和别名都过去', {name: c.name, target: e.name}),
     pick: async e => {
       try { const r = await post('/api/merge', {source: c.id, target: e.id}); setLatest(r.undo); toast(tb(r.undo.label), true); await refreshMeta(); go(charRoute(e.id)); }
       catch (err) { toast(err.message); }
@@ -201,12 +201,12 @@ export async function markOc(body, leaving, separate = false) {
 export async function splitOc(c) {
   const d = $('ocSplitDialog'), body = $('ocSplitBody');
   $('ocSplitTitle').textContent = t('按相似细分 · {name}', {name: c.name});
-  body.innerHTML = `<p class="muted-note">${t('正在比较长相…只在本机计算')}</p>`;
+  body.innerHTML = `<p class="muted-note">${t('正在比较长相…')}</p>`;
   openModal(d, {backdropClose: true, id: 'oc-split'});
   let r; try { r = await api('/api/oc/groups?' + new URLSearchParams({entity: c.id})); } catch (e) { body.innerHTML = `<p class="muted-note">${esc(readError(e))}</p>`; return; }
   const grouped = r.groups.reduce((n, g) => n + g.length, 0);
   body.innerHTML = `<p class="muted-note">${t('{n} 张里有 {groups} 组长得像（共 {grouped} 张）；其余的不像任何一张，留在这里。', {n: number(r.total), groups: number(r.groups.length), grouped: number(grouped)})}</p>` +
-    (r.groups.map((g, i) => `<section class="oc-split-group" data-g="${i}"><div class="oc-split-thumbs">${g.slice(0, 8).map(u => `<img src="/image?id=${encodeURIComponent(u)}" alt="" loading="lazy">`).join('')}${g.length > 8 ? `<span>+${number(g.length - 8)}</span>` : ''}</div><div class="oc-split-meta"><span>${t('{n} 张', {n: number(g.length)})}</span><button class="quiet" data-split="${i}">${t('设为新的原创角色')}</button></div></section>`).join('') || `<p class="palette-empty">${t('没有长得像、能成组的图。可以在图库里选中后用「换成…」新建原创角色。')}</p>`);
+    (r.groups.map((g, i) => `<section class="oc-split-group" data-g="${i}"><div class="oc-split-thumbs">${g.slice(0, 8).map(u => `<img src="/image?id=${encodeURIComponent(u)}" alt="" loading="lazy">`).join('')}${g.length > 8 ? `<span>+${number(g.length - 8)}</span>` : ''}</div><div class="oc-split-meta"><span>${t('{n} 张', {n: number(g.length)})}</span><button class="quiet" data-split="${i}">${t('设为新的原创角色')}</button></div></section>`).join('') || `<p class="palette-empty">${t('没有长得像、能成组的图。')}</p>`);
   for (const b of body.querySelectorAll('[data-split]')) b.onclick = async () => {
     const ids = r.groups[Number(b.dataset.split)]; b.disabled = true;
     let entity; try { entity = await post('/api/entities', {kind: 'oc'}); } catch (e) { toast(e.message); b.disabled = false; return; }
@@ -220,7 +220,7 @@ export function twoStage(local, remote, extra = () => []) {
   return (q, show) => {
     local(q).then(mine => {
       if (!q) { show([{label: '', items: mine}, ...extra(q)]); return; }
-      show([{label: '', items: mine}, {label: 'Danbooru', items: [], note: t('正在查 Danbooru…（只发送你输入的文字）')}, ...extra(q)]);
+      show([{label: '', items: mine}, {label: 'Danbooru', items: [], note: t('正在查 Danbooru…')}, ...extra(q)]);
       remote(q).then(result => {
         // 图库里已有的 Danbooru 条目只显示一次，显示为本地的那条。
         const found = result.found, fresh = found && found.filter(r => !mine.some(m => m.detail && m.detail === r.detail));
@@ -238,7 +238,7 @@ export async function editProfile(c) {
       <small id="pfTagNote"></small></label>`}
     <label class="field"><span>${t('显示名')}</span><input id="pfName" maxlength="120" value="${esc(p.user_name)}" placeholder="${esc(autoName ? t('留空：用自动名称「{name}」', {name: autoName}) : t('角色名称'))}">
       <small>${p.tag ? t('关联了 Danbooru 时可以留空，中文名会自动补全') : t('没有关联 Danbooru 时需要一个名称')}</small></label>
-    <div class="field"><span>${t('别名')}</span><div class="alias-box" id="pfAliases"></div><input id="pfAlias" maxlength="120" placeholder="${t('输入别名后按回车，搜索时都能找到')}">
+    <div class="field"><span>${t('别名')}</span><div class="alias-box" id="pfAliases"></div><input id="pfAlias" maxlength="120" placeholder="${t('输入别名后按回车')}">
       <small>${p.other_aliases ? t('另有 {n} 个来自 Danbooru 等来源的别名，会自动更新', {n: number(p.other_aliases)}) : ''}</small></div>
     <label class="field"><span>${t('所属作品')}</span>${p.oc ? `<small>${t('原创角色不属于任何作品')}</small>` : `<div class="combo"><input id="pfWork" autocomplete="off" placeholder="${t('搜索作品，找不到可以新建')}"><div class="combo-menu" id="pfWorkMenu" hidden></div></div><small id="pfWorkNote"></small>`}</label>`;
   // 填了内容（和打开时不一样，或输入框里还有没按回车、没选中的字）时 Esc 先确认（#422 的 2-20）。
@@ -252,12 +252,12 @@ export async function editProfile(c) {
   q('#pfAliases').onclick = e => { const b = e.target.closest('[data-a]'); if (b) { draft.aliases.splice(Number(b.dataset.a), 1); aliases(); } };
   q('#pfAlias').onkeydown = e => { if (composing(e)) return; const v = e.target.value.trim(); if (e.key === 'Enter') { e.preventDefault(); if (v && !draft.aliases.includes(v)) draft.aliases.push(v); e.target.value = ''; aliases(); } };
   aliases();
-  const tagNote = () => { if (!q('#pfTagNote')) return; q('#pfTag').value = draft.tag ? draft.tag.replaceAll('_', ' ') : ''; q('#pfTagNote').innerHTML = draft.tag ? `${t('已关联 {tag}', {tag: `<code>${esc(draft.tag)}</code>`})} · <button type="button" class="link-button" id="pfUnlink">${t('取消关联')}</button>` : t('关联后自动补中文名、别名和所属作品'); q('#pfUnlink')?.addEventListener('click', () => { draft.tag = ''; tagNote(); }); };
+  const tagNote = () => { if (!q('#pfTagNote')) return; q('#pfTag').value = draft.tag ? draft.tag.replaceAll('_', ' ') : ''; q('#pfTagNote').innerHTML = draft.tag ? `${t('已关联 {tag}', {tag: `<code>${esc(draft.tag)}</code>`})} · <button type="button" class="link-button" id="pfUnlink">${t('取消关联')}</button>` : t('补上中文名、别名和所属作品'); q('#pfUnlink')?.addEventListener('click', () => { draft.tag = ''; tagNote(); }); };
   const workNote = () => { if (!q('#pfWork')) return; q('#pfWork').value = draft.work?.label || ''; q('#pfWorkNote').innerHTML = draft.work ? `${draft.work.create ? t('保存时新建这个作品') + ' · ' : draft.work.tag ? t('保存时从 Danbooru 建立这个作品') + ' · ' : ''}<button type="button" class="link-button" id="pfNoWork">${t('不归属任何作品')}</button>` : (draft.tag && draft.tag !== p.tag && !p.work_id ? (draft.tagWork ? t('留空：按 Danbooru 自动设置（{work}）', {work: draft.tagWork}) : t('留空：按 Danbooru 自动设置')) : t('未归类')); q('#pfNoWork')?.addEventListener('click', () => { draft.work = null; workNote(); }); };
   tagNote(); workNote();
   if (q('#pfTag')) combo(q('#pfTag'), q('#pfTagMenu'), (text, show) => {
     if (!text) { show([]); return; }
-    show([{label: 'Danbooru', items: [], note: t('正在查 Danbooru…（只发送你输入的文字）')}]);
+    show([{label: 'Danbooru', items: [], note: t('正在查 Danbooru…')}]);
     remoteNames('/api/entities?' + new URLSearchParams({q: text, remote: 1})).then(({found, ...result}) => show([found
       ? {label: 'Danbooru', items: found.map(r => ({...r, label: r.name, detail: r.tag, extra: [r.work_name, t('D 站 {n}', {n: number(r.posts)})].filter(Boolean).join(' · ')})), note: found.length ? '' : t('没有找到，或已经在图库里（那就用「合并到另一个角色」）')}
       : {label: 'Danbooru', items: [], note: remoteNote(result), allow: result.unauthorized}]));
@@ -296,9 +296,9 @@ export async function editProfile(c) {
 export async function openLocalLinks() {
   const items = state.localLinks || [];
   const links = items.filter(x => x.kind === 'link'), merges = items.filter(x => x.kind === 'merge');
-  const body = `${links.length ? `<p class="muted-note">${t('关联后自动补中文名、别名和所属作品，原来的名字留作别名，可以一步撤销。名字和 tag 完全一致的已勾选；标「可能是」的是按名字搜到的最像的一个，请确认后再勾。')}</p>
+  const body = `${links.length ? `<p class="muted-note">${t('关联后补上中文名、别名和所属作品，原来的名字留作别名。名字和 tag 完全一致的已勾选；标「可能是」的是按名字搜到的最接近的一个，确认后再勾选。')}</p>
       <div class="link-list">${links.map(x => `<label class="link-row"><input type="checkbox" data-link="${esc(x.id)}"${x.guess ? '' : ' checked'}><span><b>${esc(x.name)}${x.guess ? ` <i class="guess">${t('可能是')}</i>` : ''}</b><small>${esc(x.tag)}${x.work_name ? ' · ' + esc(x.work_name) : ''} · ${t('D 站 {n} 张', {n: number(x.posts)})}</small></span><em>${t('{n} 张', {n: number(x.count)})}</em></label>`).join('')}</div>` : ''}
-    ${merges.length ? `<p class="muted-note">${t('下面的自建角色和图库里已有的角色像是同一个，合并后图和人工结论都会过去（可撤销）：')}</p>
+    ${merges.length ? `<p class="muted-note">${t('下面的自建角色和图库里已有的角色像是同一个，合并后图和人工结论都会过去：')}</p>
       <div class="link-list">${merges.map(x => `<div class="link-row"><span><b>${esc(x.name)}${x.guess ? ` <i class="guess">${t('可能是')}</i>` : ''}</b><small>${t('{n} 张', {n: number(x.count)})} → ${esc(x.target.name)} · ${esc(x.tag)}</small></span><button type="button" class="quiet" data-merge="${esc(x.id)}">${t('合并到「{name}」', {name: esc(x.target.name)})}</button></div>`).join('')}</div>` : ''}
 `;
   const d = openDialog({title: t('关联自建角色'), body, backdropClose: false,
@@ -341,7 +341,7 @@ async function editCharacterFlag(path, body) {
 export async function openRelate(ids) {
   const d = $('relateDialog');
   $('relateTitle').textContent = t('{n} 张图的关系', {n: number(ids.length)});
-  $('relateBody').innerHTML = `<p class="muted-note">${t('正在逐对比较…只在本机计算')}</p>`;
+  $('relateBody').innerHTML = `<p class="muted-note">${t('正在逐对比较…')}</p>`;
   openModal(d, {backdropClose: true, id: 'relate'});
   let r; try { r = await post('/api/relate', {ids}); } catch (e) { $('relateBody').innerHTML = `<p class="muted-note">${esc(readError(e))}</p>`; return; }
   const no = u => ids.indexOf(u) + 1;
@@ -354,7 +354,7 @@ export async function openRelate(ids) {
     ${shown.map(p => `<section class="rel-pair"><div class="rel-head"><span class="rel-kind k-${p.kind}">${esc(tb(p.label))}</span><span>${esc(tb(p.note || ''))}</span></div>
       <div class="rel-figs">${figure(p.a, p.boxes_a)}${figure(p.b, p.boxes_b)}</div></section>`).join('')}
     ${rest ? `<p class="muted-note">${shown.length ? t('另外 {n} 对是不同的图', {n: number(rest)}) : t('{n} 对是不同的图', {n: number(rest)})}</p>` : ''}
-    <p class="dialog-note">${t('红框：两张不一样的地方；蓝色虚线：小图在大图里的位置。逐像素比较得出，只在本机计算，结果不保存。')}</p>`;
+    <p class="dialog-note">${t('红框：两张不一样的地方；蓝色虚线：小图在大图里的位置。结果不保存。')}</p>`;
 }
 export function jumpToCharacter() { openPicker({title: t('跳到角色'), jump: true, sentence: e => t('打开 {name}', {name: e.name}), pick: e => go(charRoute(e.id))}); }
 
