@@ -141,6 +141,14 @@ class NativeFilesTest(unittest.TestCase):
         for body in ({'acceleration': 0}, {'acceleration': 'on'}, {'acceleration': None}, {'acceleration': True, 'language': 'xx'}):
             self.assertEqual(self.request('/api/preferences', body)['status'], 400, body)
         self.assertEqual(json.loads(preferences.read_text(encoding='utf-8')), {'language': 'en', 'acceleration': False})
+        # 关窗后任务做完时（#451）：只有桌面外壳读它，回复照旧只列语言和加速。
+        stay = self.request('/api/preferences', {'after_tasks': 'stay'})
+        self.assertEqual((stay['status'], json.loads(stay['body'])), (200, {'preferences': {'language': 'en', 'acceleration': False}}))
+        self.assertEqual(json.loads(preferences.read_text(encoding='utf-8')), {'language': 'en', 'acceleration': False, 'after_tasks': 'stay'})
+        for body in ({'after_tasks': 'later'}, {'after_tasks': True}, {'after_tasks': None}):
+            self.assertEqual(self.request('/api/preferences', body)['status'], 400, body)
+        self.assertNotIn('desktop', json.loads(self.request('/api/settings')['body']))
+        self.request('/api/preferences', {'after_tasks': 'quit'})
         self.assertEqual(served(), 'en')
         # 被手动改坏的文件回退为跟随系统，不让页面出错。
         preferences.write_text('{broken', encoding='utf-8')

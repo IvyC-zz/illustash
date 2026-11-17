@@ -45,7 +45,7 @@ export function castWorks() {
   for (const g of groups.values()) g.chars.sort((a, b) => b.count - a.count);
   return [...groups.values()].sort((a, b) => a.pseudo - b.pseudo || b.images - a.images);
 }
-export const PSEUDO_NOTES = {oc: t('画师的原创角色，不属于任何作品'), other: t('还没填所属作品的角色。在角色的「编辑资料」里填上作品，就会归到那部作品下')};
+export const PSEUDO_NOTES = {oc: t('画师的原创角色，不属于任何作品'), other: t('还没填所属作品的角色')};
 // 列表的张数档位：[key, label, test]。
 export const BUCKETS = [['all', t('全部'), () => true], ['1', t('1 张'), c => c.count === 1], ['2', t('2–4 张'), c => c.count >= 2 && c.count < 5], ['5', t('5–19 张'), c => c.count >= 5 && c.count < 20], ['20', t('20–99 张'), c => c.count >= 20 && c.count < 100], ['100', t('100 张以上'), c => c.count >= 100]];
 // 列表的行：base（全部角色，或一次搜索）中落在某一档的，按某一列排序（dir 为 1 或 -1）。

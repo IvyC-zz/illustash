@@ -57,6 +57,11 @@ fn preference(text: Option<&str>, codes: &[&str]) -> String {
     }
 }
 
+/// `preferences.json` 的原文；外壳的其他设置（关窗后任务做完时，#451）也从这里读。
+pub fn preference_text() -> Option<String> {
+    preference_file()
+}
+
 fn preference_file() -> Option<String> {
     let home = illustash_platform::app_paths::user_home().ok()?;
     std::fs::read_to_string(illustash_platform::app_paths::app_support(&home).join("preferences.json")).ok()

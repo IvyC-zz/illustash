@@ -13,6 +13,14 @@ export function setLatest(step) {
   edits.latest = step;
   changed.emit(edits);
 }
+// 同一时间只进行一项改动（#432 ③-7）：已经有改动在进行时什么也不做，返回 undefined；否则加锁执行 fn，返回它的结果。
+// 开始和结束都通知撤销控件（busy 时撤销按钮不可用）。写入或撤销之后的公共收尾放在这里或 ui/dom.js 的 written，
+// 不在各处另写（#404 换掉 core/meta.js 的 learningSettled 时也从这里接）。
+export async function exclusive(fn) {
+  if (edits.busy) return undefined;
+  edits.busy = true; changed.emit(edits);
+  try { return await fn(); } finally { edits.busy = false; setLatest(edits.latest); }
+}
 // 还原最近一步；解析为它的 label（照发送时的样子），下一步已经设好。
 export async function undoLatest() {
   const {id, label} = edits.latest, result = await post('/api/undo', {id});

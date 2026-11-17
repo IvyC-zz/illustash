@@ -13,12 +13,8 @@ export const onHuman = changed.on;
 
 // 导入槽里人工结论任务的 kind；导出有自己的槽，kind 为 human_export。
 export const HUMAN_IMPORT = 'human_conclusions';
-export const EXPORT_ACTIVE = ['running', 'stopping'];
+const EXPORT_ACTIVE = ['running', 'stopping'];
 export const exportActive = () => EXPORT_ACTIVE.includes(state.human?.export?.status);
-// 本机路径的显示和现有导入一致：家目录缩写成 ~。
-// 家目录缩写成 ~：macOS 的 /Users/<名字>，Windows 的 C:\Users\<名字>（#518，截图反馈时不带出用户名）。core/jobs.js 因为
-// 循环导入另有一份同样的写法；#431 ③-8 收进 core/format.js 时以这里为准。
-export const home = p => String(p || '').replace(/^(?:\/Users\/[^/]+|[A-Za-z]:[\\/]Users[\\/][^\\/]+)(?=[\\/]|$)/i, '~');
 // RFC3339 的时间（快照清单的 created_at）换成 Unix 秒；读不出时为 null。
 export const rfcSeconds = s => { const ms = Date.parse(s || ''); return Number.isNaN(ms) ? null : ms / 1000; };
 

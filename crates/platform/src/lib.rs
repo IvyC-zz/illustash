@@ -10,6 +10,7 @@ pub mod capabilities;
 pub mod picker;
 pub mod platform_backup;
 pub mod platform_credentials;
+pub mod platform_files;
 pub mod platform_filesystem;
 pub mod platform_folder;
 pub mod platform_photos;
