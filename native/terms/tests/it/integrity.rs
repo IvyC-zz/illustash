@@ -2,7 +2,7 @@
 //! 发现、由每周的图库检查发现、由「立即检查」发现；发现之后不再写入损坏的图库包。只用故意覆写坏页的合成图库包。
 #![allow(clippy::unwrap_used, reason = "集成测试里 unwrap 就是断言")]
 use illustash_terms::{app_create::NewSource, app_service, store};
-use rusqlite::Connection;
+use rusqlite::{auto_extension, ffi, functions::FunctionFlags, Connection, ErrorCode};
 use serde_json::{json, Value};
 use std::{
     fs,
@@ -43,12 +43,29 @@ impl Drop for Host {
 impl Host {
     /// 在 `package` 上启动；宿主在就绪前退出时返回 Err，带上它的 stdout 和 stderr。
     fn launch(root: &Path, package: &Path) -> Result<Self, (Vec<String>, String)> {
+        Self::launch_with_gate(root, package, false)
+    }
+    fn launch_with_gate(root: &Path, package: &Path, gated: bool) -> Result<Self, (Vec<String>, String)> {
         let listener = TcpListener::bind(("127.0.0.1", 0)).unwrap();
         let port = listener.local_addr().unwrap().port();
         drop(listener);
         let mut command = Command::new(env!("CARGO_BIN_EXE_illustash-terms"));
         command
-            .env_clear()
+            .args(["http", "--no-sync", "--no-names", "--no-index-check", "--no-provenance", "--library"])
+            .arg(package)
+            .arg("--root")
+            .arg(Path::new(env!("CARGO_MANIFEST_DIR")).join("../.."))
+            .args(["--port", &port.to_string()]);
+        if gated {
+            let args: Vec<_> = command.get_args().map(|arg| arg.to_str().unwrap()).collect();
+            let args = serde_json::to_string(&args).unwrap();
+            command = Command::new(std::env::current_exe().unwrap());
+            command.env_clear().env("ILLUSTASH_TEST_HOST_ARGS", args);
+            command.args(["--ignored", "--exact", "integrity::writer_host", "--nocapture"]);
+        } else {
+            command.env_clear();
+        }
+        command
             .env("HOME", root.join("home"))
             .env("USERPROFILE", root.join("home"))
             .env("ILLUSTASH_APP_SUPPORT", root.join("support"))
@@ -57,17 +74,7 @@ impl Host {
             .env("ILLUSTASH_DESKTOP_STDIN", "1");
         #[cfg(windows)]
         command.env("SystemRoot", std::env::var_os("SystemRoot").expect("SystemRoot"));
-        let mut child = command
-            .args(["http", "--no-sync", "--no-names", "--no-index-check", "--no-provenance", "--library"])
-            .arg(package)
-            .arg("--root")
-            .arg(Path::new(env!("CARGO_MANIFEST_DIR")).join("../.."))
-            .args(["--port", &port.to_string()])
-            .stdin(Stdio::piped())
-            .stdout(Stdio::piped())
-            .stderr(Stdio::piped())
-            .spawn()
-            .unwrap();
+        let mut child = command.stdin(Stdio::piped()).stdout(Stdio::piped()).stderr(Stdio::piped()).spawn().unwrap();
         let mut stdin = child.stdin.take().unwrap();
         stdin.write_all(b"1").unwrap();
         stdin.flush().unwrap();
@@ -133,9 +140,7 @@ impl Host {
         };
         (response.status(), response.into_json().unwrap())
     }
-    /// 等后台检查结束（它在宿主就绪几秒后开始）。检查耗时随磁盘速度和负载差别很大：最后一段的 source.sqlite
-    /// 以前有 2 GB 多，在 GitHub 托管的 macOS 机器上让路后重查一遍要一分多钟（#395）。所以只要进度还在变就继续等，
-    /// 进度 60 秒不动才算卡住；总时长另设上限，防止反复让路时一直等下去。
+    /// 等后台检查结束。进度变化时重新计算停滞时长，总时长另设上限，避免反复让路时一直等下去。
     fn checked(&self) -> Value {
         let start = Instant::now();
         let (mut seen, mut moved) = (Value::Null, Instant::now());
@@ -322,42 +327,84 @@ fn checks_after_a_crash_in_the_background_and_on_request_and_stop_writing_on_dam
     let (_, errors) = Host::launch(&root, &overdue).err().expect("damaged library.sqlite must not open");
     assert!(errors.contains("library.sqlite"), "{errors}");
 
-    // source.sqlite 用回滚日志：后台检查运行期间，使用应用里最短忙等超时（250 ms）的写入方仍能提交；
-    // 检查会让路，等写入方完成后从头重新检查。文件只需大到写入方到来时检查还在跑（约 330 MB，本机后台优先级下
-    // 一遍几秒）：重新检查也要读完整个文件，以前的 40 万行有 2 GB 多，在负载下或 GitHub 托管机器上一遍就超过 60 秒（#395）。
+    // CHECK 约束在真实 quick_check 的读事务里求值。首轮读到旧值 0，重查才能读到已提交的新值 1。
     let busy = create("busy");
-    {
-        let c = Connection::open(busy.join("source.sqlite")).unwrap();
-        c.execute_batch(
-            "WITH RECURSIVE n(i) AS (SELECT 1 UNION ALL SELECT i+1 FROM n WHERE i<60000)
-             INSERT INTO synthetic_bulk(body) SELECT printf('%0100d-%d', i, i) || hex(randomblob(450)) FROM n;",
+    let writer = Connection::open(busy.join("source.sqlite")).unwrap();
+    writer.create_scalar_function("writer_gate", 1, GATE_FLAGS, |_| Ok(true)).unwrap();
+    // 标记行后面还有普通行，解除同步点后 SQLite 会再次调用产品的进度处理函数，检查写入日志。
+    writer
+        .execute_batch(
+            "CREATE TABLE check_gate(phase INTEGER CHECK(phase < 0 OR writer_gate(phase)));
+             INSERT INTO check_gate VALUES (0);
+             WITH RECURSIVE n(i) AS (SELECT 1 UNION ALL SELECT i+1 FROM n WHERE i<1000)
+             INSERT INTO check_gate SELECT -i FROM n;",
         )
         .unwrap();
-    }
-    let host = Host::launch(&root, &busy).unwrap();
-    let start = Instant::now();
-    loop {
-        let status = host.get("/api/integrity");
-        if status["running"]["database"] == "source.sqlite" && status["running"]["done"].as_f64().unwrap() > 0.05 {
-            break;
-        }
-        assert!(status["running"].is_object(), "the check ended before a writer could meet it: {status}");
-        assert!(start.elapsed() < crate::common::wait::limit(), "{status}");
-        thread::sleep(Duration::from_millis(20));
-    }
-    let writer = Connection::open(busy.join("source.sqlite")).unwrap();
-    writer.busy_timeout(Duration::from_millis(250)).unwrap();
-    writer
-        .execute_batch("BEGIN IMMEDIATE; INSERT INTO synthetic_bulk(body) VALUES ('written during the check'); COMMIT;")
-        .unwrap();
-    drop(writer);
-    // 检查还在：写入方是在检查进行中提交的（检查让了路，正等着重新开始）。检查不让路时，它的读锁要到检查结束才放开，
-    // 写入方只能在那之后提交，这里就会失败；单看提交成功不够，后台优先级下 250 ms 的忙等实际要等一秒多（#395）。
+    let host = Host::launch_with_gate(&root, &busy, true).unwrap();
+    let gates = root.join("support");
+    wait_for(&gates.join("reading-0"));
     let status = host.get("/api/integrity");
-    assert_eq!(status["running"]["database"], "source.sqlite", "the writer committed after the check ended: {status}");
+    assert_eq!(status["running"]["database"], "source.sqlite", "{status}");
+    assert!(status["running"]["done"].as_f64().unwrap() > 0.05, "{status}");
+
+    // 保持首轮读锁时，回滚日志已落盘，写事务仍未提交。用同一个连接和应用的 250 ms 忙等重试 COMMIT。
+    writer.busy_timeout(Duration::from_millis(250)).unwrap();
+    writer.execute_batch("BEGIN IMMEDIATE; UPDATE check_gate SET phase=1 WHERE phase=0;").unwrap();
+    let blocked = writer.execute_batch("COMMIT").unwrap_err();
+    assert_eq!(blocked.sqlite_error_code(), Some(ErrorCode::DatabaseBusy), "{blocked}");
+    fs::write(gates.join("continue-0"), b"").unwrap();
+    writer.execute_batch("COMMIT").expect("完整性检查应给写入方让路");
+    drop(writer);
+
+    // 首轮快照看不到 1。只有检查让路并重新打开数据库，才会进入这个同步点。取样后才允许重查完成。
+    wait_for(&gates.join("reading-1"));
+    let status = host.get("/api/integrity");
+    assert_eq!(status["running"]["database"], "source.sqlite", "{status}");
+    assert!(status["checked"]["source.sqlite"].is_null(), "{status}");
+    fs::write(gates.join("continue-1"), b"").unwrap();
     let status = host.checked();
     assert!(status["damaged"].is_null(), "{status}");
     assert!(status["error"].is_null(), "{status}");
     assert!(status["checked"]["source.sqlite"].as_i64().unwrap() >= now() - 120, "{status}");
     host.quit();
+}
+
+const GATE_FLAGS: FunctionFlags = FunctionFlags::SQLITE_UTF8.union(FunctionFlags::SQLITE_INNOCUOUS);
+
+fn wait_for(path: &Path) {
+    let deadline = crate::common::wait::deadline();
+    while !path.exists() {
+        assert!(Instant::now() < deadline, "未到达完整性检查同步点 {path:?}");
+        thread::sleep(Duration::from_millis(5));
+    }
+}
+
+// SQLite 给每个宿主连接注册夹具 CHECK 函数。只有合成表的标记行会调用它。
+unsafe extern "C" fn install_gate(
+    db: *mut ffi::sqlite3,
+    error: *mut std::ffi::c_char,
+    _: *const ffi::sqlite3_api_routines,
+) -> std::ffi::c_int {
+    // SAFETY: SQLite 传入本次初始化的有效指针。回调只注册函数，不开关连接，也不修改扩展列表。
+    unsafe {
+        auto_extension::init_auto_extension(db, error, |conn| {
+            let gates = PathBuf::from(std::env::var_os("ILLUSTASH_APP_SUPPORT").unwrap());
+            conn.create_scalar_function("writer_gate", 1, GATE_FLAGS, move |ctx| {
+                let phase: i64 = ctx.get(0)?;
+                fs::write(gates.join(format!("reading-{phase}")), b"").unwrap();
+                wait_for(&gates.join(format!("continue-{phase}")));
+                Ok(true)
+            })
+        })
+    }
+}
+
+#[test]
+#[ignore = "由并发写入用例作为独立的原生 HTTP 宿主启动"]
+fn writer_host() {
+    let _env = crate::exclusive();
+    let args: Vec<String> = serde_json::from_str(&std::env::var("ILLUSTASH_TEST_HOST_ARGS").unwrap()).unwrap();
+    // SAFETY: install_gate 只在这个测试子进程中注册，满足 SQLite 自动扩展的初始化约束。
+    unsafe { auto_extension::register_auto_extension(install_gate) }.unwrap();
+    assert_eq!(illustash_terms::cli::run(&args), 0);
 }
