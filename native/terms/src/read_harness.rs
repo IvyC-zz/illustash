@@ -21,6 +21,7 @@ pub fn current_library(state: &Path) -> Result<LibraryContext> {
         value[key].as_str().filter(|v| !v.is_empty()).ok_or_else(|| Error::Invalid(format!("HTTP 图库状态缺少 {key}")))
     };
     Ok(LibraryContext {
+        examples: None,
         db: PathBuf::from(field("db")?),
         source: value["source"].as_str().map(PathBuf::from),
         token: value["token"].as_str().map(str::to_owned),

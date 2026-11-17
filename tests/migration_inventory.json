@@ -227,15 +227,15 @@
 
  "native/terms/src/app_characters.rs":"6c9e9e080970dce30092747ebcf6bdcaee7d99a8463500888e5dab278f4a0cbd",
 
- "native/terms/src/app_commands.rs":"c165827ee53db96e8f5a1de28a98af23d9d61a9704913fefd5ffc1377aff826f",
+ "native/terms/src/app_commands.rs":"e157eec21d61114cb89e607a1cfb90ed8cd402bcb350d3b9cc62e23f893812dd",
 
- "native/terms/src/app_create.rs":"f884b4587d13c479e6739fdb7439f2bee4342627b0b157f06560dabfede3cbdc",
+ "native/terms/src/app_create.rs":"523b64fc0569c52aa3cb7068aae9713a97a7fa5cb450fb0814bf5157f659411e",
 
  "native/terms/src/app_create_names.sql":"29fb8b712603ad5bfd49a20b82162ead37a45e781f949d5e1c9678bd42fa8f7f",
 
  "native/terms/src/app_create_schema.sql":"f41f751e3f9c2deae935dcb9869cd385a0893a9d20dad2c4b64b7b14d7ef54ae",
 
- "native/terms/src/app_curation.rs":"8f8bc2ff372c97865a941a988d1766c541baa84fc8ca716dd6b55e7758c611cd",
+ "native/terms/src/app_curation.rs":"849dd569bf7fb98738c4edaf0ad73a3e5292afa8b208eb34011e7ec99b8aef76",
 
  "native/terms/src/app_desktop.rs":"127f0fd9238bd2f37334b531e4ee170d78e41e573125cc3c584c4020129fd573",
 
@@ -247,7 +247,7 @@
 
  "native/terms/src/app_galleries.rs":"2a082c652330ac99e3419cc9f5c7c2cce08410a6f89b1a9989bc712b13451bc2",
 
- "native/terms/src/app_http.rs":"7563237499fe877015a24192b9a173e296eca2c5de5443d0d9c444f32a19179e",
+ "native/terms/src/app_http.rs":"db121f43374703ec3d2aaafe9869a777ae1f9b1434de11816bd91d8eebe39640",
 
  "native/terms/src/app_human_conclusions.rs":"37bd5770a1bce2e3686a3a478b0925ddcfa11eaa81bf1f85023c57ed6cc8126b",
 
@@ -273,7 +273,7 @@
 
  "native/terms/src/app_library.rs":"776cfbe684a3d2341738010c41883cc599afe533604e1a2a788ff1d9cd0d4170",
 
- "native/terms/src/app_local.rs":"297a2b6263f1b0007f8e9918ac3ce16527fb210541de383f683a2fc6cd37da26",
+ "native/terms/src/app_local.rs":"ffbc769f30608a43928dd391cc7868219ad4844b176cf7528abfc4f8b5bfdebf",
 
  "native/terms/src/app_migrate.rs":"17eac80259f33aaee591c06eb6d96ce217e9f2378216b1ffaa209a1e0c734de4",
 
@@ -329,7 +329,7 @@
 
  "native/terms/src/app_resources.rs":"d691ec21499b906972a02d49a21790f2a301c34eb4dea0bd9c301675dd9e2c0a",
 
- "native/terms/src/app_service.rs":"e755cfea8c85a07e24c26c1cbd088eb742c7845f26e7143a2477acb3845e67d6",
+ "native/terms/src/app_service.rs":"6a35d67b91fc821e1bd3e67674d31831d73042ac411380f3dcbf595f363d511c",
 
  "native/terms/src/app_settings.rs":"20f5eb9c25a3a14920b85b48e75186564c5e01f6129cca02b06b2f63d60b2c41",
 
@@ -345,7 +345,7 @@
 
  "native/terms/src/app_updates.rs":"e7b51e4afd108af07dbf92e76d44251709635984f8387d3e702922190b9834ba",
 
- "native/terms/src/app_upgrade.rs":"de6b529fbb01865fb9adeb78ae45ca4b5a541b14129b9472f58f10ac693ce6cf",
+ "native/terms/src/app_upgrade.rs":"f194c9b72ade8ca5388cd51d66604f7f14485d0cf46f59d76cf6047ab21fc12f",
 
  "native/terms/src/app_wd_extension.rs":"b595ac8af54422318a426b21c31c924d42cfaf59e6c27ff7e5874ef8313e9821",
 
@@ -363,15 +363,25 @@
 
  "native/terms/src/diagnostics/logs/details.rs":"49daaeae10eaaf1275776734b97432d01d14b14855d0cfdcc2ed87a1b97b07d9",
 
- "native/terms/src/http.rs":"806d8b048bc9e2925765986a082d3bc542c8e669bb93fcc745be8508fcc9ec91",
+ "native/terms/src/example_cache.rs":"9c8bb3014aea3f999cdd74815bd46b0f6d5a9273714e9225cb81ce662c141862",
+
+ "native/terms/src/example_disk.rs":"fd762cac3aeb77f00b35c0f4ddb2ee1849c8bbcd965808f646b6d822232c4fef",
+
+ "native/terms/src/example_features.rs":"4f52149f3597b682e17848edd6f286a76d122c47009bfbb06a80ebf7c391a80b",
+
+ "native/terms/src/example_scores.rs":"21d209027a51c59aa6d880d3ff341ccfbbf2ea8748a3cfd9e571ac4af2ee1cd2",
+
+ "native/terms/src/http.rs":"f9d1067f511fb59576b731f4afb2051b6cffd6c14fad47facf1d6aa795820bf0",
 
  "native/terms/src/http_app.rs":"1cdb28245fb1d97ac446313b089c8fe4700ce22027dbb7272bf3a6c04750a984",
 
  "native/terms/src/http_artists.rs":"4fa18a5bbbc5e5cab1954407308ffa9951bc2bf54a1b69a8ef01b2fa307d162b",
 
- "native/terms/src/http_browse.rs":"b4deef9ae03ed20cb4549de53badb65d9784c42c3f7b6e830aeda3f421488001",
+ "native/terms/src/http_browse.rs":"daf4c74f0a9cdc3f47b59b9a0a9356d51a913905ef95869524bdaa0df8e3dc3a",
 
  "native/terms/src/http_characters.rs":"03e4c82c04a2708b576a26a6c8dbbd49834f7bf4126240f06e17da4827478f9e",
+
+ "native/terms/src/http_example_search.rs":"37086571f127c0c437a4fa223184fddd7c26adb61c1c1883f8f05ee17011ab10",
 
  "native/terms/src/http_host_get.rs":"0bd6df8488c2e193eb8a1a537a7d6d1cd91520eca39ddf6ffdfe24421aee25c1",
 
@@ -401,11 +411,11 @@
 
  "native/terms/src/index_generation.rs":"940c236d35bee6001cc2225701d64d0be2964a2575a653a897449650535ad2fa",
 
- "native/terms/src/lib.rs":"5f721312971f96bd56962f54d52684be83607a74f8d552aa3c6437ace7b920b4",
+ "native/terms/src/lib.rs":"27af23cc3aca9c7fa8efa58b3ba06b896df106997486108c53569eb5f3dda97f",
 
  "native/terms/src/platform_process.rs":"62046a3cf19fa77c1f3105770d4937a6cd780b24e9219a84106c4014aaf1f500",
 
- "native/terms/src/read_harness.rs":"720ce39b82f47a7f7a874e74dff61c2e9a741153acf7b908b4188c57fe67f48f",
+ "native/terms/src/read_harness.rs":"fe26074e0229a7ce7db5fdec47e7e37d4d599308415c0e4ab6d3d974250d0860",
 
  "native/terms/src/recognition_compute/anchor_snapshot.rs":"1eb979b605a1c84fbe625b9f46e7ad899dfe5fddd6891c0a7a274cd69989b76d",
 
@@ -431,13 +441,13 @@
 
  "native/terms/src/recognition_compute/wd_coreml.rs":"deaed63306945926e57c6b59427383bf0334776abb93de94df4e74332b42b96a",
 
- "native/terms/src/research_compute/discriminate.rs":"e278266b53b06a8d2144a64109be30579a0f8acee30f3d870be5158e942ee1ba",
+ "native/terms/src/research_compute/discriminate.rs":"726d1303d0f23dbed5c531f80cdae1ab0b99d5cf096b5ae4eae8e1ec33f6a382",
 
- "native/terms/src/research_compute/features.rs":"b050aa97333d6c38d0e532b4774f44ebfbed69f7a0dc8aa0074960195a08d87b",
+ "native/terms/src/research_compute/features.rs":"f6bfa9043f9ef9d6af8023280540dd55eede23d61e6a67fa7c3f81dc07840ee8",
 
  "native/terms/src/research_compute/groups.rs":"33e7cde9ca859134d56a2ad52bfbb5b8275a64a46598869daaae38dcc9295f39",
 
- "native/terms/src/research_compute/mod.rs":"dc6a92172e93755a7b37fef3a9dc8dc3ba16eeced3d243a9997fba3ec308ee77",
+ "native/terms/src/research_compute/mod.rs":"239fc1b65c16d4081712c0c310e7802e6115f4bb5a2421ddd34c172f5d599720",
 
  "native/terms/src/research_compute/numeric.rs":"1c12b3f6180efa3b45bf3270acaeaa3699e3af9b7a9ad03891dfa908d61c73f5",
 
@@ -557,7 +567,9 @@
  "crates/core/src/ccip_longtail.rs":{"policy":"application","current_runtime":"rust-core-ccip-longtail-state","storage_domain":"app","boundary_notes":{"authorization":"#559 按图库启用或撤回独立长尾证据和包摘要。"}},
  "crates/core/src/character_extension.rs":{"policy":"application","current_runtime":"rust-core-extension-evidence","storage_domain":"app","boundary_notes":{"authorization":"沿用 WD 扩展发布和补空归属，#559 在同一事务附独立的 CCIP 长尾来源。"}},
  "native/terms/src/app_ccip_longtail.rs":{"policy":"result-import","current_runtime":"rust-native-ccip-longtail","storage_domain":"source-read+app","boundary_notes":{"authorization":"#559 只读已存 CCIP 向量，通过经校验的索引快照生成并提交独立证据，启用与撤回写每图库状态。"}},
- "native/terms/src/app_galleries.rs":{"policy":"application","current_runtime":"rust-native-galleries","storage_domain":"app","boundary_notes":{"authorization":"#445 明确保存、编辑、删除和撤销本图库画廊。"}}
+ "native/terms/src/app_galleries.rs":{"policy":"application","current_runtime":"rust-native-galleries","storage_domain":"app","boundary_notes":{"authorization":"#445 明确保存、编辑、删除和撤销本图库画廊。"}},
+ "native/terms/src/example_cache.rs":{"policy":"assets","current_runtime":"rust-native","storage_domain":"source-ro+memory-cache","boundary_notes":{"authorization":"源库以只读连接固定特征快照，事务不会写入源库。"}},
+ "native/terms/src/http_example_search.rs":{"policy":"application","current_runtime":"rust-native","storage_domain":"app-ro+connection-temp","boundary_notes":{"authorization":"#449 现有读路由和筛选写事务的会话临时选集，只写 temp.like_rank。"}}
 },
 "limitations":[
  "审计生产 HTTP/DB/事务/动态执行/启动/CLI；保留研究/测试/生成代码。",
@@ -701,7 +713,9 @@
  "crates/core/src/ccip_longtail.rs":{"database-write":{"INSERT OR REPLACE INTO:meta":1,"DELETE FROM:meta":1}},
  "crates/core/src/character_extension.rs":{"database-write":{"dynamic-or-wrapper":1,"INSERT INTO:memberships":1}},
  "native/terms/src/app_ccip_longtail.rs":{"database-write":{"dynamic-or-wrapper":6,"COMMIT":1,"INSERT OR REPLACE INTO:meta":2,"INSERT INTO:meta":1,"UPDATE:set":1,"DELETE FROM:meta":3}},
- "native/terms/src/app_galleries.rs":{"database-write":{"dynamic-or-wrapper":4,"INSERT INTO:galleries":2,"UPDATE:galleries":1,"DELETE FROM:galleries":2,"INSERT INTO:actions":1,"COMMIT":1,"UPDATE:set":1}}
+ "native/terms/src/app_galleries.rs":{"database-write":{"dynamic-or-wrapper":4,"INSERT INTO:galleries":2,"UPDATE:galleries":1,"DELETE FROM:galleries":2,"INSERT INTO:actions":1,"COMMIT":1,"UPDATE:set":1}},
+ "native/terms/src/example_cache.rs":{"database-write":{"dynamic-or-wrapper":1,"COMMIT":1}},
+ "native/terms/src/http_example_search.rs":{"database-write":{"dynamic-or-wrapper":2,"DELETE FROM:temp.like_rank":1,"INSERT INTO:temp.like_rank":1}}
 },
 "policies":{
  "application":{"final_owner":"rust","responsibility":"HTTP 参数/目标、人工命令、正式事务/投影；Python 包装待迁移","acceptance":"合成状态码/原始字节、返回/DB/历史/撤销/事件对照；竞争与注入失败原子回滚","deletion_condition":"Rust 调用链及无 Python 验收后删生产 Python；保留旧对照","stages":["M2","M3"]},

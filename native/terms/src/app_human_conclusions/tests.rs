@@ -142,6 +142,7 @@ impl Fixture {
     }
     fn context(&self) -> LibraryContext {
         LibraryContext {
+            examples: None,
             db: self.db.clone(),
             generation: "synthetic".into(),
             library: Some(self.root.clone()),

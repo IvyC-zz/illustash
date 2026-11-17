@@ -24,6 +24,7 @@ unicode-normalization = "=0.1.22" # Unicode 15.0，与 Python 3.12 契约一致
 flate2 = { version = "1", default-features = false, features = ["zlib"] }
 image = { version = "=0.25.6", default-features = false, features = ["png", "gif", "webp", "tiff", "bmp", "ico", "pnm", "tga"] }
 gif = "=0.13.3"
+half = "2.7"
 lcms2 = { version = "=5.6.0", features = ["static"] }
 lcms2-sys = { version = "=4.0.7", default-features = false, features = ["static"] }
 kamadak-exif = "0.6"
