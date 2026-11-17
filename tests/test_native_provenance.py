@@ -266,11 +266,11 @@ class NativeProvenanceTest(unittest.TestCase):
         self.assertFalse(self.sql("SELECT task_id FROM native_delivery WHERE status='pending'",cache=True))
     def large_library_delivery(self):
         """用 unittest 显式点名执行。真实宿主与导入事务，合成 worker 和回环服务。"""
-        for path in (self.lib.db, self.lib.source):
+        for path, extra_columns, extra_values in ((self.lib.db, '', ''), (self.lib.source, ',in_scope,trashed', ',1,0')):
             with closing(sqlite3.connect(path)) as c, c:
-                c.execute("""WITH RECURSIVE n(i) AS (VALUES(1) UNION ALL SELECT i+1 FROM n WHERE i<100000)
-                    INSERT INTO assets(uuid,filename,width,height,added_at,src_kind)
-                    SELECT printf('0-%06d',i),'synthetic.png',120,150,'2026-01-01','orig' FROM n""")
+                c.execute(f"""WITH RECURSIVE n(i) AS (VALUES(1) UNION ALL SELECT i+1 FROM n WHERE i<100000)
+                    INSERT INTO assets(uuid,filename,width,height,added_at,src_kind{extra_columns})
+                    SELECT printf('0-%06d',i),'synthetic.png',120,150,'2026-01-01','orig'{extra_values} FROM n""")
         [(total,)] = self.sql('SELECT count(*) FROM assets')
         self.post({'action': 'lookup', 'ids': ['a']})
         result = self.finish('done')

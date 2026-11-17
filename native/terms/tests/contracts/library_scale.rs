@@ -88,30 +88,53 @@ fn seed(root: &Path, size: usize) -> (PathBuf, PathBuf) {
         [],
     )
     .unwrap();
-    for (dim, tag, kind, system) in
-        [("rating", "general", Kind::Rating, "wd_rating"), ("general", "blue_hair", Kind::Topic, "wd")]
-    {
-        let id = store::create_term(&tx, kind, Some(tag), "fixture").unwrap();
-        store::add_link(&tx, id, system, tag, "", "fixture").unwrap();
-        tx.execute(
-            "INSERT INTO src.labels(uuid,dim,value,conf,source,ts)
-            SELECT uuid,?,?,0.9,'wd_v3',? FROM src.assets",
-            params![dim, tag, STAMP],
-        )
-        .unwrap();
-        tx.execute(
-            "INSERT INTO term_evidence(asset_id,term_id,source,method,version,score,metric,fingerprint)
-            SELECT z_pk,?,'wd','tagger','fixture',0.9,'wd_probability',zeroblob(16) FROM src.assets",
-            [id],
-        )
-        .unwrap();
-        tx.execute(
-            "INSERT INTO term_projection(asset_id,term_id,state,score,sources)
-            SELECT z_pk,?,'machine',0.9,'wd.tagger' FROM src.assets",
-            [id],
-        )
-        .unwrap();
+    // 每图四个通用标签。固定词表与编号使两档的标签选择率可直接比较。
+    let tag_path = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../tags/tags_v3.csv");
+    let mut tags = csv::Reader::from_path(tag_path).unwrap();
+    let names: Vec<_> = tags
+        .records()
+        .map(|r| r.unwrap())
+        .filter(|r| r.get(2) == Some("0"))
+        .take(256)
+        .map(|r| r[1].to_owned())
+        .collect();
+    assert_eq!(names.len(), 256);
+    tx.execute_batch("CREATE TEMP TABLE vocab(i INTEGER PRIMARY KEY,term INTEGER,key TEXT)").unwrap();
+    for (i, tag) in names.iter().enumerate() {
+        let id = store::create_term(&tx, Kind::Topic, Some(&format!("fixture-topic:{tag}")), "fixture").unwrap();
+        store::add_link(&tx, id, "wd", tag, "", "fixture").unwrap();
+        tx.execute("INSERT INTO vocab VALUES (?,?,?)", params![i, id, tag]).unwrap();
     }
+    let rating = store::create_term(&tx, Kind::Rating, Some("fixture-safe"), "fixture").unwrap();
+    store::add_link(&tx, rating, "wd_rating", "general", "", "fixture").unwrap();
+    tx.execute(
+        "INSERT INTO src.labels(uuid,dim,value,conf,source,ts)
+        SELECT uuid,'rating','general',0.9,'wd_v3',? FROM src.assets",
+        [STAMP],
+    )
+    .unwrap();
+    tx.execute(
+        "WITH shifts(k) AS (VALUES(0),(1),(2),(3))
+        INSERT INTO src.labels(uuid,dim,value,conf,source,ts)
+        SELECT a.uuid,'general',v.key,0.9,'wd_v3',? FROM src.assets a CROSS JOIN shifts
+        JOIN vocab v ON v.i=(a.z_pk*17+k*31)%256",
+        [STAMP],
+    )
+    .unwrap();
+    tx.execute(
+        "INSERT INTO term_evidence(asset_id,term_id,source,method,version,score,metric,fingerprint)
+        SELECT a.z_pk,l.term_id,'wd','tagger','fixture',s.conf,'wd_probability',zeroblob(16)
+        FROM src.labels s JOIN src.assets a USING(uuid)
+        JOIN term_links l ON l.system=CASE s.dim WHEN 'rating' THEN 'wd_rating' ELSE 'wd' END AND l.key=s.value",
+        [],
+    )
+    .unwrap();
+    tx.execute(
+        "INSERT INTO term_projection(asset_id,term_id,state,score,sources)
+        SELECT asset_id,term_id,'machine',score,'wd.tagger' FROM term_evidence",
+        [],
+    )
+    .unwrap();
     tx.execute(
         "INSERT INTO src.labels(uuid,dim,value,conf,source,ts)
         SELECT uuid,'character',entity,0.9,'wd_v3',? FROM memberships",
@@ -188,10 +211,15 @@ fn benchmark() {
         v
     };
     assert_eq!(get("/api/assets/count", None)["total"], size + NEW);
+    let page = get("/api/assets?limit=100", None);
+    assert_eq!(page["items"].as_array().unwrap().len(), 100);
+    let tagged = get("/api/assets/count?tag=1girl", None)["total"].as_u64().unwrap();
+    assert!(tagged > 0 && tagged < size as u64);
     for (metric, url) in [
         ("page", "/api/assets?limit=100&offset=2000"),
         ("count", "/api/assets/count"),
         ("detail", "/api/detail?id=IMG-0000001"),
+        ("tag_count", "/api/assets/count?tag=1girl"),
     ] {
         get(url, None);
         measured(size, metric, || {
