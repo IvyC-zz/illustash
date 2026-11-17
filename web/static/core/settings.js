@@ -37,6 +37,11 @@ export async function backupNow() { const r = await post('/api/backup', {}); sta
 export async function clearCache() { const r = await post('/api/cache', {action: 'clear'}); state.settings = r; return r; }
 // 全应用共用（preferences.json，#173）：每个窗口和图库都跟着它；之后页面用新语言重新载入。
 export const saveLanguage = language => api('/api/preferences', {method: 'POST', body: JSON.stringify({language})});
+// 桌面 App 里关窗转到后台以后，任务做完时退出还是留着（#451，desktop/src/background.rs 读它）。
+export async function saveAfterTasks(value) {
+  await api('/api/preferences', {method: 'POST', body: JSON.stringify({after_tasks: value})});
+  if (state.settings?.desktop) state.settings.desktop.after_tasks = value;
+}
 export async function loadAbout() {
   const token = session.token, value = await shared('/api/about');
   if (token === session.token) state.about = value;

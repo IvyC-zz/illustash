@@ -173,7 +173,9 @@ class FrontendArchitectureTest(unittest.TestCase):
                  "document.documentElement.addEventListener('keydown', e => {});",
                  "document.addEventListener('pointerdown', e => {});",
                  "document.addEventListener('mousedown', e => {});",
-                 "document.addEventListener('keyup', e => {});"]
+                 "document.addEventListener('keyup', e => {});",
+                 "document.addEventListener('change', e => {});",   # #431 ③-12
+                 "document.onchange = () => {};"]
         for text in cases:
             with self.subTest(text=text), Tree() as tree:
                 tree.append('ui/artists.js', '\n' + text + '\n')
@@ -187,7 +189,8 @@ class FrontendArchitectureTest(unittest.TestCase):
 
     def test_other_events_and_element_listeners_are_fine(self):
         with Tree() as tree:
-            tree.append('ui/artists.js', "\ndocument.addEventListener('change', e => {});\n"
+            # change 从 #431 起也算（见 test_body_and_more_events_count_too），这里换成 input。
+            tree.append('ui/artists.js', "\ndocument.addEventListener('input', e => {});\n"
                                          "document.addEventListener('pointermove', e => {});\n"
                                          "button.addEventListener('keydown', e => { if (composing(e)) return; });\n"
                                          "// document.addEventListener('keydown', e => {});\n")
@@ -239,7 +242,7 @@ class FrontendArchitectureTest(unittest.TestCase):
         for relative, old, new in (
                 ('ui/overlay.js', "  if (composing(e)) return;  // 组字时的 Esc 是取消组字，不关浮层；方向键是选字\n", ""),
                 ('ui/palette.js', "q('#pfAlias').onkeydown = e => { if (composing(e)) return; ", "q('#pfAlias').onkeydown = e => { "),
-                ('ui/palette.js', "const p = palette; if (!p || composing(e)) return;", "const p = palette; if (!p) return;")):
+                ('ui/combo.js', "if (composing(e) || !shown()) return;", "if (!shown()) return;")):  # 命令面板等四处结果菜单（#432）
             with self.subTest(relative=relative, old=old), Tree() as tree:
                 tree.replace(relative, old, new)
                 self.assertViolation(tree, 'ime-composing', f'{relative}: 键盘处理函数没有调用 composing()')

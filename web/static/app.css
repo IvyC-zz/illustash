@@ -590,7 +590,7 @@ select:hover{background-color:rgba(var(--sh),.08)}
 .menu-glass{background:color-mix(in srgb,var(--sheet) 94%,transparent);-webkit-backdrop-filter:blur(30px) saturate(1.8);backdrop-filter:blur(30px) saturate(1.8)}
 .menu-drop input{border:0;background:var(--soft);border-radius:var(--radius-pill);padding:0 var(--space-12)}
 .menu-item{border-radius:var(--radius-8);background:transparent}
-.menu-item:hover{background:var(--soft)}
+.menu-item:hover,.menu-item.on{background:var(--soft)}
 /* 网格 */
 .viewport{scrollbar-color:var(--scroll-thumb) transparent}
 .card{background:var(--soft);border-radius:var(--radius-10);transition:opacity .18s var(--ease),transform .2s var(--ease),box-shadow .2s var(--ease)}

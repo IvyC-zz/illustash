@@ -61,7 +61,7 @@ test('responses after navigating away update cached data without repainting', as
 
 // 资料库 · 作品（#198）：作品树取代设置页的作品表。书架在 ui/catalog.js。
 async function shelfHarness(works, watch = []) {
-  const root = {className: '', innerHTML: '', querySelectorAll: () => [], setAttribute() {}};
+  const root = {className: '', innerHTML: '', querySelectorAll: () => [], setAttribute() {}, addEventListener() {}};
   const catalog = await web.load('ui/catalog.js'), {state} = web.core();
   Object.assign(state, {route: {page: 'characters', section: 'works'}, chars: [{work_id: 'a'}, {work_id: 'a'}, {work_id: 'b'}],
     index: {works, watch: {works: watch, pending_tags: []}, check: {missing: [{copyright: 'tag_a'}]}}});
@@ -112,7 +112,8 @@ test('index progress does not reload work list or rebuild the editor', async () 
 
 test('index completion fetches updated results once', async () => {
   const {calls, renders} = await indexHarness('checking', 'checked');
-  assert.deepEqual(calls, ['/api/index?progress=1', '/api/index']);
+  // 卡片重画时另读一次覆盖情况（#561，/api/index 的回复冻结，覆盖情况走单独的路由）。
+  assert.deepEqual(calls, ['/api/index?progress=1', '/api/index', '/api/index/coverage']);
   assert.deepEqual(renders, ['index', 'tasks']);
 });
 

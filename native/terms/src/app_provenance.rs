@@ -188,6 +188,10 @@ impl Runner {
     fn busy(&self) -> bool {
         active(self.task.as_ref(), self.state.lock().expect("provenance state mutex poisoned").status())
     }
+    /// 这次运行的状态（`info` 的 `state`），只读内存；桌面外壳据此判断有没有在查（#451）。
+    pub(crate) fn snapshot(&self) -> Json {
+        self.state.lock().expect("provenance state mutex poisoned").snapshot()
+    }
     pub fn info(&self) -> Result<Json> {
         let mut history = self.history.lock().expect("provenance state mutex poisoned");
         if history.is_none() && self.path().is_file() {

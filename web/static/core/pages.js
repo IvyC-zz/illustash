@@ -40,7 +40,7 @@ const libraryBase = {
     return f;
   },
   // 「只看 R18」时没有图，多半是这个筛选造成的：写明，旁边给「显示全部」（#386 的 2-16）。
-  empty: (r, {nsfw} = {}) => nsfw === 'only' ? t('「只看 R18」开着，没有符合条件的 R18 图片。') : t('没有符合条件的图片。试试别的搜索或标签。'),
+  empty: (r, {nsfw} = {}) => nsfw === 'only' ? t('「只看 R18」开着，没有符合条件的 R18 图片。') : t('没有符合条件的图片。'),
   hint: () => t('点击查看 · 拖动或 {key} 点击多选 · Space 看大图', {key: isMac ? '⌘' : 'Ctrl'}),
   bar: 'default',
 };
@@ -52,7 +52,7 @@ const list = [
   {name: 'settings', sections: true, area: 'settingsPage', panel: true, click: 'own', nav: 'settings', toolbar: 'none'},
   {name: 'unmatched', sortPref: 'sortUnmatched', area: 'grid', panel: false, click: 'cleanup', nav: 'unmatched', lead: true, tabs: 'unmatched', tab: 'all',
     toolbar: 'grid', sorts: ['hinted', ...NEWEST], pool: 'unmatched', bar: 'unmatched', skip: true,
-    empty: () => t('全部认出来了 🎉'), hint: () => t('点击或拖动选择 · Space 看大图 · C 设为角色 · S 跳过'), card: {hintMin: 70}},
+    empty: () => t('没有未识别的图。'), hint: () => t('点击或拖动选择 · Space 看大图 · C 设为角色 · S 跳过'), card: {hintMin: 70}},
   {name: 'skipped', sortPref: 'sortUnmatched', area: 'grid', panel: false, click: 'cleanup', nav: 'unmatched', lead: true, tabs: 'unmatched', tab: 'skipped',
     toolbar: 'grid', sorts: ['hinted', ...NEWEST], pool: 'skipped', bar: 'skipped',
     empty: () => t('没有跳过的图片。'), hint: () => t('点击或拖动选择 · Space 看大图')},
@@ -64,7 +64,7 @@ const list = [
   {name: 'duplicates', area: 'grid', panel: false, click: 'browse', nav: 'duplicates', tabs: 'duplicates', tab: 'all',
     toolbar: 'grid', sorts: NEWEST, pool: 'duplicates', bar: 'default', card: {dup: true},
     params: r => r.dup ? {dup: r.dup} : {}, empty: r => r.dup ? t('所有副本的角色都一致。') : t('没有重复的图片。'),
-    hint: () => t('同色角标为同一组 · 修改会同步到整组 · 角色不一致的组对齐后自动折叠')},
+    hint: () => t('同色角标是同一组')},
   {name: 'similar', area: 'groupsPage', panel: true, click: 'own', nav: 'duplicates', tabs: 'duplicates', tab: 'similar', toolbar: 'tabs'},
   {name: 'sgroup', prefix: 's', area: 'grid', panel: false, click: 'cleanup', nav: 'duplicates', tabs: 'duplicates', tab: 'similar',
     toolbar: 'grid', sorts: NEWEST, pool: 'similar', params: r => ({cluster: r.id}), bar: 'default', empty: () => t('这一组已经没有图片了。'),
@@ -75,7 +75,7 @@ const list = [
   {name: 'pending', area: 'grid', panel: false, click: 'cleanup', nav: 'excluded', tabs: 'excluded', tab: 'pending', toolbar: 'grid', sorts: NEWEST, pool: 'pending', bar: 'pending',
     empty: () => t('没有待确认的图片。'), hint: () => t('点击或拖动选择 · Space 看大图 · X 排除')},
   {name: 'audit', area: 'grid', panel: false, click: 'cleanup', nav: 'audit', toolbar: 'grid', sorts: NEWEST, pool: 'audit', bar: 'audit', card: {audit: true},
-    empty: () => t('抽查做完了，谢谢！结果会用来衡量认人准不准。'), hint: () => t('点一张或 Space 看大图 · Y 是 · N 不是 · 看不清可以跳过，换一张')},
+    empty: () => t('抽查做完了。'), hint: () => t('点一张或 Space 看大图 · Y 是 · N 不是 · 看不清可以跳过，换一张')},
   {name: 'identity', area: 'groupsPage', panel: true, click: 'own', nav: 'identity', toolbar: 'none'},
   {name: 'artist-audit', area: 'groupsPage', panel: true, click: 'own', nav: '', toolbar: 'none'},
 ];
@@ -93,10 +93,11 @@ export const CHARACTER = character;
 // 路由里的页面名没登记时（只有测试会这样）按没有特殊性质的网格页处理。
 const UNKNOWN = {name: '', area: 'grid', panel: false, click: 'own', nav: '', toolbar: 'grid', sorts: NEWEST, bar: 'default'};
 export const pageOf = route => PAGES[route.page] || UNKNOWN;
+// 主区的全部种类（index.html 里各有一个元素），ui/dom.js 的 showArea 按它切换。
+export const AREAS = [...new Set(list.map(p => p.area))];
 // 屏幕上看到的那一页：角色筛选下是角色页，否则就是 route.page。char 默认取路由的 char；渲染标题和元数据重画时
 // 要看角色有没有读到，传 state.char。
 export const viewOf = (route, char = route.char) => char ? CHARACTER : pageOf(route);
-export const pageNames = () => list.map(p => p.name);
 // 单图快捷键在这页的范围（见上面的 keys 字段）：'grid'、'shown' 或 ''。
 export const keyScope = view => view.keys || (view.area === 'grid' ? 'grid' : '');
 // 本页的后端 pool 是不是这几个之一（条目离开本页的判断：设为角色之后离开未识别、排除之后离开已排除……）。
@@ -111,6 +112,7 @@ export const poolIs = (route, ...pools) => pools.includes(pageOf(route).pool);
 //   help(r), helpHint    标题旁「?」里的说明（一行一句）；helpHint 为真时再接上本页的 hint，一个「·」一行（#527）
 //   onMeta(info)         计数等元数据到达后重画什么；没有的页面重画工具栏
 //   emptyNext(r)         网格空了时空状态下面的去处（链接或 data-empty 按钮的 HTML，#386 的 2-12）；没有的页面只有一句话
+//   emptyAct(act)        点了 emptyNext 里的 data-empty 按钮（「显示全部」由 shell 自己处理）
 //   reveal(uuid)         主区不是网格的页面把这张图滚进视野：详情栏、大图翻页时，和面板页借列表看的大图关掉时（#424）
 //   refresh(why)         数据变了之后重画面板页：'edit' 改动之后、'undo' 撤销之后、'learned' 确认或撤销后后台学习
 //                        收尾之后（#400）、'sync' 同步到新图之后、'nsfw' 切换 R18 之后、'view' 视图选项之后、

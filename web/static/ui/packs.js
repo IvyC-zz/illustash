@@ -3,9 +3,8 @@
 // ui/tasks.js 列出；状态、轮询和请求在 core/packs.js。两个包的回复形状相同，只有名字和几句文字不同（PACK_UI）。
 // 用户点「下载」之前什么都不下载；导入只读用户选的文件；启用、重新检查和撤回都不联网。
 import {t, tb} from '../core/i18n.js';
-import {esc, bytes, number, localTime} from '../core/format.js';
+import {esc, bytes, number, localTime, home} from '../core/format.js';
 import {state} from '../core/state.js';
-import {home} from '../core/human.js';
 import {packDownloading, packRunning, packFinished, packDownloadFinished, loadPack, onPack, packageAction, enablePack, withdrawPack,
   cancelPack} from '../core/packs.js';
 import {$, toast, fold, busy} from './dom.js';
