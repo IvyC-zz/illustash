@@ -284,11 +284,16 @@ impl Imports {
         *current = Some(Current { task, state, reason, kind, generation });
         Ok(answer)
     }
-    /// 这个会话的识别导入已被接受或正在运行：同步和索引写入要等它。
+    /// 识别交付或正在检查长尾包时，同步和索引写入要等它。
     pub(crate) fn recognition_running(&self, generation: u64) -> bool {
-        lock_ignoring_poison(&self.current).as_ref().is_some_and(|c| {
-            (c.kind == Kind::Recognition || c.kind.ccip()) && c.generation == generation && c.task.running()
-        })
+        self.active_kind(generation).is_some_and(|kind| kind == Kind::Recognition || kind.ccip())
+    }
+
+    pub(crate) fn active_kind(&self, generation: u64) -> Option<Kind> {
+        lock_ignoring_poison(&self.current)
+            .as_ref()
+            .filter(|c| c.generation == generation && c.task.running())
+            .map(|c| c.kind)
     }
     pub(crate) fn cancel_import(&self) -> Json {
         self.cancel_where(CANCELLED, |c| !c.kind.ccip())

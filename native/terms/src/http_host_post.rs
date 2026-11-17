@@ -26,6 +26,7 @@ pub(super) fn handle(request: Request, host: &Host, received: u64, text: &str, b
         "/api/diagnostics/open-logs" => {
             return reply(request, crate::app_desktop::request("POST", "/platform/diagnostics/open-logs", 5), false);
         }
+        "/api/wd-extension/package" => return wd_package(request, host, received, body, &translate),
         "/api/models" => return models(request, host, body, &translate),
         "/api/ccip-longtail/package" => return ccip_package(request, host, received, body, &translate),
         url if url.starts_with("/api/files/") => return files(request, host, received, &body, &translate),
@@ -73,7 +74,8 @@ pub(super) fn handle(request: Request, host: &Host, received: u64, text: &str, b
     }
     match request.url() {
         "/api/human-conclusions/export" => {
-            let result = session.human_exports.start(&session.library, session.generation, &session.token);
+            let result = wd_idle(&session)
+                .and_then(|()| session.human_exports.start(&session.library, session.generation, &session.token));
             drop(session);
             return reply(request, result, true);
         }
@@ -83,7 +85,8 @@ pub(super) fn handle(request: Request, host: &Host, received: u64, text: &str, b
             return reply(request, result, true);
         }
         "/api/human-conclusions/import" | "/api/human-conclusions/restore" => {
-            let result = human_import(host, &session, &body, request.url().ends_with("/restore"));
+            let result = wd_idle(&session)
+                .and_then(|()| human_import(host, &session, &body, request.url().ends_with("/restore")));
             drop(session);
             return reply(request, result, true);
         }
@@ -119,12 +122,12 @@ pub(super) fn handle(request: Request, host: &Host, received: u64, text: &str, b
             return reply_if_current(request, host, received, result, true);
         }
         "/api/recognition/import" => {
-            let started = recognition_import(host, &session, &body);
+            let started = wd_idle(&session).and_then(|()| recognition_import(host, &session, &body));
             drop(session);
             return reply(request, started.map(started_task), true);
         }
         "/api/libraries/import" => {
-            let started = library_import(host, &session, &body);
+            let started = wd_idle(&session).and_then(|()| library_import(host, &session, &body));
             drop(session);
             return reply(request, started.map(started_task), true);
         }
@@ -261,7 +264,7 @@ fn choose(request: Request, host: &Host, received: u64, body: &Json, translate: 
 /// 期间不持有会话。
 fn models(request: Request, host: &Host, mut body: Json, translate: Translate) {
     if body.get("action").map(Json::text) == Some("import") && body.get("paths").is_none() {
-        match model_paths(translate) {
+        match model_paths("models", translate) {
             Ok(Some(paths)) => body.set("paths", paths),
             Ok(None) => return cancelled(request),
             Err(e) => return failure(request, e, true),
@@ -274,8 +277,81 @@ fn models(request: Request, host: &Host, mut body: Json, translate: Translate) {
     };
     reply(request, crate::app_models::post(&host.root, &body, in_use), true);
 }
-fn model_paths(translate: Translate) -> Result<Option<Json>> {
-    let picked = crate::app_platform::choose("models", true, &crate::platform_process::stopping, translate)
+fn wd_package(request: Request, host: &Host, received: u64, mut body: Json, translate: Translate) {
+    if body.get("action").map(Json::text) == Some("import") && body.get("paths").is_none() {
+        if !matches!(&body, Json::Object(fields) if fields.len() == 1) {
+            return failure(request, Error::invalid("未知参数"), true);
+        }
+        match model_paths("wd-extension", translate) {
+            Ok(Some(paths)) => body.set("paths", paths),
+            Ok(None) => return cancelled(request),
+            Err(e) => return failure(request, e, true),
+        }
+    }
+    // 包文件全应用共用，同一宿主里的并发命令按序交给独立下载槽。
+    let session = host.session.write().expect("WD 角色扩展包会话锁中毒");
+    if !host.accepts(&session, received) || header(&request, "X-CSRF-Token") != Some(&session.token) {
+        return expired(request);
+    }
+    let result =
+        crate::app_models::extension_post(&host.root, &body).and_then(|()| host.wd_status(&session)).map(Json::from);
+    drop(session);
+    reply(request, result, true);
+}
+
+fn wd_extension(url: &str, host: &Host, session: &mut Session, body: &Json) -> Result<Json> {
+    use crate::app_wd_extension::Action;
+    if url.ends_with("/cancel") {
+        let Some(Json::Scalar(serde_json::Value::String(id))) = body.get("id") else {
+            return Err(Error::invalid("需要 WD 角色扩展任务编号"));
+        };
+        if id.is_empty() || !matches!(body, Json::Object(fields) if fields.len() == 1) {
+            return Err(Error::invalid("WD 角色扩展任务编号不合法"));
+        }
+        session.wd_extension.cancel(id)?;
+        return host.wd_status(session).map(Json::from);
+    }
+    if !matches!(body, Json::Object(fields) if fields.is_empty()) {
+        return Err(Error::invalid("WD 角色扩展请求字段不正确"));
+    }
+    if session.wd_extension.running() {
+        return Err(wd_running());
+    }
+    let mut snapshot = host.wd_status(session)?;
+    match snapshot["library"]["blocked"].as_str() {
+        Some("frozen") => return Err(Error::Conflict("图库只读".into())),
+        Some("syncing") => return Err(Error::Conflict("正在同步或交付识别结果，请等它结束".into())),
+        Some("busy") => return Err(Error::Conflict("图库正在导入、导出或更新角色索引，请等它结束".into())),
+        Some("no_vectors") if url.ends_with("/enable") => {
+            return Err(Error::Conflict("这个图库没有已保存的 WD 向量".into()));
+        }
+        _ => {}
+    }
+    let action = if url.ends_with("/withdraw") {
+        Action::Withdraw
+    } else {
+        let path =
+            crate::app_models::extension_file(&host.root)?.ok_or_else(|| Error::Conflict("扩展包还没就位".into()))?;
+        Action::Enable(path)
+    };
+    let identity = crate::app_tasks::TaskIdentity::new(&session.library, session.generation, &session.token)?;
+    snapshot["task"] = session.wd_extension.start_for(&session.library, identity, action)?;
+    Ok(snapshot.into())
+}
+
+fn wd_idle(session: &Session) -> Result<()> {
+    if session.wd_extension.running() {
+        return Err(wd_running());
+    }
+    Ok(())
+}
+
+fn wd_running() -> Error {
+    Error::Conflict("WD 角色扩展任务正在进行，请等它结束".into())
+}
+
+fn model_paths(kind: &str, translate: Translate) -> Result<Option<Json>> {
+    let picked = crate::app_platform::choose(kind, true, &crate::platform_process::stopping, translate)
         .map_err(management_error)?;
     Ok(picked.get("paths").filter(|v| matches!(v, Json::Array(list) if !list.is_empty())).cloned())
 }
@@ -288,7 +364,7 @@ fn ccip_status_current(host: &Host, received: u64) -> Result<Json> {
 }
 fn ccip_package(request: Request, host: &Host, received: u64, mut body: Json, translate: Translate) {
     if body.get("action").map(Json::text) == Some("import") && body.get("paths").is_none() {
-        match model_paths(translate) {
+        match model_paths("models", translate) {
             Ok(Some(paths)) => body.set("paths", paths),
             Ok(None) => return cancelled(request),
             Err(e) => return failure(request, e, true),
@@ -401,6 +477,7 @@ fn longtail(host: &Host, session: &Session, withdraw: bool) -> Result<Json> {
     if session.library.frozen() {
         return Err(Error::Conflict("图库只读".into()));
     }
+    wd_idle(session)?;
     if session.syncer.running() || session.index.writing() {
         return Err(Error::Conflict("正在同步或更新角色索引，请稍后重试".into()));
     }
@@ -545,7 +622,7 @@ fn route(
         }
         "/api/index" => {
             let library = session.library.clone();
-            let busy = session.syncer.running();
+            let busy = session.syncer.running() || session.wd_extension.running();
             if host.imports.recognition_running(session.generation)
                 && matches!(body.get("action").map(Json::text), Some("apply" | "drop"))
             {
@@ -557,6 +634,9 @@ fn route(
         "/api/names" => {
             let library = session.library.clone();
             session.names.post(&library, body)
+        }
+        "/api/wd-extension/enable" | "/api/wd-extension/withdraw" | "/api/wd-extension/cancel" => {
+            wd_extension(url, host, session, body)
         }
         "/api/sync" => sync(host, received, session),
         "/api/similar" | "/api/regroup" => research(url, session, body),
@@ -584,7 +664,9 @@ fn route(
         )
         .map_err(management_error),
         "/api/libraries/forget" => forget(session, body),
-        "/api/libraries/export" => host.exports.start(&session.library, session.generation),
+        "/api/libraries/export" => {
+            wd_idle(session).and_then(|()| host.exports.start(&session.library, session.generation))
+        }
         "/api/integrity" => Ok(session.check_now()),
         "/api/integrity/rescue" => crate::app_create::optional_reference(&host.reference)
             .and_then(|reference| session.start_rescue(reference.map(Path::to_owned))),
@@ -593,6 +675,7 @@ fn route(
     })
 }
 fn sync(host: &Host, received: u64, session: &mut Session) -> Result<Json> {
+    wd_idle(session)?;
     if session.index.writing() {
         return Err(Error::Invalid("角色索引正在更新，请稍后".into()));
     }
@@ -617,6 +700,7 @@ fn research(url: &str, session: &mut Session, body: &Json) -> Result<Json> {
     session.research.start(&lib, kind, serde_json::json!({}), None).map(|_| Json::object([("started", true.into())]))
 }
 fn sources(url: &str, received: u64, session: &mut Session, body: &Json) -> Result<Json> {
+    wd_idle(session)?;
     // 进行中的同步持有一份固定的来源副本；只在两次同步之间修改来源。
     if session.syncer.running() || session.index.writing() {
         return Err(Error::Invalid("正在同步或更新角色索引，请稍后再修改来源".into()));

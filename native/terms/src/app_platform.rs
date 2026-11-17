@@ -15,12 +15,12 @@ pub fn choose(
         "library" => illustash_platform::picker::Kind::Library,
         "zip" => illustash_platform::picker::Kind::Zip,
         "archive" => illustash_platform::picker::Kind::Archive,
-        "models" => illustash_platform::picker::Kind::Models,
+        "models" | "wd-extension" => illustash_platform::picker::Kind::Models,
         "human-conclusions" => illustash_platform::picker::Kind::HumanConclusions,
         "export" => illustash_platform::picker::Kind::Export,
         _ => return Err(Error::Invalid("未知的选择类型".into())),
     };
-    if multiple && !matches!(kind, "folder" | "models") {
+    if multiple && !matches!(kind, "folder" | "models" | "wd-extension") {
         return Err(Error::Invalid("此类型不支持多选".into()));
     }
     if crate::app_desktop::available() {
@@ -44,7 +44,7 @@ pub fn choose(
         }
         return Ok(selection(kind, paths, multiple));
     }
-    let title = translate(choice_kind.title());
+    let title = translate(if kind == "wd-extension" { "从文件导入…" } else { choice_kind.title() });
     let choice = illustash_platform::picker::choose(choice_kind, &title, multiple, stopping, Duration::from_secs(600))?;
     let paths = match choice {
         illustash_platform::picker::Choice::Selected(paths) => paths,

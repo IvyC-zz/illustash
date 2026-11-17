@@ -20,13 +20,6 @@ impl Extension {
             Self::Ccip => (crate::ccip_longtail::SOURCE, crate::ccip_longtail::METHOD),
         }
     }
-
-    fn candidate(self) -> &'static str {
-        match self {
-            Self::Wd => "WD_EXT",
-            Self::Ccip => "CCIP_LONGTAIL",
-        }
-    }
 }
 
 type Active = BTreeMap<i64, (String, BTreeSet<i64>)>;
@@ -189,7 +182,7 @@ pub(crate) fn images_of<'a>(c: &Connection, terms: impl Iterator<Item = &'a str>
     Ok(images.into_iter().collect())
 }
 
-pub(crate) fn fill_unassigned(c: &Connection, scoped: bool, extension: Extension) -> Result<()> {
+pub(crate) fn fill_unassigned(c: &Connection, scoped: bool) -> Result<()> {
     let hybrid = character_projection::policy(c)?;
     let (entities, family, restrictions) = if hybrid {
         (
@@ -212,22 +205,25 @@ pub(crate) fn fill_unassigned(c: &Connection, scoped: bool, extension: Extension
         )
     };
     let scope = if scoped { "AND v.uuid IN (SELECT uuid FROM touched)" } else { "" };
-    // 旧候选与人工结论已投影完成。扩展分数只在同一张图的扩展候选中比较。
+    // 基础候选与人工结论已投影完成。已有扩展来源优先，余下的按固定来源顺序取候选。
+    // 分数只在同一来源的候选之间比较。
     c.execute(
         &format!(
             "WITH eligible AS (
-               SELECT v.uuid,{family} AS entity,v.score,
-                      row_number() OVER(PARTITION BY v.uuid ORDER BY v.score DESC,{family},v.entity) AS n
+               SELECT v.uuid,{family} AS entity,v.score,v.source,
+                      row_number() OVER(PARTITION BY v.uuid
+                        ORDER BY p.source IS v.source DESC,v.source='WD_EXT' DESC,v.score DESC,{family},v.entity) AS n
                FROM candidates v JOIN assets a ON a.uuid=v.uuid JOIN {entities}
                JOIN terms f ON f.key={family} JOIN term_tree r ON r.term_id=f.id AND r.mascot=0
-               WHERE v.source=?1 {scope} AND {restrictions}
+               LEFT JOIN previous_extension_sources p ON p.uuid=v.uuid
+               WHERE v.source IN ('WD_EXT','CCIP_LONGTAIL') {scope} AND {restrictions}
                  AND NOT EXISTS(SELECT 1 FROM memberships m WHERE m.uuid=v.uuid)
                  AND NOT EXISTS(SELECT 1 FROM family_confirmed m WHERE m.uuid=v.uuid))
              INSERT INTO memberships
-             SELECT uuid,entity,'machine','machine',?1,score,1,0,printf('001%020.12f1',score)
+             SELECT uuid,entity,'machine','machine',source,score,1,0,printf('001%020.12f1',score)
              FROM eligible WHERE n=1"
         ),
-        [extension.candidate()],
+        [],
     )?;
     Ok(())
 }

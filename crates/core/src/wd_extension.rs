@@ -20,11 +20,20 @@ pub struct Hit {
 
 /// 以给定冻结包的命中更新整个图库的 WD 扩展候选。调用方持有核心写事务。
 pub fn apply(c: &Connection, package: &str, hits: &[Hit]) -> Result<usize> {
+    publish(c, package, None, hits)
+}
+
+/// 只替换本次扫描范围内的 WD 扩展候选。调用方持有核心写事务。
+pub fn apply_scoped(c: &Connection, package: &str, scope: &[String], hits: &[Hit]) -> Result<usize> {
+    publish(c, package, Some(scope), hits)
+}
+
+fn publish(c: &Connection, package: &str, scope: Option<&[String]>, hits: &[Hit]) -> Result<usize> {
     character_extension::apply(
         c,
         Extension::Wd,
         package,
-        None,
+        scope,
         hits.iter().map(|h| (h.uuid.as_str(), h.tag.as_str(), h.probability)),
     )
 }

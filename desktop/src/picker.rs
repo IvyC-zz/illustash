@@ -12,11 +12,12 @@ pub fn choose(app: &AppHandle, kind: &str, multiple: bool) -> Result<Value, Stri
         "zip" => tr("选择导出的图库（.zip）"),
         "archive" => tr("选择 X 数据归档（.zip）"),
         "models" => tr("选择下载好的模型文件（.onnx、.json 或 .zip）"),
+        "wd-extension" => tr("从文件导入…"),
         "human-conclusions" => tr("选择人工结论文件（.illustash-human.jsonl）"),
         "export" => tr("选择导出到的文件夹"),
         _ => return Err(tr("未知的选择类型")),
     };
-    if multiple && !matches!(kind, "folder" | "models") {
+    if multiple && !matches!(kind, "folder" | "models" | "wd-extension") {
         return Err(tr("此类型不支持多选"));
     }
     let mut dialog = app.dialog().file().set_title(title);
@@ -27,6 +28,7 @@ pub fn choose(app: &AppHandle, kind: &str, multiple: bool) -> Result<Value, Stri
         "folder" if multiple => dialog.blocking_pick_folders(),
         "folder" | "library" | "export" => dialog.blocking_pick_folder().map(|p| vec![p]),
         "models" => dialog.add_filter(tr("模型文件"), &["onnx", "json", "zip"]).blocking_pick_files(),
+        "wd-extension" => dialog.add_filter(tr("模型文件"), &["bin", "zip"]).blocking_pick_files(),
         "human-conclusions" => dialog.add_filter(tr("人工结论"), &["jsonl"]).blocking_pick_file().map(|p| vec![p]),
         _ => dialog.add_filter("ZIP", &["zip"]).blocking_pick_file().map(|p| vec![p]),
     };

@@ -493,6 +493,14 @@ struct Task {
 #[derive(Default)]
 pub(crate) struct Exports(Mutex<Option<Task>>, AtomicBool);
 impl Exports {
+    pub(crate) fn running(&self) -> bool {
+        self.0
+            .lock()
+            .expect("app_archives mutex poisoned")
+            .as_ref()
+            .is_some_and(|task| task.handle.as_ref().is_some_and(|handle| !handle.is_finished()))
+    }
+
     pub(crate) fn state(&self, library: &Library, generation: u64) -> Json {
         let tasks = self.0.lock().expect("app_archives mutex poisoned");
         tasks

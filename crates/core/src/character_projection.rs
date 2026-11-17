@@ -176,6 +176,21 @@ pub fn legacy_memberships(c: &Connection) -> Result<()> {
 fn memberships_in(c: &Connection, uuids: Option<&[String]>, core: bool) -> Result<()> {
     touch(c, uuids)?;
     let ids = uuids.map(|u| u.iter().collect::<std::collections::BTreeSet<_>>());
+    if core {
+        // 两个包都命中时保留已有扩展归属的来源。基础规则仍先计算。
+        c.execute_batch(
+            "CREATE TEMP TABLE IF NOT EXISTS previous_extension_sources(uuid TEXT PRIMARY KEY,source TEXT NOT NULL);
+             DELETE FROM previous_extension_sources;",
+        )?;
+        let scope = if uuids.is_some() { "AND uuid IN (SELECT uuid FROM touched)" } else { "" };
+        c.execute(
+            &format!(
+                "INSERT INTO previous_extension_sources
+                      SELECT uuid,sources FROM memberships WHERE sources IN ('WD_EXT','CCIP_LONGTAIL') {scope}"
+            ),
+            [],
+        )?;
+    }
     if uuids.is_none() {
         // 两张归属表共享同一组规则结果；原规则及排序键原样计算，临时集合仅存在于这次事务。
         c.execute_batch("DROP TABLE IF EXISTS temp.projected_membership_rules;")?;
@@ -208,9 +223,8 @@ fn memberships_in(c: &Connection, uuids: Option<&[String]>, core: bool) -> Resul
         c.execute_batch("DROP TABLE temp.projected_membership_rules;")?;
     }
     if core {
-        use crate::character_extension::{fill_unassigned, Extension};
-        fill_unassigned(c, uuids.is_some(), Extension::Wd)?;
-        fill_unassigned(c, uuids.is_some(), Extension::Ccip)?;
+        crate::character_extension::fill_unassigned(c, uuids.is_some())?;
+        c.execute_batch("DELETE FROM previous_extension_sources;")?;
     }
     let scope = if uuids.is_some() {
         " WHERE d.grp IN (SELECT grp FROM duplicates WHERE uuid IN (SELECT uuid FROM touched))"

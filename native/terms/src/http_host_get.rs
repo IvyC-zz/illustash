@@ -84,7 +84,7 @@ pub(super) fn ccip_status(host: &Host, session: &Session, started: Option<Json>)
         Some("frozen")
     } else if session.syncer.running() || session.index.writing() {
         Some("syncing")
-    } else if host.imports.busy() {
+    } else if session.wd_extension.running() || host.imports.busy() {
         Some("busy")
     } else if local["vectors"] == 0 {
         Some("no_vectors")
@@ -253,6 +253,7 @@ fn read(request: &Request, host: &Host, session: &Session, path: &str) -> Result
                 session.names.status(&session.library).map(|v| Some((v, 200)))
             }
         }
+        "/api/wd-extension" => host.wd_status(session).map(|v| Some((v.into(), 200))),
         "/api/sync" => session.syncer.status(&session.library).map(|p| Some((p, 200))),
         "/api/integrity" => Ok(Some((session.integrity(), 200))),
         // 全应用范围（#191）：检查更新的选项和上次结果，不属于图库。
