@@ -28,15 +28,6 @@
     },
     {
       "kind": "rust",
-      "crate": "native/terms",
-      "id": "integrity::checks_after_a_crash_in_the_background_and_on_request_and_stop_writing_on_damage",
-      "platforms": ["macos"],
-      "issue": 473,
-      "added": "2026-11-15",
-      "expires": "2026-11-29"
-    },
-    {
-      "kind": "rust",
       "crate": "desktop",
       "id": "server::tests::forced_cleanup_includes_descendants_and_leaves_bystander_alive",
       "platforms": ["macos"],
