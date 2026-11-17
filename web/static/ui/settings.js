@@ -25,7 +25,7 @@ import {drawGuide, drawNudge, replayGuide} from './guide.js';
 import {renderIntegrityLine} from './integrity.js';
 import {renderModelsCard} from './models.js';
 import {PACK_KEYS, PACK_UI, packCardBody, packNote} from './packs.js';
-import {loadPack, onPack} from '../core/packs.js';
+import {loadPack, loadCatalog, onPack} from '../core/packs.js';
 import {openModal} from './overlay.js';
 import {renderHumanBlock, onHumanClick, wireHuman} from './human.js';
 import {loadHuman} from '../core/human.js';
@@ -428,6 +428,8 @@ export async function renderSettings(fetchMissing = true, refresh = false) {
   if (state.index?.works) renderIndexCard(false);
   if (state.names) renderNamesCard(false);
   for (const key of PACK_KEYS) if ($(PACK_UI[key].card)) renderPackCard(key, fetchMissing);
+  // 签名目录里的新版本（#602）：画卡片时读一次本机缓存的目录，不联网。
+  if (PACK_KEYS.some(key => $(PACK_UI[key].card)) && (fetchMissing || !state.packCatalog)) loadCatalog().catch(() => {});
   wireFolds(page);
   for (const box of page.querySelectorAll('[data-fold]')) box.onchange = async () => {
     const kinds = [...page.querySelectorAll('[data-fold]:checked')].map(b => b.dataset.fold);
@@ -867,6 +869,7 @@ function redrawUpdates() {
 }
 
 // 设置各页的处理函数，以及读取或更改它们的数据之后要做的事。页面启动时调用一次。
+let catalogChecked;
 export function wireSettings() {
   // 名称联网授权和检查更新的按钮不只在设置页里（搜索结果下面的「允许查询…」、导览里的更新提示），所以在 document 上
   // 用一个监听接住（#432 ③-9，原来是三个）。
@@ -884,6 +887,8 @@ export function wireSettings() {
     else if (what === 'pixiv') toast(detail.error ? detail.error.message : t('已绑定 Pixiv：{name}', {name: detail.bound.name || detail.bound.user_id}));
     else if (what === 'updates') {
       drawNudge(); drawUpdateButton();
+      // 检查更新时后端顺带读了包目录（#602）：检查时间变了就重读一次。
+      if (state.updates?.checked_at !== catalogChecked) { catalogChecked = state.updates?.checked_at; if (state.packCatalog) loadCatalog().catch(() => {}); }
       for (const el of document.querySelectorAll('.set-scope[data-scope="browser"]')) el.outerHTML = scope('browser');
       if ($('aboutUpdates')) $('aboutUpdates').innerHTML = updatesLine();
       // 显示它的设置页只在有变化时重画，绝不在用户输入时重画；下载进度只改上面那一行。

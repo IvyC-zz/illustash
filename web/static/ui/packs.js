@@ -1,12 +1,13 @@
 // 角色数据包（#550 WD 角色扩展、#559 CCIP 长尾包）：「设置 › 角色资料」里每个包一张卡片的状态行、按钮、失败列表和包信息，
 // 三个确认框，任务面板里每个包一项，以及结束时的提示。卡片本身由 ui/settings.js 画（cardHead 在那里），任务面板的项由
 // ui/tasks.js 列出；状态、轮询和请求在 core/packs.js。两个包的回复形状相同，只有名字和几句文字不同（PACK_UI）。
-// 用户点「下载」之前什么都不下载；导入只读用户选的文件；启用、重新检查和撤回都不联网。
-import {t, tb} from '../core/i18n.js';
+// 用户点「下载」之前什么都不下载；导入只读用户选的文件；启用、重新检查和撤回都不联网。签名目录里有更新的版本时（#602），
+// 卡片多一行「有新版本」：点了才下载，下好以后点了才换（已启用的图库）。目录只跟着检查更新读，这里从不联网读目录。
+import {t, tb, I18N} from '../core/i18n.js';
 import {esc, bytes, number, localTime, home} from '../core/format.js';
 import {state} from '../core/state.js';
 import {packDownloading, packRunning, packFinished, packDownloadFinished, loadPack, onPack, packageAction, enablePack, withdrawPack,
-  cancelPack} from '../core/packs.js';
+  cancelPack, packOffer} from '../core/packs.js';
 import {$, toast, fold, busy} from './dom.js';
 import {confirmAction} from './dialog.js';
 
@@ -166,7 +167,9 @@ export function packFailures(key, x = current(key)) {
 // 导入对所选的每个文件做了什么。只在这个页面发起的导入结束后列出：WD 扩展包整个 App 一份，导入结果也是，换了图库
 // （页面重新载入）或别的窗口导入的不列。按包记。
 const importedHere = new Set();
-const RESULT = {accepted: () => t('已接收'), mismatch: () => t('SHA-256 不符，已拒绝'), already: () => t('已经有了')};
+const RESULT = {accepted: () => t('已接收'), mismatch: () => t('SHA-256 不符，已拒绝'), already: () => t('已经有了'),
+  // 离线包里的包目录和签名（#602）。
+  catalog: () => t('包目录，已读取'), catalog_old: () => t('包目录比本机的旧，没有采用'), catalog_invalid: () => t('包目录签名不对，已拒绝')};
 export function packImportSummary(key, x = current(key)) {
   const d = x?.download; if (!importedHere.has(key) || d?.kind !== 'import' || !d.results?.length || packDownloading(x)) return '';
   const what = r => r.result === 'unknown' ? ui(key).unknown() : RESULT[r.result]?.() || esc(r.result);
@@ -190,9 +193,33 @@ export function packStatus(key, x = current(key)) {
   return `<div class="setting-line set-status"><span><span class="local-dot${dot ? ' ' + dot : ''}"></span>${text}</span>`
     + `${link ? `<button class="quiet small" data-open-tasks>${t('在任务面板查看')}</button>` : ''}</div>`;
 }
-// 卡片正文（标题之后）：状态行、进度、失败或导入结果、按钮和折叠区。
+// 「有新版本」一行（#602）：签名目录里比卡片上的版本新的最新一个。没下载时可以下载；正在下载时进度在上面的状态行；
+// 下好以后已启用的图库可以换成它（没启用的图库卡片上直接就是它）。纯文本和按钮，没有新版本时为空。
+export function packOfferLine(key, x = current(key), offer = packOffer(key)) {
+  if (!x || !offer || x.package?.file?.sha256 === offer.file?.sha256) return '';
+  const n = number(offer.heads || 0), m = offer.candidate_only || 0;
+  const what = m ? t('有新版本：{n} 个角色，其中 {m} 个只给候选', {n, m: number(m)}) : t('有新版本：{n} 个角色', {n});
+  const note = offer.note && (I18N.language === 'zh-CN' ? offer.note['zh-CN'] : offer.note.en);
+  const downloading = offer.downloading && packDownloading(x);
+  const failed = offer.downloading && x.download?.kind === 'download' && x.download.status === 'failed' && offer.status !== 'ready';
+  const busyNow = packDownloading(x) || packRunning(x), off = busyNow ? ` disabled title="${t('正在下载或检查，等它结束')}"` : '';
+  let act = '';
+  if (offer.status === 'ready') {
+    const blocked = blockedReason(key, x);
+    act = lib(x).enabled ? button(key, 'offer-switch', t('换成新版本…'), 'primary', blocked ? ` disabled title="${esc(blocked)}"` : off) : '';
+  } else if (!downloading) {
+    const size = bytes(offer.file?.size || 0), left = bytes(Math.max(0, (offer.file?.size || 0) - (offer.have || 0)));
+    const label = failed ? t('重试') : offer.status === 'partial' ? t('继续下载新版本（还差 {left}）', {left}) : t('下载新版本（约 {size}）', {size});
+    act = button(key, 'offer-download', label, lib(x).enabled ? 'quiet' : 'primary', off);
+  }
+  const hint = [failed ? esc(t('新版本没能下载：{reason}', {reason: tb(x.download.message || '') || t('每个来源都试过了')})) : '',
+    note ? `<bdi>${esc(note)}</bdi>` : ''].filter(Boolean).join(' · ');
+  return `<div class="setting-line"><span>${esc(what)}${hint ? `<small class="line-hint">${hint}</small>` : ''}</span></div>`
+    + (act ? `<div class="models-acts">${act}</div>` : '');
+}
+// 卡片正文（标题之后）：状态行、进度、失败或导入结果、按钮、新版本和折叠区。
 export const packCardBody = (key, x = current(key)) => !x ? '<p class="muted-note">…</p>'
-  : `${packStatus(key, x)}${packBar(key, x)}${packFailures(key, x)}${packImportSummary(key, x)}<div class="models-acts">${packActions(key, x)}</div>${packInfo(key, x)}`;
+  : `${packStatus(key, x)}${packBar(key, x)}${packFailures(key, x)}${packImportSummary(key, x)}<div class="models-acts">${packActions(key, x)}</div>${packOfferLine(key, x)}${packInfo(key, x)}`;
 export const packNote = (key, x = current(key)) => ui(key).note(number(pkg(x).heads || 0));
 
 // 任务面板的一项：下载或导入、启用、撤回共用。运行中和结束后都列出来（同导入、导出）。
@@ -220,6 +247,10 @@ export function finishedText(key, task, before, x = current(key)) {
   return more(images ? t('{name}已启用：{n} 张图有扩展候选', {name, n: number(images)}) : t('{name}已启用，没有找到扩展候选', {name}));
 }
 export function downloadText(key, d, x = current(key)) {
+  // 下的是新版本（#602）：卡片上的版本没变，提示说新版本。
+  if (packOffer(key)?.downloading && d.kind === 'download') {
+    return d.status === 'done' ? t('新版本已下载') : d.status === 'failed' ? t('新版本没能下载：{reason}', {reason: tb(d.message || '')}) : '';
+  }
   if (d.status === 'failed' && d.kind === 'download') return packLine(key, x);
   return ready(x) && d.status === 'done' ? ui(key).arrived() : '';
 }
@@ -228,6 +259,12 @@ export function downloadText(key, d, x = current(key)) {
 export function enableMessage(key, x = current(key)) {
   const n = lib(x).vectors;
   return ui(key).scan(n != null ? number(n) : null) + t('还没有归属、也没有人工确认的图会补上一个机器归属，已有的归属和人工结论不变。以后可以撤回。');
+}
+// 换成新版本（#602）：要重新检查的张数，换掉的是旧版本给的候选和归属；新版本里只给候选的角色写明不补归属。
+export function switchMessage(key, offer = packOffer(key), x = current(key)) {
+  const n = lib(x).vectors, m = offer?.candidate_only || 0;
+  return ui(key).scan(n != null ? number(n) : null) + t('旧版本给出的扩展候选和由它补上的归属换成新版本的结果，已有的其他归属和人工结论不变。')
+    + (m ? t('其中 {m} 个角色只给候选，不补归属。', {m: number(m)}) : '') + t('以后可以撤回。');
 }
 // 两个包可以同时启用，撤回只去掉这一个包给的：写包名。
 export function withdrawMessage(key, x = current(key)) {
@@ -242,6 +279,12 @@ async function act(key, what) {
   if (what !== 'import') importedHere.delete(key);
   try {
     if (what === 'download') await packageAction(key, 'download');
+    else if (what === 'offer-download') await packageAction(key, 'download', packOffer(key)?.version);
+    else if (what === 'offer-switch') {
+      const offer = packOffer(key); if (!offer) return;
+      if (!await confirmAction(switchMessage(key, offer), t('换成新版本'), t('换成新版本'))) return;
+      await enablePack(key, offer.version);
+    }
     else if (what === 'import') { const r = await packageAction(key, 'import'); if (!r?.cancelled) importedHere.add(key); }
     else if (what === 'package-cancel') await packageAction(key, 'cancel');
     else if (what === 'discard') {

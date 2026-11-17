@@ -384,7 +384,8 @@ impl WorkerInputs {
         let snapshot =
             crate::recognition_compute::anchor_snapshot::Snapshot::load_checked(&shared, &library.source(), &check)?;
 
-        let longtail = crate::app_ccip_longtail::prepare_delivery(library, root, &shared, &snapshot.fingerprint, &check);
+        let longtail =
+            crate::app_ccip_longtail::prepare_delivery(library, root, &shared, &snapshot.fingerprint, &check);
         check()?;
         Ok(Self { identity: identity.clone(), snapshot, models, longtail, root: root.to_owned(), shared })
     }

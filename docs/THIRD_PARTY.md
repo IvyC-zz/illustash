@@ -81,6 +81,8 @@ python3 tools/gen_rust_licenses.py
 
 WD 角色扩展 v1（#534）从 Illustash 0.3 起支持，通过项目的 GitHub 模型 Release `wd-extension-v1` 单独分发 `wd-extension-v1.bin`（应用下载）、`wd-extension-v1.zip`（手动下载）和 `SHA256SUMS.txt`。二者中的同一冻结模型文件为 940,701 字节，SHA-256 为 `9da0365457e479eff189150926289c6cf8325cd9bb98c0bd2504c26d7dcae471`，含 228 个分类头和固定阈值 `0.8008725047111511`。随安装包提供模型公告、Apache-2.0 许可和 Character Index 声明的 MIT 许可文本。复封入口见 [构建脚本](../tools/build_wd_extension.py)，启用与撤回见 [安装说明](INSTALL.md#可选的-wd-角色扩展包)。
 
+WD 角色扩展 v2（#555、#602）不随应用发布，列在签名的包目录里（见 [开发说明](DEVELOPMENT.md#发布角色数据包)），从 Illustash 0.3 起可用。模型 Release `wd-extension-v2` 分发 `wd-extension-v2.bin`（应用下载）和离线包 `wd-extension-v2-offline.zip`（包文件、签名的包目录和下述许可文本）。模型文件为 1,065,048 字节，SHA-256 为 `f9157a71244607a81f751b5cfbd0e40b6ccbdb1e901bfe2a883ceed7e4a193ff`，格式 `illustash-wd-extension/1`，257 个分类头，全部一级：前 228 个头的标签、顺序、权重、偏置和阈值与 v1 逐项相同，另 29 个头用逐头阈值（0.5–0.99）。新增头的数据来源、独立盲测和旧角色误报口径见 [#551 的验收](https://github.com/shio-vinyl/illustash/issues/551#issuecomment-6911924088) 和其后的扩容验收评论；图片、逐图结果和角色明细不公开。
+
 扩展文件按 Apache-2.0 分发。分类头用公开 Danbooru 样本在冻结的 WD 向量上独立拟合，底座为 SmilingWolf 的 WD SwinV2 Tagger v3 经 DeepGHS 重导出的向量模型（固定提交 `4ec31f2aeabf66353f3ee3ccd20d2f07e716851b`）。DeepGHS Character Index（MIT，固定提交 `5ee6075ff09f82c27e23f33044b9f9cabaf1e8c3`）用于筛选原索引未覆盖的角色。扩展模型文件包含词表、参数、阈值与底座指纹。ZIP 附 Apache-2.0 原文、两份 WD 模型卡、Character Index 的归属和 MIT 许可、`NOTICE.txt` 与 `provenance.json`。原始图片的版权归各原作者。[实验输入和评测口径](https://github.com/shio-vinyl/illustash/issues/534#issuecomment-6907588551)
 
 **随包的许可原文**（2026-10-16，#8；2026-10-19 起不论带不带模型，#168）：原文提交在 `packaging/model-licenses/`，是打包的唯一来源。`sources.json` 登记每个文件的上游地址和 SHA-256。每个计算包（`--research`）都把这个目录整份按原字节放进 `resources/licenses/models/`；文件缺失、多出、内容与登记不符，打包都会报错，不会产出半成品。Windows 和 macOS 安装包的暂存步骤也把这些文件列为必需组件。

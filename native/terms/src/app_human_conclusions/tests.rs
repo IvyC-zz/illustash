@@ -340,7 +340,12 @@ fn withdrawn_wd_extension_keeps_history_and_allows_import_undo() {
             wd_extension::apply(
                 tx,
                 "synthetic",
-                &[wd_extension::Hit { uuid: "image".into(), tag: tag.into(), probability: 0.95, candidate_only: false }],
+                &[wd_extension::Hit {
+                    uuid: "image".into(),
+                    tag: tag.into(),
+                    probability: 0.95,
+                    candidate_only: false,
+                }],
             )
         },
         wd_extension::withdraw,

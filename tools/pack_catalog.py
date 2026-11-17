@@ -280,8 +280,9 @@ def check_signed(catalog_path, signature_path=None, pubkey=None):
     return verify(data, signature_path.read_text(encoding='utf-8'), pubkey)
 
 
-def offline(catalog_path, package_path, output, signature_path=None):
-    """离线包：根上是 packs.json、packs.json.sig 和包文件（名字照目录里的）。"""
+def offline(catalog_path, package_path, output, signature_path=None, extra=()):
+    """离线包：根上是 packs.json、packs.json.sig 和包文件（名字照目录里的），再加 `extra` 里的许可文本等。应用导入时
+    把认不出的成员列为「不是扩展包」，不影响包文件。"""
     catalog_path, package_path = Path(catalog_path), Path(package_path)
     signature_path = Path(signature_path or str(catalog_path) + '.sig')
     catalog = json.loads(catalog_path.read_bytes())
@@ -290,8 +291,11 @@ def offline(catalog_path, package_path, output, signature_path=None):
     if not found:
         raise CatalogError(f'{package_path.name} 不在这份目录里')
     with zipfile.ZipFile(output, 'w', zipfile.ZIP_DEFLATED) as archive:
-        for name, body in ((CATALOG_NAME, catalog_path.read_bytes()), (SIGNATURE_NAME, signature_path.read_bytes()),
-                           (found[0]['file']['name'], data)):
+        members = [(CATALOG_NAME, catalog_path.read_bytes()), (SIGNATURE_NAME, signature_path.read_bytes()),
+                   (found[0]['file']['name'], data)] + [(Path(path).name, Path(path).read_bytes()) for path in extra]
+        if len({name for name, _ in members}) != len(members):
+            raise CatalogError('离线包里的文件重名')
+        for name, body in members:
             archive.writestr(zipfile.ZipInfo(name, date_time=(2026, 1, 1, 0, 0, 0)), body)
 
 
@@ -334,6 +338,7 @@ def main(argv=None):
     bundle.add_argument('--catalog', type=Path, required=True)
     bundle.add_argument('--file', type=Path, required=True)
     bundle.add_argument('--output', type=Path, required=True)
+    bundle.add_argument('--extra', type=Path, action='append', default=[], help='一起放进去的许可文本等，可重复')
     args = parser.parse_args(argv)
     try:
         if args.command == 'keygen':
@@ -370,7 +375,7 @@ def main(argv=None):
         else:
             if not check_signed(args.catalog):
                 print('提示：没装 cryptography，签名只核对了密钥编号', file=sys.stderr)
-            offline(args.catalog, args.file, args.output)
+            offline(args.catalog, args.file, args.output, extra=args.extra)
             print(f'已写出 {args.output}')
         return 0
     except (CatalogError, OSError, ValueError, KeyError, subprocess.CalledProcessError) as error:

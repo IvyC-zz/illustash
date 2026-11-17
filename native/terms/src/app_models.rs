@@ -810,7 +810,10 @@ fn import_into(
     }
     let raw_archive = places.iter().any(|place| place.raw_archive);
     let wanted = |size: u64| {
-        places.iter().enumerate().find_map(|(i, place)| place.manifest.files.iter().find(|e| e.size == size).map(|e| (i, e)))
+        places
+            .iter()
+            .enumerate()
+            .find_map(|(i, place)| place.manifest.files.iter().find(|e| e.size == size).map(|e| (i, e)))
     };
     let mut results = Vec::new();
     let mut meter = Meter::new(models, 0);
@@ -947,7 +950,8 @@ pub(crate) fn info(resources: &Path) -> Result<Json> {
 
 static CCIP_LONGTAIL: Models = Models::new();
 
-const LONGTAIL_MANUAL: &str = "https://github.com/shio-vinyl/illustash/blob/main/docs/INSTALL.md#可选的-ccip-长尾角色参考包";
+const LONGTAIL_MANUAL: &str =
+    "https://github.com/shio-vinyl/illustash/blob/main/docs/INSTALL.md#可选的-ccip-长尾角色参考包";
 
 /// 某个版本的参考包放在共享数据的 `extensions/<版本>/` 下（内置的是 `extensions/ccip-longtail-v1/`）。
 fn longtail_place(resources: &Path, pack: &crate::app_packs::Pack) -> Result<Place> {
@@ -1140,6 +1144,10 @@ pub(crate) struct WdExtension {
     pub heads: usize,
     pub license: String,
     pub base_sha256: String,
+    /// WD 标签表的 SHA-256。models.json 不写（就是随包的 tags_v3.csv）；走查清单可以写合成标签表的（#602 判断目录里
+    /// 的包和这个构建的模型对不对得上时用）。
+    #[serde(default)]
+    pub tags_sha256: Option<String>,
     pub file: Entry,
 }
 
@@ -1243,7 +1251,9 @@ fn pack_manifest(pack: &crate::app_packs::Pack, manual: &str) -> Result<&'static
     let mut known = MANIFESTS.lock().expect("数据包清单锁中毒");
     if let Some(found) = known.iter().find(|m| {
         m.pack == pack.version
-            && m.files.first().is_some_and(|e| e.sha256 == pack.file.sha256 && matches!(&e.source, Source::Project { url: u } if *u == url))
+            && m.files.first().is_some_and(|e| {
+                e.sha256 == pack.file.sha256 && matches!(&e.source, Source::Project { url: u } if *u == url)
+            })
     }) {
         return Ok(found);
     }

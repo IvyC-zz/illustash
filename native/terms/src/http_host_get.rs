@@ -59,7 +59,8 @@ fn packs(host: &Host, session: &Session) -> Result<Json> {
                 let progress = crate::app_models::pack_progress(&host.root, &pack)?;
                 view["status"] = progress["status"].clone();
                 view["have"] = progress["have"].clone();
-                view["downloading"] = (crate::app_models::pack_job_version(kind).as_deref() == Some(&pack.version)).into();
+                view["downloading"] =
+                    (crate::app_models::pack_job_version(kind).as_deref() == Some(&pack.version)).into();
                 view
             }
             None => serde_json::Value::Null,

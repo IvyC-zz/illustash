@@ -688,9 +688,7 @@ mod tests {
         let legacy = 0.8008725047111511;
         let high = f64::from(0.99_f32);
         let labels = |n: usize| (0..n).map(|i| format!("test_{i}")).collect::<Vec<_>>();
-        let base = |format: &str, n: usize| {
-            json!({"format":format,"wd_model_sha256":"model","wd_tags_sha256":"tags","labels":labels(n)})
-        };
+        let base = |format: &str, n: usize| json!({"format":format,"wd_model_sha256":"model","wd_tags_sha256":"tags","labels":labels(n)});
         // 内置 v1：统一阈值，全部一级。
         let mut v1 = base(WD_FORMAT_V1, 3);
         v1["threshold"] = legacy.into();
@@ -759,7 +757,9 @@ mod tests {
         let assets = ["one", "two", "three"];
         let source = writer(&f.library.source()).unwrap();
         source
-            .execute_batch("CREATE TABLE IF NOT EXISTS embeddings(uuid TEXT,model TEXT,vec BLOB,PRIMARY KEY(uuid,model))")
+            .execute_batch(
+                "CREATE TABLE IF NOT EXISTS embeddings(uuid TEXT,model TEXT,vec BLOB,PRIMARY KEY(uuid,model))",
+            )
             .unwrap();
         for (i, uuid) in assets.iter().enumerate() {
             let mut wd = vec![0f32; DIM];
@@ -794,7 +794,8 @@ mod tests {
         let baseline = (snapshot(&app, members), snapshot(&app, candidates), snapshot(&app, active));
         let state = || enabled(&app).unwrap().map(|e| e.package_sha256);
         let key = |uuid: &str| -> String {
-            app.query_row("SELECT entity FROM candidates WHERE uuid=?1 AND source='WD_EXT'", [uuid], |r| r.get(0)).unwrap()
+            app.query_row("SELECT entity FROM candidates WHERE uuid=?1 AND source='WD_EXT'", [uuid], |r| r.get(0))
+                .unwrap()
         };
 
         // v1：一个头，只认第一张图。
@@ -822,7 +823,10 @@ mod tests {
         );
         assert_eq!(tier, vec![json!(["role_one", null]), json!(["role_three", 2]), json!(["role_two", null])]);
         // 同一个一级头在两个版本里分数相同，但证据行按包分开记。
-        assert_eq!(snapshot(&app, "SELECT DISTINCT version FROM term_current_evidence WHERE source='wd_extension'").len(), 3);
+        assert_eq!(
+            snapshot(&app, "SELECT DISTINCT version FROM term_current_evidence WHERE source='wd_extension'").len(),
+            3
+        );
 
         // 之后别的操作按图或整库重算归属时，二级候选照样不补归属。
         f.write(|tx| {
@@ -893,7 +897,8 @@ mod tests {
                     "indexed":"2026-11-16","index":{},"labels":[],"decisions":[],"duplicates":[]}),
             )?;
             let a = [ccip_longtail::Hit { uuid: asset.clone(), tag: "longtail_role".into(), score: 0.85 }];
-            let b = [Hit { uuid: asset.clone(), tag: "extension_role".into(), probability: 0.99, candidate_only: false }];
+            let b =
+                [Hit { uuid: asset.clone(), tag: "extension_role".into(), probability: 0.99, candidate_only: false }];
             let scope = std::slice::from_ref(&asset);
             let sources = || snapshot(tx, "SELECT sources FROM memberships WHERE uuid='overlap'");
             let candidates = || snapshot(tx, "SELECT source FROM candidates WHERE uuid='overlap' ORDER BY source");

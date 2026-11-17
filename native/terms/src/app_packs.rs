@@ -260,7 +260,8 @@ impl Catalog {
             && short(&raw.license, 200)
             && raw.note.as_ref().is_none_or(|n| short(&n.zh, 200) && short(&n.en, 200));
         if !valid {
-            return Err(bad(&format!("条目 {} 的字段不合法", raw.version.chars().take(64).collect::<String>())));
+            let version = raw.version.chars().take(64).collect::<String>();
+            return Err(bad(&format!("条目 {version} 的字段不合法")));
         }
         let min_app = Version::parse(&raw.min_app).ok_or_else(|| bad("最低应用版本不是 X.Y.Z"))?;
         let hex = |v: &Option<String>| v.as_deref().filter(|s| hex64(s)).map(str::to_owned);
@@ -269,9 +270,9 @@ impl Catalog {
                 model: hex(&raw.base.wd_model_sha256).ok_or_else(|| bad("缺少 WD 模型的 SHA-256"))?,
                 tags: hex(&raw.base.wd_tags_sha256).ok_or_else(|| bad("缺少 WD 标签表的 SHA-256"))?,
             },
-            Some(Kind::Ccip) => {
-                Base::Ccip { model: hex(&raw.base.ccip_model_sha256).ok_or_else(|| bad("缺少 CCIP 模型的 SHA-256"))? }
-            }
+            Some(Kind::Ccip) => Base::Ccip {
+                model: hex(&raw.base.ccip_model_sha256).ok_or_else(|| bad("缺少 CCIP 模型的 SHA-256"))?,
+            },
             // 以后的种类：结构照查，本版本不提供。
             None => Base::Ccip { model: String::new() },
         };
@@ -346,7 +347,10 @@ pub(crate) fn builtin_wd() -> Result<Pack> {
         heads: spec.heads,
         candidate_only: 0,
         file: File { name, size, sha256, url },
-        base: Base::Wd { model: spec.base_sha256.clone(), tags: WD_TAGS_SHA256.into() },
+        base: Base::Wd {
+            model: spec.base_sha256.clone(),
+            tags: spec.tags_sha256.clone().unwrap_or_else(|| WD_TAGS_SHA256.into()),
+        },
         license: spec.license.clone(),
         note: None,
         builtin: true,
@@ -398,16 +402,17 @@ fn configured(text: &str) -> Option<String> {
 /// 用 Tauri 格式的公钥核对 Tauri 格式的签名（`cargo tauri signer sign` 写的 `.sig`）。只认预哈希的签名（minisign 的
 /// `ED`），和 `cargo tauri signer` 写出的一样。
 pub(crate) fn verify(bytes: &[u8], signature: &[u8], pubkey: &str) -> Result<()> {
-    let decode = |text: &[u8], what: &str| -> Result<String> {
-        let raw = STANDARD
-            .decode(text.iter().copied().filter(|b| !b.is_ascii_whitespace()).collect::<Vec<_>>())
-            .map_err(|_| Error::invalid(format!("包目录的{what}不是 Tauri 写的格式")))?;
-        String::from_utf8(raw).map_err(|_| Error::invalid(format!("包目录的{what}不是 Tauri 写的格式")))
+    let decode = |text: &[u8]| -> Option<String> {
+        let raw =
+            STANDARD.decode(text.iter().copied().filter(|b| !b.is_ascii_whitespace()).collect::<Vec<_>>()).ok()?;
+        String::from_utf8(raw).ok()
     };
-    let key = minisign_verify::PublicKey::decode(&decode(pubkey.as_bytes(), "公钥")?)
-        .map_err(|_| Error::invalid("包目录的公钥无效"))?;
-    let signature = minisign_verify::Signature::decode(&decode(signature, "签名")?)
-        .map_err(|_| Error::invalid("包目录的签名无效"))?;
+    let key = decode(pubkey.as_bytes())
+        .and_then(|text| minisign_verify::PublicKey::decode(&text).ok())
+        .ok_or_else(|| Error::invalid("包目录的公钥无效"))?;
+    let signature = decode(signature)
+        .and_then(|text| minisign_verify::Signature::decode(&text).ok())
+        .ok_or_else(|| Error::invalid("包目录的签名无效"))?;
     key.verify(bytes, &signature, false).map_err(|error| match error {
         minisign_verify::Error::UnexpectedKeyId => Error::invalid("包目录不是用数据包的密钥签的"),
         _ => Error::invalid("包目录的签名对不上"),
@@ -480,7 +485,8 @@ fn adopt_at(path: &Path, bytes: &[u8], signature: &[u8], key: &str) -> Result<Ad
             return Err(bad("和本机已有的目录序号相同、内容不同"));
         }
     }
-    let envelope = json!({"format":CACHE_FORMAT,"catalog":STANDARD.encode(bytes),"signature":STANDARD.encode(signature)});
+    let envelope =
+        json!({"format":CACHE_FORMAT,"catalog":STANDARD.encode(bytes),"signature":STANDARD.encode(signature)});
     fs::create_dir_all(path.parent().expect("目录缓存有上级文件夹"))?;
     let tmp = path.with_extension(format!("{}.tmp", crate::store::new_key()?));
     let written = fs::write(&tmp, envelope.to_string() + "\n").and_then(|()| fs::rename(&tmp, path));
@@ -540,7 +546,8 @@ pub(crate) fn adopt_archives(resources: &Path, paths: &[PathBuf]) -> Vec<(String
             item.take(limit + 1).read_to_end(&mut bytes).ok()?;
             (bytes.len() as u64 <= limit).then_some(bytes)
         };
-        let (Some(bytes), Some(signature)) = (member(CATALOG_NAME, CATALOG_LIMIT), member(SIGNATURE_NAME, SIGNATURE_LIMIT))
+        let (Some(bytes), Some(signature)) =
+            (member(CATALOG_NAME, CATALOG_LIMIT), member(SIGNATURE_NAME, SIGNATURE_LIMIT))
         else {
             continue;
         };

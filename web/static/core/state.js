@@ -36,7 +36,8 @@ export const state = {
   // ---- 识别模型的状态：core/models.js ----
   models: null,
   // ---- 角色数据包的状态（wd：GET /api/wd-extension，#550；ccip：GET /api/ccip-longtail，#559）：core/packs.js ----
-  packs: {wd: null, ccip: null},
+  // packCatalog 是签名目录里的新版本（GET /api/packs，#602）。
+  packs: {wd: null, ccip: null}, packCatalog: null,
   // ---- 画廊列表（GET /api/galleries，#445）：core/galleries.js ----
   galleries: null,
   // ---- 上手引导的进度：ui/guide.js ----

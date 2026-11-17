@@ -111,13 +111,18 @@ fn catalog_fields_are_checked_entry_by_entry() {
         ("文件过大", Box::new(|c| c["packs"][0]["file"]["size"] = (FILE_LIMIT + 1).into())),
         (
             "地址不在本项目的 Release",
-            Box::new(|c| c["packs"][0]["file"]["url"] = "https://example.com/wd-extension-v2/wd-extension-v2.bin".into()),
+            Box::new(|c| {
+                c["packs"][0]["file"]["url"] = "https://example.com/wd-extension-v2/wd-extension-v2.bin".into()
+            }),
         ),
         (
             "地址里的文件名和 name 不同",
             Box::new(|c| c["packs"][0]["file"]["url"] = format!("{RELEASE_PREFIX}wd-extension-v2/other.bin").into()),
         ),
-        ("地址没有 tag", Box::new(|c| c["packs"][0]["file"]["url"] = format!("{RELEASE_PREFIX}wd-extension-v2.bin").into())),
+        (
+            "地址没有 tag",
+            Box::new(|c| c["packs"][0]["file"]["url"] = format!("{RELEASE_PREFIX}wd-extension-v2.bin").into()),
+        ),
         ("文件名带路径", Box::new(|c| c["packs"][0]["file"]["name"] = "../wd-extension-v2.bin".into())),
         ("版本名带路径", Box::new(|c| c["packs"][0]["version"] = "wd/extension".into())),
         ("版本名有 ..", Box::new(|c| c["packs"][0]["version"] = "wd..v2".into())),
@@ -130,7 +135,10 @@ fn catalog_fields_are_checked_entry_by_entry() {
         ("缺 WD 标签表", Box::new(|c| c["packs"][0]["base"] = json!({"wd_model_sha256": "a".repeat(64)}))),
         ("CCIP 缺模型", Box::new(|c| c["packs"][0]["kind"] = "ccip-longtail".into())),
         ("缺字段", Box::new(|c| drop(c["packs"][0].as_object_mut().unwrap().remove("min_app")))),
-        ("条目过多", Box::new(|c| c["packs"] = json!((1..=65).map(|i| entry(&format!("v{i}"), i)).collect::<Vec<_>>()))),
+        (
+            "条目过多",
+            Box::new(|c| c["packs"] = json!((1..=65).map(|i| entry(&format!("v{i}"), i)).collect::<Vec<_>>())),
+        ),
     ];
     for (what, change) in broken {
         let mut value = good.clone();
@@ -237,7 +245,8 @@ fn card_shows_the_enabled_or_newest_present_version_and_offers_newer_ones() {
     // 启用的版本不在可用列表里（目录不再列它）：按没启用算。
     assert_eq!(card(Some(&sha(9)), &["v1"]), "v1");
 
-    let offered = |version: &str| offer(&packs, packs.iter().find(|p| p.version == version).unwrap()).map(|p| p.version);
+    let offered =
+        |version: &str| offer(&packs, packs.iter().find(|p| p.version == version).unwrap()).map(|p| p.version);
     assert_eq!(offered("v1").as_deref(), Some("v3"));
     assert_eq!(offered("v2").as_deref(), Some("v3"));
     assert_eq!(offered("v3"), None);

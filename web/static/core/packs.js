@@ -8,7 +8,8 @@ import {listeners} from './events.js';
 const changed = listeners();
 export const onPack = changed.on;
 
-// 包 → 路由。界面上的名字和文字在 ui/packs.js。
+// 包 → 路由。界面上的名字和文字在 ui/packs.js。签名目录里的新版本（#602）另读 GET /api/packs，存在 state.packCatalog：
+// {catalog, wd: {current, offer}, ccip: {current, offer}}；读到后对两个包各通知一次 onPack（before 是没变的那个包状态）。
 export const PACKS = {wd: '/api/wd-extension', ccip: '/api/ccip-longtail'};
 export const packDownloading = x => x?.download?.status === 'running';
 export const packRunning = x => x?.task?.status === 'running';
@@ -21,8 +22,21 @@ async function adopt(key, value, mine, token) {
   clearTimeout(timers[key]);
   if (packDownloading(value) || packRunning(value)) timers[key] = setTimeout(() => loadPack(key).catch(() => {}), 1000);
   await changed.emit(key, before);
+  // 下载、导入或启用（换包）刚结束：卡片上的版本和「新版本」那一行可能变了，重读一次目录。
+  if (packDownloadFinished(before, value) || packFinished(before, value)) loadCatalog().catch(() => {});
   return value;
 }
+let catalogPoll = 0;
+export async function loadCatalog() {
+  const mine = ++catalogPoll, token = session.token;
+  const value = await api('/api/packs');
+  if (mine !== catalogPoll || token !== session.token) return state.packCatalog;
+  state.packCatalog = value;
+  for (const key of Object.keys(PACKS)) await changed.emit(key, state.packs[key]);
+  return value;
+}
+// 卡片上「有新版本」的那个版本（没有时为 null）。
+export const packOffer = key => state.packCatalog?.[key]?.offer || null;
 export function loadPack(key) {
   const mine = polls[key] = (polls[key] || 0) + 1, token = session.token;
   return api(PACKS[key]).then(value => adopt(key, value, mine, token));
@@ -34,10 +48,10 @@ async function send(key, path, body) {
   const value = await api(PACKS[key] + path, {method: 'POST', body: JSON.stringify(body)});
   return value.cancelled ? value : adopt(key, value, mine, token);
 }
-// download、import、cancel、discard、delete。
-export const packageAction = (key, action) => send(key, '/package', {action});
-// 启用和重新检查是同一个路由。
-export const enablePack = key => send(key, '/enable', {});
+// download、import、cancel、discard、delete。下载带 version 时下载目录里的那个版本（#602）。
+export const packageAction = (key, action, version) => send(key, '/package', version ? {action, version} : {action});
+// 启用和重新检查是同一个路由；带 version 时换成那个版本。
+export const enablePack = (key, version) => send(key, '/enable', version ? {version} : {});
 export const withdrawPack = key => send(key, '/withdraw', {});
 // 只在扫描阶段有效；写入阶段后端回 409。
 export const cancelPack = (key, id = state.packs[key]?.task?.id) => send(key, '/cancel', {id});

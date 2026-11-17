@@ -391,3 +391,125 @@ test('两个包各走各的路由，状态互不覆盖', async () => {
   assert.equal(c.state.packs.wd.package.status, 'ready');
   assert.equal(c.state.packs.ccip.package.status, 'ready');
 });
+
+// ---------- 签名目录里的新版本（#602）：卡片上的「有新版本」一行、换包确认框、离线包的导入结果 ----------
+const OFFER = (fields = {}) => ({kind: 'wd-extension', version: 'wd-extension-v2', revision: 2, format: 'illustash-wd-extension/1', heads: 257,
+  candidate_only: 0, license: 'Apache-2.0', builtin: false, note: {'zh-CN': '比第一版多认 29 个角色', en: '29 more characters than the first version'},
+  file: {path: 'wd-extension-v2.bin', size: 1065048, sha256: 'f9'.repeat(32)}, status: 'missing', have: 0, downloading: false, ...fields});
+const catalogOf = (offer, ccipOffer = null) => ({catalog: {configured: true, serial: 1, checked_at: null, error: null},
+  wd: {current: {version: 'wd-extension-v1'}, offer}, ccip: {current: {version: 'ccip-longtail-v1'}, offer: ccipOffer}});
+
+test('有新版本：没下载时下载，下了一部分接着下，正在下载时进度在状态行；没有新版本时什么都不画', () => {
+  c.state.packCatalog = catalogOf(OFFER());
+  const enabled = ext({package: READY, library: ENABLED});
+  let html = c.packOfferLine('wd', enabled);
+  assert.match(html, /^<div class="setting-line"><span>有新版本：257 个角色<small class="line-hint"><bdi>比第一版多认 29 个角色<\/bdi><\/small><\/span><\/div>/);
+  assert.deepEqual(buttons(html).map(b => [b.act, b.label, b.cls]), [['offer-download', '下载新版本（约 1.1 MB）', 'quiet small']]);
+  // 卡片正文里，新版本一行在按钮之后、折叠区之前。
+  const body = c.packCardBody('wd', enabled);
+  assert.ok(body.indexOf('有新版本') > body.indexOf('data-pack="wd:withdraw"') && body.indexOf('有新版本') < body.indexOf('扩展包</summary>'));
+  // 没启用的图库（卡片上是本机已有的旧版本）：下载是主按钮。
+  assert.match(buttons(c.packOfferLine('wd', ext({package: READY})))[0].cls, /primary/);
+  c.state.packCatalog = catalogOf(OFFER({status: 'partial', have: 65048}));
+  assert.deepEqual(labels(c.packOfferLine('wd', enabled)), ['继续下载新版本（还差 1.0 MB）']);
+  // 正在下载新版本：进度和取消在上面的状态行，这一行不放按钮。
+  c.state.packCatalog = catalogOf(OFFER({downloading: true}));
+  const downloading = ext({package: READY, library: ENABLED, download: {kind: 'download', status: 'running', done: 1, total: 9}});
+  assert.deepEqual(labels(c.packOfferLine('wd', downloading)), []);
+  assert.match(c.packOfferLine('wd', downloading), /有新版本：257 个角色/);
+  // 正在下载别的东西、或在检查：按钮禁用。
+  c.state.packCatalog = catalogOf(OFFER());
+  assert.match(buttons(c.packOfferLine('wd', ext({package: READY, library: ENABLED, task: {id: 't', kind: 'enable', status: 'running', phase: 'scan'}})))[0].attrs, /disabled/);
+  // 二级头写明只给候选。
+  c.state.packCatalog = catalogOf(OFFER({heads: 2100, candidate_only: 1872, note: null}));
+  assert.match(c.packOfferLine('wd', enabled), /<span>有新版本：2,100 个角色，其中 1,872 个只给候选<\/span>/);
+  c.state.packCatalog = catalogOf(null);
+  assert.equal(c.packOfferLine('wd', enabled), '');
+  c.state.packCatalog = catalogOf(OFFER({file: {...OFFER().file, sha256: SHA}}));
+  assert.equal(c.packOfferLine('wd', enabled), '', '新版本就是卡片上的这个');
+  c.state.packCatalog = null;
+  assert.equal(c.packOfferLine('wd', enabled), '', '还没读到目录');
+  assert.equal(c.packOfferLine('wd', null), '');
+});
+
+test('有新版本：下好以后已启用的图库可以换；下载失败写原因、可以重试；说明按界面语言', () => {
+  const enabled = ext({package: READY, library: ENABLED});
+  c.state.packCatalog = catalogOf(OFFER({status: 'ready', have: 1065048}));
+  assert.deepEqual(buttons(c.packOfferLine('wd', enabled)).map(b => [b.act, b.label, b.cls]), [['offer-switch', '换成新版本…', 'primary small']]);
+  const blocked = c.packOfferLine('wd', ext({package: READY, library: {...ENABLED, blocked: 'syncing'}}));
+  assert.match(buttons(blocked)[0].attrs, /disabled title="正在同步，等它结束"/);
+  c.state.packCatalog = catalogOf(OFFER({downloading: true}));
+  const failed = ext({package: READY, library: ENABLED, download: {kind: 'download', status: 'failed', message: '连接被重置'}});
+  const html = c.packOfferLine('wd', failed);
+  assert.match(html, /新版本没能下载：连接被重置 · <bdi>比第一版多认 29 个角色<\/bdi>/);
+  assert.deepEqual(buttons(html).map(b => [b.act, b.label]), [['offer-download', '重试']]);
+  assert.equal(c.downloadText('wd', failed.download, failed), '新版本没能下载：连接被重置');
+  assert.equal(c.downloadText('wd', {kind: 'download', status: 'done'}, enabled), '新版本已下载');
+  c.state.packCatalog = null;
+  assert.equal(c.downloadText('wd', {kind: 'download', status: 'done'}, enabled), '扩展包已就位');
+});
+
+test('换成新版本的确认框写明要检查的张数、换掉什么、二级头不补归属', () => {
+  const x = ext({package: READY, library: ENABLED});
+  assert.equal(c.switchMessage('wd', OFFER(), x),
+    '用扩展包检查本图库 120 张图。旧版本给出的扩展候选和由它补上的归属换成新版本的结果，已有的其他归属和人工结论不变。以后可以撤回。');
+  assert.match(c.switchMessage('wd', OFFER({candidate_only: 1872}), x), /不变。其中 1,872 个角色只给候选，不补归属。以后可以撤回。$/);
+});
+
+test('有新版本：下载和换包的请求带版本；换包先确认，取消什么都不发', async () => {
+  const page = web.fakePage();
+  const answers = [], titles = [];
+  page.document.body.append = d => { titles.push(d.attributes['aria-label']); d.showModal = () => { d.returnValue = answers.shift(); d.onclose(); }; };
+  c.wirePacks();
+  const click = async act => {
+    const b = {dataset: {pack: 'wd:' + act}, disabled: false};
+    for (const fn of page.el('settingsPage').listeners.click) await fn({target: {closest: s => s === '[data-pack]' ? b : null}});
+  };
+  c.state.route = {page: 'settings'};
+  c.state.packs.wd = ext({package: READY, library: ENABLED});
+  c.state.packCatalog = catalogOf(OFFER({status: 'ready'}));
+  const calls = server(Array.from({length: 4}, () => ({body: ext({package: READY, library: ENABLED})})));
+  await click('offer-download');
+  answers.push('cancel');
+  await click('offer-switch');
+  assert.deepEqual(titles, ['换成新版本']);
+  answers.push('ok');
+  await click('offer-switch');
+  assert.deepEqual(calls.map(([m, p, b]) => [m, p, b]), [
+    ['POST', '/api/wd-extension/package', {action: 'download', version: 'wd-extension-v2'}],
+    ['POST', '/api/wd-extension/enable', {version: 'wd-extension-v2'}]]);
+});
+
+test('读目录：GET /api/packs，存下后两个包各通知一次；换了图库的回复丢掉', async () => {
+  const value = catalogOf(OFFER());
+  const calls = server([{body: value}]);
+  const seen = [];
+  const off = c.onPack(key => seen.push(key));
+  await c.loadCatalog();
+  assert.deepEqual(calls, [['GET', '/api/packs', null]]);
+  assert.equal(c.state.packCatalog, value);
+  assert.deepEqual(seen, ['wd', 'ccip']);
+  assert.equal(c.packOffer('wd').version, 'wd-extension-v2');
+  assert.equal(c.packOffer('ccip'), null);
+  globalThis.fetch = async () => { c.session.token = 'library-b'; return {status: 200, ok: true, headers: {get: () => null}, json: async () => catalogOf(null)}; };
+  await c.loadCatalog();
+  assert.equal(c.state.packCatalog, value);
+  off();
+});
+
+test('离线包的导入结果：包目录读取、比本机的旧、签名不对', async () => {
+  const download = {kind: 'import', status: 'done', results: [{name: 'wd-extension-v2-offline.zip/packs.json', result: 'catalog'},
+    {name: 'old-offline.zip/packs.json', result: 'catalog_old'}, {name: 'bad-offline.zip/packs.json', result: 'catalog_invalid'},
+    {name: 'wd-extension-v2-offline.zip/wd-extension-v2.bin', result: 'accepted'}]};
+  const imported = ext({package: READY, download});
+  const page = web.fakePage();
+  c.wirePacks();
+  server([{body: imported}]);
+  for (const fn of page.el('settingsPage').listeners.click) fn({target: {closest: () => ({dataset: {pack: 'wd:import'}, disabled: false})}});
+  await new Promise(resolve => setTimeout(resolve, 10));
+  const html = c.packImportSummary('wd', imported);
+  assert.match(html, /wd-extension-v2-offline.zip\/packs.json<\/bdi> · 包目录，已读取/);
+  assert.match(html, /old-offline.zip\/packs.json<\/bdi> · 包目录比本机的旧，没有采用/);
+  assert.match(html, /bad-offline.zip\/packs.json<\/bdi> · 包目录签名不对，已拒绝/);
+  assert.match(html, /wd-extension-v2.bin<\/bdi> · 已接收/);
+});

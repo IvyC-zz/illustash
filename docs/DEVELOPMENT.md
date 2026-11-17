@@ -160,6 +160,29 @@ stderr 每行最多取前 4 KiB 在内存识别，未知非空行只记未分类
 - **私钥泄露了**：别人可以签出应用肯装的包，但还要让用户下载到它，也就是要能往本仓库的 Release 里放文件（应用只从这个版本的 Release 下载，走 HTTPS）。处理办法同上：换一对密钥、发版、请大家手动更新一次，并检查仓库的访问权限。
 - **核对是不是一对**：第 6 步的 `tools/updater_release.py manifest` 会比较签名和配置里公钥的密钥编号；不一致时停下，不会写出 latest.json。
 
+#### 发布角色数据包
+
+2026-11-17 用户定（#602）：WD 角色扩展包和 CCIP 长尾参考包单独发布，不跟软件版本走。新包写进一份签名的包目录，应用跟着检查更新读它（`native/terms/src/app_packs.rs`）；下载、启用和换包仍然只在用户点了以后发生。内置的 `wd-extension-v1`、`ccip-longtail-v1` 照旧写在程序里，离线也能用。
+
+- **两种 Release**：每个包一个 Release，tag 就是版本名（如 `wd-extension-v2`），放包文件和离线包 `<版本>-offline.zip`。包目录放在固定的 Release `packs` 里，只有 `packs.json` 和签名 `packs.json.sig` 两个文件，每次发包都整份替换。`packs` 和模型 Release 一样不能标成 Latest（第 8 步），建它时加 `--latest=false`。
+- **目录格式** `illustash-packs/1`：`serial`（正整数，每次发布加一）和 `packs` 列表。每个条目写种类（`wd-extension` 或 `ccip-longtail`）、修订号 `revision`（同一种类里越大越新）、版本名 `version`（也是 Release 的 tag 和本机 `extensions/` 下的文件夹名）、包格式 `format`、头数 `heads`、其中只给候选的二级头数 `candidate_only`、文件（`name`、`size`、`sha256`、`url`，地址必须是本项目 Release 的 `…/releases/download/<tag>/<name>`）、基础模型身份 `base`（WD 写 `wd_model_sha256` 和 `wd_tags_sha256`，CCIP 写 `ccip_model_sha256`）、最低应用版本 `min_app`（按 X.Y.Z 比，不看测试版后缀）、许可 `license`，可选的一行说明 `note`（`zh-CN`、`en`，显示在卡片的「有新版本」一行下面）。
+- **应用怎么认**：签名对不上、格式不认识、任何一条结构不对（字段缺失、SHA-256 不是 64 位小写十六进制、地址不在本项目 Release、版本名或修订号或 SHA-256 重复），整份不用。结构对的目录里，种类、包格式、基础模型（和这个构建的 `models.json`、`tags_v3.csv` 比）或最低版本不符的条目跳过，其余可以下载和导入。本机只留最近一份验过签的目录；序号比本机的小的不采用，同一序号内容不同的也不采用。
+- **包格式分级**：`illustash-wd-extension/1` 的包全部是一级头，可以另带逐头阈值 `thresholds`（第二版就是这样）。`illustash-wd-extension/2` 必须带 `thresholds` 和 `tiers`，每个头 1 或 2：一级和现在一样可以补主归属，二级只出现在「也可能是」里，永远不补主归属，也不影响已有的主归属（证据带 `tier: 2`，见[词条存储](TERMS_SCHEMA.md#16-第-10-版03)）。几千头的二级包用这个格式。CCIP 长尾参考包只有一级。
+- **目录里保留还在支持的版本**：已启用某个版本的图库，只要这个版本还在目录里（或是内置的），就照常自动检查新图；从目录里删掉一个版本，等于不再支持它，用它的图库不再自动检查，要换成别的版本或撤回。同一个版本名永远对应同一个文件：内容变了就是新版本，修订号加一。
+
+**专签数据包的密钥**：和应用更新的密钥分开，规矩相同（私钥只由用户保管，不进仓库、不交给 CI 和代理会话，不出现在 Issue、PR 和对话里；备份、丢失和泄露的处理照上一节）。用户在自己的 Mac 上运行一次 `python3 tools/pack_catalog.py keygen ~/.tauri/illustash-packs.key`：它调用 `cargo tauri signer generate`（按提示设密码，不要留空），再把公钥写进 `native/terms/pack-key.pub`，开一个普通代码级的 PR。这个 PR 合入之后打出的应用才读包目录；在那之前 `pack-key.pub` 只有说明行，应用只用内置的两个包。换钥匙要发一个新版本，旧版本仍只认旧钥匙签的目录。
+
+**发一个新包**（签名和上传由用户做，代理会话可以准备前三步）：
+
+1. 准备包文件并核对 SHA-256（复封入口见 `tools/build_wd_extension.py`、`tools/build_ccip_longtail.py`，或研究会话交付的冻结文件）。文件名改成 `<版本>.bin`（CCIP 是 `.zip`），内容不变。
+2. 写条目：`python3 tools/pack_catalog.py entry --kind wd-extension --revision 2 --file wd-extension-v2.bin --min-app 0.3.0 --note-zh '…' --note-en '…' --output wd-extension-v2.entry.json`。格式、头数、二级头数和基础模型都从包文件里读。
+3. 并进目录：先取上一份 `gh release download packs -p packs.json`（第一次发布时没有，省略 `--previous`），再 `python3 tools/pack_catalog.py build --previous packs.json --entry wd-extension-v2.entry.json --output packs.json`，序号自动加一。
+4. 签名（用户）：`python3 tools/pack_catalog.py sign --key ~/.tauri/illustash-packs.key packs.json`，写出 `packs.json.sig` 并核对。只想核对时用 `verify packs.json`（装了 `cryptography` 时完整核对签名，否则只核对密钥编号）。
+5. 离线包：`python3 tools/pack_catalog.py offline --catalog packs.json --file wd-extension-v2.bin --output wd-extension-v2-offline.zip`，要附许可文本时加 `--extra LICENSE-2.0.txt` 等。
+6. 包的 Release（用户授权后）：`gh release create wd-extension-v2 --draft --latest=false --title … --notes-file … wd-extension-v2.bin wd-extension-v2-offline.zip`，核对后公开。**先公开包，再更新目录**：目录指向的文件必须已经下得到。
+7. 更新目录（用户授权后）：`gh release upload packs packs.json packs.json.sig --clobber`；第一次用 `gh release create packs --latest=false --title "Illustash 角色数据包目录" --notes … packs.json packs.json.sig`。
+8. 核对：`curl -sL https://github.com/shio-vinyl/illustash/releases/download/packs/packs.json | python3 -m json.tool` 能读到新序号；`python3 tools/pack_catalog.py verify` 下载下来的两个文件通过；在虚拟机里点「检查更新」，卡片上出现「有新版本」，下载、换包、撤回各走一遍。
+
 ## 图库包
 
 - `library.json`：包清单、来源与已移除来源记录。
@@ -214,6 +237,7 @@ illustash/
 | `ui_walk/` | 浏览器界面走查（#453）：合成图库夹具、跨页面流程、两次运行的比较，`python3 -m tools.ui_walk run`，见 [本地验收](LOCAL_CHECKS.md#界面走查浏览器453) |
 | `version.py` | 版本号的唯一来源是 `native/terms/application.json`（#189）：检查或改写 `tauri.conf.json`、各发布 crate 的 `Cargo.toml` 与 `Cargo.lock` |
 | `updater_release.py` | 应用内更新的发布文件（#279）：打 macOS 更新包、生成 `latest.json`，步骤见上文「发布」 |
+| `pack_catalog.py` | 角色数据包的签名目录（#602）：生成专签数据包的密钥、从包文件写条目、组目录、签名、核对、打离线包，步骤见上文「发布角色数据包」；测试夹具由 `tests/fixtures/pack_catalog/make.py` 用测试密钥生成 |
 | `gen_rust_licenses.py` | 生成 `packaging/rust-licenses/` 的第三方 Rust crate 许可（#161），依赖或 `Cargo.lock` 变了要重跑 |
 | `build_wd_coreml.py` | 生成 `models.json` 固定的 WD Core ML 执行变体（#375），只在维护者构建模型 Release 时用 |
 | `mac_icon.py` | 由 `docs/assets/icon-transparent.svg` 生成 macOS App 图标（#293），只能在 macOS 上运行 |

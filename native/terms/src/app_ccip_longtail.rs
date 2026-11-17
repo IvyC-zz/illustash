@@ -422,10 +422,8 @@ pub(crate) fn apply(
     check()?;
     let mut tx = Some(tx);
     observer.publish(&mut || crate::schema::commit_writing(tx.take().expect("角色参考包只提交一次")))?;
-    Ok(
-        json!({"package_sha256":pack.file.sha256,"roles":pack.heads,"scored":count,"hits":hits.len(),"changed":changed,
-        "missing":rows.missing,"incompatible":rows.incompatible,"scan_ms":scan_ms,"publish_ms":publish.elapsed().as_millis()}),
-    )
+    Ok(json!({"package_sha256":pack.file.sha256,"roles":pack.heads,"scored":count,"hits":hits.len(),"changed":changed,
+        "missing":rows.missing,"incompatible":rows.incompatible,"scan_ms":scan_ms,"publish_ms":publish.elapsed().as_millis()}))
 }
 
 pub(crate) fn withdraw(library: &Library, observer: &dyn Observer) -> Result<Value> {
