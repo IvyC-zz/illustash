@@ -382,23 +382,6 @@ fn replay(category: &str) {
 }
 
 #[test]
-fn http_api_contract() {
-    replay("http_api");
-}
-#[test]
-fn genuine_v6_upgrade_contract() {
-    replay("upgrade_v6");
-}
-#[test]
-fn undo_and_history_contract() {
-    replay("undo_history");
-}
-#[test]
-fn interrupted_task_recovery_contract() {
-    replay("task_recovery");
-}
-
-#[test]
 fn favorite_http_contract() {
     let (_scratch, root, _) = materialize(&json!({"input": {}}), "favorites");
     let package = root.join("favorites.pilib");
@@ -614,7 +597,24 @@ fn combined_gallery_http_contract() {
     );
 }
 
-/// 把响应解析成 JSON，供契约扩展和基准读取字段。
+#[test]
+fn http_api_contract() {
+    replay("http_api");
+}
+#[test]
+fn genuine_v6_upgrade_contract() {
+    replay("upgrade_v6");
+}
+#[test]
+fn undo_and_history_contract() {
+    replay("undo_history");
+}
+#[test]
+fn interrupted_task_recovery_contract() {
+    replay("task_recovery");
+}
+
+/// 把响应解析成 JSON，供按字段断言和计时使用。
 fn request_json(origin: &str, url: &str, body: Option<&Value>, token: &str) -> (u16, Value, Map<String, Value>) {
     let (status, raw, headers) = request(origin, url, body, token);
     (status, serde_json::from_str(&raw).unwrap_or(Value::Null), headers)
