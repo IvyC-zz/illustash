@@ -8,8 +8,14 @@ use crate::{
     Error, Result,
 };
 use rusqlite::{params, params_from_iter, types::ValueRef, Connection, OpenFlags, OptionalExtension};
-use std::{cell::RefCell, collections::HashMap, sync::Arc};
+use std::{
+    cell::RefCell,
+    collections::HashMap,
+    sync::{Arc, OnceLock},
+};
 use unicode_normalization::UnicodeNormalization;
+
+const ARTIST_DIRECTORY: &str = "/api/artist-directory";
 
 #[cfg(test)]
 pub const CORE_ROUTES: &[&str] = &[
@@ -18,6 +24,7 @@ pub const CORE_ROUTES: &[&str] = &[
     "/api/ids",
     "/api/detail",
     "/api/home",
+    "/api/galleries",
     "/api/fold",
     "/api/review-pools",
     "/api/characters",
@@ -31,6 +38,7 @@ pub const CORE_ROUTES: &[&str] = &[
     "/api/user-tags",
     "/api/general-tags",
     "/api/artists",
+    ARTIST_DIRECTORY,
     "/api/artist",
     "/api/artist-audit",
     "/api/entities",
@@ -420,6 +428,7 @@ fn entities(c: &Connection, q: &str) -> Result<Json> {
     match_names(c, &q)?;
     let matched = if q.is_empty() { "" } else { "JOIN name_matches sm ON sm.entity=e.id" };
     let ranking = if q.is_empty() { "" } else { "sm.rank DESC," };
+    // 只在扩展仍提供候选，或词条已有归属或人工资料时返回扩展新建的角色。
     let sql = format!(
         "SELECT e.id,entity_name(e.id) AS name,e.work,e.kind,e.artist,e.label_only,e.mascot,e.parent_id,
            (SELECT count(*)
@@ -436,11 +445,18 @@ fn entities(c: &Connection, q: &str) -> Result<Json> {
          FROM {ENTITIES} e
          {matched}
          WHERE e.parent_id IS NULL AND e.kind<>'work' AND e.merged_into IS NULL
+           AND NOT EXISTS (
+               SELECT 1 FROM terms t WHERE t.id=e.term_id AND t.origin=?2
+               AND NOT EXISTS (SELECT 1 FROM candidates v WHERE v.entity=e.id)
+               AND NOT EXISTS (SELECT 1 FROM term_projection p WHERE p.term_id=t.id)
+               AND NOT EXISTS (SELECT 1 FROM term_names n WHERE n.term_id=t.id AND n.source='user')
+               AND NOT EXISTS (SELECT 1 FROM term_links l WHERE l.term_id=t.id AND l.source='user'))
          ORDER BY {ranking}count DESC,entity_name(e.id),e.id
          LIMIT 30",
         visible = visible("m")
     );
-    let result = rows(c, &sql, &[&like(&q)])?.into_iter().map(|v| display(c, v)).collect::<Result<Vec<_>>>()?;
+    let origin = crate::character_import::EXTENSION_CHARACTER_ORIGIN;
+    let result = rows(c, &sql, &[&like(&q), origin])?.into_iter().map(|v| display(c, v)).collect::<Result<Vec<_>>>()?;
     c.execute("DELETE FROM name_matches", [])?;
     Ok(Json::Array(result))
 }
@@ -545,10 +561,11 @@ pub(crate) fn tag_vocabulary(context: &LibraryContext) -> Result<Arc<Vec<String>
 const BROWSE_ROUTES: [&str; 7] =
     ["/api/assets", "/api/assets/count", "/api/ids", "/api/detail", "/api/home", "/api/fold", "/api/review-pools"];
 /// 会渲染名字的模块读取。计数、ID 以及原始的身份和偏好读取不渲染；它们的查询路径保持在本地。
-const NAMED_ROUTES: [&str; 8] = [
+const NAMED_ROUTES: [&str; 9] = [
     "/api/assets",
     "/api/detail",
     "/api/home",
+    "/api/galleries",
     "/api/characters",
     "/api/tagged",
     "/api/character/profile",
@@ -562,14 +579,20 @@ pub fn read(context: &LibraryContext, url: &str) -> Result<Option<(Json, u16)>> 
     let q = query(url);
     let path = url.split('?').next().unwrap_or(url);
     if path == "/api/general-tags" {
-        return Ok(Some((general_tags(context, q.get("q").map(String::as_str).unwrap_or(""))?, 200)));
+        let needle = q.get("q").map(String::as_str).unwrap_or("");
+        let tags = if q.get("format").is_some_and(|format| format == "menu") {
+            general_tag_menu(context, needle)?
+        } else {
+            general_tags(context, needle)?
+        };
+        return Ok(Some((tags, 200)));
     }
     let audit_n = match audit_size(path, &q) {
         Ok(n) => n,
         Err(message) => return Ok(refused(message)),
     };
     let local = crate::http_local::ROUTES.contains(&path);
-    let browse = BROWSE_ROUTES.contains(&path);
+    let browse = BROWSE_ROUTES.contains(&path) || path == "/api/galleries";
     let characters = crate::http_characters::ROUTES.contains(&path);
     let validation = if browse {
         crate::http_browse::validate(path, &q)
@@ -598,9 +621,16 @@ pub fn read(context: &LibraryContext, url: &str) -> Result<Option<(Json, u16)>> 
     }
     attach_provenance(&tx, context, path)?;
     if !(characters || browse || local || path == "/api/bootstrap") {
-        let result = read_library(&tx, context, path, &q, audit_n)?;
-        tx.commit()?;
-        return Ok(Some((result, 200)));
+        // 新读接口可拒绝参数。库中其他接口保留原来的错误处理。
+        let result = read_library(&tx, context, path, &q, audit_n);
+        return match result {
+            Ok(payload) => {
+                tx.commit()?;
+                Ok(Some((payload, 200)))
+            }
+            Err(Error::Invalid(m)) if path == ARTIST_DIRECTORY => Ok(refused(m)),
+            Err(e) => Err(e),
+        };
     }
     // Store.connect 在交出连接之前会探查名字开关，即使没有名字渲染器也一样。
     flag(&tx, "terms_names")?;
@@ -630,6 +660,47 @@ fn general_tags(context: &LibraryContext, q: &str) -> Result<Json> {
     let vocabulary = tag_vocabulary(context)?;
     let tags = vocabulary.iter().filter(|n| crate::casefold::casefold(n).contains(&q)).take(30);
     Ok(Json::Array(tags.map(|n| n.as_str().into()).collect()))
+}
+
+#[derive(serde::Deserialize)]
+struct GeneralTagNames {
+    zh: Option<String>,
+    ja: Option<String>,
+    #[serde(default)]
+    aliases: Vec<String>,
+}
+
+fn tag_search_key(text: &str) -> String {
+    let normalized: String = text.nfkc().map(|c| if whitespace(c) { '_' } else { c }).collect();
+    crate::casefold::casefold(&normalized)
+}
+
+fn general_tag_menu(context: &LibraryContext, q: &str) -> Result<Json> {
+    static NAMES: OnceLock<HashMap<String, GeneralTagNames>> = OnceLock::new();
+    let names = NAMES.get_or_init(|| {
+        serde_json::from_str(include_str!("../../../tags/general_names.json")).expect("内置通用标签对照表必须有效")
+    });
+    let q = cut(&tag_search_key(trim(q)), 80);
+    let vocabulary = tag_vocabulary(context)?;
+    let mut matches = Vec::new();
+    for tag in vocabulary.iter() {
+        let entry = names.get(tag);
+        let localized_match = || {
+            entry.is_some_and(|entry| {
+                entry.zh.iter().chain(&entry.ja).chain(&entry.aliases).any(|name| tag_search_key(name).contains(&q))
+            })
+        };
+        if !q.is_empty() && !tag_search_key(tag).contains(&q) && !localized_match() {
+            continue;
+        }
+        let zh = entry.and_then(|entry| entry.zh.as_deref());
+        let ja = entry.and_then(|entry| entry.ja.as_deref());
+        matches.push(Json::object([("tag", tag.as_str().into()), ("zh", zh.into()), ("ja", ja.into())]));
+        if matches.len() == 30 {
+            break;
+        }
+    }
+    Ok(Json::Array(matches))
 }
 /// /api/artist-audit 抽查多少张图（其他读取为 50），或者请求被拒绝的原因。
 fn audit_size(path: &str, q: &HashMap<String, String>) -> std::result::Result<usize, String> {
@@ -670,6 +741,11 @@ fn read_library(
     let library = context.library.is_some();
     Ok(match path {
         "/api/user-tags" => {
+            let limit =
+                q.get("limit").map(|value| python_int(value).map_err(Error::Invalid)).transpose()?.unwrap_or(60);
+            if !(1..=1000).contains(&limit) {
+                return Err(Error::invalid("分页参数不正确"));
+            }
             let sql = format!(
                 "SELECT tag,count(*) AS count
                  FROM asset_tags m
@@ -677,11 +753,12 @@ fn read_library(
                  WHERE {visible} AND tag LIKE ? ESCAPE '\\'
                  GROUP BY tag
                  ORDER BY count DESC,tag
-                 LIMIT 60",
+                 LIMIT {limit}",
                 visible = visible("m")
             );
             Json::Array(rows(c, &sql, &[&like(&cut(trim(value("q")), 60))])?)
         }
+        ARTIST_DIRECTORY => crate::http_artists::directory(c, library, q)?,
         "/api/artists" => {
             let sql = format!(
                 "SELECT artist,count(*) AS characters
@@ -747,8 +824,8 @@ mod tests {
             "CREATE TABLE meta(key TEXT PRIMARY KEY,value TEXT);
              INSERT INTO meta VALUES ('terms_names','core');
              CREATE TABLE term_links(system TEXT,key TEXT,term_id INTEGER,current INTEGER,source TEXT,added_at TEXT);
-             CREATE TABLE terms(id INTEGER PRIMARY KEY,key TEXT,kind TEXT);
-             INSERT INTO terms VALUES (1,'x','character');
+             CREATE TABLE terms(id INTEGER PRIMARY KEY,key TEXT,kind TEXT,origin TEXT NOT NULL);
+             INSERT INTO terms VALUES (1,'x','character','user');
              CREATE TABLE term_tree(term_id INTEGER PRIMARY KEY,parent_id TEXT,merged_into TEXT,work_id TEXT,
                work_text TEXT,variant TEXT,artist TEXT,label_only INTEGER,mascot INTEGER,mascot_origin TEXT,
                original INTEGER,seq INTEGER);
@@ -760,6 +837,8 @@ mod tests {
              INSERT INTO term_key_names VALUES ('work','unprojected','zh','user','未投影🙂');
              CREATE TABLE term_key_aliases(kind TEXT,key TEXT,value TEXT,position INTEGER);
              CREATE TABLE assets(uuid TEXT PRIMARY KEY);
+             CREATE TABLE candidates(uuid TEXT,entity TEXT,source TEXT,score REAL);
+             CREATE TABLE term_projection(term_id INTEGER);
              CREATE TABLE memberships(uuid TEXT,entity TEXT);
              CREATE TABLE tag_memberships(uuid TEXT,entity TEXT);
              CREATE TABLE duplicates(uuid TEXT,hidden INTEGER);

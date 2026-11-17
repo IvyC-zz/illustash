@@ -89,13 +89,16 @@ pub(crate) fn run(
     progress: Option<Progress>,
 ) -> std::result::Result<UpgradeReport, UpgradeFailure> {
     let report = upgrade(prepared, progress)?;
-    eprintln!(
-        "图库升级已提交：terms {} → {}；升级前备份：{}{}",
-        report.before,
-        report.after,
-        report.backup.display(),
-        if report.maintenance_pending { "；空间维护待重试" } else { "" }
-    );
+    // 桌面用就绪协议和图库会话报告成功，stderr 留给空间回收等真实告警。
+    if !crate::desktop_shell::is_host_child() {
+        eprintln!(
+            "图库升级已提交：terms {} → {}；升级前备份：{}{}",
+            report.before,
+            report.after,
+            report.backup.display(),
+            if report.maintenance_pending { "；空间维护待重试" } else { "" }
+        );
+    }
     Ok(report)
 }
 
@@ -490,6 +493,7 @@ mod tests {
         let report = run(&needed(&f.0).unwrap(), None).unwrap();
         assert_eq!((report.before, report.after, f.backups()), (8, crate::SCHEMA_VERSION, 1));
         let context = crate::http::LibraryContext {
+            examples: None,
             db: f.0.join("library.sqlite"),
             generation: "synthetic".into(),
             library: Some(f.0.clone()),
@@ -540,6 +544,7 @@ mod tests {
         let read = || state::read(&f.connection(), Domain::Deferred, "synthetic-a").unwrap();
         assert!(matches!(read(),State::Absent(m) if m.owner_action_id==2));
         let context = crate::http::LibraryContext {
+            examples: None,
             db: f.0.join("library.sqlite"),
             generation: "synthetic".into(),
             library: Some(f.0.clone()),

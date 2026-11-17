@@ -5,6 +5,13 @@ use crate::{Error, Result};
 use serde_json::{json, Value};
 use std::path::{Path, PathBuf};
 
+/// 子宿主已通过只读预检，等待用户同意升级。普通 CLI 的 schema 退出码仍为 4。
+pub const UPGRADE_NEEDED_EXIT: u8 = 6;
+
+pub(crate) fn is_host_child() -> bool {
+    std::env::var_os("ILLUSTASH_DESKTOP_STDIN").as_deref() == Some(std::ffi::OsStr::new("1"))
+}
+
 /// 仍能打开的最近图库，最近的在前：`[{path, name}]`。
 pub fn recent() -> Vec<Value> {
     crate::app_libraries::recent_entries()

@@ -140,8 +140,9 @@ impl Fixture {
         assert!(!data.contains("source-a.png"));
         path
     }
-    fn undo(&self, id: i64) -> Result<Json> {
-        let context = LibraryContext {
+    fn context(&self) -> LibraryContext {
+        LibraryContext {
+            examples: None,
             db: self.db.clone(),
             generation: "synthetic".into(),
             library: Some(self.root.clone()),
@@ -149,9 +150,11 @@ impl Fixture {
             tags: self.root.join("unused.csv"),
             token: Some("synthetic".into()),
             read_only: None,
-        };
+        }
+    }
+    fn undo(&self, id: i64) -> Result<Json> {
         crate::app_commands::request(
-            &context,
+            &self.context(),
             "/api/undo",
             &crate::http_json::parse_request(&json!({"id":id}).to_string()).unwrap(),
         )
@@ -164,6 +167,55 @@ impl Drop for Fixture {
     fn drop(&mut self) {
         let _ = fs::remove_dir_all(&self.root);
     }
+}
+
+#[test]
+fn favorite_snapshot_restores_fixed_key_and_undo_allows_reusing_it() {
+    use illustash_core::schema::FAVORITE_KEY;
+    let set = |f: &Fixture, ids: &[&str], add: bool| {
+        crate::app_commands::request(
+            &f.context(),
+            "/api/favorite",
+            &crate::http_json::parse_request(&json!({"ids":ids,"add":add}).to_string()).unwrap(),
+        )
+        .unwrap()
+    };
+    let confirmed = |f: &Fixture| {
+        f.count("SELECT count(*) FROM term_projection p JOIN terms t ON t.id=p.term_id WHERE t.kind='mark' AND p.state='confirmed'")
+    };
+    let source = Fixture::new("favorite-source");
+    source.asset("a", "source-a.png", 1);
+    source.asset("b", "source-b.png", 2);
+    set(&source, &["a", "b"], true);
+    set(&source, &["b"], false);
+    let path = source.root.join("favorite.illustash-human.jsonl");
+    let snapshot = capture(&source.db, &source.id, &|| Ok(())).unwrap();
+    assert_eq!(snapshot.coverage().verified, 2);
+    snapshot.write(&mut File::create(&path).unwrap()).unwrap();
+
+    let target = Fixture::new("favorite-target");
+    target.asset("moved-a", "target-a.png", 1);
+    target.asset("moved-b", "target-b.png", 2);
+    let restore = || import_file(&target.db, &target.id, &path, &|| Ok(())).unwrap();
+    let result = restore();
+    let action = result.action_id.unwrap();
+    let c = crate::open(&target.db).unwrap();
+    let (term, kind) = crate::store::term_by_key(&c, FAVORITE_KEY).unwrap().unwrap();
+    assert_eq!(kind, crate::Kind::Mark);
+    let a = crate::store::library_asset(&c, "moved-a").unwrap().unwrap();
+    let b = crate::store::library_asset(&c, "moved-b").unwrap().unwrap();
+    assert_eq!(crate::store::state(&c, a, term).unwrap().as_deref(), Some("confirmed"));
+    assert!(crate::store::state(&c, b, term).unwrap().is_none());
+    assert_eq!(target.count("SELECT count(*) FROM term_verdicts WHERE verdict='clear'"), 1);
+    assert_eq!(restore().action_id, None);
+    target.undo(action).unwrap();
+    assert_eq!(confirmed(&target), 0);
+    let again = restore().action_id.unwrap();
+    assert_eq!(confirmed(&target), 1);
+    target.undo(again).unwrap();
+    set(&target, &["moved-b"], true);
+    assert_eq!(confirmed(&target), 1);
+    assert_eq!(target.count("SELECT count(*) FROM term_records WHERE kind='mark'"), 1);
 }
 
 #[test]
@@ -282,7 +334,39 @@ fn independent_evidence_keeps_imported_definition_and_rolls_back_entire_undo() {
 
 #[test]
 fn withdrawn_wd_extension_keeps_history_and_allows_import_undo() {
-    use illustash_core::{character_entities, wd_extension};
+    use illustash_core::wd_extension;
+    withdrawn_extension_keeps_history_and_allows_import_undo(
+        |tx, tag| {
+            wd_extension::apply(
+                tx,
+                "synthetic",
+                &[wd_extension::Hit { uuid: "image".into(), tag: tag.into(), probability: 0.95 }],
+            )
+        },
+        wd_extension::withdraw,
+    );
+}
+
+#[test]
+fn withdrawn_ccip_longtail_keeps_history_and_allows_import_undo() {
+    use illustash_core::ccip_longtail;
+    withdrawn_extension_keeps_history_and_allows_import_undo(
+        |tx, tag| {
+            ccip_longtail::apply(
+                tx,
+                "synthetic",
+                &[ccip_longtail::Hit { uuid: "image".into(), tag: tag.into(), score: 0.95 }],
+            )
+        },
+        ccip_longtail::withdraw,
+    );
+}
+
+fn withdrawn_extension_keeps_history_and_allows_import_undo(
+    apply: impl Fn(&Connection, &str) -> crate::Result<usize>,
+    withdraw: impl Fn(&Connection) -> crate::Result<usize>,
+) {
+    use illustash_core::character_entities;
 
     let source = Fixture::new("source-library");
     let tag = "synthetic_character";
@@ -309,8 +393,7 @@ fn withdrawn_wd_extension_keeps_history_and_allows_import_undo() {
     let mut c = crate::open(&target.db).unwrap();
     let tx = c.transaction().unwrap();
     crate::schema::begin_writing(&tx).unwrap();
-    let hit = wd_extension::Hit { uuid: "image".into(), tag: tag.into(), probability: 0.95 };
-    assert_eq!(wd_extension::apply(&tx, "synthetic", &[hit]).unwrap(), 1);
+    assert_eq!(apply(&tx, tag).unwrap(), 1);
     crate::schema::commit_writing(tx).unwrap();
     assert_eq!(target.count("SELECT term_id FROM term_current_evidence"), first);
     assert!(matches!(target.undo(action), Err(Error::Conflict(_))));
@@ -318,7 +401,7 @@ fn withdrawn_wd_extension_keeps_history_and_allows_import_undo() {
 
     let tx = c.transaction().unwrap();
     crate::schema::begin_writing(&tx).unwrap();
-    assert_eq!(wd_extension::withdraw(&tx).unwrap(), 1);
+    assert_eq!(withdraw(&tx).unwrap(), 1);
     crate::schema::commit_writing(tx).unwrap();
     target.undo(action).unwrap();
     for table in ["terms", "term_links", "term_current_evidence", "candidates", "memberships"] {
@@ -799,7 +882,7 @@ fn linked_character(c: &Connection, key: &str, parent: Option<&str>) {
 
 #[test]
 fn family_conflicts_follow_existing_hybrid_representative() {
-    for source_parent_no in [true, false] {
+    for (source_parent_no, suspended) in [(true, false), (false, false), (true, true), (false, true)] {
         let source = Fixture::new("canonical-source");
         let target = Fixture::new("canonical-target");
         for (fixture, is_target) in [(&source, false), (&target, true)] {
@@ -807,7 +890,7 @@ fn family_conflicts_follow_existing_hybrid_representative() {
             let mut c = crate::open(&fixture.db).unwrap();
             let tx = c.transaction().unwrap();
             crate::schema::begin_writing(&tx).unwrap();
-            hybrid(&tx);
+            tx.execute("INSERT INTO meta VALUES ('identity_policy','hybrid')", []).unwrap();
             linked_character(&tx, "Q", None);
             if is_target {
                 linked_character(&tx, "P", None);
@@ -826,32 +909,49 @@ fn family_conflicts_follow_existing_hybrid_representative() {
             .unwrap();
             if is_target {
                 illustash_core::character_identity::command(&tx,&json!({"op":"decide","a":"P","b":"Q","kind":"duplicate_of","status":"accepted","reason":"合成代表更换"})).unwrap();
+                if suspended {
+                    tx.execute(
+                        "INSERT INTO identity_suspended VALUES ('image',?,'equivalence_split',json_array('P','Q'))",
+                        [if parent_no { parent } else { "C" }],
+                    )
+                    .unwrap();
+                }
             }
             crate::schema::commit_writing(tx).unwrap();
         }
         let c = crate::open(&target.db).unwrap();
-        let before: Vec<(String, String, String)> = c
-            .prepare("SELECT entity,character_id,status FROM effective_assertions ORDER BY entity")
+        let assertions = || {
+            c.prepare(
+                "SELECT s.entity,n.canonical_id,n.character_id,s.status
+                 FROM assertions s JOIN identity_nodes n ON n.id=s.entity ORDER BY s.entity",
+            )
             .unwrap()
-            .query_map([], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)))
+            .query_map([], |r| {
+                Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?, r.get::<_, String>(2)?, r.get::<_, String>(3)?))
+            })
             .unwrap()
-            .collect::<rusqlite::Result<_>>()
-            .unwrap();
-        assert_eq!(before[0].1, "Q");
+            .collect::<rusqlite::Result<Vec<_>>>()
+            .unwrap()
+        };
+        let before = assertions();
+        let (raw, canonical, status) = if source_parent_no { ("C", "C", "confirmed") } else { ("P", "Q", "rejected") };
+        assert_eq!(before, vec![(raw.into(), canonical.into(), "Q".into(), status.into())]);
         let path = source.root.join("canonical.illustash-human.jsonl");
         capture(&source.db, &source.id, &|| Ok(())).unwrap().write(&mut File::create(&path).unwrap()).unwrap();
         let result = import_file(&target.db, &target.id, &path, &|| Ok(())).unwrap();
-        assert_eq!(result.action_id, None);
-        assert!(result.records["blocked_dependency"] > 0);
+        if suspended {
+            let action = result.action_id.expect("挂起的目标裁决不构成角色冲突");
+            assert!(result.records["applied"] > 0);
+            assert_eq!(target.count("SELECT count(*) FROM identity_suspended"), 1);
+            assert!(assertions().iter().all(|row| row.2 == "Q"));
+            target.undo(action).unwrap();
+            assert_eq!(target.count("SELECT count(*) FROM identity_suspended"), 1);
+        } else {
+            assert_eq!(result.action_id, None);
+            assert!(result.records["blocked_dependency"] > 0);
+        }
         assert_eq!(target.count("SELECT count(*) FROM actions WHERE undone=0"), 2);
-        let after: Vec<(String, String, String)> = c
-            .prepare("SELECT entity,character_id,status FROM effective_assertions ORDER BY entity")
-            .unwrap()
-            .query_map([], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)))
-            .unwrap()
-            .collect::<rusqlite::Result<_>>()
-            .unwrap();
-        assert_eq!(after, before);
+        assert_eq!(assertions(), before);
     }
 }
 

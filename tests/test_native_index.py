@@ -1,6 +1,7 @@
 """#49：只用显式临时合成包、loopback 文本/图片服务及隔离计算替身。"""
 from tests.native_worker_fixture import command as worker_command, source as worker_source, exists as worker_exists
 
+from contextlib import closing
 import io
 import json
 import os
@@ -14,6 +15,8 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from tests import test_native_lifecycle as lifecycle
 from tests.fixed_expectations import unclocked
 from tests.test_native_human_labels import snapshot
+from tests.test_read_http import wait_until
+from tools.ui_walk.fixture import wd_extension_spec
 from tools.wait_limit import WAIT
 
 WORKER = r'''#!/usr/bin/env PYTHON
@@ -157,6 +160,51 @@ class NativeIndexTest(unittest.TestCase):
         self.index({'action':'drop','char':'carol_example','reason':'  合成放弃  '});v=self.finish();self.assertEqual(v['state']['status'],'done',v)
         self.assertEqual(v['history'][0]['characters'][0]['status'],'dropped')
         self.assertEqual(self.check()['check']['missing'],[]) # 两个被拒绝的角色都仍被排除
+
+    def test_coverage_uses_persisted_wd_enablement_and_available_package(self):
+        tag = self.remote_rows[0]['tag']
+        manifest = wd_extension_spec(self.root / 'wd-package', b'fixture tags', [(tag, [0.] * 1024, -10.)],
+                                     f'http://127.0.0.1:{self.remote.server_port}')
+        entry = json.loads(manifest.read_text())['file']
+        package = manifest.with_name(entry['path']).read_bytes()
+        installed = self.shared / 'extensions' / 'wd-extension-v1' / entry['path']
+        installed.parent.mkdir(parents=True)
+        installed.write_bytes(package)
+        self.env['ILLUSTASH_TEST_WD_EXTENSION'] = str(manifest)
+        self.stop(self.process)
+        with closing(sqlite3.connect(self.lib.source)) as db, db:
+            db.execute('CREATE TABLE IF NOT EXISTS embeddings(uuid TEXT,model TEXT,vec BLOB,PRIMARY KEY(uuid,model))')
+            db.execute("INSERT OR REPLACE INTO embeddings SELECT uuid,'wd',zeroblob(4096) FROM assets WHERE in_scope=1")
+        self.restart()
+
+        def coverage(expected):
+            checked = self.check()['check']
+            self.assertEqual(checked['missing'], self.remote_rows[expected:])
+            result = json.loads(self.request('/api/index/coverage')['body'])
+            self.assertEqual(result['coverage'], {'example': {'packs': expected, 'own': 0, 'missing': 2-expected}})
+
+        def extension(action):
+            response = self.request('/api/wd-extension/' + action, {})
+            self.assertEqual(response['status'], 200, response['body'])
+
+            def completed():
+                state = json.loads(self.request('/api/wd-extension')['body'])
+                task = state['task']
+                return task if task and task['kind'] == action and task['status'] != 'running' else None
+
+            task = wait_until(completed)
+            self.assertEqual(task['status'], 'done', task)
+            return task['result']
+
+        coverage(0)
+        self.assertEqual(extension('enable')['hits'], 0)
+        coverage(1)
+        installed.unlink()
+        coverage(0)
+        installed.write_bytes(package)
+        coverage(1)
+        extension('withdraw')
+        coverage(0)
 
     def test_watch_list_belongs_to_each_library(self):
         # #205：作品 ID 只在各自的图库里存在，所以每个图库保留自己的列表和阈值。

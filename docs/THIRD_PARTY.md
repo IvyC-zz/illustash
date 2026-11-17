@@ -38,8 +38,23 @@ python3 tools/gen_rust_licenses.py
 | LittleCMS 2.19 及 lcms2 封装层 | Rust 依赖 | MIT，原文 `native/terms/licenses/LCMS.txt` |
 | Unicode 字符数据 | `crates/core` 的 casefold 与 HTTP 字符表，由 `tools/gen_casefold.py`、`tools/gen_http_unicode.py` 从 Python `unicodedata`（Unicode 15.0）生成 | [Unicode License v3](https://www.unicode.org/license.txt) |
 | 标签表 | `tags/tags_v3.csv` | 取自 WD tagger 模型仓库的 `selected_tags.csv`（Apache-2.0）；标签名与计数源自 [Danbooru](https://danbooru.donmai.us) |
+| 画面标签对照表 | `tags/general_names.json` | 简体中文译名和社区别名取自 danbooru-tags-data-zh（MIT），日文名取自 CharaDB 的标签数据（CC0-1.0）。固定来源见下节 |
 
-每个分发产物（便携包、安装包）的 `resources/licenses/` 里有本项目 `LICENSE`、本文（`THIRD_PARTY.md`）、PocketFFT 和 LittleCMS 的许可原文，以及 Rust 依赖的许可正文 `rust-dependencies.txt`（见上节），见 [安装与平台](BACKEND_TASKS.md#独立安装与可选计算包)。
+每个分发产物（便携包、安装包）的 `resources/licenses/` 里有本项目 `LICENSE`、本文（`THIRD_PARTY.md`）、PocketFFT、LittleCMS 和画面标签对照表的许可原文，以及 Rust 依赖的许可正文 `rust-dependencies.txt`（见上节），见 [安装与平台](BACKEND_TASKS.md#独立安装与可选计算包)。
+
+### 画面标签对照表
+
+- 中文译名及社区别名使用 danbooru-tags-data-zh 的 [`tags/general.csv`](https://github.com/amenorira/danbooru-tags-data-zh/blob/8e73f3b1c15b30f873c11a8c65d2d8264cdf0224/tags/general.csv)。该版本的 README 将项目声明为 MIT。README 末尾另有社区交流与学习的用途说明，本项目按同一版本 [MIT 许可原文](https://github.com/amenorira/danbooru-tags-data-zh/blob/8e73f3b1c15b30f873c11a8c65d2d8264cdf0224/LICENSE) 给出的再分发条款使用，并保留 amenorira 的版权声明和许可原文。
+- 日文名使用 CharaDB 的 [`data/items_public.json`](https://github.com/taki-ttt/charadb/blob/7fe2e4b009ad6d85496101e929ac8528cb21d357/data/items_public.json)。其 [许可原文第 2 节](https://github.com/taki-ttt/charadb/blob/7fe2e4b009ad6d85496101e929ac8528cb21d357/LICENSE) 明确把该文件的标签数据按 CC0-1.0 发布。只取能直接对应单个 WD 标签的日文名。保留两份上游许可，见 [中文数据](../tags/general_names_zh_LICENSE.txt) 和 [日文数据](../tags/general_names_ja_LICENSE.txt)。
+
+| 输入或产物 | SHA-256 |
+|---|---|
+| `tags/tags_v3.csv` | `298633d94d0031d2081c0893f29c82eab7f0df00b08483ba8f29d1e979441217` |
+| danbooru-tags-data-zh 固定版 `tags/general.csv` | `4df46d24d61ee32b96d9aa79ae390b0c35bdd99ce15d591b617dc949e92c4240` |
+| CharaDB 固定版 `data/items_public.json` | `7d3afccb974dbec08b03b33cd8ba922849903af89ce51eb6428d63f0158f5e9e` |
+| `tags/general_names.json` | `958e30a1d99f37f6497d9ecf2dbc7ed1ef173b80637f6937d94a2ec4c0ec1ab6` |
+
+在仓库根目录运行 [`python3 tools/build_general_tag_names.py`](../tools/build_general_tag_names.py) 下载固定版本的两个数据文件、核对三个输入的 SHA-256 并重建。已有核对过的输入时，传 `--zh general.csv --ja items_public.json` 离线重建。生成脚本只取 WD v3 的 8,106 个 `category=0` 标签，以原 tag 为键，提取译名和别名字段。生成文件为 459,155 字节，共 7,773 个条目，其中 7,750 个含中文名、56 个含单列日文名。该文件编入原生宿主，安装和使用均可离线。
 
 ## 打包时加入的运行库
 
@@ -64,7 +79,7 @@ python3 tools/gen_rust_licenses.py
 
 2026-11-12 用户批准（#375）：macOS 的 WD Core ML 执行变体由本项目 GitHub 模型 Release 分发，按 Apache-2.0 附许可原文、原始来源及变换说明。它基于上述固定 WD 模型，固定 batch 为 1，降低六维形状、删除等价广播、分解 ReduceL2 并预转置常量矩阵；不量化、不训练，不改原始模型文件。构建入口 `tools/build_wd_coreml.py`，固定版本与 SHA-256 见 `native/terms/models.json`，随包声明见 `packaging/model-licenses/NOTICE.txt`。原始模型仍是 CPU 回退和结果身份的唯一依据。
 
-WD 角色扩展 v1（#534）从 Illustash 0.3 起支持，通过项目的 GitHub 模型 Release `wd-extension-v1` 单独分发 `wd-extension-v1.zip` 和 `SHA256SUMS.txt`。ZIP 内的固定模型文件 `b-534.bin` 为 940,701 字节，SHA-256 为 `9da0365457e479eff189150926289c6cf8325cd9bb98c0bd2504c26d7dcae471`，含 228 个分类头和固定阈值 `0.8008725047111511`。模型文件不随代码或安装包分发。复封入口见 [构建脚本](../tools/build_wd_extension.py)，启用与撤回见 [安装说明](INSTALL.md#可选的-wd-角色扩展包)。
+WD 角色扩展 v1（#534）从 Illustash 0.3 起支持，通过项目的 GitHub 模型 Release `wd-extension-v1` 单独分发 `wd-extension-v1.bin`（应用下载）、`wd-extension-v1.zip`（手动下载）和 `SHA256SUMS.txt`。二者中的同一冻结模型文件为 940,701 字节，SHA-256 为 `9da0365457e479eff189150926289c6cf8325cd9bb98c0bd2504c26d7dcae471`，含 228 个分类头和固定阈值 `0.8008725047111511`。随安装包提供模型公告、Apache-2.0 许可和 Character Index 声明的 MIT 许可文本。复封入口见 [构建脚本](../tools/build_wd_extension.py)，启用与撤回见 [安装说明](INSTALL.md#可选的-wd-角色扩展包)。
 
 扩展文件按 Apache-2.0 分发。分类头用公开 Danbooru 样本在冻结的 WD 向量上独立拟合，底座为 SmilingWolf 的 WD SwinV2 Tagger v3 经 DeepGHS 重导出的向量模型（固定提交 `4ec31f2aeabf66353f3ee3ccd20d2f07e716851b`）。DeepGHS Character Index（MIT，固定提交 `5ee6075ff09f82c27e23f33044b9f9cabaf1e8c3`）用于筛选原索引未覆盖的角色。扩展模型文件包含词表、参数、阈值与底座指纹。ZIP 附 Apache-2.0 原文、两份 WD 模型卡、Character Index 的归属和 MIT 许可、`NOTICE.txt` 与 `provenance.json`。原始图片的版权归各原作者。[实验输入和评测口径](https://github.com/shio-vinyl/illustash/issues/534#issuecomment-6907588551)
 
@@ -78,3 +93,5 @@ WD 角色扩展 v1（#534）从 Illustash 0.3 起支持，通过项目的 GitHub
 | Character Index | [deepghs/character_index](https://huggingface.co/datasets/deepghs/character_index) | 已有共享角色索引的来源数据；不随安装包分发，应用也不下载。新用户补充角色参考特征走「检查新角色」（Danbooru 公开图片，每次运行前确认） | MIT |
 
 应用「关于」页另列出致谢的上游项目与数据源（Danbooru、Bangumi 等）；联网获取的数据按各站点条款使用，见 [找回画师](PROVENANCE.md) 与 [名字](TERMS_NAMES.md#9-显示名来源与后台更新)。
+
+长尾参考包使用上述 CCIP 特征模型，从公开 Danbooru 缩图生成参考和锚点。原图版权归原作者；包携带特征、阈值和来源清单。冻结的 Character Index 基础索引用于筛选和评估，版权和 MIT 归属按上游保留。包版本、样本范围和复跑口径见 [#557](https://github.com/shio-vinyl/illustash/issues/557#issuecomment-6915312907)。

@@ -71,7 +71,7 @@ pub fn merge(c: &Connection, args: &Value) -> Result<Value> {
     let cands = rows3(c, "SELECT uuid,source,score FROM candidates WHERE entity=?", &[&source])?;
     let prev = rows3(
         c,
-        "SELECT t.uuid,t.source,t.score FROM candidates t JOIN candidates s ON s.uuid=t.uuid AND s.source=t.source AND s.entity=?1 WHERE t.entity=?2 AND t.source<>'WD_EXT'",
+        "SELECT t.uuid,t.source,t.score FROM candidates t JOIN candidates s ON s.uuid=t.uuid AND s.source=t.source AND s.entity=?1 WHERE t.entity=?2 AND t.source NOT IN ('WD_EXT','CCIP_LONGTAIL')",
         &[&source, &target],
     )?;
     let variants: Vec<String> = c
@@ -151,7 +151,7 @@ pub fn merge(c: &Connection, args: &Value) -> Result<Value> {
     character_projection::memberships(c, Some(&touched))?;
     let mut before = vec![json!({"merge": {
         "source": source, "target": target, "moved": moved, "kept": kept,
-        "candidates": cands.iter().filter(|(_, source, _)| source != "WD_EXT").map(|(u, k, s)| json!([u, k, s])).collect::<Vec<_>>(),
+        "candidates": cands.iter().filter(|(_, source, _)| source != "WD_EXT" && source != "CCIP_LONGTAIL").map(|(u, k, s)| json!([u, k, s])).collect::<Vec<_>>(),
         "target_prev": prev.iter().map(|(u, k, s)| json!([u, k, s])).collect::<Vec<_>>(),
         "variants": variants, "aliases": added, "pins": pins, "reviews": reviews, "uuids": touched,
     }})];
@@ -236,7 +236,7 @@ pub fn undo(c: &Connection, action: i64, m: &Value) -> Result<()> {
     let mut touched: BTreeSet<String> = list("uuids").iter().filter_map(|u| u.as_str().map(str::to_owned)).collect();
     let variants = list("variants");
     let affected_terms = std::iter::once(source).chain(variants.iter().filter_map(Value::as_str));
-    let extension = crate::wd_extension::images_of(c, affected_terms)?;
+    let extension = crate::character_extension::images_of(c, affected_terms)?;
     touched.extend(extension.iter().cloned());
     let uuids: Vec<String> = touched.into_iter().collect();
     restore_candidates(c, action, m, source, target)?;
@@ -266,7 +266,7 @@ fn restore_candidates(c: &Connection, action: i64, m: &Value, source: &str, targ
         let mut out = std::collections::BTreeMap::new();
         for u in &scope {
             for row in c
-                .prepare_cached("SELECT uuid,entity,source,score FROM candidates WHERE uuid=? AND source<>'WD_EXT'")?
+                .prepare_cached("SELECT uuid,entity,source,score FROM candidates WHERE uuid=? AND source NOT IN ('WD_EXT','CCIP_LONGTAIL')")?
                 .query_map([u], |r| Ok(((r.get(0)?, r.get(1)?, r.get(2)?), r.get(3)?)))?
             {
                 let (k, v) = row?;

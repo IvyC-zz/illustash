@@ -123,6 +123,8 @@ class PackagingResourcesTest(unittest.TestCase):
         for relative, digest in {
             'native/terms/vendor/pocketfft/LICENSE.md': 'a85ca13fdf90160b64a0698215868c13b74d835ad0a4e2ba44713b8c5058a056',
             'native/terms/licenses/LCMS.txt': '9ed584604d11ed0ab26211e1775687283008d35e164baa8294757fbd4d829f90',
+            'tags/general_names_zh_LICENSE.txt': 'd9db28b2e55ae4694f7ec9b38c3849cc604366a97470d347e7ef7d4e9e73e940',
+            'tags/general_names_ja_LICENSE.txt': '3a76e8780d8d5d86df9141e64b22e8f73d5c2b9330e7f9dab12c8e7362a4062c',
         }.items():
             self.assertEqual(hashlib.sha256((ROOT / relative).read_bytes()).hexdigest(), digest)
 
@@ -237,12 +239,14 @@ class PackagingResourcesTest(unittest.TestCase):
         除此之外没有别的来源。"""
         registry = json.loads((pack.MODEL_LICENSES / 'sources.json').read_text())['files']
         self.assertEqual(sorted(registry), ['ccip/BigScience-OpenRAIL-M.pdf', 'ccip/deepghs-ccip-README.md',
-                                            'ccip/deepghs-ccip_onnx-README.md', 'wd-swinv2-tagger-v3/LICENSE-2.0.txt',
+                                            'ccip/deepghs-ccip_onnx-README.md', 'wd-extension/Character-Index-MIT.txt',
+                                            'wd-swinv2-tagger-v3/LICENSE-2.0.txt',
                                             'wd-swinv2-tagger-v3/SmilingWolf-wd-swinv2-tagger-v3-README.md',
                                             'wd-swinv2-tagger-v3/deepghs-wd14_tagger_with_embeddings-README.md'])
         notice = (pack.MODEL_LICENSES / 'NOTICE.txt').read_text()
         # 声明列出每个附带的模型文件和适用于它的许可文本。
         for name in ('wd_swinv2_v3_emb.onnx', 'model_feat.onnx', 'model_metrics.onnx', 'metrics.json',
+                     'wd-extension-v1.bin', 'wd-extension/Character-Index-MIT.txt',
                      'wd-swinv2-tagger-v3/LICENSE-2.0.txt', 'ccip/BigScience-OpenRAIL-M.pdf'):
             self.assertIn(name, notice)
         output = self.root / 'with models'

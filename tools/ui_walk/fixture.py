@@ -243,6 +243,39 @@ def recognition_package(dest: Path, resources: Path, library_id: str, assets: li
     return dest
 
 
+def wd_extension_spec(directory: Path, tags: bytes, heads: list[tuple[str, list[float], float]], origin: str) -> Path:
+    """把合成线性头和对应的下载清单写到隔离目录。"""
+    path = 'wd-extension-v1.bin'
+    format_name = 'illustash-wd-extension/1'
+    base = sha(b'synthetic WD')
+    header = {'format': format_name, 'wd_model_sha256': base, 'wd_tags_sha256': sha(tags),
+              'threshold': 0.8008725047111511, 'labels': [label for label, _, _ in heads]}
+    weights = b''.join(struct.pack(f'<{WD_DIM}f', *weights) for _, weights, _ in heads)
+    bias = struct.pack(f'<{len(heads)}f', *(bias for _, _, bias in heads))
+    contents = json.dumps(header).encode() + b'\n' + weights + bias
+    directory.mkdir(parents=True, exist_ok=True)
+    (directory / path).write_bytes(contents)
+    spec = {'revision': 1, 'format': format_name, 'heads': len(heads), 'license': 'Apache-2.0',
+            'base_sha256': base,
+            'file': {'path': path, 'size': len(contents), 'sha256': sha(contents), 'url': f'{origin}/{path}'}}
+    manifest = directory / 'wd-extension.json'
+    manifest.write_text(json.dumps(spec), encoding='utf-8')
+    return manifest
+
+
+def wd_extension_walk(fixture: Fixture, directory: Path, origin: str) -> Path:
+    """三个合成头分别命中无归属、已有 WD 归属、已有人工归属的图片。"""
+    names = ['group-1-01', 'dahlia-01', 'aster-01']
+    start = struct.unpack_from('<H', (data := (fixture.root / 'recognition' / 'wd.npy').read_bytes()), 8)[0] + 10
+    order = {name: i for i, name in enumerate(fixture.names.values())}
+    heads = []
+    for label, photo in zip(('extone_(synthetic)', 'exttwo_(synthetic)', 'extthree_(synthetic)'), names):
+        vector = struct.unpack_from(f'<{WD_DIM}f', data, start + order[photo] * WD_DIM * 4)
+        heads.append((label, [10 * x for x in vector], -8))
+    tags = (fixture.root / 'resources' / 'tags' / 'tags_v3.csv').read_bytes()
+    return wd_extension_spec(directory, tags, heads, origin)
+
+
 def fake_resources(dest: Path) -> Path:
     """识别结果包要求的模型文件和标签表：内容是假的，宿主只核对 SHA-256，不加载。"""
     (dest / 'models' / 'ccip').mkdir(parents=True)

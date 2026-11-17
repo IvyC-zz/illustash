@@ -5,9 +5,11 @@
 #![cfg_attr(not(test), warn(clippy::unwrap_used))]
 pub mod backup;
 pub mod casefold;
+pub mod ccip_longtail;
 pub mod character_commands;
 pub mod character_entities;
 pub mod character_evidence;
+mod character_extension;
 pub mod character_graph;
 pub mod character_identity;
 pub mod character_import;

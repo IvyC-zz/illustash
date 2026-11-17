@@ -1,7 +1,8 @@
 //! tests/reference/web/artists.py（#9 已删除）的读取契约。辅助的溯源库保持只读，并与请求共用同一个事务。
 use crate::{
     http_json::{Json, Refusal},
-    http_read::{flag, rows, strings},
+    http_read::{flag, python_int, rows, strings, trim},
+    sql_fragments::{rating, visible},
     Error, Result,
 };
 use rusqlite::{Connection, OptionalExtension};
@@ -45,16 +46,15 @@ fn canonical(c: &Connection, id: &str) -> Result<String> {
     }
     Ok(id)
 }
+// 以 t.id 为参数；详情和目录都用首选的显示名。
+const CORE_NICKNAME: &str = "(SELECT n.value FROM term_names n
+    WHERE n.term_id=t.id AND n.role='display'
+    ORDER BY n.preferred DESC,n.position,n.value LIMIT 1)";
+
 fn nickname(c: &Connection, id: &str, core: bool) -> Result<Option<String>> {
     if core {
-        let sql = "
-            SELECT n.value
-            FROM term_names n
-            JOIN terms t ON t.id=n.term_id
-            WHERE t.key=? AND n.role='display'
-            ORDER BY n.preferred DESC,n.position,n.value
-            LIMIT 1";
-        return Ok(c.query_row(sql, [id], |r| r.get(0)).optional()?);
+        let sql = format!("SELECT {CORE_NICKNAME} FROM terms t WHERE t.key=?");
+        return Ok(c.query_row(&sql, [id], |r| r.get(0)).optional()?.flatten());
     }
     let named = "SELECT EXISTS(SELECT 1 FROM prov.sqlite_master WHERE name='artist_names')";
     if !c.query_row(named, [], |r| r.get::<_, bool>(0))? {
@@ -93,14 +93,134 @@ fn card(c: &Connection, id: &str, core: bool) -> Result<Json> {
     if let Some(key) = links.get("danbooru") {
         home("Danbooru", format!("https://danbooru.donmai.us/artists/show_or_new?name={key}"));
     }
-    let name = nickname
-        .or_else(|| links.get("name").cloned())
-        .or_else(|| links.get("x").map(|k| format!("@{k}")))
-        .or_else(|| links.get("danbooru").map(|k| k.replace('_', " ")))
-        .or_else(|| links.get("pixiv").map(|k| format!("Pixiv {k}")))
-        .unwrap_or_else(|| "未知画师".into());
+    let link = |system| links.get(system).map(String::as_str);
+    let name = display_name(nickname, link("name"), link("x"), link("danbooru"), link("pixiv"));
     Ok(Json::object([("id", id.into()), ("name", name.into()), ("homes", Json::Array(homes))]))
 }
+
+fn display_name(
+    nickname: Option<String>,
+    linked_name: Option<&str>,
+    x: Option<&str>,
+    danbooru: Option<&str>,
+    pixiv: Option<&str>,
+) -> String {
+    nickname
+        .or_else(|| linked_name.map(str::to_owned))
+        .or_else(|| x.map(|k| format!("@{k}")))
+        .or_else(|| danbooru.map(|k| k.replace('_', " ")))
+        .or_else(|| pixiv.map(|k| format!("Pixiv {k}")))
+        .unwrap_or_else(|| "未知画师".into())
+}
+
+/// 目录排序和查询使用详情卡片的显示名；账号子串查询还会匹配同一画师的其他账号。
+fn directory_name(c: &Connection) -> Result<String> {
+    use rusqlite::functions::FunctionFlags;
+    let flags = FunctionFlags::SQLITE_UTF8 | FunctionFlags::SQLITE_DETERMINISTIC;
+    c.create_scalar_function("casefold", 1, flags, |ctx| Ok(crate::casefold::casefold(ctx.get_raw(0).as_str()?)))?;
+    c.create_scalar_function("artist_display_name", 5, flags, |ctx| {
+        let linked_name: Option<String> = ctx.get(1)?;
+        let x: Option<String> = ctx.get(2)?;
+        let danbooru: Option<String> = ctx.get(3)?;
+        let pixiv: Option<String> = ctx.get(4)?;
+        Ok(display_name(ctx.get(0)?, linked_name.as_deref(), x.as_deref(), danbooru.as_deref(), pixiv.as_deref()))
+    })?;
+    // 查当前画师在该站的链接，再对少量 key 排序，避免为了省排序而遍历整个站点的账号索引。
+    let first_link = |system| {
+        format!(
+            "(SELECT l.key FROM term_links l INDEXED BY term_links_term
+              WHERE l.term_id=t.id AND l.system='{system}' ORDER BY l.key LIMIT 1)"
+        )
+    };
+    Ok(format!(
+        "casefold(artist_display_name({CORE_NICKNAME},{},{},{},{}))",
+        first_link("name"),
+        first_link("x"),
+        first_link("danbooru"),
+        first_link("pixiv"),
+    ))
+}
+
+pub(crate) fn directory(c: &Connection, library: bool, q: &HashMap<String, String>) -> Result<Json> {
+    let value = |key, default| q.get(key).map(String::as_str).unwrap_or(default);
+    let page_number = |key, default| python_int(value(key, default)).map_err(|_| Error::invalid("分页参数不正确"));
+    let limit = page_number("limit", "60")?;
+    let offset = page_number("offset", "0")?;
+    if !(1..=200).contains(&limit) || offset < 0 {
+        return illustash_core::error::invalid("分页参数不正确");
+    }
+    let (order, sort_by_name) = match value("order", "") {
+        "" | "count" => ("count DESC,key", false),
+        "recent" => ("last DESC,key", false),
+        "name" => ("sort_name,key", true),
+        _ => return illustash_core::error::invalid("未知排序"),
+    };
+    let rating = rating("a", value("nsfw", ""))?;
+    let reply = |items, total: i64| {
+        Json::object([("items", Json::Array(items)), ("total", total.into()), ("offset", offset.into())])
+    };
+    if !library || !flag(c, "terms_artists")? {
+        return Ok(reply(Vec::new(), 0i64));
+    }
+    let needle: String = trim(value("q", "")).chars().take(80).collect();
+    let needle = crate::casefold::casefold(&needle);
+    let name = if sort_by_name || !needle.is_empty() { directory_name(c)? } else { String::new() };
+    let search = if needle.is_empty() {
+        String::new()
+    } else {
+        format!(
+            "AND t.id IN (
+                SELECT t.id FROM terms t WHERE t.kind='artist' AND (
+                    instr({name},?3)>0 OR EXISTS (
+                        SELECT 1 FROM term_links l WHERE l.term_id=t.id
+                        AND l.system IN ('x','x_id','pixiv','danbooru') AND instr(casefold(l.key),?3)>0)))"
+        )
+    };
+    let sort_name = if sort_by_name { name.as_str() } else { "NULL" };
+    // 从画师词条按 term_projection_term 取投影；不能从全库资产出发扫描每张图的题材投影。
+    // 日期相同取 UUID 最小的那张，与图库默认排序一致。LEFT JOIN 让空页仍返回总数。
+    let sql = format!(
+        "WITH ranked AS (
+             SELECT t.id,t.key,a.uuid,a.added_at AS last,
+                    count(*) OVER (PARTITION BY t.id) AS count,
+                    row_number() OVER (PARTITION BY t.id ORDER BY a.added_at DESC,a.uuid) AS pos
+             FROM terms t
+             CROSS JOIN term_projection p ON p.term_id=t.id AND p.state IN ('machine','confirmed')
+             CROSS JOIN term_assets ta ON ta.id=p.asset_id AND ta.namespace='library' AND ta.removed_at IS NULL
+             CROSS JOIN assets a ON a.uuid=ta.key
+             WHERE t.kind='artist' AND {}{rating} {search}
+         ), summary AS (
+             SELECT id,key,uuid,last,count FROM ranked WHERE pos=1
+         )
+         SELECT total,key,uuid,last,count FROM (SELECT count(*) AS total FROM summary)
+         LEFT JOIN (
+             SELECT t.key AS key,s.uuid,s.last,s.count,{sort_name} AS sort_name
+             FROM summary s JOIN terms t ON t.id=s.id
+             ORDER BY {order} LIMIT ?1 OFFSET ?2
+         ) AS page ON 1
+         ORDER BY {order}",
+        visible("a"),
+    );
+    let mut stmt = c.prepare(&sql)?;
+    let mut rows = if needle.is_empty() {
+        stmt.query(rusqlite::params![limit, offset])?
+    } else {
+        stmt.query(rusqlite::params![limit, offset, needle])?
+    };
+    let mut items = Vec::new();
+    let mut total = 0i64;
+    while let Some(row) = rows.next()? {
+        total = row.get(0)?;
+        let Some(key): Option<String> = row.get(1)? else { break };
+        let mut item = card(c, &key, true)?;
+        item.set("count", row.get::<_, i64>(4)?.into());
+        item.set("last", row.get::<_, Option<String>>(3)?.into());
+        item.set("cover", row.get::<_, String>(2)?.into());
+        items.push(item);
+    }
+    Ok(reply(items, total))
+}
+
 pub fn name_of(c: &Connection, library: bool, id: &str) -> Result<Json> {
     if !library {
         return Ok(None::<String>.into());

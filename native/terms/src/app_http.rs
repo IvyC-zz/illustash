@@ -43,6 +43,11 @@ struct Host {
     origin: String,
     entry: Entry,
 }
+impl Host {
+    fn wd_status(&self, session: &Session) -> Result<serde_json::Value> {
+        crate::app_wd_extension::status(&self.root, &session.library, &session.wd_extension, self.wd_busy(session))
+    }
+}
 impl std::ops::Deref for Host {
     type Target = Application;
     fn deref(&self) -> &Application {
@@ -135,6 +140,7 @@ impl Session {
             library: Some(self.library.instance_path().to_owned()),
             tags: tags.to_owned(),
             source: Some(self.library.source()),
+            examples: Some(self.examples.clone()),
             token: Some(self.token.clone()),
             read_only: None,
         }
@@ -558,7 +564,8 @@ fn run_inner(args: &[String]) -> Result<u8> {
     // 管道归属在初始化之前就记下，所以即使父进程很早崩溃，也会走正常的停止和 join 路径。
     // 除非明确要求，从不读 CLI 的 stdin。
     let desktop_closed = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
-    if std::env::var_os("ILLUSTASH_DESKTOP_STDIN").as_deref() == Some(std::ffi::OsStr::new("1")) {
+    let desktop_child = crate::desktop_shell::is_host_child();
+    if desktop_child {
         // 外壳在放开这道启动闸之前分配好它的 Windows Job。
         // 如果它在分配之前就退出，EOF 会在任何任务启动之前退出。
         let mut gate = [0u8; 1];
@@ -708,7 +715,12 @@ fn run_inner(args: &[String]) -> Result<u8> {
         if rescue {
             rescued = Some(rescue_reporting(&path, &root)?);
         }
-        (open_reporting(&path)?, None)
+        match open_reporting(&path) {
+            Err(Error::Schema(_)) if desktop_child && !rescue && crate::app_upgrade::needed(&path).is_some() => {
+                return Ok(crate::desktop_shell::UPGRADE_NEEDED_EXIT);
+            }
+            opened => (opened?, None),
+        }
     };
     let server = match server {
         Some(server) => server,

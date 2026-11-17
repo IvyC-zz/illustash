@@ -105,10 +105,10 @@ pub(crate) fn configured_root(resources: &Path, configured: Option<&Path>) -> Pa
 fn has(dir: &Path, entry: &Entry) -> bool {
     fs::symlink_metadata(dir.join(&entry.path)).is_ok_and(|m| m.is_file() && m.len() == entry.size)
 }
-/// 下载与导入时校验执行变体的已有副本，允许修复同长度损坏；轮询状态不读取大文件。
+/// 校验项目发布的派生文件，允许修复同长度损坏；原始模型保持原有的大小检查。
 fn usable(dir: &Path, entry: &Entry) -> bool {
     has(dir, entry)
-        && (!entry.optional
+        && (!matches!(entry.source, Source::Project { .. })
             || crate::recognition_compute::models::hash(&dir.join(&entry.path), &|| Ok(()))
                 .is_ok_and(|sha| sha == entry.sha256))
 }
@@ -183,6 +183,8 @@ struct Place {
     on_demand: bool,
     /// 会话正在识别或更新角色索引：模型正在使用中。
     in_use: bool,
+    /// 参考包的整个 ZIP 都是清单中的文件。
+    raw_archive: bool,
 }
 impl Place {
     fn app(resources: &Path) -> Result<Self> {
@@ -201,6 +203,7 @@ impl Place {
             proxy: None,
             on_demand: on_demand(),
             in_use: false,
+            raw_archive: false,
         })
     }
     fn mirror(&self) -> String {
@@ -787,12 +790,19 @@ fn import(models: &Models, place: &Place, paths: &[PathBuf]) -> std::result::Res
         |name: String, size: u64, reader: &mut dyn Read, meter: &mut Meter| -> std::result::Result<(), Stop> {
             let result = match wanted(size) {
                 None => "unknown",
-                Some(entry) if usable(&place.root, entry) || usable(&partial, entry) => "already",
+                Some(entry) if !place.raw_archive && (usable(&place.root, entry) || usable(&partial, entry)) => {
+                    "already"
+                }
                 Some(entry) => {
+                    let installed = place.raw_archive
+                        && crate::recognition_compute::models::hash(&place.root.join(&entry.path), &|| Ok(()))
+                            .is_ok_and(|sha| sha == entry.sha256);
                     models.set(|job| job["file"] = entry.path.clone().into());
                     let ok = copy_checked(reader, &partial, entry, meter)?;
                     meter.finish(entry.size);
-                    if ok {
+                    if ok && installed {
+                        "already"
+                    } else if ok {
                         "accepted"
                     } else {
                         "mismatch"
@@ -806,7 +816,7 @@ fn import(models: &Models, place: &Place, paths: &[PathBuf]) -> std::result::Res
         let name = path.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
         let unreadable = |e: std::io::Error| Stop::Failed(format!("读不到所选文件 {name}：{error}", error = e));
         let metadata = fs::metadata(path).map_err(unreadable)?;
-        let zip = path.extension().is_some_and(|x| x.eq_ignore_ascii_case("zip"));
+        let zip = !place.raw_archive && path.extension().is_some_and(|x| x.eq_ignore_ascii_case("zip"));
         if zip {
             let file = fs::File::open(path).map_err(unreadable)?;
             let mut archive = zip::ZipArchive::new(file)
@@ -839,6 +849,10 @@ fn import(models: &Models, place: &Place, paths: &[PathBuf]) -> std::result::Res
 // ---------- 状态和请求 ----------
 
 fn info_at(models: &Models, place: &Place) -> Json {
+    package_info(place, || models.snapshot())
+}
+
+fn package_info(place: &Place, job: impl FnOnce() -> Value) -> Json {
     let manifest = place.manifest;
     let partial = partial_dir(&place.root);
     let ready = ready_at(&place.root, manifest);
@@ -873,7 +887,7 @@ fn info_at(models: &Models, place: &Place) -> Json {
         "sources": sources,
         "manual": manifest.manual,
         "files": manifest.files.iter().map(|e| json!({"path": e.path, "size": e.size, "sha256": e.sha256, "optional": e.optional})).collect::<Vec<_>>(),
-        "job": models.snapshot(),
+        "job": job(),
     }))
 }
 
@@ -886,6 +900,57 @@ pub(crate) fn job() -> Value {
 pub(crate) fn info(resources: &Path) -> Result<Json> {
     let place = Place::app(resources)?;
     Ok(with_acceleration(resources, &place, info_at(&APP, &place)))
+}
+
+static CCIP_LONGTAIL: Models = Models::new();
+
+fn longtail_place(resources: &Path) -> Result<Place> {
+    use crate::app_ccip_longtail::{self, PACKAGE_BYTES, PACKAGE_NAME, PACKAGE_SHA256, PACKAGE_VERSION};
+    static MANIFEST: OnceLock<Manifest> = OnceLock::new();
+    let manifest = MANIFEST.get_or_init(|| Manifest {
+        format: 1,
+        pack: PACKAGE_VERSION.into(),
+        manual: "https://github.com/shio-vinyl/illustash/blob/main/docs/INSTALL.md#可选的-ccip-长尾角色参考包".into(),
+        mirror: String::new(),
+        modelscope: String::new(),
+        files: vec![Entry {
+            path: PACKAGE_NAME.into(),
+            size: PACKAGE_BYTES,
+            sha256: PACKAGE_SHA256.into(),
+            source: Source::Project {
+                url: "https://github.com/shio-vinyl/illustash/releases/download/ccip-longtail-v1/A-longtail-p75.zip"
+                    .into(),
+            },
+            optional: false,
+        }],
+        wd_coreml: None,
+    });
+    let shared = crate::app_resources::shared_path(resources)?;
+    Ok(Place {
+        root: app_ccip_longtail::package_path(&shared).parent().expect("参考包有存放目录").into(),
+        manifest,
+        preferences: PathBuf::new(),
+        modelscope: String::new(),
+        proxy: None,
+        on_demand: true,
+        in_use: false,
+        raw_archive: true,
+    })
+}
+
+pub(crate) fn longtail_package(resources: &Path) -> Result<Json> {
+    // 下载状态可能在文件改名后进入终态，响应以取得任务快照时序为准。
+    let job = CCIP_LONGTAIL.snapshot();
+    Ok(package_info(&longtail_place(resources)?, || job))
+}
+
+pub(crate) fn longtail_package_post(resources: &Path, body: &Json, in_use: bool) -> Result<()> {
+    let mut place = longtail_place(resources)?;
+    if body.get("action").map(Json::text) == Some("delete") && in_use {
+        return Err(Error::Conflict("正在检查角色，请等任务结束后再删除参考包".into()));
+    }
+    place.proxy = proxy();
+    post_at(&CCIP_LONGTAIL, place, body).map(|_| ())
 }
 
 /// 「使用 GPU 加速识别」（#270）在模型卡片上：这个构建有没有加速器、开关（POST /api/preferences），
@@ -955,7 +1020,9 @@ fn post_at(models: &'static Models, place: Place, body: &Json) -> Result<Json> {
     }
     match action {
         "download" => {
-            if ready_at(&place.root, place.manifest) && !place.manifest.files.iter().any(|e| e.optional) {
+            if ready_at(&place.root, place.manifest)
+                && !place.manifest.files.iter().any(|e| e.optional || matches!(e.source, Source::Project { .. }))
+            {
                 return Err(Error::Invalid("识别模型已经就位".into()));
             }
             let total = place.manifest.files.iter().map(|e| e.size).sum();
@@ -1033,6 +1100,146 @@ fn post_at(models: &'static Models, place: Place, body: &Json) -> Result<Json> {
         }
     }
     Ok(info_at(models, &place))
+}
+
+#[derive(Deserialize)]
+pub(crate) struct WdExtension {
+    pub revision: u32,
+    pub format: String,
+    pub heads: usize,
+    pub license: String,
+    pub base_sha256: String,
+    pub file: Entry,
+}
+
+pub(crate) fn wd_extension() -> Result<&'static WdExtension> {
+    #[derive(Deserialize)]
+    struct Document {
+        wd_extension: WdExtension,
+    }
+    static SPEC: OnceLock<WdExtension> = OnceLock::new();
+    static FIXTURE: OnceLock<std::result::Result<WdExtension, String>> = OnceLock::new();
+    let spec = SPEC.get_or_init(|| {
+        serde_json::from_str::<Document>(include_str!("../models.json"))
+            .expect("models.json 含有 WD 扩展包清单")
+            .wd_extension
+    });
+    // 走查只替换冻结文件的身份和下载来源，目录和发布版一致。
+    let Some(path) = std::env::var_os("ILLUSTASH_TEST_WD_EXTENSION") else { return Ok(spec) };
+    FIXTURE
+        .get_or_init(|| {
+            let text = fs::read_to_string(path).map_err(|e| format!("读不到 WD 扩展包测试清单：{e}"))?;
+            let fixture: WdExtension =
+                serde_json::from_str(&text).map_err(|e| format!("WD 扩展包测试清单无效：{e}"))?;
+            let local = matches!(&fixture.file.source, Source::Project { url } if
+                url::Url::parse(url).is_ok_and(|u| u.scheme() == "http" && u.host_str() == Some("127.0.0.1")
+                    && u.username().is_empty() && u.password().is_none() && u.port().is_some()));
+            if !local
+                || fixture.file.path != spec.file.path
+                || fixture.revision != spec.revision
+                || fixture.format != spec.format
+                || !(1..=spec.heads).contains(&fixture.heads)
+                || !(1..=spec.file.size).contains(&fixture.file.size)
+            {
+                return Err("WD 扩展包测试清单无效，下载地址须为 127.0.0.1 的 HTTP 端口".into());
+            }
+            Ok(fixture)
+        })
+        .as_ref()
+        .map_err(|message| Error::invalid(message.clone()))
+}
+
+const WD_EXTENSION_MANUAL: &str =
+    "https://github.com/shio-vinyl/illustash/blob/main/docs/INSTALL.md#可选的-wd-角色扩展包";
+static WD_EXTENSION: Models = Models::new();
+
+fn extension_place(resources: &Path) -> Result<Place> {
+    static DOWNLOAD: OnceLock<Manifest> = OnceLock::new();
+    let spec = wd_extension()?;
+    let manifest = DOWNLOAD.get_or_init(|| Manifest {
+        format: 1,
+        pack: format!("wd-extension-v{}", spec.revision),
+        manual: WD_EXTENSION_MANUAL.into(),
+        mirror: String::new(),
+        modelscope: String::new(),
+        files: vec![spec.file.clone()],
+        wd_coreml: None,
+    });
+    let shared = if std::env::var_os("ILLUSTASH_SHARED").is_some() {
+        crate::app_resources::shared_path(resources)?
+    } else {
+        let home = crate::app_paths::user_home()?;
+        let support = if cfg!(windows) && std::env::var_os("ILLUSTASH_APP_SUPPORT").is_none() {
+            std::env::var_os("LOCALAPPDATA")
+                .filter(|path| !path.is_empty())
+                .map(PathBuf::from)
+                .unwrap_or_else(|| home.join("AppData").join("Local"))
+                .join("Illustash")
+        } else {
+            crate::app_paths::app_support(&home)
+        };
+        support.join("Shared")
+    };
+    Ok(Place {
+        root: shared.join("extensions").join(&manifest.pack),
+        manifest,
+        preferences: PathBuf::new(),
+        modelscope: String::new(),
+        proxy: None,
+        on_demand: true,
+        in_use: false,
+        raw_archive: false,
+    })
+}
+
+pub(crate) fn extension_file(resources: &Path) -> Result<Option<PathBuf>> {
+    let place = extension_place(resources)?;
+    let entry = &wd_extension()?.file;
+    Ok(usable(&place.root, entry).then(|| place.root.join(&entry.path)))
+}
+
+pub(crate) fn extension_info(resources: &Path) -> Result<Value> {
+    // 先读任务快照；看到下载已结束时才开始确认激活后的文件。
+    let download = WD_EXTENSION.snapshot();
+    let place = extension_place(resources)?;
+    let spec = wd_extension()?;
+    let entry = &spec.file;
+    let ready = usable(&place.root, entry);
+    let partial = partial_dir(&place.root);
+    let have = if ready || usable(&partial, entry) {
+        entry.size
+    } else {
+        fs::metadata(part(&partial, entry)).map_or(0, |m| m.len().min(entry.size))
+    };
+    Ok(json!({
+        "package": {
+            "version":place.manifest.pack, "heads":spec.heads, "license":spec.license,
+            "file":{"path":entry.path,"size":entry.size,"sha256":entry.sha256},
+            "manual":place.manifest.manual, "location":place.root,
+            "status":if ready {"ready"} else if have > 0 {"partial"} else {"missing"},
+            "have":have,"partial":!ready && have > 0,
+            "sources":place.sources(entry).into_iter().map(|(host, _)| host).collect::<Vec<_>>()
+        },
+        "download":download
+    }))
+}
+
+pub(crate) fn extension_post(resources: &Path, body: &Json) -> Result<()> {
+    let mut place = extension_place(resources)?;
+    let action = body.get("action").map(Json::text).unwrap_or("");
+    if !matches!(action, "download" | "import" | "cancel" | "discard" | "delete") {
+        return Err(Error::invalid("未知的 WD 角色扩展包操作"));
+    }
+    if action != "cancel" && WD_EXTENSION.running.load(Ordering::SeqCst) {
+        return Err(Error::Conflict("扩展包正在下载或导入，请等它结束".into()));
+    }
+    if action == "download" {
+        if usable(&place.root, &wd_extension()?.file) {
+            return Err(Error::Conflict("扩展包已经就位".into()));
+        }
+        place.proxy = proxy();
+    }
+    post_at(&WD_EXTENSION, place, body).map(|_| ())
 }
 
 #[cfg(test)]

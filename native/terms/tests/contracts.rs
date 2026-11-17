@@ -28,6 +28,9 @@ mod entry;
 #[path = "common/wait.rs"]
 mod wait;
 
+#[path = "contracts/library_50k.rs"]
+mod library_50k;
+
 const DATABASES: [&str; 3] = ["source.sqlite", "library.sqlite", "provenance.sqlite"];
 
 struct Sandbox(PathBuf);
@@ -165,6 +168,11 @@ fn materialize(fixture: &Value, category: &str) -> (Sandbox, PathBuf, PathBuf) {
     // Windows 规范化路径带有 `\\?\` 原样前缀，而宿主从不产生这种前缀。
     #[cfg(windows)]
     let root = PathBuf::from(root.to_str().unwrap().strip_prefix(r"\\?\").unwrap());
+    let package = materialize_at(fixture, &root);
+    (scratch, root, package)
+}
+
+fn materialize_at(fixture: &Value, root: &Path) -> PathBuf {
     let package = root.join("fixture.pilib");
     for dir in ["fixture.pilib", "fixture.pilib/thumbnails", "folder", "bin", "home", "support", "shared"] {
         fs::create_dir_all(root.join(dir)).unwrap();
@@ -190,10 +198,66 @@ fn materialize(fixture: &Value, category: &str) -> (Sandbox, PathBuf, PathBuf) {
             fs::set_permissions(path, fs::Permissions::from_mode(0o755)).unwrap();
         }
     }
-    (scratch, root, package)
+    package
+}
+
+#[cfg(unix)]
+fn benchmark_root() -> PathBuf {
+    if cfg!(debug_assertions) {
+        panic!("benchmark must be compiled --release");
+    }
+    std::env::var_os("ILLUSTASH_BENCH_ROOT").expect("benchmark fixture directory required").into()
+}
+
+#[cfg(unix)]
+#[test]
+#[ignore = "explicit release performance runner only"]
+fn prepare_benchmark_fixture() {
+    let root = benchmark_root();
+    let binary = std::env::var_os("ILLUSTASH_BENCH_BINARY").expect("explicit baseline release binary");
+    let fixture = load("http_api");
+    fs::create_dir(&root).unwrap();
+    let root = root.canonicalize().unwrap();
+    let package = materialize_at(&fixture, &root);
+    // 固定 4096 个合成的应用侧和来源侧资产，两个参考角色。
+    // 原有的三个资产保留各自的认领；其余未分类，不解码任何文件。
+    for name in ["library.sqlite", "source.sqlite"] {
+        let mut c = Connection::open(package.join(name)).unwrap();
+        let tx = c.transaction().unwrap();
+        for i in 3..4096 {
+            let id = format!("synthetic-{i:05}");
+            let filename = format!("{id}.png");
+            if name == "library.sqlite" {
+                tx.execute("INSERT INTO assets(uuid,filename,src_path,width,height,added_at,src_kind) VALUES (?,?,?,120,150,'2026-09-22','orig')",
+                    rusqlite::params![id, filename, root.join("folder").join(&filename).to_str()]).unwrap();
+            } else {
+                tx.execute("INSERT INTO assets(uuid,filename,src_path,width,height,added_at,src_kind,in_scope,trashed) VALUES (?,?,?,120,150,'2026-09-22','orig',1,0)",
+                    rusqlite::params![id, filename, root.join("folder").join(&filename).to_str()]).unwrap();
+            }
+        }
+        tx.commit().unwrap();
+    }
+    // 基线宿主决定要准备的版本；它和候选都用不带 --upgrade 的普通打开来测量。
+    let done = Command::new(&binary).args(["migrate", "--db"]).arg(package.join("library.sqlite")).output().unwrap();
+    assert!(done.status.success(), "benchmark fixture: upgrade: {}", String::from_utf8_lossy(&done.stderr));
+    let backups = package.join("library-backups");
+    if backups.exists() {
+        fs::remove_dir_all(backups).unwrap();
+    }
 }
 
 fn launch(root: &Path, package: &Path, category: &str, upgrade: bool, binary: &Path) -> (Host, String, String) {
+    launch_inner(root, package, category, upgrade, binary, false)
+}
+
+fn launch_inner(
+    root: &Path,
+    package: &Path,
+    category: &str,
+    upgrade: bool,
+    binary: &Path,
+    desktop_pipe: bool,
+) -> (Host, String, String) {
     let listener = TcpListener::bind(("127.0.0.1", 0)).unwrap();
     let port = listener.local_addr().unwrap().port();
     drop(listener);
@@ -226,7 +290,13 @@ fn launch(root: &Path, package: &Path, category: &str, upgrade: bool, binary: &P
     if upgrade {
         command.arg("--upgrade");
     }
+    if desktop_pipe {
+        command.env("ILLUSTASH_DESKTOP_STDIN", "1").stdin(Stdio::piped());
+    }
     let mut host = Host { child: command.spawn().unwrap(), reaped: false };
+    if let Some(stdin) = host.child.stdin.as_mut() {
+        std::io::Write::write_all(stdin, &[1]).unwrap();
+    }
     let (ready, lines) = std::sync::mpsc::channel();
     let stdout = host.child.stdout.take().unwrap();
     thread::spawn(move || {
@@ -255,7 +325,8 @@ fn load(category: &str) -> Value {
     let path =
         Path::new(env!("CARGO_MANIFEST_DIR")).join(format!("tests/fixtures/baseline/contracts/{category}.json.gz"));
     let mut text = String::new();
-    flate2::read::GzDecoder::new(fs::File::open(&path).unwrap()).read_to_string(&mut text).unwrap();
+    let file = fs::File::open(&path).unwrap_or_else(|error| panic!("{}: {error}", path.display()));
+    flate2::read::GzDecoder::new(file).read_to_string(&mut text).unwrap();
     let fixture: Value = serde_json::from_str(&text).unwrap();
     assert_eq!(fixture["format"], baseline::FORMAT);
     fixture
@@ -287,6 +358,16 @@ fn check_backup(
     fs::remove_dir_all(&check).unwrap();
 }
 
+/// 固定夹具的来源库布局照旧，只把词条库升到当前版本。
+fn migrate_fixture_terms(package: &Path, category: &str) {
+    let done = Command::new(env!("CARGO_BIN_EXE_illustash-terms"))
+        .args(["migrate", "--db"])
+        .arg(package.join("library.sqlite"))
+        .output()
+        .unwrap();
+    assert!(done.status.success(), "{category}: upgrade: {}", String::from_utf8_lossy(&done.stderr));
+}
+
 fn replay(category: &str) {
     let fixture = load(category);
     let (_scratch, root, package) = materialize(&fixture, category);
@@ -302,12 +383,7 @@ fn replay(category: &str) {
     // 较旧的 source.sqlite 布局一并更新，而这不在录制范围内），再检查并删除升级前备份。
     let upgrade = version < recorded;
     if version == recorded && recorded < illustash_terms::SCHEMA_VERSION {
-        let done = Command::new(env!("CARGO_BIN_EXE_illustash-terms"))
-            .args(["migrate", "--db"])
-            .arg(package.join("library.sqlite"))
-            .output()
-            .unwrap();
-        assert!(done.status.success(), "{category}: upgrade: {}", String::from_utf8_lossy(&done.stderr));
+        migrate_fixture_terms(&package, category);
         check_backup(&package, &root, &before, recorded, category);
         fs::remove_dir_all(package.join("library-backups")).unwrap();
     }
@@ -362,6 +438,222 @@ fn replay(category: &str) {
 }
 
 #[test]
+fn favorite_http_contract() {
+    let (_scratch, root, _) = materialize(&json!({"input": {}}), "favorites");
+    let package = root.join("favorites.pilib");
+    illustash_terms::app_create::create_folder(&package, &root.join("folder"), Some("收藏夹具"), None, None).unwrap();
+    let db = Connection::open(package.join("library.sqlite")).unwrap();
+    db.execute_batch(
+        "INSERT INTO assets(uuid,added_at) VALUES ('a','2026-09-22'),('copy','2026-09-22'),('b','2026-09-21');
+         INSERT INTO duplicates VALUES ('a','g',2,0,'2026-09-22',1,0),('copy','g',2,1,'2026-09-22',0,1);",
+    )
+    .unwrap();
+    let (_host, origin, token) =
+        launch(&root, &package, "favorites", false, Path::new(env!("CARGO_BIN_EXE_illustash-terms")));
+    let call = |url: &str, data: Option<&Value>| {
+        let (status, result, _) = request_json(&origin, url, data, &token);
+        assert_eq!(status, 200, "{url}: {result}");
+        result
+    };
+    let verdicts = || db.query_row("SELECT count(*) FROM term_verdicts", [], |r| r.get::<_, i64>(0)).unwrap();
+    let fav = "has=%5B%22fav%22%5D";
+    let not_fav = "not=%5B%22fav%22%5D";
+    let ids = || call(&format!("/api/ids?{fav}"), None);
+    assert_eq!(call("/api/favorite", Some(&json!({"ids":["a"],"add":false}))), json!({"undo":null}));
+    assert_eq!(verdicts(), 0);
+    assert_eq!(ids(), json!([]));
+    let (status, _, _) = request_json(&origin, "/api/favorite", Some(&json!({"ids":vec!["a"; 501]})), &token);
+    assert_eq!(status, 400);
+    let first = call("/api/favorite", Some(&json!({"ids":["a"]})));
+    assert_eq!(first["undo"]["label"], "已收藏 1 张");
+    assert_eq!(verdicts(), 2);
+    let batch = call("/api/favorite", Some(&json!({"ids":["a","b"]})));
+    assert_eq!(batch["undo"]["label"], "已收藏 2 张");
+    assert_eq!(verdicts(), 5);
+    assert_eq!(call("/api/user-tags", None), json!([]));
+    db.execute_batch(
+        "INSERT INTO assets(uuid,added_at) VALUES ('late','2026-09-23'),('plain','2026-09-20');
+         UPDATE duplicates SET rep=0,hidden=1,size=3 WHERE grp='g';
+         INSERT INTO duplicates VALUES ('late','g',3,2,'2026-09-23',1,0);",
+    )
+    .unwrap();
+    assert_eq!(ids(), json!(["late", "b"]));
+    let page = call(&format!("/api/assets?{fav}&marks=fav"), None);
+    assert_eq!(page["total"], 2);
+    assert_eq!(page["items"][0]["uuid"], "late");
+    assert_eq!(page["items"][0]["fav"], true);
+    assert_eq!(call(&format!("/api/assets/count?{fav}"), None)["total"], 2);
+    assert_eq!(call(&format!("/api/ids?{not_fav}"), None), json!(["plain"]));
+    assert_eq!(call(&format!("/api/ids?{fav}&{not_fav}"), None), json!([]));
+    assert_eq!(call(&format!("/api/ids?{fav}&day=2026-09-21"), None), json!(["b"]));
+    assert_eq!(call("/api/home?marks=fav", None)["days"][0]["items"][0]["fav"], true);
+    assert_eq!(call("/api/detail?id=late&marks=fav", None)["fav"], true);
+    assert_eq!(call("/api/detail?id=plain&marks=other,fav", None)["fav"], false);
+    assert!(call("/api/detail?id=late", None).get("fav").is_none());
+
+    for query in ["has=fav", "has=%5B1%5D", "not=%5B%22fav%3Ax%22%5D"] {
+        assert_eq!(request(&origin, &format!("/api/ids?{query}"), None, &token).0, 400);
+    }
+    let too_many = format!("has=%5B{}%5D&{not_fav}", vec!["%22fav%22"; 20].join(","));
+    assert_eq!(request(&origin, &format!("/api/assets/count?{too_many}"), None, &token).0, 400);
+
+    let clear = call("/api/favorite", Some(&json!({"filter":{"has":"[\"fav\"]"},"exclude":["b"],"add":false})));
+    assert_eq!(clear["undo"]["label"], "已取消收藏 1 张");
+    assert_eq!(verdicts(), 8);
+    assert_eq!(ids(), json!(["b"]));
+    assert_eq!(call("/api/detail?id=late&marks=fav", None)["fav"], false);
+    call("/api/undo", Some(&json!({"id":clear["undo"]["id"]})));
+    assert_eq!(ids(), json!(["late", "b"]));
+}
+
+#[test]
+fn combined_gallery_http_contract() {
+    use illustash_terms::{schema, store, Kind};
+    use rusqlite::params;
+
+    let (_scratch, root, _) = materialize(&json!({"input": {}}), "galleries");
+    let package = root.join("galleries.pilib");
+    illustash_terms::app_create::create_folder(&package, &root.join("folder"), Some("画廊夹具"), None, None).unwrap();
+    let mut db = illustash_terms::open(&package.join("library.sqlite")).unwrap();
+    let tx = db.transaction().unwrap();
+    schema::begin_writing(&tx).unwrap();
+    tx.execute_batch(
+        "INSERT INTO assets(uuid,filename,added_at) VALUES
+         ('a','one.png','2025-01-01'),('b','two.png','2025-12-31'),('c','three.png','2025-06-01'),
+         ('d','four.png','2025-05-01'),('e','five.png','2025-07-01'),('new','six.png','2026-01-01');",
+    )
+    .unwrap();
+    for (tag, ids) in [("1girl", &["a", "b", "c", "d", "e", "new"][..]), ("solo", &["a", "b", "d", "e", "new"][..])] {
+        let term = store::create_term(&tx, Kind::Topic, None, "test").unwrap();
+        store::add_link(&tx, term, "wd", tag, "", "test").unwrap();
+        for id in ids {
+            let asset = store::library_asset(&tx, id).unwrap().unwrap();
+            tx.execute(
+                "INSERT INTO term_evidence(asset_id,term_id,source,method,version,score,metric,fingerprint)
+                 VALUES (?,?,'wd','tagger','fixture',0.9,'wd_probability',zeroblob(16))",
+                params![asset, term],
+            )
+            .unwrap();
+        }
+    }
+    let rating = store::create_term(&tx, Kind::Rating, None, "test").unwrap();
+    store::add_link(&tx, rating, "wd_rating", "explicit", "", "test").unwrap();
+    let b = store::library_asset(&tx, "b").unwrap().unwrap();
+    tx.execute(
+        "INSERT INTO term_evidence(asset_id,term_id,source,method,version,score,metric,fingerprint)
+                 VALUES (?,?,'wd','tagger','fixture',0.9,'wd_probability',zeroblob(16))",
+        params![b, rating],
+    )
+    .unwrap();
+    let registered = tx
+        .prepare("SELECT id FROM term_assets")
+        .unwrap()
+        .query_map([], |r| r.get(0))
+        .unwrap()
+        .collect::<rusqlite::Result<Vec<_>>>()
+        .unwrap();
+    store::project(&tx, &registered).unwrap();
+    let artist = store::create_term(&tx, Kind::Artist, Some("synthetic-artist"), "test").unwrap();
+    let a = store::library_asset(&tx, "a").unwrap().unwrap();
+    let d = store::library_asset(&tx, "d").unwrap().unwrap();
+    for (asset, state) in [(a, "confirmed"), (b, "maybe"), (d, "rejected")] {
+        tx.execute("INSERT INTO term_projection(asset_id,term_id,state) VALUES (?,?,?)", params![asset, artist, state])
+            .unwrap();
+    }
+    use illustash_terms::character_entities::{self, New};
+    for entity in [
+        New { id: "fixture-root-work", kind: "work", ..New::default() },
+        New { id: "fixture-child-work", kind: "work", parent_id: Some("fixture-root-work"), ..New::default() },
+        New { id: "fixture-character", kind: "character", work_id: Some("fixture-child-work"), ..New::default() },
+    ] {
+        character_entities::create(&tx, &entity, "user").unwrap();
+    }
+    tx.execute_batch(
+        "INSERT INTO memberships(uuid,entity,status,origin,sources,score,source_count,ccip_only,skey)
+         VALUES ('a','fixture-character','machine','fixture','WD',0.9,1,0,'a');",
+    )
+    .unwrap();
+    schema::commit_writing(tx).unwrap();
+    Connection::open(package.join("source.sqlite"))
+        .unwrap()
+        .execute_batch(
+            "INSERT INTO assets(uuid,preset,in_scope,trashed) VALUES
+         ('a','pixiv',1,0),('b','pixiv',1,0),('c','pixiv',1,0),('d','x',1,0),('new','pixiv',1,0);",
+        )
+        .unwrap();
+
+    let (_host, origin, token) =
+        launch(&root, &package, "galleries", false, Path::new(env!("CARGO_BIN_EXE_illustash-terms")));
+    let call = |url: &str, data: Option<&Value>| {
+        let (status, result, _) = request_json(&origin, url, data, &token);
+        assert_eq!(status, 200, "{url}: {result}");
+        result
+    };
+    let url = |path: &str, filter: &[(&str, &str)]| {
+        format!(
+            "{path}?{}",
+            url::form_urlencoded::Serializer::new(String::new()).extend_pairs(filter.iter().copied()).finish()
+        )
+    };
+    let has = r#"["tag:1girl","tag:solo","source:pixiv","tag:1girl"]"#;
+    let filter = [("has", has), ("from", "2025-01-01"), ("to", "2025-12-31")];
+    assert_eq!(call(&url("/api/ids", &filter), None), json!(["b", "a"]));
+    assert_eq!(call(&url("/api/assets/count", &filter), None)["total"], 2);
+    let page = call(&url("/api/assets", &filter), None);
+    assert_eq!(page["total"], 2);
+    assert_eq!(page["items"][0]["uuid"], "b");
+    assert_eq!(call(&url("/api/ids", &[("has", r#"["source:other"]"#)]), None), json!(["e"]));
+    assert_eq!(call(&url("/api/ids", &[("has", r#"["artist:synthetic-artist"]"#)]), None), json!(["a"]));
+    assert_eq!(call(&url("/api/ids", &[("not", r#"["tag:solo"]"#)]), None), json!(["c"]));
+    assert_eq!(call(&url("/api/ids", &[("has", r#"["char:fixture-character"]"#)]), None), json!(["a"]));
+    assert_eq!(call(&url("/api/ids", &[("has", r#"["work:fixture-root-work"]"#)]), None), json!(["a"]));
+    assert_eq!(call(&url("/api/ids", &[("work", "fixture-root-work")]), None), json!(["a"]));
+    let params = json!({"to":"2025-12-31","has":has,"not":"[\"utag:审完:合成\"]","from":"2025-01-01"});
+    let created = call("/api/galleries", Some(&json!({"action":"create","params":params})));
+    let gallery = &created["gallery"];
+    let id = &gallery["id"];
+    assert_eq!(gallery["name"], "1girl · solo · Pixiv · 不含 审完:合成 · 2025");
+    assert_eq!(gallery["params"]["has"], r#"["tag:1girl","tag:solo","source:pixiv"]"#);
+    assert_eq!(gallery["cover"], "a");
+    assert_eq!(call("/api/galleries", None)[0]["cover"], "b");
+    let fixed =
+        call("/api/galleries", Some(&json!({"action":"update","id":id,"name":"手动封面","cover":"b","position":8})));
+    assert_eq!(fixed["gallery"]["cover"], "a");
+    assert_eq!(fixed["gallery"]["cover_manual"], true);
+    assert_eq!(call("/api/galleries?nsfw=only", None)[0]["cover"], "b");
+    let cleared = call("/api/galleries", Some(&json!({"action":"update","id":id,"cover":null})));
+    assert_eq!(cleared["gallery"]["cover_manual"], false);
+    call("/api/undo", Some(&json!({"id":cleared["undo"]["id"]})));
+    assert_eq!(call("/api/galleries", None)[0]["cover_manual"], true);
+    let deleted = call("/api/galleries", Some(&json!({"action":"delete","id":id})));
+    assert_eq!(call("/api/galleries", None), json!([]));
+    call("/api/undo", Some(&json!({"id":deleted["undo"]["id"]})));
+    assert_eq!(call("/api/galleries?nsfw=hide", None)[0]["cover"], "a");
+    let position: i64 = db.query_row("SELECT position FROM galleries WHERE id=1", [], |r| r.get(0)).unwrap();
+    assert_eq!(position, 8);
+
+    call("/api/tag", Some(&json!({"filter":params,"exclude":["a"],"tag":"审完:合成"})));
+    assert_eq!(call("/api/user-tags?limit=1000", None)[0]["count"], 1);
+    let exclude = ("not", r#"["utag:审完:合成"]"#);
+    let filtered: Vec<_> = filter.into_iter().chain([exclude]).collect();
+    assert_eq!(call(&url("/api/ids", &filtered), None), json!(["a"]));
+    assert_eq!(call("/api/galleries", None)[0]["cover"], "a");
+    for (path, filters) in [
+        ("/api/ids", vec![("from", "2025-02-29")]),
+        ("/api/ids", vec![("from", "2025-12-31"), ("to", "2025-01-01")]),
+        ("/api/ids", vec![("has", r#"["tag:synthetic-missing"]"#)]),
+        ("/api/ids", vec![("has", r#"["source:invalid"]"#)]),
+        ("/api/user-tags", vec![("limit", "1001")]),
+    ] {
+        assert_eq!(request(&origin, &url(path, &filters), None, &token).0, 400);
+    }
+    assert_eq!(
+        request_json(&origin, "/api/galleries", Some(&json!({"action":"create","params":{"nsfw":"hide"}})), &token).0,
+        400
+    );
+}
+
+#[test]
 fn http_api_contract() {
     replay("http_api");
 }
@@ -378,11 +670,206 @@ fn interrupted_task_recovery_contract() {
     replay("task_recovery");
 }
 
-/// 把响应解析成 JSON（基准测试要从响应里读值）。
-#[cfg(unix)]
+/// 把响应解析成 JSON，供按字段断言和计时使用。
 fn request_json(origin: &str, url: &str, body: Option<&Value>, token: &str) -> (u16, Value, Map<String, Value>) {
     let (status, raw, headers) = request(origin, url, body, token);
     (status, serde_json::from_str(&raw).unwrap_or(Value::Null), headers)
+}
+
+#[test]
+fn artist_directory_contract() {
+    let category = "artist-directory";
+    let (_scratch, root, package) = materialize(&load("http_api"), category);
+    migrate_fixture_terms(&package, category);
+    let binary = Path::new(env!("CARGO_BIN_EXE_illustash-terms"));
+    let (_host, origin, token) = launch(&root, &package, category, false, binary);
+    let c = Connection::open(package.join("library.sqlite")).unwrap();
+    c.execute_batch(
+        "INSERT INTO terms(key,kind,origin) VALUES
+             ('dir-a','artist','test'),('dir-b','artist','test'),('dir-c','artist','test'),('dir-d','artist','test'),
+             ('dir-explicit','rating','test');
+         INSERT INTO term_names(term_id,value,role,source,preferred)
+             SELECT id,'Straße','display','test',1 FROM terms WHERE key='dir-a';
+         INSERT INTO term_names(term_id,value,role,source)
+             SELECT id,'Unpreferred','display','test' FROM terms WHERE key='dir-a';
+         INSERT INTO term_links(system,key,term_id,source)
+             SELECT 'x','Maple_Artist',id,'test' FROM terms WHERE key='dir-a'
+             UNION ALL SELECT 'pixiv','987654',id,'test' FROM terms WHERE key='dir-a'
+             UNION ALL SELECT 'danbooru','Aoi_Illustrator',id,'test' FROM terms WHERE key='dir-b'
+             UNION ALL SELECT 'wd_rating','explicit',id,'test' FROM terms WHERE key='dir-explicit';
+         INSERT INTO assets(uuid,filename,width,height,added_at) VALUES
+             ('dir-safe-a','a.png',10,10,'2026-10-01'),('dir-safe-z','z.png',10,10,'2026-10-01'),
+             ('dir-safe-b','b.png',10,10,'2026-10-03'),
+             ('dir-adult','r.png',10,10,'2026-10-02'),('dir-hidden','h.png',10,10,'2026-10-03'),
+             ('dir-excluded','e.png',10,10,'2026-10-04'),('dir-maybe','m.png',10,10,'2026-10-05'),
+             ('dir-rejected','n.png',10,10,'2026-10-06'),('dir-removed','x.png',10,10,'2026-10-07');
+         INSERT INTO duplicates(uuid,grp,size,pos,grp_added,rep,hidden)
+             VALUES ('dir-hidden','dir-dup',2,2,'2026-10-03',0,1);
+         INSERT INTO excluded(uuid,reason,origin) VALUES ('dir-excluded','manual','test');
+         INSERT INTO term_assets(namespace,key,removed_at)
+             SELECT 'library',uuid,CASE WHEN uuid='dir-removed' THEN '2026-10-08' END
+             FROM assets WHERE uuid LIKE 'dir-%';
+         INSERT INTO term_projection(asset_id,term_id,state)
+             SELECT a.id,t.id,CASE a.key WHEN 'dir-maybe' THEN 'maybe'
+                                         WHEN 'dir-rejected' THEN 'rejected'
+                                         WHEN 'dir-safe-a' THEN 'confirmed' ELSE 'machine' END
+             FROM term_assets a JOIN terms t ON t.key='dir-a' WHERE a.key LIKE 'dir-%' AND a.key<>'dir-safe-b';
+         INSERT INTO term_projection(asset_id,term_id,state)
+             SELECT a.id,t.id,'machine' FROM term_assets a JOIN terms t
+                 ON (t.key='dir-b' AND a.key IN ('dir-safe-b','dir-adult'))
+                 OR (t.key IN ('dir-c','dir-explicit') AND a.key='dir-adult');
+         INSERT INTO term_projection(asset_id,term_id,state)
+             SELECT a.id,t.id,'maybe' FROM term_assets a JOIN terms t ON t.key='dir-d' WHERE a.key='dir-maybe';",
+    )
+    .unwrap();
+
+    let get = |url: &str| {
+        let (status, payload, _) = request_json(&origin, url, None, &token);
+        assert_eq!(status, 200, "{url}: {payload}");
+        payload
+    };
+    let page_ids = |page: &Value| {
+        page["items"].as_array().unwrap().iter().map(|x| x["id"].as_str().unwrap().to_owned()).collect::<Vec<_>>()
+    };
+    for (nsfw, counts, cover, last) in [
+        ("", &[3, 2, 1][..], "dir-adult", "2026-10-02"),
+        ("hide", &[2, 1], "dir-safe-a", "2026-10-01"),
+        ("only", &[1, 1, 1], "dir-adult", "2026-10-02"),
+    ] {
+        let page = get(&format!("/api/artist-directory?nsfw={nsfw}"));
+        assert_eq!(page["total"], counts.len());
+        let items = page["items"].as_array().unwrap();
+        assert_eq!(items.len(), counts.len());
+        for (item, (id, expected)) in items.iter().zip(["dir-a", "dir-b", "dir-c"].into_iter().zip(counts)) {
+            let filter = get(&format!("/api/assets/count?artist={id}&nsfw={nsfw}"));
+            assert_eq!(item["id"], id);
+            assert_eq!(item["count"], *expected, "{id} {nsfw}");
+            assert_eq!(item["count"], filter["total"], "{id} {nsfw}");
+        }
+        for id in ["dir-a", "dir-b", "dir-c", "dir-d"].into_iter().skip(counts.len()) {
+            assert_eq!(get(&format!("/api/assets/count?artist={id}&nsfw={nsfw}"))["total"], 0);
+        }
+        assert_eq!(items[0]["cover"], cover);
+        assert_eq!(items[0]["last"], last);
+        assert_eq!(items[0]["name"], get("/api/artist?id=dir-a")["name"]);
+        let detail = get(&format!("/api/detail?id={cover}"));
+        let artist = detail["artists"].as_array().unwrap().iter().find(|x| x["id"] == "dir-a").unwrap();
+        assert_eq!(items[0]["homes"], artist["homes"]);
+        assert_eq!(items[0]["homes"].as_array().unwrap().len(), 2);
+    }
+    for (order, expected) in [
+        ("count", ["dir-a", "dir-b", "dir-c"]),
+        ("recent", ["dir-b", "dir-a", "dir-c"]),
+        ("name", ["dir-b", "dir-a", "dir-c"]),
+    ] {
+        assert_eq!(page_ids(&get(&format!("/api/artist-directory?order={order}"))), expected);
+        for (offset, expected) in expected.iter().enumerate() {
+            let page = get(&format!("/api/artist-directory?order={order}&offset={offset}&limit=1"));
+            assert_eq!(page_ids(&page), [*expected]);
+            assert_eq!(page["total"], 3);
+            assert_eq!(page["offset"], offset);
+        }
+        assert_eq!(
+            get(&format!("/api/artist-directory?order={order}&offset=3&limit=1")),
+            json!({"items":[], "total":3, "offset":3})
+        );
+    }
+    for (query, expected) in [
+        ("STRASSE", &["dir-a"][..]),
+        ("maple_", &["dir-a"]),
+        ("987654", &["dir-a"]),
+        ("AOI_ILL", &["dir-b"]),
+        ("aoi%20ill", &["dir-b"]),
+        ("unpreferred", &[]),
+        ("%25", &[]),
+    ] {
+        assert_eq!(page_ids(&get(&format!("/api/artist-directory?q={query}"))), expected);
+    }
+    for query in ["order=bad", "nsfw=bad", "limit=0", "limit=201", "offset=-1", "offset=no"] {
+        assert_eq!(request_json(&origin, &format!("/api/artist-directory?{query}"), None, &token).0, 400);
+    }
+}
+
+/// #448 专用合成数据。独立运行本用例三次，每次报告 50 个 HTTP 请求的平均耗时。
+#[test]
+#[ignore = "release HTTP benchmark; run with collab_run.py timing"]
+fn benchmark_artist_directory() {
+    if cfg!(debug_assertions) {
+        panic!("benchmark must be compiled --release");
+    }
+    let category = "artist-directory-benchmark";
+    let (_scratch, root, package) = materialize(&load("http_api"), category);
+    migrate_fixture_terms(&package, category);
+    let binary = Path::new(env!("CARGO_BIN_EXE_illustash-terms"));
+    let c = Connection::open(package.join("library.sqlite")).unwrap();
+    c.execute_batch(
+        "BEGIN;
+         CREATE TEMP TABLE seq(i INTEGER PRIMARY KEY);
+         WITH RECURSIVE ints(i) AS (VALUES(0) UNION ALL SELECT i+1 FROM ints WHERE i<49999)
+             INSERT INTO seq SELECT i FROM ints;
+         INSERT INTO assets(uuid,width,height,added_at,filename)
+             SELECT printf('directory-%05d',i),120,150,date('2023-01-01',printf('+%d days',i%1095)),
+                    printf('directory-%05d.png',i)
+             FROM seq;
+         INSERT INTO term_assets(namespace,key) SELECT 'library',printf('directory-%05d',i) FROM seq;
+         CREATE TEMP TABLE synthetic AS
+             SELECT i,a.id,(i*7919)%50000 AS permuted FROM seq JOIN term_assets a ON a.namespace='library' AND a.key=printf('directory-%05d',i);
+         INSERT INTO terms(key,kind,origin)
+             SELECT printf('directory-artist-%04d',i),'artist','synthetic' FROM seq WHERE i<4000;
+         INSERT INTO term_names(term_id,value,role,source)
+             SELECT id,CASE WHEN id%5=0 THEN 'Maple ' ELSE 'Aoi ' END || key,'display','synthetic'
+             FROM terms WHERE key LIKE 'directory-artist-%';
+         INSERT INTO term_links(system,key,term_id,source)
+             SELECT 'pixiv',printf('%d',810000000+id),id,'synthetic' FROM terms WHERE key LIKE 'directory-artist-%';
+         INSERT INTO term_projection(asset_id,term_id,state)
+             SELECT s.id,t.id,CASE WHEN permuted%9=0 THEN 'confirmed' ELSE 'machine' END
+             FROM synthetic s JOIN terms t ON t.key=printf('directory-artist-%04d',
+                  CASE WHEN permuted>=4000 AND permuted%3=0 THEN permuted%79 ELSE permuted%4000 END)
+             WHERE permuted<12000;
+         INSERT INTO terms(key,kind,origin) VALUES ('directory-explicit','rating','synthetic');
+         INSERT INTO term_links(system,key,term_id,source)
+             SELECT 'wd_rating','explicit',id,'synthetic' FROM terms WHERE key='directory-explicit';
+         INSERT INTO term_projection(asset_id,term_id,state)
+             SELECT s.id,t.id,'machine' FROM synthetic s JOIN terms t ON t.key='directory-explicit'
+             WHERE (i*31337)%50000 < 20000;
+         INSERT INTO duplicates(uuid,grp,size,pos,grp_added,rep,hidden)
+             SELECT printf('directory-%05d',i),printf('d-%04d',i/2),2,i%2+1,'2025-01-01',1-i%2,i%2
+             FROM seq WHERE i<2500;
+         INSERT INTO terms(key,kind,origin)
+             SELECT printf('directory-topic-%04d',i),'topic','synthetic' FROM seq WHERE i<3000;
+         INSERT INTO term_projection(asset_id,term_id,state)
+             SELECT s.id,t.id,'machine'
+             FROM synthetic s JOIN seq n ON n.i<30
+             JOIN terms t ON t.key=printf('directory-topic-%04d',(s.permuted+n.i*97)%3000);
+         COMMIT;",
+    )
+    .unwrap();
+    drop(c);
+    let (_host, origin, token) = launch(&root, &package, category, false, binary);
+    let page = request_json(&origin, "/api/artist-directory", None, &token);
+    assert_eq!(page.0, 200, "{}", page.1);
+    let total = page.1["total"].as_u64().unwrap();
+    assert!(total > 3800);
+    let last_page = format!("/api/artist-directory?offset={}", (total - 1) / 60 * 60);
+    for (name, url) in [
+        ("count", "/api/artist-directory"),
+        ("recent", "/api/artist-directory?order=recent"),
+        ("name", "/api/artist-directory?order=name"),
+        ("search", "/api/artist-directory?q=maple"),
+        ("hide", "/api/artist-directory?nsfw=hide"),
+        ("last_page", &last_page),
+    ] {
+        for _ in 0..5 {
+            let (status, body, _) = request_json(&origin, url, None, &token);
+            assert_eq!(status, 200, "{url}: {body}");
+            assert!(!body["items"].as_array().unwrap().is_empty());
+        }
+        let start = Instant::now();
+        for _ in 0..50 {
+            assert_eq!(request_json(&origin, url, None, &token).0, 200);
+        }
+        println!("BENCH {name} {:.3}", start.elapsed().as_secs_f64() * 1000.0 / 50.0);
+    }
 }
 
 // 每次调用这个可执行文件做一次独立试验。shell 运行脚本对每个显式指定的 release 宿主恰好做三次试验，报告中位数。
@@ -390,44 +877,16 @@ fn request_json(origin: &str, url: &str, body: Option<&Value>, token: &str) -> (
 #[test]
 #[ignore = "explicit release performance runner only"]
 fn benchmark_release_host() {
-    if cfg!(debug_assertions) {
-        panic!("benchmark must be compiled --release");
+    let root = benchmark_root().canonicalize().expect("prepared benchmark fixture directory missing");
+    let package = root.join("fixture.pilib");
+    let replacement = root.join("replacement.pilib");
+    for input in [&package, &replacement] {
+        for name in ["library.sqlite", "source.sqlite", "library.json"] {
+            let path = input.join(name);
+            assert!(path.is_file(), "prepared benchmark input missing: {}", path.display());
+        }
     }
     let binary = std::env::var_os("ILLUSTASH_BENCH_BINARY").expect("explicit release binary");
-    let (_scratch, root, package) = materialize(&load("http_api"), "benchmark");
-    // 固定 4096 个合成的应用侧和来源侧资产，两个参考角色。
-    // 原有的三个资产保留各自的认领；其余未分类，不解码任何文件。
-    for name in ["library.sqlite", "source.sqlite"] {
-        let mut c = Connection::open(package.join(name)).unwrap();
-        let tx = c.transaction().unwrap();
-        for i in 3..4096 {
-            let id = format!("synthetic-{i:05}");
-            let filename = format!("{id}.png");
-            if name == "library.sqlite" {
-                tx.execute("INSERT INTO assets(uuid,filename,src_path,width,height,added_at,src_kind) VALUES (?,?,?,120,150,'2026-09-22','orig')",
-                    rusqlite::params![id, filename, root.join("folder").join(&filename).to_str()]).unwrap();
-            } else {
-                tx.execute("INSERT INTO assets(uuid,filename,src_path,width,height,added_at,src_kind,in_scope,trashed) VALUES (?,?,?,120,150,'2026-09-22','orig',1,0)",
-                    rusqlite::params![id, filename, root.join("folder").join(&filename).to_str()]).unwrap();
-            }
-        }
-        tx.commit().unwrap();
-    }
-    // 一个物理上不同的图库包使用同一个图库 ID；每次切换都必须打开那个实例。
-    fn copy_tree(from: &Path, to: &Path) {
-        fs::create_dir(to).unwrap();
-        for entry in fs::read_dir(from).unwrap() {
-            let entry = entry.unwrap();
-            let dest = to.join(entry.file_name());
-            if entry.file_type().unwrap().is_dir() {
-                copy_tree(&entry.path(), &dest);
-            } else {
-                fs::copy(entry.path(), dest).unwrap();
-            }
-        }
-    }
-    let replacement = root.join("replacement.pilib");
-    copy_tree(&package, &replacement);
     // 测量完整过程：启动进程 -> 校验和恢复图库包 -> bootstrap 就绪。
     let mut opens = Vec::new();
     for _ in 0..7 {
@@ -504,3 +963,6 @@ fn benchmark_release_host() {
     }
     assert!(!root.join("python-launched").exists());
 }
+
+#[path = "contracts/examples_bench.rs"]
+mod examples_bench;

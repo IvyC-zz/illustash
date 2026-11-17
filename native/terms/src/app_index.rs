@@ -204,7 +204,13 @@ fn set_watch(lib: &Library, dir: &Path, b: &Value) -> Result<()> {
     tx.commit()?;
     Ok(())
 }
-fn candidates(lib: &Library, shared: &Path, dir: &Path, net: &crate::app_name_sources::Source) -> Result<Value> {
+fn candidates(
+    lib: &Library,
+    resources: &Path,
+    shared: &Path,
+    dir: &Path,
+    net: &crate::app_name_sources::Source,
+) -> Result<Value> {
     let w = watch(lib, dir)?;
     let app = crate::app_library::read_connection(&lib.db())?;
     let src = crate::app_library::read_connection(&lib.source())?;
@@ -243,7 +249,7 @@ fn candidates(lib: &Library, shared: &Path, dir: &Path, net: &crate::app_name_so
     } else {
         BTreeSet::new()
     };
-    let covered = package_covered(&app, shared)?;
+    let covered = package_covered(&app, resources)?;
     let own = |id: &str| shared.join("char-index").join(format!("{id}.json")).exists();
     let local = Local {
         known: &known,
@@ -336,9 +342,9 @@ fn tally(
 }
 /// 本图库启用的数据包能认出的角色标签（#561）：检查新角色把它们算作已有，按作品计数。现在只有 WD 角色扩展
 /// （app_wd_extension 读启用状态和包里的标签表）；CCIP 长尾包（#559）合入后，在这里并进它启用的包的角色标签。
-fn package_covered(app: &Connection, shared: &Path) -> Result<BTreeSet<String>> {
+fn package_covered(app: &Connection, resources: &Path) -> Result<BTreeSet<String>> {
     let mut covered = BTreeSet::new();
-    covered.extend(crate::app_wd_extension::covered_labels(app, shared)?);
+    covered.extend(crate::app_wd_extension::covered_labels(app, resources)?);
     Ok(covered)
 }
 
@@ -659,7 +665,8 @@ impl Updater {
         self.task.take();
         let identity = TaskIdentity::new(lib, self.generation, &self.session)?;
         let lib = lib.clone();
-        let (shared, dir, journal, state, network) = (
+        let (resources, shared, dir, journal, state, network) = (
+            self.resources.clone(),
             self.shared.clone(),
             self.dir.clone(),
             self.journal.clone(),
@@ -689,7 +696,7 @@ impl Updater {
                 let net = crate::app_name_sources::Source::new(lib.db(), ctx.cancellation_arc(), network, true)?;
 
                 if b["action"] == "check" {
-                    let checked = candidates(&lib, &shared, &dir, &net)?;
+                    let checked = candidates(&lib, &resources, &shared, &dir, &net)?;
                     let found = checked["missing"].as_array().expect("candidates always returns a missing array").len();
                     ctx.check()?;
                     write_check(&dir.join("check.json"), &checked)?;

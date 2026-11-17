@@ -6,18 +6,29 @@ baseline=${2:?explicit main release host required}
 candidate=${3:?explicit candidate release host required}
 for path in "$runner" "$baseline" "$candidate"; do
     case "$path" in /*) ;; *) echo 'absolute executables required' >&2; exit 2;; esac
-    [ -x "$path" ]
+    [ -f "$path" ] && [ -x "$path" ] || { echo "missing executable: $path" >&2; exit 2; }
 done
 owned=$(mktemp -d "${TMPDIR:-/tmp}/illustash-benchmark.XXXXXX")
 trap 'rm -rf "$owned"' EXIT HUP INT TERM
 mkdir "$owned/bin" "$owned/home"
+run_contract() {
+    /usr/bin/env -i PATH="$owned/bin" HOME="$owned/home" TMPDIR="$owned" \
+        ILLUSTASH_BENCH_ROOT="$owned/trial" ILLUSTASH_BENCH_BINARY="$2" \
+        "$runner" --ignored --exact "$1" --nocapture > "$owned/trial.log" 2>&1 || { cat "$owned/trial.log" >&2; exit 1; }
+}
+# 只扩容、迁移一次。合成记录含绝对路径，所以每轮把准备好的副本放回同一个试验目录。
+run_contract prepare_benchmark_fixture "$baseline"
+# 一个物理上不同的图库包使用同一个图库 ID；每次切换都必须打开那个实例。
+cp -R "$owned/trial/fixture.pilib" "$owned/trial/replacement.pilib"
+mv "$owned/trial" "$owned/prepared"
 : > "$owned/samples.tsv"
 for trial in 1 2 3; do
     for label in baseline candidate; do
         if [ "$label" = baseline ]; then host=$baseline; else host=$candidate; fi
-        /usr/bin/env -i PATH="$owned/bin" HOME="$owned/home" TMPDIR="$owned" ILLUSTASH_BENCH_BINARY="$host" \
-            "$runner" --ignored --exact benchmark_release_host --nocapture > "$owned/trial.log" 2>&1 || { cat "$owned/trial.log"; exit 1; }
+        cp -R "$owned/prepared" "$owned/trial"
+        run_contract benchmark_release_host "$host"
         awk -v label="$label" -v trial="$trial" '$1 == "BENCH" {print label, $2, trial, $3}' "$owned/trial.log" >> "$owned/samples.tsv"
+        rm -rf "$owned/trial"
     done
 done
 # 读取和人工操作取每轮的平均值；打开取 7 次启动的中位数，切换取 20 次切换的中位数。

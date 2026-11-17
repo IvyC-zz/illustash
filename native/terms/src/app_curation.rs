@@ -259,6 +259,7 @@ mod tests {
                 .unwrap();
             }
             let context = LibraryContext {
+                examples: None,
                 db,
                 generation: "synthetic".into(),
                 library: Some(root.clone()),

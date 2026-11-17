@@ -719,6 +719,7 @@ dependencies = [
  "flate2",
  "getrandom 0.3.4",
  "gif",
+ "half",
  "httpdate",
  "illustash-core",
  "illustash-platform",
