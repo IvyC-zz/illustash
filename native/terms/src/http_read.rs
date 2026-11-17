@@ -25,6 +25,7 @@ pub const CORE_ROUTES: &[&str] = &[
     "/api/detail",
     "/api/home",
     "/api/galleries",
+    "/api/galleries/covers",
     "/api/fold",
     "/api/review-pools",
     "/api/characters",
@@ -565,7 +566,7 @@ const NAMED_ROUTES: [&str; 9] = [
     "/api/assets",
     "/api/detail",
     "/api/home",
-    "/api/galleries",
+    "/api/galleries/covers",
     "/api/characters",
     "/api/tagged",
     "/api/character/profile",
@@ -592,7 +593,7 @@ pub fn read(context: &LibraryContext, url: &str) -> Result<Option<(Json, u16)>> 
         Err(message) => return Ok(refused(message)),
     };
     let local = crate::http_local::ROUTES.contains(&path);
-    let browse = BROWSE_ROUTES.contains(&path) || path == "/api/galleries";
+    let browse = BROWSE_ROUTES.contains(&path) || matches!(path, "/api/galleries" | "/api/galleries/covers");
     let characters = crate::http_characters::ROUTES.contains(&path);
     let validation = if browse {
         crate::http_browse::validate(path, &q)

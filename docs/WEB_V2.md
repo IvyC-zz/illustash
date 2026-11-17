@@ -148,7 +148,8 @@
 - `GET /api/assets/count`：使用图库相同筛选参数（搜索使用 `q`，不接收分页参数），仅返回 `{total}`，不加载图片附属信息。
 - 组合筛选（#445）在原筛选上叠加 `has`、`not`、`from` 和 `to`。`has` 与 `not` 是 URL 编码的 JSON 字符串数组，分别要求全部满足和全部排除。可用 `char:<id>`、`work:<id>`、`artist:<key>`、`tag:<WD 标签>`、`utag:<我的标签>`、`source:pixiv|x|other` 和 `fav`。条件只按首个冒号分隔，重复项去重，合计至多 20 条，每条至多 160 字符。日期区间沿用加入日期，两端包含，可只提供一端。无出处的图归入 `other`。列表、计数、ID、按筛选选图的写入及画廊封面使用同一选区。
 - `GET /api/user-tags?limit=` 可指定 1–1,000 条，默认 60 条。
-- `GET /api/galleries?nsfw=` 按保存的顺序返回 `id,name,params,cover,cover_manual`。手动封面仍在当前选区时使用它，否则取排序第一张。空选区或失效的保存条件返回空封面，打开图片列表时沿用筛选错误响应。
+- `GET /api/galleries` 按 `position,id` 返回 `[{id,name,params,position,cover_manual}]`，`position` 是保存的整数顺序值，可能不连续；创建和更新回复的 `gallery` 同样带 `position`。保存的条件失效时仍返回该画廊。
+- `GET /api/galleries/covers?ids=&nsfw=` 按需读取当前封面。`ids` 为 URL 编码的 JSON 整数数组。按画廊顺序返回 `[{id,cover}]`，重复 ID 去重、缺失的 ID 跳过。手动封面仍在当前选区且符合调用方的 `nsfw` 时使用它，否则取排序第一张。空选区或失效的保存条件返回 `cover:null`，打开图片列表时沿用筛选错误响应。
 - `GET /api/identity/count?nsfw=...`：复用身份待判断队列的筛选、去重与跳过规则，仅返回 `{total}`，不排序或加载展示名称、样例图。
 - 每张图片返回 `memberships`，每个父角色包含 `status,origin,evidence:{sources,max_score},variants`。状态区分 `confirmed` 与 `machine`；`confirmed` 数组为前端兼容字段。
 - `GET /api/detail?id=` 另返回 `ownership`，包含有效归属与 `rejected` 父角色记录，每项带 origin 和证据。原始 assertions/candidates 继续返回，保留历史人工结论和逐来源证据。
