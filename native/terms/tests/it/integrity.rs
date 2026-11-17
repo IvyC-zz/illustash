@@ -382,7 +382,7 @@ fn wait_for(path: &Path) {
 // SQLite 给每个宿主连接注册夹具 CHECK 函数。只有合成表的标记行会调用它。
 unsafe extern "C" fn install_gate(
     db: *mut ffi::sqlite3,
-    error: *mut std::ffi::c_char,
+    error: *mut *mut std::ffi::c_char,
     _: *const ffi::sqlite3_api_routines,
 ) -> std::ffi::c_int {
     // SAFETY: SQLite 传入本次初始化的有效指针。回调只注册函数，不开关连接，也不修改扩展列表。
