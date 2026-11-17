@@ -619,7 +619,7 @@ fn run(
         results.insert(format!("{}.{}", index + 1, step), result);
     }
     validate_cache(lib, &staged, &path)?;
-    let pkg = cache::package(lib, &staged, &dir.join("evidence"))?;
+    let parts = cache::package(lib, &staged, &dir.join("evidence"), &ctx.identity().task_id)?;
     let found = cache::connect(&staged)?.query_row(
         "SELECT count(DISTINCT asset) FROM image_artists WHERE status='auto'",
         [],
@@ -637,7 +637,7 @@ fn run(
         }
         // 研究运行期间，导入账号归档可能新增线索：保留新线索。
         tx.execute("INSERT INTO leads SELECT * FROM stage.leads WHERE 1 ON CONFLICT(source,system,key) DO UPDATE SET status=excluded.status,artist_id=excluded.artist_id,next_due_at=excluded.next_due_at",[])?;
-        tx.execute("INSERT INTO native_delivery(task_id,package) VALUES (?,?)",params![ctx.identity().task_id,format!(".provenance/{}/evidence",ctx.identity().task_id)])?;
+        tx.execute("INSERT INTO native_delivery(task_id,package,parts) VALUES (?,?,?)",params![ctx.identity().task_id,format!(".provenance/{}/evidence",ctx.identity().task_id),parts])?;
         tx.execute("UPDATE runs SET status=?,reason=?,results=?,found=?,traffic_mb=?,report=?,finished_at=datetime('now') WHERE id=?",params![status,reasons.join("；"),Value::Object(results).to_string(),found,(net.used as f64/1048576.0*100.0).round()/100.0,crate::character_json::dump(&report,false),id])?;
         tx.commit()?;
         // 回执已提交：先分离暂存副本、删掉本次运行的工作文件，再发布终态，这样看到结束状态的调用方只会找到
@@ -649,7 +649,6 @@ fn run(
         let mut s=state.lock().expect("provenance state mutex poisoned");s.remove("text");s.set("status",status.into());s.set("reason",reasons.join("；").into());s.set("found",found.into());s.set("traffic_mb",Json::Float((net.used as f64/1048576.0*100.0).round()/100.0));s.set("finished_at",now().into());
         Ok(())
     })?;
-    let _ = pkg;
     Ok(())
 }
 /// 已交付的运行目录里除封好的 `evidence` 包以外的全部内容；失败忽略。
