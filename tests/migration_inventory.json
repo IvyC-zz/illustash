@@ -239,7 +239,7 @@
 
  "native/terms/src/app_desktop.rs":"127f0fd9238bd2f37334b531e4ee170d78e41e573125cc3c584c4020129fd573",
 
- "native/terms/src/app_effects.rs":"507ff09441aab09cc8f2ca7460bbde3da5bffb8180629b3bb6f503598dbbe1b8",
+ "native/terms/src/app_effects.rs":"e6e90940198b185af01531a5639539f4b023663be17ea7bc4dd6f43c7b2af040",
 
  "native/terms/src/app_files.rs":"be49abed7bcc1e2ff0da093b7aa482fc8f28afe9e755755b72d9c645e33736e8",
 
@@ -247,7 +247,7 @@
 
  "native/terms/src/app_galleries.rs":"2a082c652330ac99e3419cc9f5c7c2cce08410a6f89b1a9989bc712b13451bc2",
 
- "native/terms/src/app_http.rs":"105cbc9818405928658bcfedf438a5707f4f70a0824c67540453a4e3068c8041",
+ "native/terms/src/app_http.rs":"abeb95d0db6f4ba5be201c7c75fe63ac3aa79222925835ab3ebd29c27b030b80",
 
  "native/terms/src/app_human_conclusions.rs":"37bd5770a1bce2e3686a3a478b0925ddcfa11eaa81bf1f85023c57ed6cc8126b",
 
@@ -325,11 +325,11 @@
 
  "native/terms/src/app_rescue.rs":"08915aa36490c06b4d43fb0ff6337d4a548b451bc15c090928b0d37e6af4456d",
 
- "native/terms/src/app_research.rs":"18b432ce273fd06d51e6f26d7ddb709b8dd88dd776932ee4838861d29ec97abe",
+ "native/terms/src/app_research.rs":"6a98cd57e887be7dfb0825fdac813f55a8d606444b2492f678ff4716e35e146c",
 
  "native/terms/src/app_resources.rs":"d691ec21499b906972a02d49a21790f2a301c34eb4dea0bd9c301675dd9e2c0a",
 
- "native/terms/src/app_service.rs":"72176a78851ea28376ea2f9241b4786a3df217817c032c4e9ad4bad0d26294b9",
+ "native/terms/src/app_service.rs":"efde5f59144b1e18c24b15bcc27357b3cfa9aca4fed8197e688711fb1caf7adf",
 
  "native/terms/src/app_settings.rs":"20f5eb9c25a3a14920b85b48e75186564c5e01f6129cca02b06b2f63d60b2c41",
 
@@ -383,7 +383,7 @@
 
  "native/terms/src/http_example_search.rs":"37086571f127c0c437a4fa223184fddd7c26adb61c1c1883f8f05ee17011ab10",
 
- "native/terms/src/http_host_get.rs":"a5a92af6a50961083eae37af61e20cbc1de85e4bfddda1cd9231957cdcbb4298",
+ "native/terms/src/http_host_get.rs":"7b31a1cc13c675d6e321111c2c6965c1999874caf094fa661eaa406d33210613",
 
  "native/terms/src/http_host_post.rs":"b6b0e497024b22041203599518f889366c35134df8be4296292c09b14ea7b781",
 
@@ -647,7 +647,7 @@
  "native/terms/src/cli.rs":{"cli-entry":["recognition-import","folder-scan","photos-scan","library-scan","library-create","http","serve","wd-pending","names-command","names-project","names-search","character-command","identity-command","learning-snapshot","publish-learning","reproject-characters","validate","migrate","import","judge","tag","reproject","undo","wd-extension",329],"database-write":[[0,3],3,1]},
  "crates/core/src/character_sql/fold.sql":{"database-write":["UPDATE:duplicates"]},
  "crates/core/src/character_commands.rs":{"database-write":[[0,10],[184,2],198,[317,2],[318,2],316,14,15,"INSERT OR REPLACE INTO:assertions",[312,2],313,18,[35,4],"INSERT OR IGNORE INTO:deferred",[321,2],[322,2],315,"INSERT OR REPLACE INTO:identity_uncertain",175,314,190,"DELETE FROM:identity_anchor_decisions","INSERT INTO:identity_anchor_decisions","INSERT INTO:identity_anchor_history"]},
- "native/terms/src/http_host_get.rs":{"http-branch":[17,306,97,"/api/diagnostics",42,39,"/api/similar|/api/clusters",26,41,43,296,295,305,293,291,"/api/human-conclusions","/api/human-conclusions/report","/api/settings","/api/libraries","/api/files","/api/index/coverage",330,"/api/wd-extension"]},
+ "native/terms/src/http_host_get.rs":{"http-branch":[17,306,97,"/api/diagnostics",42,39,"/api/similar|/api/clusters",26,41,43,296,295,305,293,291,"/api/human-conclusions","/api/human-conclusions/report","/api/settings","/api/libraries","/api/files","/api/index/coverage",330,"/api/wd-extension","/api/learning"]},
  "native/terms/src/app_create.rs":{"database-write":{"ATTACH":1,"dynamic-or-wrapper":9,"INSERT INTO:main.":1,"CREATE INDEX:if":1,"COMMIT":3,"DETACH":1,"ALTER TABLE:assets":1,"INSERT OR IGNORE INTO:meta":1}},
  "native/terms/src/app_index.rs":{"database-write":[[0,7],34,[1,5],33,283,284,285,286,[208,2],12,[199,2],287,249,201,[3,2]],"entrypoint":[4]},
  "native/terms/src/http_browse.rs":{"http-branch":["/api/assets|/api/ids",[246,3],[77,2],[248,3],24,99,89,"/api/assets|/api/assets/count|/api/ids",[78,3],331],"database-write":[[7,3],[0,2]]},

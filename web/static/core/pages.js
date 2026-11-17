@@ -123,8 +123,8 @@ export const poolIs = (route, ...pools) => pools.includes(pageOf(route).pool);
 //   emptyAct(act)        点了 emptyNext 里的 data-empty 按钮（「显示全部」由 shell 自己处理）
 //   readFailed(e)        网格读取失败时：返回一句话就当作没有结果、把它写进空状态，不弹错误条（相似结果的例图没有特征）
 //   reveal(uuid)         主区不是网格的页面把这张图滚进视野：详情栏、大图翻页时，和面板页借列表看的大图关掉时（#424）
-//   refresh(why)         数据变了之后重画面板页：'edit' 改动之后、'undo' 撤销之后、'learned' 确认或撤销后后台学习
-//                        收尾之后（#400）、'sync' 同步到新图之后、'nsfw' 切换 R18 之后、'view' 视图选项之后、
+//   refresh(why)         数据变了之后重画面板页：'edit' 改动之后、'undo' 撤销之后、'learned' 确认角色或同步结束后后台学习
+//                        收尾之后（#400、#404）、'sync' 同步到新图之后、'nsfw' 切换 R18 之后、'view' 视图选项之后、
 //                        'ask' 「偶尔问一句」开关之后
 export function implement(hooks) {
   for (const [name, h] of Object.entries(hooks)) {
