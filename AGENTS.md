@@ -89,6 +89,7 @@ Claude Code 通过 `CLAUDE.md` 引入本文件，Codex 等直接读本文件。�
   - 虚拟机用 `run --slot vm`，同一时间只开一台，不测的时候就关掉。从本机经 SSH 发起的 Windows 构建与验收用 `--slot windows`，与本机检查互不阻塞。验收机有两份常驻检出，`windows` 槽同时放行两个作业；要独占验收机的计时和验收加 `--exclusive`。
   - **检查放哪台机器**：开发会话的定向 Rust 测试和 clippy，只要不碰 macOS 专用代码（`cfg(target_os = "macos")` 的分支），优先放 Windows 验收机跑。必须留在 Mac 的：`cargo fmt --check`（验收机没装 rustfmt）、碰到 macOS 专用代码的编译、clippy 和测试、虚拟机走查要用的 macOS 构建。界面级的两条 Python 测试可以以 PR 上 CI 为准（见「检查分级」）。合入门槛不变，仍是集成会话在 Mac 上跑的本机全量。
   - 留在 Mac 的开发编译和定向测试（`cargo build/test/clippy/check`、`python -m unittest`）用 `bg` 以后台优先级运行，不排队，把性能核留给全量和计时；全量、计时和单独的 release 构建本身不降级，经 SSH 在 Windows 机上跑的不受此限。全量在跑时这些命令会慢很多，甚至几乎停住，这是预期的。
+  - 在 macOS 上生成数万张及以上的合成图库时，把夹具放在顶层目录名以 `.noindex` 结尾的专用目录，或放在自己的 worktree 里。这样可避免 Spotlight 持续扫描大量图片、占用计时所需的空闲 CPU。（2026-11-18，#457）
   - 重型槽被占时照常写代码、跑小的定向测试；对时间敏感的测试在高负载下失败，先排除负载影响再下结论（#219）。
   - 重型、计时和后台三类命令由钩子按本机配置拦截，没按规定运行时照提示改写即可。
 

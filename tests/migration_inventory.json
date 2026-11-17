@@ -327,7 +327,7 @@
 
  "native/terms/src/app_rescue.rs":"08915aa36490c06b4d43fb0ff6337d4a548b451bc15c090928b0d37e6af4456d",
 
- "native/terms/src/app_research.rs":"323b2627210249c7e23576aa8ca285d426b12d8b0bf517cad228feb92dcc98d2",
+ "native/terms/src/app_research.rs":"d03a0d63c700cae4dd12585efec16028ef67e13e86f2b2519156aace6c02644a",
 
  "native/terms/src/app_resources.rs":"d691ec21499b906972a02d49a21790f2a301c34eb4dea0bd9c301675dd9e2c0a",
 
@@ -588,7 +588,7 @@
 ],
 "boundaries":{
  "native/terms/src/app_curation.rs":{"database-write":[[0,6],178,"INSERT OR REPLACE INTO:curation",18,1,60,69,181,195,34,57,61]},
- "native/terms/src/app_research.rs":{"database-write":{"DELETE FROM:image_sigs":1,"dynamic-or-wrapper":6,"DELETE FROM:relations":1,"DELETE FROM:similar_paired":1,"DELETE FROM:similar_retry":1,"BEGIN":1,"ROLLBACK":1,"CREATE TABLE IF NOT EXISTS:research_runs":1,"INSERT INTO:research_runs|UPDATE:set":1,"INSERT OR IGNORE INTO:research_runs":1,"INSERT INTO:research_runs":1,"UPDATE:backend_effects":2,"UPDATE:research_runs":3,"DELETE FROM:name_settings":1,"CREATE TABLE IF NOT EXISTS:similar_paired|CREATE TABLE IF NOT EXISTS:similar_retry":1},"entrypoint":{"process-start":1}},
+ "native/terms/src/app_research.rs":{"database-write":{"DELETE FROM:image_sigs":1,"dynamic-or-wrapper":10,"DELETE FROM:relations":1,"DELETE FROM:similar_paired":1,"DELETE FROM:similar_retry":1,"BEGIN":1,"ROLLBACK":1,"CREATE TABLE:assets":1,"COMMIT":1,"CREATE TABLE IF NOT EXISTS:research_runs":1,"INSERT INTO:research_runs|UPDATE:set":1,"INSERT OR IGNORE INTO:research_runs":1,"INSERT INTO:research_runs":1,"UPDATE:backend_effects":2,"UPDATE:research_runs":3,"CREATE TABLE IF NOT EXISTS:similar_paired|CREATE TABLE IF NOT EXISTS:similar_retry":1},"entrypoint":{"process-start":1}},
  "crates/core/src/character_names.rs":{"database-write":{"UPDATE:term_names":1,"dynamic-or-wrapper":2,"INSERT INTO:term_names":1,"UPDATE:set":1}},
  "native/terms/src/app_migration_sql/effects.sql":{"database-write":[126]},
  "native/terms/src/app_provenance_sources.rs":{"database-write":{"INSERT OR IGNORE INTO:artists":1,"@0":10,"@243":1,"UPDATE:leads":2,"INSERT OR IGNORE INTO:seeds":2,"@1":4,"@244":1,"INSERT INTO:artist_names|UPDATE:set":1,"INSERT OR REPLACE INTO:ext_cache":1,"@236":3,"INSERT OR REPLACE INTO:image_sources":2,"INSERT OR REPLACE INTO:image_artists":1,"INSERT OR IGNORE INTO:image_artists":1}},
