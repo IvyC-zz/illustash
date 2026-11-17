@@ -34,9 +34,12 @@
 - **建库可以带多个来源**：`POST /api/libraries/new` 接受 `sources: [{kind: "folder", path, preset} | {kind: "photos"}]`，来源 id 按顺序为 `s1`、`s2`……；照片图库最多一个，只在 macOS 上可用。旧的 `kind` / `folder` / `preset` 单来源写法照常可用。
 - **文件夹不能嵌套**：每个文件夹连同子文件夹一起读取；新文件夹和已有文件夹相同、在其内部或包含它，都直接拒绝并提示冲突的文件夹。按规范化后的真实路径比较，macOS 和 Windows 忽略大小写（`app_paths::overlaps`）。
 - **往当前图库添加来源**：`POST /api/libraries/sources/add {kind, path | paths, preset}`；`paths` 一次添加多个同出处的文件夹，全部加完再开始一次同步（中途有文件夹被拒绝时，前面已加入的照常同步，报错指出被拒绝的那个）。
-- **设置页界面**：设置「图库」页（`#/settings/library`）里当前图库的来源按出处分组（Pixiv / X / 其他，macOS 另有 iCloud 照片），每组可以「添加文件夹…」（原生窗口多选），每个文件夹可以改出处或移除；移除前弹窗写明会移除的图片数。「新建图库」按出处分三栏添加文件夹，macOS 可勾选同时读取 iCloud 照片。没有原生选择窗口的环境（非 macOS 的 CLI 网页模式）改为输入路径。
+- **设置页界面**：设置「图库」页（`#/settings/library`）里当前图库的来源按出处分组（Pixiv / X / 其他，macOS 另有 iCloud 照片），每组可以「添加文件夹…」（原生窗口多选），每个文件夹可以改出处、指定搬家后的新位置、认回原图或移除；移除前弹窗写明会移除的图片数。「新建图库」按出处分三栏添加文件夹，macOS 可勾选同时读取 iCloud 照片。没有原生选择窗口的环境（非 macOS 的 CLI 网页模式）改为输入路径。
 - **移除来源**：`POST /api/libraries/sources/remove {source}` 先只返回会移除的图片数（`{confirm: true, count}`），界面据此显示页面内确认框并等待明确确认，取消、关闭或 Esc 不提交；不依赖桌面插件替换后的 `window.confirm`，也不增加图库页面的 Tauri 权限。重复点击同一来源只保留一个确认流程；确认期间导航或会话改变会使确认失效，提交仍绑定预览时的会话 token。带 `confirm: 1` 才执行。执行时先把这个来源的图在源库里标为已删除（与文件消失相同），再把来源从 `sources` 挪到 `library.json` 的 `removed_sources`（带 `removed_at`），然后开始一次同步，把删除带进浏览用的应用库。人工结论不物理删除。图库至少保留一个来源。
 - **重新添加同一个文件夹**会沿用原来的来源 id，同步时按 `files` 表里的记录把这些图恢复（资产 ID 和人工结论不变）；可以换一个出处，这个来源的图随之改出处。
+- 整个来源搬家时，点原来源的「这个文件夹搬到了…」选择新位置。来源 ID 和出处保留。同步会重新读取新位置的每个文件，先认回相对路径和 MD5 都相同的图片，再按 MD5 认回剩余的一对一匹配。旧盘可以离线。同一路径换了内容，或相同内容有多个候选且无法区分时，新文件获得独立 ID，旧整理记录保留在原 ID 上。
+- 通过「添加文件夹…」加入新来源时，先给新图片独立 ID。点「认回原图…」可查看旧位置和新位置。新来源的文件仍在、同一 MD5 在其他来源的旧位置都已缺失时，再按相对路径和内容的一对一规则列出候选。确认后同步会再核对内容；两份原件都在时，各自保留 ID。
+- 来源设置显示最近一次认回的张数。点「撤销」恢复原位置和原 ID，显式搬家还会恢复来源路径；旧盘离线也可以撤销。若后来同步或其他来源操作已改变所涉及的文件记录，撤销会拒绝整次变更。文件夹里的原图和按 ID 保存的人工结论始终保留。
 - 同步或角色索引更新进行中时拒绝修改来源；测试图库（冻结快照）不能修改来源。
 - 回退：旧版本不认识 `removed_sources`，会忽略它，已移除来源的图仍是已删除状态；旧版本仍可打开和同步其余来源。
 
@@ -183,7 +186,8 @@ CREATE TABLE asset_links(
   key TEXT NOT NULL,
   source_id TEXT NOT NULL,      -- library.json 里的来源 ID
   current INTEGER NOT NULL DEFAULT 1,
-  PRIMARY KEY(system, key, source_id));
+  PRIMARY KEY(system, key, source_id, asset));
+CREATE UNIQUE INDEX asset_links_location ON asset_links(system, key, source_id) WHERE system<>'md5';
 CREATE INDEX asset_links_asset ON asset_links(asset);
 ```
 
@@ -191,7 +195,7 @@ CREATE INDEX asset_links_asset ON asset_links(asset);
   `preset` 是后面几件事的依据：「以图搜图」只发 `x`、`pixiv` 的图；溯源回查按来源选 Danbooru 还是 Pixiv；界面上按来源筛选。
   - Photos 来源：由 `library.json` 里 `apps` 的映射决定（原生来源实现见 `crates/core/src/origin.rs` 与 `crates/platform/src/platform_photos.rs`）；
   - 文件夹来源：取该来源的 `preset`。
-- 同一张图跨设备、跨来源时靠 `md5` 对上；文件被移动或改名时，重扫先按路径找，找不到再按 `md5` 找，都找不到才算新图。
+- 首次扫描有文件记录的来源时，在源库事务里扩展链接主键，按 `files.md5` 补写每个文件的内容链接。文件路径和 Photos 标识在同一来源内仍然唯一，同一 MD5 可指向多个独立资产。普通同步沿用原位编辑的 ID；指定新根目录时逐文件校验内容，规则见上文「来源管理」。
 - `source.sqlite` 损坏时，文件夹图片的 uuid 靠 `library.sqlite` 认回（#228）：它的 `assets.src_path` 记着每张在库图片的完整路径，`meta` 里的 `folder_hash:<uuid>` 记着内容 md5（图片移出图库后也保留）。`library.sqlite` 的每份备份因此都带着与其中整理记录一致的对照表；应用内抢救按它重扫，见 [ARCHITECTURE_DIRECTION.md](ARCHITECTURE_DIRECTION.md) 开库检查一节。
 - `library.sqlite` 损坏时只能换回整库备份（#492，损坏提示 `app_integrity::LIBRARY_DAMAGED`）：退出应用，把它连同 `-wal`/`-shm` 移走，复制一份备份改名为 `library.sqlite`。可用的是 `backups/library-*.sqlite`（设置里的手动备份，当前格式，直接打开）和 `library-backups/terms-*.sqlite`（升级前的必需备份，内容停在升级前，打开时再升级一次；需要 pre-v8 版本升级的不能用）；`backups/source-damaged-*.sqlite` 和 `backups/human-conclusions/` 里的快照不是应用库。选修改时间最近的一份，之后的整理丢失；打开后可以在「设置 › 数据」的「人工结论快照」里对换回之前最近的一份自动快照点「恢复…」，补回备份之后的人工结论（只补仍未决定的项，冲突时保留已有的，见上文「人工结论快照」）；换回的图库打开后也会生成快照，内容是换回后的状态，补回时不要选它。记过损坏的图库换回旧格式备份后，打开前的完整检查通过就清除损坏记录，改为提问升级。
 
