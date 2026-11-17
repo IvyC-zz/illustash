@@ -43,7 +43,9 @@ class MigrationInventoryTest(unittest.TestCase):
         self.assertEqual(inventory.dump_spec(spec), text, '运行 python -m tools.migration_inventory fmt')
         # 预算按内容计，不计每条一行的空白。
         # 人工结论的存储、后台任务和 HTTP 归属扩充后，无损整理为约 83 KB（#441）。
-        self.assertLess(len(json.dumps(spec, ensure_ascii=False, separators=(',', ':')).encode()), 84_000)
+        # 0.3 的 v10 批（CCIP 长尾、收藏、画廊、相似检索、WD 扩展）和桌面功能新增源文件指纹、HTTP 与迁移边界，
+        # 合起来约 90 KB（2026-11-17）。超限时先看增长是不是新的源文件和边界，再调这里。
+        self.assertLess(len(json.dumps(spec, ensure_ascii=False, separators=(',', ':')).encode()), 94_000)
         self.assertNotIn('coverage', spec)
         self.assertNotIn('sites', spec)
         self.assertNotIn('tools/verify_read_http.py', spec['sources'])

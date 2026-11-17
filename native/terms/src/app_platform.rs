@@ -17,6 +17,7 @@ pub fn choose(
         "archive" => illustash_platform::picker::Kind::Archive,
         "models" => illustash_platform::picker::Kind::Models,
         "human-conclusions" => illustash_platform::picker::Kind::HumanConclusions,
+        "export" => illustash_platform::picker::Kind::Export,
         _ => return Err(Error::Invalid("未知的选择类型".into())),
     };
     if multiple && !matches!(kind, "folder" | "models") {

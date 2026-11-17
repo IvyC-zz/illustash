@@ -260,6 +260,8 @@ fn show_diagnostic(
     );
     *main.app_handle().state::<ErrorPage>().0.lock().expect("lock poisoned by an earlier panic") = Some(js.clone());
     on_start(main, &js);
+    // 窗口隐藏在后台时宿主出了事：把窗口拿出来，让用户看到出错页（#451）。
+    crate::background::host_gone(main.app_handle(), true);
 }
 
 /// 启动页询问是否升级名为 `name` 的图库（#193）；和失败页一样会再执行。
@@ -377,6 +379,7 @@ fn start_again(app: &AppHandle, library: Option<PathBuf>, start: Start) {
     let Some(main) = app.get_webview_window("main") else { return };
     app.state::<Launch>().generation.fetch_add(1, Ordering::SeqCst);
     app.state::<Child>().stop();
+    crate::background::host_gone(app, false);
     app.state::<ErrorPage>().0.lock().expect("lock poisoned by an earlier panic").take();
     app.state::<StartupPage>().0.lock().expect("lock poisoned by an earlier panic").take();
     let library =
