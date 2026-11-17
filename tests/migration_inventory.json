@@ -223,7 +223,7 @@
 
  "native/terms/src/app_asset_files.rs":"a33b3eddb934d5547dac2966c1e4ccbc7c5910ab030bbd2979ad193dac9e6c77",
 
- "native/terms/src/app_ccip_longtail.rs":"0d34f98c91cd3e544379f79a2dc21630f1d9d1c2c2c0120bb4fb140f693258a0",
+ "native/terms/src/app_ccip_longtail.rs":"fa03b80ee91ac108a9ea2f7591adde31ee5c83e4aa9b3462f76381729e307d93",
 
  "native/terms/src/app_characters.rs":"6c9e9e080970dce30092747ebcf6bdcaee7d99a8463500888e5dab278f4a0cbd",
 
@@ -297,7 +297,7 @@
 
  "native/terms/src/app_migration_sql/provenance.sql":"a780f1f8837dd2c90a556539c114d56cdaa513b057fb667bf0c5c9d604f75934",
 
- "native/terms/src/app_models.rs":"81f60e96859a7b8624a8a00d59dc0022acfded247da177490a534f41418cef11",
+ "native/terms/src/app_models.rs":"fa5666d229db315badcf4ec3f075cf1c9f27b6a6f2a9538d53edcce91668eb08",
 
  "native/terms/src/app_name_sources.rs":"a9d895621405e92c2bdacd7f547f28feec7f294f307d628ea25d5e2bf27f9515",
 
@@ -305,7 +305,7 @@
 
  "native/terms/src/app_onboarding.rs":"5e0d950d43ad03ffeb44e19a9090795c479a9e4a6199fcbafe93e107fe9a62a9",
 
- "native/terms/src/app_packs.rs":"3196c68c008ec4753ebdfd55ce561f72adbc28ccee71f49501e2c1fafbfffee4",
+ "native/terms/src/app_packs.rs":"9a9030de1a0366ba260b7425dfcf6603b1231b6631caefd805f8b2752861cc91",
 
  "native/terms/src/app_photos.rs":"df3a434e0b64f63e395ca93703be19d90b83faefe6901537fdd628d51ddc0326",
 
@@ -341,7 +341,7 @@
 
  "native/terms/src/app_sources.rs":"8ee039dc596b1253783ab4256fd7befa1ce4087eee3f93b69208e7ede676c819",
 
- "native/terms/src/app_sync.rs":"d2fabaebab08426eb649f573c8956212894705210349774b3b4ab870227d4255",
+ "native/terms/src/app_sync.rs":"e5c924cdeb9819272097cd8382419e3234e790ce2f5068723a55dd2e713fb02b",
 
  "native/terms/src/app_tasks.rs":"3a2653f069763b5c2d5f50580679a064e21b1f048a530a886829d483871ba400",
 
@@ -349,7 +349,7 @@
 
  "native/terms/src/app_upgrade.rs":"a54111dd23542c882a5ac02a2a0913b0333625af44950108d8af33a2dbd1c5e6",
 
- "native/terms/src/app_wd_extension.rs":"045017d59454ebec3373dbb1a2fd3f815c3b4d286a74f6a52647e3806ee0d3f6",
+ "native/terms/src/app_wd_extension.rs":"ccb490bb64f5f69a188b1a2b2e1e44c0f17afd99aa19f583ace1f2eb7decc89a",
 
  "native/terms/src/bin/illustash-terms.rs":"04ee80bb280034a16f8ddd9fe97e8de0700713259c44f76858f70b8713d4c594",
 
@@ -385,9 +385,9 @@
 
  "native/terms/src/http_example_search.rs":"37086571f127c0c437a4fa223184fddd7c26adb61c1c1883f8f05ee17011ab10",
 
- "native/terms/src/http_host_get.rs":"007db2a11611a6a4466edb8fcd50ac758cd9ca83eaaa337c1e691445fccffe83",
+ "native/terms/src/http_host_get.rs":"0999ace4433cc003b17ed294f8bcf68766e79a1ba698a4bf00171ccb9e10a88d",
 
- "native/terms/src/http_host_post.rs":"7d9011432ab7ca09ac2150a119760a9b005def2e2ec3a336623d3d8b1d277881",
+ "native/terms/src/http_host_post.rs":"262ad75f2bdc4d35bf758e0a688e95d420ef1585a7bad6733ee96ba1c58f086a",
 
  "native/terms/src/http_json.rs":"42ec65687fad69e430186543d3ef27b8141030e6694b07f683ee91f678478d6b",
 
@@ -658,7 +658,7 @@
  "crates/core/src/names_commands.rs":{"database-write":{"INSERT OR IGNORE INTO:term_key_names":1,"dynamic-or-wrapper":8,"DELETE FROM:term_names":4,"DELETE FROM:term_key_names":1,"DELETE FROM:term_key_aliases":1,"INSERT INTO:term_key_aliases":1}},
  "native/terms/src/app_profiles.rs":{"http-branch":[[23,8],[16,5],[17,7],[44,3],[83,3],[242,4],[98,3]],"database-write":[[3,3],0]},
  "crates/core/src/character_import.rs":{"database-write":{"INSERT OR IGNORE INTO:term_links":1,"dynamic-or-wrapper":15,"UPDATE:term_tree":3,"UPDATE:terms":1,"INSERT INTO:term_batches":1,"INSERT OR IGNORE INTO:assertions":1,"INSERT INTO:imported":1,"DELETE FROM:auto_rules":1,"INSERT OR IGNORE INTO:auto_rules":4,"INSERT INTO:excluded":1,"DELETE FROM:excluded":1,"DELETE FROM:touched":1,"INSERT OR IGNORE INTO:touched":1,"INSERT INTO:assets":1,"DELETE FROM:duplicates":1,"INSERT INTO:duplicates":1,"INSERT OR REPLACE INTO:meta":2,"DELETE FROM:assets":1,"DELETE FROM:candidates":1,"REINDEX":3,"INSERT OR REPLACE INTO:sync_added":1}},
- "native/terms/src/http_host_post.rs":{"http-branch":[[303,2],[282,2],[275,2],[280,2],[279,2],[274,2],[294,2],264,295,"/api/diagnostics/open-logs",305,"/api/human-conclusions/",[307,2],[308,2],[309,2],"/api/human-conclusions/restore",265,"/api/human-conclusions/import|/api/human-conclusions/restore",266,267,[41,2],268,270,292,247,231,74,88,24,23,16,17,44,83,242,98,80,79,76,269,100,37,95,40,42,293,[230,2],39,43,271,272,273,276,278,281,296,[26,2],277,"/api/files/","/api/files/open","/api/files/reveal","/api/files/drag","/api/files/export","/api/files/export/cancel","/api/files/export/reveal","/api/ccip-longtail/package","/api/ccip-longtail/enable|/api/ccip-longtail/withdraw","/api/ccip-longtail/cancel","/api/favorite",331,"/api/wd-extension/package","/api/wd-extension/enable|/api/wd-extension/withdraw|/api/wd-extension/cancel"]},
+ "native/terms/src/http_host_post.rs":{"http-branch":[[303,2],[282,2],[275,2],[280,2],[279,2],[274,2],[294,2],264,295,"/api/diagnostics/open-logs",305,"/api/human-conclusions/",[307,2],[308,2],[309,2],"/api/human-conclusions/restore",265,"/api/human-conclusions/import|/api/human-conclusions/restore",266,267,[41,2],268,270,292,247,231,74,88,24,23,16,17,44,83,242,98,80,79,76,269,100,37,95,40,42,293,[230,2],39,43,271,272,273,276,278,281,296,[26,2],277,"/api/files/","/api/files/open","/api/files/reveal","/api/files/drag","/api/files/export","/api/files/export/cancel","/api/files/export/reveal","/api/ccip-longtail/package","/api/ccip-longtail/enable|/api/ccip-longtail/withdraw","/api/ccip-longtail/cancel","/api/favorite",331,"/api/wd-extension/package","/api/wd-extension/enable|/api/wd-extension/withdraw|/api/wd-extension/cancel","/api/packs"]},
  "native/terms/src/app_provenance.rs":{"database-write":{"INSERT OR IGNORE INTO:pending_runs":3,"UPDATE:runs":3,"INSERT OR IGNORE INTO:native_meta":2,"dynamic-or-wrapper":4,"UPDATE:native_meta":1,"COMMIT":2,"INSERT INTO:runs":1,"DELETE FROM:pending_runs":1,"ATTACH":2,"PRAGMA:c.execute_batch(\"pragma defer_foreign_keys":1,"INSERT INTO:leads|UPDATE:set":1,"INSERT INTO:native_delivery":1},"entrypoint":{"process-start":1}},
  "crates/core/src/character_sql/evidence_default.sql":{"database-write":[196]},
  "native/terms/src/app_migration_sql/artists.sql":{"database-write":["CREATE TABLE IF NOT EXISTS:artist_verdicts","CREATE INDEX IF NOT EXISTS:artist_verdicts_artist"]},
@@ -709,12 +709,12 @@
  "native/terms/src/app_human_conclusions/hashes.rs":{"database-write":["INSERT INTO:human_asset_hashes",9,323]},
  "native/terms/src/app_human_conclusions/reports.rs":{"database-write":[[0,2],"INSERT INTO:human_import_reports","INSERT INTO:human_import_report_rows"]},
  "desktop/src/updater.rs":{"entrypoint":["process-start"]},
- "native/terms/src/app_wd_extension.rs":{"database-write":{"dynamic-or-wrapper":4,"COMMIT":1,"INSERT OR REPLACE INTO:meta":1,"DELETE FROM:meta":1}},
+ "native/terms/src/app_wd_extension.rs":{"database-write":{"dynamic-or-wrapper":6,"COMMIT":1,"INSERT OR REPLACE INTO:meta":3,"DELETE FROM:meta":2}},
  "crates/platform/src/platform_files.rs":{"entrypoint":{"process-start":3}},
  "native/terms/src/app_asset_export.rs":{"database-write":{"ATTACH":1}},
  "crates/core/src/ccip_longtail.rs":{"database-write":{"INSERT OR REPLACE INTO:meta":1,"DELETE FROM:meta":1}},
  "crates/core/src/character_extension.rs":{"database-write":{"dynamic-or-wrapper":1,"INSERT INTO:memberships":1}},
- "native/terms/src/app_ccip_longtail.rs":{"database-write":{"dynamic-or-wrapper":6,"COMMIT":1,"INSERT OR REPLACE INTO:meta":2,"INSERT INTO:meta":1,"UPDATE:set":1,"DELETE FROM:meta":3}},
+ "native/terms/src/app_ccip_longtail.rs":{"database-write":{"dynamic-or-wrapper":8,"COMMIT":1,"INSERT OR REPLACE INTO:meta":3,"INSERT INTO:meta":2,"UPDATE:set":2,"DELETE FROM:meta":3}},
  "native/terms/src/app_galleries.rs":{"database-write":{"dynamic-or-wrapper":4,"INSERT INTO:galleries":2,"UPDATE:galleries":1,"DELETE FROM:galleries":2,"INSERT INTO:actions":1,"COMMIT":1,"UPDATE:set":1}},
  "native/terms/src/example_cache.rs":{"database-write":{"dynamic-or-wrapper":1,"COMMIT":1}},
  "native/terms/src/http_example_search.rs":{"database-write":{"dynamic-or-wrapper":2,"DELETE FROM:temp.like_rank":1,"INSERT INTO:temp.like_rank":1}}

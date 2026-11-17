@@ -21,6 +21,7 @@ const lib = (fields = {}) => ({enabled: false, version: null, wd: false, ccip: f
   checked_at: null, blocked: null, ...fields});
 const pack = ({current: p = {}, library: l = {}, download = null, task = null, offer = null, ccip = {}} = {}) => ({
   catalog: {configured: true, serial: null, checked_at: null, error: null}, current: cur(p), offer, download, library: lib(l), task,
+  location: '/Users/synthetic/Library/Application Support/Illustash/Shared/extensions',
   wd: {package: {manual: 'https://github.com/shio-vinyl/illustash/blob/main/docs/INSTALL.md#可选的-wd-角色扩展包',
     location: '/Users/synthetic/Library/Application Support/Illustash/Shared/extensions/wd-extension-v1'}},
   ccip: {library: {needs_scan: false, error: null, ...ccip}}});
@@ -49,6 +50,10 @@ test('下了一部分：继续下载，未完成的部分可以删除', () => {
   const x = pack({current: {status: 'partial', have: 1214393}});
   assert.equal(c.packLine(x), '角色资料包还没下载完（已有 1.2 MB，共 2.2 MB）');
   assert.deepEqual(labels(c.packActions(x)), ['继续下载（还差 1.0 MB）', '从文件导入…', '删除未完成的部分']);
+  // 两个文件里有一个已经在本机（和别的版本共用），另一个还没开始下：不算下了一部分。
+  const shared = pack({current: {status: 'missing', have: 1273692}});
+  assert.equal(c.packLine(shared), '角色资料包还没下载（约 941 KB）');
+  assert.deepEqual(labels(c.packActions(shared)), ['下载角色资料包（约 941 KB）', '从文件导入…']);
 });
 
 test('下载中：进度、速度、来源、代理和取消；失败时写原因和每个来源的失败', () => {
@@ -133,7 +138,7 @@ test('失败和取消：图库没有改动；CCIP 部分在 WD 部分提交以�
 
 test('折叠区：存放位置、两个组成部分的文件、版本和许可；就位时可以删除', () => {
   const html = c.packInfo(pack({current: READY}));
-  assert.match(html, /所有图库共用/);
+  assert.match(html, /Illustash\/Shared\/extensions · 所有图库共用/);
   assert.match(html, /WD 扩展头<\/td><td class="mono" title="SHA-256 (ab)+"><bdi>wd-extension-v1.bin<\/bdi> · 941 KB · abababababab… · 228 个角色/);
   assert.match(html, /CCIP 长尾锚点<\/td>.*<bdi>A-longtail-p75.zip<\/bdi> · 1.3 MB · d3d3d3d3d3d3… · 54 个角色/);
   assert.match(html, /character-pack-v1 · 282 个角色/);
@@ -159,6 +164,8 @@ test('有新版本：没下载时下载，下了一部分接着下，正在下�
   assert.deepEqual(buttons(html).map(b => [b.act, b.label, b.cls]), [['offer-download', '下载新版本（约 2.3 MB）', 'quiet small']]);
   assert.match(buttons(c.packOfferLine(pack({current: READY, offer: OFFER()})))[0].cls, /primary/, '没启用的图库下载是主按钮');
   assert.deepEqual(labels(c.packOfferLine(enabled({status: 'partial', have: 338740}))), ['继续下载新版本（还差 2.0 MB）']);
+  // 新版本只换了 WD 部分：CCIP 文件已经在本机，按钮写还要下的大小，不说「继续」。
+  assert.deepEqual(labels(c.packOfferLine(enabled({status: 'missing', have: 1273692}))), ['下载新版本（约 1.1 MB）']);
   const downloading = pack({current: READY, library: ENABLED, offer: OFFER({downloading: true}), download: {kind: 'download', status: 'running', done: 1, total: 9}});
   assert.deepEqual(labels(c.packOfferLine(downloading)), []);
   assert.match(buttons(c.packOfferLine(pack({current: READY, library: ENABLED, offer: OFFER(), task: {id: 't', kind: 'enable', status: 'running', phase: 'scan'}})))[0].attrs, /disabled/);
@@ -189,7 +196,7 @@ test('确认框写明做决定前要知道的事实', () => {
     '用角色资料包检查本图库 120 张图。还没有归属、也没有人工确认的图会补上一个机器归属，已有的归属和人工结论不变。以后可以撤回。');
   assert.equal(c.enableMessage(pack({current: {...READY, candidate_only: 1872}, library: {vectors: 0}})),
     '本图库还没有识别结果，新识别的图会用角色资料包检查。还没有归属、也没有人工确认的图会补上一个机器归属，已有的归属和人工结论不变。其中 1,872 个角色只给候选，不补归属。以后可以撤回。');
-  assert.equal(c.withdrawMessage(x), '去掉本图库里 角色资料包给出的全部候选，以及它补上的 3 个机器归属。你确认过、否定过的保留。撤回不进撤销历史，要恢复就重新启用。');
+  assert.equal(c.withdrawMessage(x), '去掉本图库里角色资料包给出的全部候选，以及它补上的 3 个机器归属。你确认过、否定过的保留。撤回不进撤销历史，要恢复就重新启用。');
   assert.equal(c.switchMessage(OFFER({candidate_only: 2}), x),
     '用角色资料包检查本图库 120 张图。旧版本给出的扩展候选和由它补上的归属换成新版本的结果，已有的其他归属和人工结论不变。其中 2 个角色只给候选，不补归属。以后可以撤回。');
 });
@@ -201,7 +208,7 @@ test('结束时的提示', () => {
   assert.equal(c.finishedText(task({kind: 'enable', result: {changed: 0}}), after, after), '没有变化');
   assert.equal(c.finishedText(task({kind: 'enable', result: {changed: 2, ccip: {missing: 4, incompatible: 1}}}), after, after),
     '角色资料包已更新：7 张图有扩展候选；5 张图缺少兼容的向量，没有检查');
-  assert.equal(c.finishedText(task({kind: 'withdraw', result: {changed: 3}}), after, pack({current: READY})), '已撤回 角色资料包');
+  assert.equal(c.finishedText(task({kind: 'withdraw', result: {changed: 3}}), after, pack({current: READY})), '已撤回角色资料包');
   assert.equal(c.finishedText(task({kind: 'auto', result: {changed: 0}}), after, after), '');
   assert.equal(c.finishedText(task({kind: 'auto', result: {changed: 1}}), after, after), '角色资料包已更新：7 张图有扩展候选');
   assert.equal(c.finishedText(task({kind: 'enable', result: {changed: 0}}), pack({current: READY}), pack({current: READY, library: {...ENABLED, images: 0}})),
@@ -289,7 +296,7 @@ test('启用、撤回、删除、换成新版本都先确认；取消什么都�
   answers.push('cancel', 'cancel', 'cancel', 'cancel');
   await click('settingsPage', 'enable-confirm'); await click('settingsPage', 'withdraw'); await click('taskPanel', 'delete');
   await click('settingsPage', 'offer-switch');
-  assert.deepEqual(titles, ['启用 角色资料包', '撤回 角色资料包', '删除角色资料包', '换成新版本']);
+  assert.deepEqual(titles, ['启用角色资料包', '撤回角色资料包', '删除角色资料包', '换成新版本']);
   assert.deepEqual(calls, []);
   answers.push('ok', 'ok', 'ok', 'ok');
   await click('settingsPage', 'enable-confirm'); await click('settingsPage', 'withdraw'); await click('taskPanel', 'delete');

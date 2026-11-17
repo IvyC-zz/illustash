@@ -1362,33 +1362,34 @@ fn models_of(kind: PackKind) -> &'static Models {
     }
 }
 
-/// 一个组成部分下载了多少：`(就位, 已有字节)`。
-fn component_progress(resources: &Path, pack: &Pack) -> Result<(bool, u64)> {
+/// 一个组成部分下载了多少：`(就位, 已有字节, 有没下完的部分)`。
+fn component_progress(resources: &Path, pack: &Pack) -> Result<(bool, u64, bool)> {
     let place = place_of(resources, pack)?;
     let entry = &place.manifest.files[0];
     let partial = partial_dir(&place.root);
     let ready = has(&place.root, entry);
+    let started = !ready && (has(&partial, entry) || part(&partial, entry).is_file());
     let have = if ready || has(&partial, entry) {
         entry.size
     } else {
         fs::metadata(part(&partial, entry)).map_or(0, |m| m.len().min(entry.size))
     };
-    Ok((ready, have))
+    Ok((ready, have, started))
 }
 
-/// 角色资料包的两个文件下载了多少（`GET /api/packs`）：`status` 为 `ready`（两个都就位）、`partial` 或 `missing`。
+/// 角色资料包的两个文件下载了多少（`GET /api/packs`）：`status` 为 `ready`（两个都就位）、`partial`（有下了一半的
+/// 文件）或 `missing`。`have` 也算上已经在本机的那个文件（新版本只换了一个组成部分时，另一个不用再下）。
 pub(crate) fn pack_progress(resources: &Path, pack: &CharacterPack) -> Result<Value> {
-    let (wd_ready, wd_have) = component_progress(resources, &pack.wd)?;
-    let (ccip_ready, ccip_have) = component_progress(resources, &pack.ccip)?;
-    let have = wd_have + ccip_have;
+    let (wd_ready, wd_have, wd_started) = component_progress(resources, &pack.wd)?;
+    let (ccip_ready, ccip_have, ccip_started) = component_progress(resources, &pack.ccip)?;
     let status = if wd_ready && ccip_ready {
         "ready"
-    } else if have > 0 {
+    } else if wd_started || ccip_started {
         "partial"
     } else {
         "missing"
     };
-    Ok(json!({"status":status,"have":have}))
+    Ok(json!({"status":status,"have":wd_have + ccip_have}))
 }
 
 /// 两个组成部分的下载或导入合成一个状态（`GET /api/packs` 的 `download`）：有一个在进行就算进行中，字节数相加；

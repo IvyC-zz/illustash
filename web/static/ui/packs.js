@@ -67,8 +67,8 @@ export function packLine(x = current()) {
     return t('角色资料包没能下载：{reason}', {reason: tb(d.message || '') || t('每个来源都试过了')});
   }
   if (!ready(x) && d?.kind === 'download' && d.status === 'cancelled') return t('已取消');
-  if (!ready(x)) return pkg(x).have ? t('角色资料包还没下载完（已有 {have}，共 {size}）', {have: bytes(pkg(x).have), size: size(x)})
-    : t('角色资料包还没下载（约 {size}）', {size: size(x)});
+  if (!ready(x)) return pkg(x).status === 'partial' ? t('角色资料包还没下载完（已有 {have}，共 {size}）', {have: bytes(pkg(x).have), size: size(x)})
+    : t('角色资料包还没下载（约 {size}）', {size: bytes(left(x))});
   if (l.prompt === 'ask') return t('角色资料包现在默认启用，本图库还没启用');
   if (l.prompt === 'auto') return t('第一次同步时启用');
   return t('本图库未启用');
@@ -108,10 +108,11 @@ export function packActions(x = current(), compact = false) {
   if (!ready(x)) {
     const main = on(x) ? 'quiet' : 'primary';
     const failed = x.download?.kind === 'download' && x.download.status === 'failed' && !packOffer(x)?.downloading;
-    const download = button('download', failed ? t('重试') : pkg(x).have ? t('继续下载（还差 {left}）', {left: bytes(left(x))})
-      : t('下载角色资料包（约 {size}）', {size: size(x)}), main);
+    const partial = pkg(x).status === 'partial';
+    const download = button('download', failed ? t('重试') : partial ? t('继续下载（还差 {left}）', {left: bytes(left(x))})
+      : t('下载角色资料包（约 {size}）', {size: bytes(left(x))}), main);
     if (compact) return download;
-    return download + button('import', t('从文件导入…')) + (pkg(x).have ? button('discard', t('删除未完成的部分')) : '') + withdraw;
+    return download + button('import', t('从文件导入…')) + (partial ? button('discard', t('删除未完成的部分')) : '') + withdraw;
   }
   // CCIP 部分的角色索引更新过：重新检查后才用上，按钮升为主按钮。
   if (on(x)) return compact ? '' : button('enable', t('重新检查'), x.ccip?.library?.needs_scan ? 'primary' : 'quiet', off) + withdraw;
@@ -156,7 +157,7 @@ export function packInfo(x = current()) {
   const file = (label, c) => `<tr><td>${label}</td><td class="mono" title="SHA-256 ${esc(c.file.sha256)}">`
     + `<bdi>${esc(c.file.path)}</bdi> · ${bytes(c.file.size)} · ${esc(String(c.file.sha256).slice(0, 12))}… · `
     + `${t('{n} 个角色', {n: number(c.heads || 0)})}</td></tr>`;
-  const location = x.wd?.package?.location;
+  const location = x.location;
   return fold('pack', t('角色资料包'), `<table class="settings-table models-files">
     ${location ? `<tr><td>${t('存放位置')}</td><td class="mono" title="${esc(location)}">${esc(home(location))} · ${t('所有图库共用')}</td></tr>` : ''}
     ${file(t('WD 扩展头'), p.components.wd)}${file(t('CCIP 长尾锚点'), p.components.ccip)}
@@ -178,8 +179,9 @@ export function packOfferLine(x = current(), offer = packOffer(x)) {
     const blocked = blockedReason(x);
     act = on(x) ? button('offer-switch', t('换成新版本…'), 'primary', blocked ? ` disabled title="${esc(blocked)}"` : off) : '';
   } else if (!downloading) {
-    const total = bytes(offer.size || 0), rest = bytes(Math.max(0, (offer.size || 0) - (offer.have || 0)));
-    const label = failed ? t('重试') : offer.status === 'partial' ? t('继续下载新版本（还差 {left}）', {left: rest}) : t('下载新版本（约 {size}）', {size: total});
+    // 按还要下的算：新版本只换了一个组成部分时，另一个已经在本机。
+    const rest = bytes(Math.max(0, (offer.size || 0) - (offer.have || 0)));
+    const label = failed ? t('重试') : offer.status === 'partial' ? t('继续下载新版本（还差 {left}）', {left: rest}) : t('下载新版本（约 {size}）', {size: rest});
     act = button('offer-download', label, on(x) ? 'quiet' : 'primary', off);
   }
   const hint = [failed ? esc(t('新版本没能下载：{reason}', {reason: tb(x.download.message || '') || t('每个来源都试过了')})) : '',
@@ -219,7 +221,7 @@ export function finishedText(task, before, x = current()) {
   const updated = () => more(t('{name}已更新：{n} 张图有扩展候选', {name, n: number(images)}));
   if (task.kind === 'auto' && task.status !== 'failed') return task.status === 'done' && task.result?.changed ? updated() : '';
   if (task.status === 'failed' || task.status === 'cancelled') return packLine(x);
-  if (task.kind === 'withdraw') return t('已撤回 {name}', {name});
+  if (task.kind === 'withdraw') return t('已撤回角色资料包');
   if (lib(before).enabled) return !task.result?.changed ? more(t('没有变化')) : updated();
   return more(images ? t('{name}已启用：{n} 张图有扩展候选', {name, n: number(images)}) : t('{name}已启用，没有找到扩展候选', {name}));
 }
@@ -240,8 +242,8 @@ export function enableMessage(x = current()) {
     + tierText(pkg(x).candidate_only) + t('以后可以撤回。');
 }
 export function withdrawMessage(x = current()) {
-  const n = lib(x).assigned || 0, name = packName();
-  return (n ? t('去掉本图库里 {name}给出的全部候选，以及它补上的 {n} 个机器归属。', {name, n: number(n)}) : t('去掉本图库里 {name}给出的全部候选。', {name}))
+  const n = lib(x).assigned || 0;
+  return (n ? t('去掉本图库里角色资料包给出的全部候选，以及它补上的 {n} 个机器归属。', {n: number(n)}) : t('去掉本图库里角色资料包给出的全部候选。'))
     + t('你确认过、否定过的保留。撤回不进撤销历史，要恢复就重新启用。');
 }
 // 换成新版本：要重新检查的张数，换掉的是旧版本给的候选和归属；新版本里只给候选的角色写明不补归属。
@@ -251,7 +253,6 @@ export function switchMessage(offer = packOffer(), x = current()) {
 }
 
 async function act(what) {
-  const name = packName();
   // 导入的结果只留到下一个动作：启用、重新检查、撤回、删除以后不再列出（#559 走查）。
   if (what !== 'import') importedHere = false;
   try {
@@ -271,12 +272,12 @@ async function act(what) {
       await packAction('delete');
       toast(t('角色资料包已删除'));
     } else if (what === 'enable-confirm') {
-      if (!await confirmAction(enableMessage(), t('启用 {name}', {name}), t('启用'))) return;
+      if (!await confirmAction(enableMessage(), t('启用角色资料包'), t('启用'))) return;
       await enablePack();
     } else if (what === 'enable' || what === 'enable-retry') await enablePack();
     else if (what === 'decline') await declinePack();
     else if (what === 'withdraw') {
-      if (!await confirmAction(withdrawMessage(), t('撤回 {name}', {name}), t('撤回'))) return;
+      if (!await confirmAction(withdrawMessage(), t('撤回角色资料包'), t('撤回'))) return;
       await withdrawPack();
     } else if (what === 'withdraw-retry') await withdrawPack();
     else if (what === 'cancel') {

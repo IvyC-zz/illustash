@@ -42,6 +42,26 @@
       ],
       "port": 8779,
       "url": "http://127.0.0.1:8779"
+    },
+    {
+      "name": "pack-catalog-602-local",
+      "runtimeExecutable": "python3",
+      "runtimeArgs": [
+        "/Users/hoshiumiseina/Projects/github-public/illustash/.claude/worktrees/issue-602-pack-catalog/tools/dev_preview.py",
+        "--port",
+        "8781",
+        "--fixture",
+        "walk",
+        "--wd-extension",
+        "--ccip-longtail",
+        "--pack-catalog"
+      ],
+      "port": 8781,
+      "url": "http://127.0.0.1:8781",
+      "env": {
+        "ILLUSTASH_TERMS_BIN": "/Users/hoshiumiseina/Projects/github-public/illustash/.claude/worktrees/issue-602-pack-catalog/native/terms/target/debug/illustash-terms"
+      },
+      "cwd": "/Users/hoshiumiseina/Projects/github-public/illustash/.claude/worktrees/issue-602-pack-catalog"
     }
   ]
 }

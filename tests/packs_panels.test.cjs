@@ -22,7 +22,7 @@ const READY = {catalog: {configured: true, serial: null, checked_at: null, error
     status: 'ready', have: 2214393, components: {wd: part('wd-extension-v1.bin', 228), ccip: part('A-longtail-p75.zip', 54)}},
   offer: null, download: null, task: null,
   library: {enabled: false, version: null, wd: false, ccip: false, prompt: 'declined', images: 0, assigned: 0, vectors: 12, checked_at: null, blocked: null},
-  wd: {package: {location: '/synthetic/Shared/extensions/wd-extension-v1'}}, ccip: {library: {}}};
+  location: '/synthetic/Shared/extensions', wd: {package: {}}, ccip: {library: {}}};
 
 test('一张卡片在「角色资料」里，范围标「本图库」，状态和按钮来自 ui/packs.js', async () => {
   state.route = {page: 'settings', section: 'characters'};

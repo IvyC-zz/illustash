@@ -114,13 +114,13 @@ def main() -> int:
     parser.add_argument('--wd-extension', action='store_true', help='给走查图库提供本机合成 WD 扩展包')
     parser.add_argument('--ccip-longtail', action='store_true', help='给走查图库提供本机合成 CCIP 长尾参考包和基础角色索引（#559）')
     parser.add_argument('--pack-catalog', action='store_true',
-                        help='再给一份用测试密钥签名的包目录（#602）：检查更新时由本机替身服务答复，目录里有 WD 扩展的新版本')
+                        help='再给一份用测试密钥签名的包目录（#602）：检查更新时由本机替身服务答复，目录里有角色资料包的新版本')
     parser.add_argument('host_args', nargs='*', help='在 -- 之后，原样传给 illustash-terms http')
     args = parser.parse_args()
     if (args.wd_extension or args.ccip_longtail) and args.fixture != 'walk':
         parser.error('--wd-extension、--ccip-longtail 需要 --fixture walk')
-    if args.pack_catalog and not args.wd_extension:
-        parser.error('--pack-catalog 需要 --fixture walk --wd-extension')
+    if args.pack_catalog and not (args.wd_extension and args.ccip_longtail):
+        parser.error('--pack-catalog 需要 --fixture walk --wd-extension --ccip-longtail')
     port = int(os.environ.get('PORT') or args.port)
     core = binary()
 
@@ -163,7 +163,8 @@ def main() -> int:
             servers.append(server)
         if args.pack_catalog:
             # GitHub 的版本列表和 Release 下载都由这个本机服务答复（ILLUSTASH_UPDATE_BASE），版本列表是空的。
-            files, pubkey = fixture.pack_catalog_walk(walk, work / 'pack-catalog')
+            files, pubkey = fixture.pack_catalog_walk(walk, work / 'pack-catalog',
+                                                      work / 'ccip-longtail-download' / 'A-longtail-p75.zip')
 
             class GitHub(http.server.BaseHTTPRequestHandler):
                 def do_GET(self) -> None:  # noqa: N802（标准库要求的方法名）

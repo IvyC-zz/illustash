@@ -3192,22 +3192,14 @@
     "one": "{name} updated: {n} picture with extension candidates",
     "other": "{name} updated: {n} pictures with extension candidates"
   },
-  "已撤回 {name}": "{name} withdrawn",
   "{name}已启用：{n} 张图有扩展候选": {
     "one": "{name} enabled: {n} picture with extension candidates",
     "other": "{name} enabled: {n} pictures with extension candidates"
   },
   "{name}已启用，没有找到扩展候选": "{name} enabled; no extension candidates found",
-  "启用 {name}": "Enable {name}",
-  "撤回 {name}": "Withdraw {name}",
   "图片较少的角色": "Characters with few pictures",
   "见来源与许可": "See sources and licenses",
   "重新检查没有完成，图库没有改动：{reason}": "Checking again did not finish; the library is unchanged: {reason}",
-  "去掉本图库里 {name}给出的全部候选，以及它补上的 {n} 个机器归属。": {
-    "one": "Remove all candidates from the {name} in this library and the {n} machine assignment it added. ",
-    "other": "Remove all candidates from the {name} in this library and the {n} machine assignments it added. "
-  },
-  "去掉本图库里 {name}给出的全部候选。": "Remove all candidates from the {name} in this library. ",
   "已经开始写入，没能取消": "Writing had already started; it could not be cancelled",
   "选择 CCIP 长尾参考包（.zip）": "Choose the CCIP long-tail reference pack (.zip)",
   "角色资料包": "Character pack",
@@ -3254,5 +3246,13 @@
   "下载角色资料包": "Download character pack",
   "一次普通的 HTTPS 下载，取回角色资料包；不发送图库里的任何信息": "One ordinary HTTPS download of the character pack; nothing from your library is sent",
   "只在你点「下载」时，或首次准备时和识别模型一起": "Only when you click Download, or with the recognition models during first setup",
-  "一次普通的 HTTPS 请求，读取公开的版本列表和角色资料包目录；不发送图库里的任何信息": "One ordinary HTTPS request that reads the public list of releases and the character pack catalog; nothing from your library is sent"
+  "一次普通的 HTTPS 请求，读取公开的版本列表和角色资料包目录；不发送图库里的任何信息": "One ordinary HTTPS request that reads the public list of releases and the character pack catalog; nothing from your library is sent",
+  "去掉本图库里角色资料包给出的全部候选，以及它补上的 {n} 个机器归属。": {
+    "one": "Removes every suggestion the character pack gave in this library, and the {n} machine assignment it filled in.",
+    "other": "Removes every suggestion the character pack gave in this library, and the {n} machine assignments it filled in."
+  },
+  "去掉本图库里角色资料包给出的全部候选。": "Removes every suggestion the character pack gave in this library.",
+  "已撤回角色资料包": "Character pack withdrawn",
+  "启用角色资料包": "Turn on character pack",
+  "撤回角色资料包": "Withdraw character pack"
 }

@@ -41,7 +41,7 @@ fn ccip_task_and_library(
 /// （没有时为 null），两个都带两个文件在本机下载了多少（`status`、`have`），`offer` 另带 `downloading`。`download` 是
 /// 两个组成部分的下载或导入合成的一个状态，`task` 是启用、换包、撤回的任务（`part` 是正在处理的组成部分）。
 /// `library` 是本图库启用了哪个版本、两个组成部分各自启用没有，以及默认启用的提示（`prompt`，见 `app_packs::default_state`）。
-/// `wd`、`ccip` 是两个组成部分的旧路由的完整回复。只读，不联网：目录只跟着检查更新读（`app_updates::post`）。
+/// `location` 是共享数据里放角色资料包的文件夹。`wd`、`ccip` 是两个组成部分的旧路由的完整回复。只读，不联网：目录只跟着检查更新读（`app_updates::post`）。
 pub(super) fn packs(host: &Host, session: &Session) -> Result<Json> {
     use serde_json::{json, Value};
     let (checked_at, error) = crate::app_updates::packs_state()?;
@@ -84,6 +84,7 @@ pub(super) fn packs(host: &Host, session: &Session) -> Result<Json> {
         "catalog":{"configured":crate::app_packs::pubkey().is_some(),"serial":catalog.map(|c| c.serial),
             "checked_at":checked_at,"error":error},
         "current":view(&lib.card)?,"offer":offer,"download":download,
+        "location":crate::app_packs::extensions_root(&host.root)?,
         "library":{"enabled":lib.wd.is_some() || lib.ccip.is_some(),"version":lib.enabled.as_ref().map(|p| &p.version),
             "wd":lib.wd.is_some(),"ccip":lib.ccip.is_some(),"prompt":prompt,"images":images,"assigned":assigned,
             "vectors":vectors,"checked_at":checked,"blocked":wd["library"]["blocked"].clone()},
