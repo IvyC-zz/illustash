@@ -137,6 +137,16 @@ class NativeWdExtensionTest(SyntheticWdLibrary, unittest.TestCase):
                 ids = [u for u, in app.execute('SELECT uuid FROM assets ORDER BY uuid')]
             detail = lambda u: self.request('/api/detail?id=' + u)['body']
             before = {u: detail(u) for u in ids}
+            created = self.request('/api/entities', {'name': 'Synthetic extension manual'})
+            self.assertEqual(created['status'], 200, created['body'])
+            manual_id = json.loads(created['body'])['id']
+
+            def search_roles():
+                result = self.request('/api/entities?q=synthetic%20extension')
+                self.assertEqual(result['status'], 200, result['body'])
+                return {item['id']: item['count'] for item in json.loads(result['body'])}
+
+            self.assertEqual(search_roles(), {manual_id: 0})
             expected = self.state()['library']['vectors']
             self.assertGreater(expected, 0)
             self.assertEqual(self.request(ROUTE + '/enable', {})['status'], 409)
@@ -179,6 +189,10 @@ class NativeWdExtensionTest(SyntheticWdLibrary, unittest.TestCase):
             self.assertEqual(enabled['library']['scored'], expected)
             self.assertRegex(enabled['library']['checked_at'], r'^\d{4}-\d\d-\d\d \d\d:\d\d:\d\d$')
             self.assertTrue(enabled['library']['enabled'])
+            searchable = search_roles()
+            self.assertEqual(len(searchable), 3)
+            self.assertEqual(searchable[manual_id], 0)
+            self.assertIn(0, [count for role, count in searchable.items() if role != manual_id])
             candidates = [
                 alt['evidence'] for u in ids for alt in json.loads(detail(u))['alternatives']
                 if alt['evidence']['sources'] == ['WD_EXT']
@@ -205,6 +219,12 @@ class NativeWdExtensionTest(SyntheticWdLibrary, unittest.TestCase):
             self.assertEqual(reverted['task']['status'], 'done', reverted)
             self.assertFalse(reverted['library']['enabled'])
             self.assertEqual({u: detail(u) for u in ids}, before)
+            self.assertEqual(search_roles(), {manual_id: 0})
+            with sqlite3.connect(self.lib.db) as app:
+                for role in searchable:
+                    self.assertIsNotNone(app.execute('SELECT 1 FROM term_records WHERE key=?', (role,)).fetchone())
+            self.restart()
+            self.assertEqual(search_roles(), {manual_id: 0})
             self.state('/withdraw', {})
             self.assertEqual(self.finish('withdraw')['task']['result']['changed'], 0)
 

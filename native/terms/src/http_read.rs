@@ -420,6 +420,7 @@ fn entities(c: &Connection, q: &str) -> Result<Json> {
     match_names(c, &q)?;
     let matched = if q.is_empty() { "" } else { "JOIN name_matches sm ON sm.entity=e.id" };
     let ranking = if q.is_empty() { "" } else { "sm.rank DESC," };
+    // 只在扩展仍提供候选，或词条已有归属或人工资料时返回扩展新建的角色。
     let sql = format!(
         "SELECT e.id,entity_name(e.id) AS name,e.work,e.kind,e.artist,e.label_only,e.mascot,e.parent_id,
            (SELECT count(*)
@@ -436,11 +437,18 @@ fn entities(c: &Connection, q: &str) -> Result<Json> {
          FROM {ENTITIES} e
          {matched}
          WHERE e.parent_id IS NULL AND e.kind<>'work' AND e.merged_into IS NULL
+           AND NOT EXISTS (
+               SELECT 1 FROM terms t WHERE t.id=e.term_id AND t.origin=?2
+               AND NOT EXISTS (SELECT 1 FROM candidates v WHERE v.entity=e.id)
+               AND NOT EXISTS (SELECT 1 FROM term_projection p WHERE p.term_id=t.id)
+               AND NOT EXISTS (SELECT 1 FROM term_names n WHERE n.term_id=t.id AND n.source='user')
+               AND NOT EXISTS (SELECT 1 FROM term_links l WHERE l.term_id=t.id AND l.source='user'))
          ORDER BY {ranking}count DESC,entity_name(e.id),e.id
          LIMIT 30",
         visible = visible("m")
     );
-    let result = rows(c, &sql, &[&like(&q)])?.into_iter().map(|v| display(c, v)).collect::<Result<Vec<_>>>()?;
+    let origin = crate::character_import::EXTENSION_CHARACTER_ORIGIN;
+    let result = rows(c, &sql, &[&like(&q), origin])?.into_iter().map(|v| display(c, v)).collect::<Result<Vec<_>>>()?;
     c.execute("DELETE FROM name_matches", [])?;
     Ok(Json::Array(result))
 }

@@ -19,7 +19,7 @@
 
  "crates/core/src/character_identity.rs":"106fcf70a3fe2ec3d20195cf6bdf7c84aaf22b2e8e9ee8e3dac314d66d2cb505",
 
- "crates/core/src/character_import.rs":"589d0043bf73b27a2e37874b72665171dcd80d1b97f155a1772685bd8a65bf13",
+ "crates/core/src/character_import.rs":"2eeccb12e62e4d90f5c2056d63ebfdec149c37cc1112374b5439d9371b379bec",
 
  "crates/core/src/character_json.rs":"9a60f525976d786c9edfcd8420c100481ba117bbaa78e839f02e7002ff328046",
 
@@ -363,7 +363,7 @@
 
  "native/terms/src/http_local.rs":"d7a5757ae32b7c609f0749facd77996e8879dd8fb531bb0a40352364807e8370",
 
- "native/terms/src/http_read.rs":"197171859bc8173f97ac78d919608b8978936f94861a9c1ec5e0c4c722c54bf9",
+ "native/terms/src/http_read.rs":"07dd7fe51b65e6cb22edb2d8fde89c6aa128d8c05ef6c779dbd5114d6dda2427",
 
  "native/terms/src/image_samples/mod.rs":"3322652e6cd2806e1c739a67ecca850060eb2d4d2c9fd49d74d1ade3bafbefd6",
 
