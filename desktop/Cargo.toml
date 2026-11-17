@@ -23,6 +23,19 @@ libc = "0.2"
 # 词条核心链进外壳：外壳兼当 illustash-terms 命令行（main.rs），版本与外壳一致，不另带边车程序。
 illustash-terms = { path = "../native/terms" }
 
+# 关窗后在后台继续时的系统通知和 App Nap 声明（#451，notify.rs）。
+[target.'cfg(target_os = "macos")'.dependencies]
+objc2 = "0.6"
+block2 = "0.6"
+objc2-foundation = { version = "0.3", default-features = false, features = ["std", "NSString", "NSProcessInfo", "NSBundle", "NSError", "NSObject"] }
+objc2-user-notifications = { version = "0.3", default-features = false, features = ["std", "bitflags", "block2", "UNUserNotificationCenter", "UNNotification", "UNNotificationContent", "UNNotificationRequest", "UNNotificationResponse", "UNNotificationTrigger"] }
+
+# Windows：后台时的托盘图标、toast 通知、再次打开时回到已在运行的那个（#451）。
+[target.'cfg(windows)'.dependencies]
+tauri = { version = "2.12", features = ["tray-icon"] }
+tauri-plugin-single-instance = "2"
+windows = { version = "0.62", features = ["Data_Xml_Dom", "Foundation", "UI_Notifications"] }
+
 [profile.release]
 strip = true
 

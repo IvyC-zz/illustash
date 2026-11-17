@@ -18,6 +18,18 @@ pub fn request(method: &str, route: &str, timeout: u64) -> Result<Json> {
     if !available() {
         return Err(Error::invalid("桌面平台服务不可用"));
     }
+    let (port, token) = endpoint()?;
+    send(port, &token, method, route, timeout, None)
+}
+/// 带 JSON 正文的 POST，只用于宿主主动告诉外壳的事（任务进行状态，#451）。
+pub fn post(route: &str, body: &str, timeout: u64) -> Result<Json> {
+    if !available() {
+        return Err(Error::invalid("桌面平台服务不可用"));
+    }
+    let (port, token) = endpoint()?;
+    send(port, &token, "POST", route, timeout, Some(body))
+}
+fn endpoint() -> Result<(u16, String)> {
     let base = std::env::var("ILLUSTASH_DESKTOP_BRIDGE").expect("app_desktop internal invariant");
     let port = base
         .trim_end_matches('/')
@@ -25,22 +37,27 @@ pub fn request(method: &str, route: &str, timeout: u64) -> Result<Json> {
         .and_then(|v| v.parse::<u16>().ok())
         .filter(|p| *p > 0)
         .ok_or_else(|| Error::invalid("本机桥地址不正确"))?;
-    let token = std::env::var("ILLUSTASH_DESKTOP_TOKEN").expect("app_desktop internal invariant");
-    send(port, &token, method, route, timeout)
+    Ok((port, std::env::var("ILLUSTASH_DESKTOP_TOKEN").expect("app_desktop internal invariant")))
 }
-fn send(port: u16, token: &str, method: &str, route: &str, timeout: u64) -> Result<Json> {
+fn send(port: u16, token: &str, method: &str, route: &str, timeout: u64, body: Option<&str>) -> Result<Json> {
+    // 带正文的只有任务进行状态这一条；它也只能带正文发。
+    let activity = method == "POST" && route == crate::app_activity::ROUTE;
+    let allowed = route.starts_with("/pixiv/")
+        || route.starts_with("/platform/choose?")
+        || (method == "POST" && route == "/platform/diagnostics/open-logs")
+        || route.starts_with("/platform/update/");
     if token.contains(['\r', '\n'])
         || !["GET", "POST"].contains(&method)
-        || !(route.starts_with("/pixiv/")
-            || route.starts_with("/platform/choose?")
-            || (method == "POST" && route == "/platform/diagnostics/open-logs")
-            || route.starts_with("/platform/update/"))
+        || !(if body.is_some() { activity } else { allowed })
     {
         return Err(Error::invalid("本机桥参数不正确"));
     }
     let agent = ureq::AgentBuilder::new().redirects(0).timeout(Duration::from_secs(timeout)).build();
-    let result =
-        agent.request(method, &format!("http://127.0.0.1:{port}{route}")).set("X-Illustash-Token", token).call();
+    let call = agent.request(method, &format!("http://127.0.0.1:{port}{route}")).set("X-Illustash-Token", token);
+    let result = match body {
+        Some(body) => call.set("Content-Type", "application/json").send_string(body),
+        None => call.call(),
+    };
     let response = result.map_err(|e| Error::invalid(format!("{UNANSWERED}：{}", failure(e, timeout))))?;
     let mut bytes = Vec::new();
     response
@@ -112,33 +129,43 @@ mod tests {
     fn bridge_failures_say_which_step_failed() {
         // 桌面端自己的拒绝文字会原样传过来（选择器失败、token 不对）。
         let port = bridge(502, r#"{"error": "选择结果不是本地路径"}"#);
-        let m = message(send(port, "t", "POST", "/platform/choose?kind=folder&multiple=1", 5));
+        let m = message(send(port, "t", "POST", "/platform/choose?kind=folder&multiple=1", 5, None));
         assert_eq!(m, "桌面 app 没有响应或拒绝请求：桌面 app 回复失败（502）：选择结果不是本地路径");
         let port = bridge(403, r#"{"error": "口令不对"}"#);
-        assert!(message(send(port, "t", "GET", "/pixiv/session", 5)).ends_with("（403）：口令不对"));
+        assert!(message(send(port, "t", "GET", "/pixiv/session", 5, None)).ends_with("（403）：口令不对"));
         let port = bridge(500, "not json");
-        assert!(message(send(port, "t", "GET", "/pixiv/session", 5)).ends_with("桌面 app 回复失败（500）"));
+        assert!(message(send(port, "t", "GET", "/pixiv/session", 5, None)).ends_with("桌面 app 回复失败（500）"));
         // 端口上没有监听。
         let port = TcpListener::bind("127.0.0.1:0").unwrap().local_addr().unwrap().port();
-        let m = message(send(port, "t", "GET", "/pixiv/session", 5));
+        let m = message(send(port, "t", "GET", "/pixiv/session", 5, None));
         assert_eq!(m, "桌面 app 没有响应或拒绝请求：连不上桌面 app 的本机通道");
         // 接受了连接但一直不回答。
         let silent = TcpListener::bind("127.0.0.1:0").unwrap();
         let port = silent.local_addr().unwrap().port();
-        let m = message(send(port, "t", "GET", "/pixiv/session", 1));
+        let m = message(send(port, "t", "GET", "/pixiv/session", 1, None));
         assert_eq!(m, "桌面 app 没有响应或拒绝请求：等待超过 1 秒");
         drop(silent);
         assert!(unanswered(&m) && !unanswered("Pixiv 请求失败"));
     }
 
     #[test]
+    fn activity_route_only_goes_out_as_a_post_with_a_body() {
+        let route = crate::app_activity::ROUTE;
+        let port = bridge(200, r#"{"ok":true}"#);
+        assert!(send(port, "t", "POST", route, 1, Some(r#"{"busy":[]}"#)).is_ok());
+        assert_eq!(message(send(0, "t", "POST", route, 1, None)), "本机桥参数不正确");
+        assert_eq!(message(send(0, "t", "GET", route, 1, Some("{}"))), "本机桥参数不正确");
+        assert_eq!(message(send(0, "t", "POST", "/pixiv/login", 1, Some("{}"))), "本机桥参数不正确");
+    }
+
+    #[test]
     fn logs_folder_bridge_only_accepts_the_fixed_post_route() {
         let route = "/platform/diagnostics/open-logs";
         let port = bridge(200, r#"{"ok":true}"#);
-        let reply = send(port, "t", "POST", route, 1).unwrap();
+        let reply = send(port, "t", "POST", route, 1, None).unwrap();
         assert!(matches!(reply.get("ok"), Some(Json::Scalar(serde_json::Value::Bool(true)))));
         for (method, route) in [("GET", route), ("POST", "/platform/diagnostics/open-logs?path=synthetic")] {
-            assert_eq!(message(send(0, "t", method, route, 1)), "本机桥参数不正确");
+            assert_eq!(message(send(0, "t", method, route, 1, None)), "本机桥参数不正确");
         }
     }
 }

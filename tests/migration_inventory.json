@@ -173,23 +173,29 @@
 
  "desktop/build.rs":"ba1c3b9097208d998ecbebb7b5ab044ceef97999132afb8f1a55a1a61b077034",
 
- "desktop/src/bridge.rs":"27c5b13b181305ad6f3bad122814cf9446eb3060cf7f83d7e5f76b3adab15c19",
+ "desktop/src/background.rs":"2a158d1f9ef281c0456971bf4817ce31655fc21cce9d54fe0066ef98731bb0e8",
+
+ "desktop/src/bridge.rs":"2ee649580dd829fd887c016df32c4d689685269d6b7aee96d10032861ac67edf",
 
  "desktop/src/bundled_workers.rs":"123206aa49f1c44e84879ce65e780661653b312fd7ca4ab0d1ef77e5255c2aa6",
 
- "desktop/src/i18n.rs":"ab24cd127b728f156f456069c1c7e10de2ea10cbeea476ef4eb552daa2ae931b",
+ "desktop/src/i18n.rs":"4ffbb404d970d55845cb936eeb437ed3ee6ef5ed5d1629a835364926ddae3fcd",
 
- "desktop/src/main.rs":"c9a8bad5ef34aa2e46dd39dd830f8524a32b8cd2d1fe26f6b4d77c6b28a22307",
+ "desktop/src/main.rs":"c145f969f6c5adff9b260170373865aa31661613581c2cbb5332116a3b2e5897",
+
+ "desktop/src/notify.rs":"9d22270643d502829f409d5164d83abefe30da5b044533551daceba2a66c7891",
 
  "desktop/src/picker.rs":"277e5cdbe688d9c6ac4fe04a741c148feda72d8bf7d82c11a65c7b2860d2595b",
 
  "desktop/src/pixiv.rs":"511b8003b2068c801f336d96a6c130a6796ed1866d1102e64678760d3a906c65",
 
- "desktop/src/server.rs":"4ba6ebfe8a0ff505027d469c9363bb32bc4f2d370882cce5da267ad676b455ff",
+ "desktop/src/server.rs":"f730c004eaf6ceff7b2386d683e8c50e60069f65f8035be0b016a3ac870ae66f",
 
  "desktop/src/updater.rs":"eb5c53f5025e9db4e1179988de11d276d9395da2841d79da2c6278fd77929fb9",
 
- "desktop/src/welcome.rs":"2ddf57612f854e273fa6fbdf9f15d5b0f2b47e453c290045343b3f26feeed3bb",
+ "desktop/src/welcome.rs":"79c4c120ab8e4e6fef3459e8452655c00ecd0b9a328f894df911474cd3a2b80b",
+
+ "desktop/src/window_state.rs":"e2330e0d323eaf117a9fe462d49e062d85d919078062087d4a8e187637752570",
 
  "desktop/tauri.conf.json":"410add1c0dcb1b8f26d28e6970f3a84019c42ce87e27a0599484d2c59d88210a",
 
@@ -200,6 +206,8 @@
  "native/terms/examples/research_compute/math.rs":"ceedf5880d735289e7686d8b5bd11e54278941f93eb7955421996ca29c774562",
 
  "native/terms/src/app_accounts.rs":"22ef4d58e65652276a92a0eb89a475cd86ea2f22a7fe80be57b0ac502b22bdeb",
+
+ "native/terms/src/app_activity.rs":"bb314441e92fe2ea801d28a478f3c14f1f5b6fd36586fc4c4e73c0482846aa07",
 
  "native/terms/src/app_archives.rs":"a9a0735559c82df2283d06564d8f889b07d3a01cb00d8d310631f1b85e1b48eb",
 
@@ -215,7 +223,7 @@
 
  "native/terms/src/app_curation.rs":"8f8bc2ff372c97865a941a988d1766c541baa84fc8ca716dd6b55e7758c611cd",
 
- "native/terms/src/app_desktop.rs":"6a2d810a15066cfa4d6ff3f41e257a4b29304c6756914da2580fce2a4184b47a",
+ "native/terms/src/app_desktop.rs":"9b7ea33d4e03230774d3dfa27025637b59194beb97573a7a8a72df1d836e7e85",
 
  "native/terms/src/app_effects.rs":"507ff09441aab09cc8f2ca7460bbde3da5bffb8180629b3bb6f503598dbbe1b8",
 
@@ -223,7 +231,7 @@
 
  "native/terms/src/app_folder.rs":"cd148b0a312065b97da3cbea8dc782a596eb0d8e842a1dfcf2d45f259fea6216",
 
- "native/terms/src/app_http.rs":"1f3446f0fbaaee14a6f9bf178466746ccf1c6fa085f64c4f8511dc6825771e3f",
+ "native/terms/src/app_http.rs":"7563237499fe877015a24192b9a173e296eca2c5de5443d0d9c444f32a19179e",
 
  "native/terms/src/app_human_conclusions.rs":"37bd5770a1bce2e3686a3a478b0925ddcfa11eaa81bf1f85023c57ed6cc8126b",
 
@@ -273,7 +281,7 @@
 
  "native/terms/src/app_migration_sql/provenance.sql":"a780f1f8837dd2c90a556539c114d56cdaa513b057fb667bf0c5c9d604f75934",
 
- "native/terms/src/app_models.rs":"9bd2a3eae8e0022dc234f13d87d198803fd1250f133e9c8ff9ed11ef7cb33648",
+ "native/terms/src/app_models.rs":"f83a8aecc14f65f8a03f6e4cbd2c20f50c3077c49ed4bc4e131ab0e7de36097e",
 
  "native/terms/src/app_name_sources.rs":"a9d895621405e92c2bdacd7f547f28feec7f294f307d628ea25d5e2bf27f9515",
 
@@ -285,11 +293,11 @@
 
  "native/terms/src/app_platform.rs":"42a41370b59fe5d1282f40c890215e0dd3e183a1ac8f29de420decc4f13b591b",
 
- "native/terms/src/app_preferences.rs":"1718355189e4572f61797110da007b9baa6ad565ca8684929bec452875f12c61",
+ "native/terms/src/app_preferences.rs":"da1fa9dfa9c487d164ae55757481c6dbdcc05b74feb00207ebc3e31a01f16303",
 
  "native/terms/src/app_profiles.rs":"34b2f5ab3486b4d88b01aebad9cf82f45a3fbfd286123b479733a3434f04abae",
 
- "native/terms/src/app_provenance.rs":"78e2e1660cb702fa9b9240da7c9a4b19b6203344b8bf9cab98380845d03705cd",
+ "native/terms/src/app_provenance.rs":"af3104f3ac2255ebb325ee2719eaf9a70258eb95d73f076a9b94941c6fdc3239",
 
  "native/terms/src/app_provenance_cache.rs":"440757a5a3d3fd37e79ac5a4400befe0503e3d792dd213b4cd2ff6f5af1655f4",
 
@@ -315,7 +323,7 @@
 
  "native/terms/src/app_sources.rs":"8ee039dc596b1253783ab4256fd7befa1ce4087eee3f93b69208e7ede676c819",
 
- "native/terms/src/app_sync.rs":"6d9a92764b5884d26bcafabe2d504a520a5fca981e9128858c361d4e4beb79d0",
+ "native/terms/src/app_sync.rs":"6939c5ebea46157879114ad4d56d7f377c62ef39f2b840b896cffb6aadc2497c",
 
  "native/terms/src/app_tasks.rs":"3a2653f069763b5c2d5f50580679a064e21b1f048a530a886829d483871ba400",
 
@@ -349,7 +357,7 @@
 
  "native/terms/src/http_characters.rs":"03e4c82c04a2708b576a26a6c8dbbd49834f7bf4126240f06e17da4827478f9e",
 
- "native/terms/src/http_host_get.rs":"f93d7e18df459adb1d1a67d4b6708ee893876ec70cd7a053d7641084ad57a6e4",
+ "native/terms/src/http_host_get.rs":"6da826d4b366b85800d7c6ded1b3f675fc0bf060f64c94cc74e37fcb69cbbeea",
 
  "native/terms/src/http_host_post.rs":"a14c607900a0bd9e61d9baf79be6f4f17bef66a4c43e4853ac6adf160ac2905d",
 
@@ -377,7 +385,7 @@
 
  "native/terms/src/index_generation.rs":"940c236d35bee6001cc2225701d64d0be2964a2575a653a897449650535ad2fa",
 
- "native/terms/src/lib.rs":"57552183bbeec284216e818a948c750abe72f1bd2bf464167badb7f1c995a90a",
+ "native/terms/src/lib.rs":"abc240eb2277de63154ee7f1617d9df3e14fbba4cd08378227e1b7d475e2cd1e",
 
  "native/terms/src/platform_process.rs":"62046a3cf19fa77c1f3105770d4937a6cd780b24e9219a84106c4014aaf1f500",
 

@@ -6,15 +6,19 @@
 //!   GET  /platform/update/status   应用内更新的状态（#279，updater.rs）
 //!   POST /platform/update/download?version=X.Y.Z 下载并校验这个版本；cancel 取消；install 安装并重启
 //!   POST /platform/diagnostics/open-logs 打开应用自己的日志目录（无路径参数）
+//!   POST /platform/activity        宿主报来的后台任务进行状态（#451，background.rs），正文是 JSON
+use std::io::Read;
 use std::thread;
 
 use serde_json::{json, Value};
 use tauri::AppHandle;
 use tiny_http::{Header, Method, Request, Response, Server};
 
-use crate::{picker, pixiv, updater};
+use crate::{background, picker, pixiv, updater};
 
 pub const TOKEN_HEADER: &str = "X-Illustash-Token";
+/// 任务状态只有几个任务的种类和数字，用不了这么多。
+const ACTIVITY_LIMIT: u64 = 64 * 1024;
 
 pub fn token() -> String {
     let mut raw = [0u8; 24];
@@ -40,13 +44,14 @@ fn query(url: &str, key: &str) -> Option<String> {
     found
 }
 
-fn handle(app: &AppHandle, token: &str, request: Request) {
+fn handle(app: &AppHandle, token: &str, mut request: Request) {
     let authorized = request.headers().iter().any(|h| h.field.equiv(TOKEN_HEADER) && h.value.as_str() == token);
     let route = request.url().split('?').next().unwrap_or("").to_string();
     let (code, body): (u16, Value) = if !authorized {
         (403, json!({"error": "口令不对"}))
     } else {
-        let result = match (request.method(), route.as_str()) {
+        let method = request.method().clone();
+        let result = match (&method, route.as_str()) {
             (Method::Post, "/platform/choose") => picker::choose(
                 app,
                 query(request.url(), "kind").as_deref().unwrap_or(""),
@@ -71,6 +76,13 @@ fn handle(app: &AppHandle, token: &str, request: Request) {
             },
             (Method::Post, "/platform/update/cancel") => Ok(updater::cancel(app)),
             (Method::Post, "/platform/update/install") => updater::install(app),
+            (Method::Post, "/platform/activity") if request.url() == route => {
+                let mut body = String::new();
+                match request.as_reader().take(ACTIVITY_LIMIT + 1).read_to_string(&mut body) {
+                    Ok(n) if n as u64 <= ACTIVITY_LIMIT => background::activity(app, &body),
+                    _ => Err("任务状态读不了或太长".to_string()),
+                }
+            }
             _ => Err("未知路径".to_string()),
         };
         // 给终端 / 控制台看的诊断信息：哪个调用，Pixiv 或窗口怎样回应（从不输出正文或 cookie）。
@@ -81,8 +93,8 @@ fn handle(app: &AppHandle, token: &str, request: Request) {
                 }
             }
             Ok(_) if route == "/platform/choose" => eprintln!("[bridge] 选择窗口完成"),
-            // 下载时页面每秒问一次状态。
-            Ok(_) if route == "/platform/update/status" => {}
+            // 下载时页面每秒问一次状态；任务进度一变就报一次。
+            Ok(_) if route == "/platform/update/status" || route == "/platform/activity" => {}
             Ok(value) => eprintln!("[bridge] {route} → {value}"),
             Err(error) => eprintln!("[bridge] {route} 失败：{error}"),
         }
