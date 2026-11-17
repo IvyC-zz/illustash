@@ -1,9 +1,9 @@
 // 由 tools/styleguide/census.py 从 web/static/app.css 生成，不要手改。
 window.CENSUS = {
  "source": "web/static/app.css",
- "sha256": "d44a017c6f0929b7cc03594e75adeecd9c1e154b0f99f61c2d3552747b16ea71",
- "lines": 1399,
- "rules": 1235,
+ "sha256": "7332e9eb291e73f8f160053cbff96d9f72c3cf06d712fe663067e661b4db60a2",
+ "lines": 1401,
+ "rules": 1236,
  "themeVars": {
   "light": {
    "--canvas": "#f4f4f6",
@@ -1559,16 +1559,16 @@ window.CENSUS = {
  },
  "padding": {
   "kinds": 107,
-  "uses": 210,
+  "uses": 211,
   "table": [
    {
     "value": "0",
-    "uses": 19,
+    "uses": 20,
     "examples": [
+     ".heading-main h1>.link-button,.heading-main h1>input",
      ".preview",
      ".alt kbd",
-     "dialog.palette",
-     ".like-example>button"
+     "dialog.palette"
     ]
    },
    {
