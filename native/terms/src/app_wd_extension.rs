@@ -5,7 +5,7 @@ use illustash_core::wd_extension::{self, Hit};
 use rusqlite::{Connection, OpenFlags, OptionalExtension, TransactionBehavior};
 use serde::Deserialize;
 use serde_json::{json, Value};
-use std::path::{Path, PathBuf};
+use std::path::Path;
 
 const DIM: usize = 1024;
 
@@ -245,33 +245,19 @@ pub fn withdraw(library: &Library) -> Result<Value> {
     Ok(json!({"changed":changed}))
 }
 
-/// 扩展包在这台电脑上的位置（#550 方案第 2 节）：共享可写目录下，所有图库共用。
-pub(crate) fn package_path(shared: &Path) -> PathBuf {
-    shared.join("extensions").join("wd-extension-v1").join("wd-extension-v1.bin")
-}
-
-/// 本图库现在启用的扩展包摘要（#561）。#549 没有单独的启用标记，按这个来源最近一次发布的证据批次判断：
-/// `extension:<摘要>` 是启用，`extension:withdraw` 是撤回；图片作废留下的 `extension:stale_wd` 不改变启用状态。
-/// 整库零命中的启用不留批次，这时算没有启用。
-pub(crate) fn enabled_package(app: &Connection) -> Result<Option<String>> {
-    let producer: Option<String> = app
-        .query_row(
-            "SELECT producer FROM term_evidence_sets
-             WHERE source=?1 AND method=?2 AND producer<>'extension:stale_wd' ORDER BY id DESC LIMIT 1",
-            [wd_extension::SOURCE, wd_extension::METHOD],
-            |r| r.get(0),
-        )
-        .optional()?;
-    Ok(producer.and_then(|p| p.strip_prefix("extension:").filter(|s| *s != "withdraw").map(str::to_owned)))
-}
-
-/// 本图库启用的扩展包能认出的角色标签（#561），读包里的标签表。没有启用、启用的不是这个版本，或者扩展包不在这台
-/// 电脑上（新识别的图不会被它检查）时为空。
-pub(crate) fn covered_labels(app: &Connection, shared: &Path) -> Result<Vec<String>> {
-    if enabled_package(app)?.as_deref() != Some(PACKAGE) {
+/// 角色检查使用图库的持久启用状态和本机已校验的包（#561）。包在本机缺席时仍按未覆盖处理。
+pub(crate) fn covered_labels(app: &Connection, resources: &Path) -> Result<Vec<String>> {
+    let Some(active) = enabled(app)? else {
+        return Ok(Vec::new());
+    };
+    let spec = crate::app_models::wd_extension()?;
+    if active.package_sha256 != spec.file.sha256 {
         return Ok(Vec::new());
     }
-    Ok(Package::load(&package_path(shared)).map(|p| p.manifest.labels).unwrap_or_default())
+    let Some(path) = crate::app_models::extension_file(resources)? else {
+        return Ok(Vec::new());
+    };
+    Ok(Package::load(&path, spec).map(|p| p.manifest.labels).unwrap_or_default())
 }
 
 fn ensure_writable(library: &Library) -> Result<()> {
@@ -565,45 +551,6 @@ mod tests {
 
     fn snapshot(c: &Connection, sql: &str) -> Vec<Value> {
         crate::app_migrate_data::rows(c, sql).unwrap()
-    }
-
-    /// 启用状态按最近一次发布的批次判断（#561）：启用后是这个包，图片作废不改变它，撤回后没有；扩展包不在本机时
-    /// 不算覆盖任何角色。
-    #[test]
-    fn enabled_package_follows_latest_batch() {
-        let f = Fixture::new();
-        let app = || writer(&f.library.db()).unwrap();
-        assert_eq!(enabled_package(&app()).unwrap(), None);
-        for (producer, expected) in [
-            (format!("extension:{PACKAGE}"), Some(PACKAGE)),
-            ("extension:stale_wd".into(), Some(PACKAGE)),
-            ("extension:withdraw".into(), None),
-            ("extension:stale_wd".into(), None),
-            (format!("extension:{PACKAGE}"), Some(PACKAGE)),
-        ] {
-            f.write(|c| {
-                c.execute(
-                    "INSERT INTO term_evidence_sets(producer,source,method,scope) VALUES (?1,?2,?3,'assets')",
-                    [producer.as_str(), wd_extension::SOURCE, wd_extension::METHOD],
-                )?;
-                Ok(())
-            })
-            .unwrap();
-            assert_eq!(enabled_package(&app()).unwrap().as_deref(), expected, "{producer}");
-        }
-        // 别的来源的批次不影响。
-        f.write(|c| {
-            c.execute(
-                "INSERT INTO term_evidence_sets(producer,source,method,scope) VALUES ('recognition','wd','wd_character','assets')",
-                [],
-            )?;
-            Ok(())
-        })
-        .unwrap();
-        assert_eq!(enabled_package(&app()).unwrap().as_deref(), Some(PACKAGE));
-        let shared = f.root.join("shared");
-        assert!(covered_labels(&app(), &shared).unwrap().is_empty());
-        assert!(package_path(&shared).ends_with("extensions/wd-extension-v1/wd-extension-v1.bin"));
     }
 
     #[test]
