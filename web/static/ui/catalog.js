@@ -21,13 +21,15 @@ import {charHash, charRoute, go} from '../core/route.js';
 import {fetchChar, refreshMeta} from '../core/meta.js';
 import {closeInspector} from './detail.js';
 import {renderHeading} from './shell.js';
+import {refreshArtistDir, renderArtistDir} from './artist_dir.js';
 
 // ---------- 角色：书架（作品标签页、海报、分档）和列表 ----------
 // 「角色」页显示什么：书架还是列表、哪个作品标签页、搜索结果、列表的排序和档位。
 export const cast = {mode: prefs.get('castMode', 'shelf'), tab: 'all', list: null, sort: 'count', dir: -1, bucket: 'all', pop: false, popQ: ''};
-async function renderIndex() {
+async function renderIndex(opts) {
   showArea(); closeInspector(); $('selectionBar').hidden = true;
   $('resultCount').textContent = '';
+  if (state.route.section === 'artists') { await renderArtistDir(opts); return; }
   if (state.route.section === 'works') { renderShelf(); return; }
   drawn.clear();
   $('hint').textContent = t('点角色，在图库里只看 TA');
@@ -57,7 +59,10 @@ export async function searchIndex() {
   if (route === state.route && token === session.token && q === $('charSearch').value.trim()) { cast.list = list; drawCast(); }
 }
 // 留给元数据变化后刷新页面的调用方。
-export function renderIndexBody() { if (!onPage(state.route, 'characters')) return; if (state.route.section === 'works') drawShelf(); else { drawCast(); loadActivity(); } }
+export function renderIndexBody() {
+  if (!onPage(state.route, 'characters') || state.route.section === 'artists') return;
+  if (state.route.section === 'works') drawShelf(); else { drawCast(); loadActivity(); }
+}
 const cover = (c, size = 'thumb') => c?.cover ? `<img src="/image?id=${encodeURIComponent(c.cover)}&size=${size}" alt="" loading="lazy" decoding="async">` : '';
 const avatar = (c, px) => `<i class="cast-av" style="width:${px}px;height:${px}px">${cover(c)}</i>`;
 // ---------- 海报的图片：静止时随机一张，指针下看其他的（#293） ----------
@@ -229,7 +234,7 @@ function castPane(works) {
   if (cast.tab === 'all') {
     const top = [...state.chars].sort((a, b) => b.count - a.count).slice(0, 9);
     const rec = state.chars.filter(c => recentOf(c)).sort((a, b) => recentOf(b) - recentOf(a)), max = rec[0] ? recentOf(rec[0]) : 1;
-    return `<section class="cast-sec"><h3>${t('你最常看的')}<small>${t('按收藏张数')}</small></h3><div class="cast-board">${top.map((c, i) => poster(c, (c.work_name ? esc(c.work_name) + ' · ' : '') + t('{n} 张', {n: number(c.count)}), i + 1, i === 0)).join('')}</div></section>
+    return `<section class="cast-sec"><h3>${t('你最常看的')}<small>${t('按张数')}</small></h3><div class="cast-board">${top.map((c, i) => poster(c, (c.work_name ? esc(c.work_name) + ' · ' : '') + t('{n} 张', {n: number(c.count)}), i + 1, i === 0)).join('')}</div></section>
       ${rec.length ? `<section class="cast-sec"><h3>${t('最近 30 天在收')}<small>${t('{n} 位角色有新图', {n: number(rec.length)})}</small><button class="link-button strong" data-tab="recent">${t('全部')} ›</button></h3><div class="cast-recent">${rec.slice(0, 24).map(c => `<a class="cast-rc" href="${charHash(c.id)}" title="${esc(nameTip(c))}"><span class="ring" style="--p:${Math.max(8, Math.round(recentOf(c) / max * 100))}">${avatar(c, 66)}<em>+${number(recentOf(c))}</em></span><b>${esc(c.name)}</b><small>${esc(c.work_name || '')}</small></a>`).join('')}</div></section>` : ''}
       <section class="cast-sec"><h3>${t('作品')}<small>${t('{n} 部 · 按张数', {n: number(works.filter(w => !w.pseudo).length)})}</small></h3><div class="cast-works">${works.slice(0, 24).map(w => `<button class="cast-wt" data-tab="${esc(w.key)}">${fan(w.chars)}<b>${esc(w.name)}</b><small>${t('{n} 位 · {images} 张', {n: number(w.chars.length), images: number(w.images)})}${w.recent ? ` · <em>+${number(w.recent)}</em>` : ''}</small></button>`).join('')}</div></section>`;
   }
@@ -248,7 +253,7 @@ function castList() {
   const max = Math.max(1, ...base.map(c => c.count)), shown = rows.slice(0, cast.limit || 300);
   const th = (k, label) => `<th data-sort="${k}" class="${cast.sort === k ? 'on' : ''}" aria-sort="${cast.sort === k ? (cast.dir < 0 ? 'descending' : 'ascending') : 'none'}">${label}${cast.sort === k ? (cast.dir < 0 ? ' ↓' : ' ↑') : ''}</th>`;
   return `<div class="cast-buckets">${BUCKETS.map(([k, label, f]) => `<button data-bucket="${k}" class="${cast.bucket === k ? 'on' : ''}">${label}<small>${number(base.filter(f).length)}</small></button>`).join('')}</div>
-    <table class="cast-table"><thead><tr>${th('name', t('角色'))}${th('work', t('作品'))}${th('count', t('张数'))}${th('recent', t('近 30 天'))}${th('last', t('最后收藏'))}${th('skins', t('造型'))}</tr></thead><tbody>
+    <table class="cast-table"><thead><tr>${th('name', t('角色'))}${th('work', t('作品'))}${th('count', t('张数'))}${th('recent', t('近 30 天'))}${th('last', t('最后加入'))}${th('skins', t('造型'))}</tr></thead><tbody>
     ${shown.map(c => { const a = catalog.activity.get(c.id), skins = (c.variants || []).filter(v => v.count).length, orig = c.tag && c.tag !== c.name ? c.tag.replaceAll('_', ' ') : '';
       return `<tr data-char="${esc(c.id)}"><td><div class="cast-who">${avatar(c, 36)}<span><b>${esc(c.name)}</b>${orig ? `<small>${esc(orig)}</small>` : ''}</span></div></td><td>${esc(c.kind === 'oc' ? t('原创角色') : c.work_name || '—')}</td><td><div class="cast-bar"><i style="width:${Math.max(4, Math.log(c.count + 1) / Math.log(max + 1) * 110)}px"></i>${number(c.count)}</div></td><td>${a?.recent ? `<span class="cast-plus">+${number(a.recent)}</span>` : '<span class="dim">—</span>'}</td><td class="mono">${esc(a?.last || '')}</td><td>${skins || '<span class="dim">—</span>'}</td></tr>`; }).join('')}
     </tbody></table>${rows.length > shown.length ? `<button class="quiet cast-more" id="castMore">${t('再显示 300 位（共 {n} 位）', {n: number(rows.length)})}</button>` : ''}`;
@@ -547,8 +552,9 @@ export function wireCatalog() {
   });
 }
 
-// 元数据刷新角色目录，撤销后还要重读作品计数或「只当标签」清单。
-implement({characters: {render: () => renderIndex(), refresh: async why => {
+// 元数据刷新角色目录，撤销后还要重读作品计数或「只当标签」清单；画师子页由 ui/artist_dir.js 自己重读。
+implement({characters: {render: opts => renderIndex(opts), refresh: async why => {
+  if (state.route.section === 'artists') { refreshArtistDir(why); return; }
   if (why === 'nsfw') { forgetActivity(); readActivity(); }
   if (why !== 'undo') return;
   const route = state.route;

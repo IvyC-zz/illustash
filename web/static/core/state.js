@@ -15,6 +15,8 @@ export const state = {
   chars: [], charMap: new Map(), workNames: null, char: null, userTags: [],
   pools: {unmatched: 0, skipped: 0}, dupInfo: {groups: 0, mixed: 0}, exclInfo: {count: 0, reasons: {}}, pendingCount: 0, recentCount: 0,
   identityCount: null,
+  // 撤销以后在等后台学习落定（#404）：计数旁显示「正在更新」。
+  learning: false,
 
   // ---- 后台任务最近一次的回应：core/jobs.js（index、names 别处要换时用 setIndex、setNames、mergeNames） ----
   sync: {status: 'off'}, syncHistory: [], syncDamaged: null, provenance: null, importTask: null, index: null, names: null,
@@ -35,6 +37,8 @@ export const state = {
   models: null,
   // ---- 角色数据包的状态（wd：GET /api/wd-extension，#550；ccip：GET /api/ccip-longtail，#559）：core/packs.js ----
   packs: {wd: null, ccip: null},
+  // ---- 画廊列表（GET /api/galleries，#445）：core/galleries.js ----
+  galleries: null,
   // ---- 上手引导的进度：ui/guide.js ----
   guide: null,
 

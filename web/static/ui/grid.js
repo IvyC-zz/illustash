@@ -6,11 +6,12 @@ import {t} from '../core/i18n.js';
 import {composing} from '../core/keys.js';
 import {REASONS, nameWithWork} from '../core/labels.js';
 import {undoRefusal} from '../core/human.js';
-import {learnerState, learningSettled, metaSoon, refreshMeta} from '../core/meta.js';
+import {afterSyncLearning, learningNow, learningSettled, learningShown, metaSoon, refreshMeta} from '../core/meta.js';
 import {prefs} from '../core/prefs.js';
 import {SHORTCUTS, currentSource, keyAction, keySelection, modes, selectionSize, shownUuid, viewerTarget} from '../core/modes.js';
 import {keyScope, pageOf, viewOf} from '../core/pages.js';
-import {browsing, cleanup, defaultSort, hashFor, stepHistory} from '../core/route.js';
+import {browsing, cleanup, defaultSort, go, hashFor, stepHistory} from '../core/route.js';
+import {canLike, likeRoute} from '../core/like.js';
 import {api, post, readError} from '../core/session.js';
 import {state} from '../core/state.js';
 import {offerWatch} from './catalog.js';
@@ -19,9 +20,11 @@ import {renderChrome, renderHeading} from './shell.js';
 import {findArtists} from './artists.js';
 import {openExport, startDrag} from './files.js';
 import {canDrag, exportActive} from '../core/files.js';
-import {answerAsk, closeInspector, closeViewer, ensureVisible, indexOf, inspect, openViewer, peek, pickAlternative, showViewer, singleAction, step, zoomView} from './detail.js';
+import {answerAsk, closeInspector, closeViewer, ensureVisible, indexOf, inspect, noteFavorite, openViewer, peek, pickAlternative, showViewer, singleAction, step, zoomView} from './detail.js';
 import {jumpToCharacter, markOc, newIds, openPicker, openRelate, targets} from './palette.js';
 import {createLayer, inPopover, popoverOpen} from './overlay.js';
+import {FAV, MARKS, favLeaves, isFav, markLocal, wantsAdd, withCondition} from '../core/favorites.js';
+import {cardHeart, paintHearts, writeFavorite} from './favorites.js';
 
 // ---------- 加载图片 ----------
 // 缩放是一个连续的目标列宽；网格对齐到整列，并在两者之间做动画。
@@ -40,7 +43,7 @@ export function filters() {
   if (state.nsfw) f.nsfw = state.nsfw;
   return f;
 }
-const pageUrl = (offset, count = true) => '/api/assets?' + new URLSearchParams({...filters(), offset, limit: PAGE, ...(count ? {} : {count: 0})});
+const pageUrl = (offset, count = true) => '/api/assets?' + new URLSearchParams({...filters(), offset, limit: PAGE, ...MARKS, ...(count ? {} : {count: 0})});
 // 从第 first 张到第 last 张所在的几页（最多 4 页）。
 function pagesBetween(first, last) {
   const offsets = []; for (let o = Math.floor(first / PAGE) * PAGE; o < Math.max(last, 1); o += PAGE) offsets.push(o);
@@ -98,7 +101,18 @@ export async function reload(reset = false, place = null) {
     $('empty').innerHTML = next ? `<div>${text}<div>${next}</div></div>` : text;
     renderHeading();
     if (state.route.char) refreshMaybe(gen);
-  } catch (e) { if (e.name !== 'AbortError' && gen === state.generation && route === state.route) { error(e.message); $('resultCount').textContent = t('读取失败'); } }
+  } catch (e) {
+    if (e.name === 'AbortError' || gen !== state.generation || route !== state.route) return;
+    const text = viewOf(route).readFailed?.(e);   // 这一页认得的失败当作没有结果（core/pages.js 的 readFailed）
+    if (text) { showNone(text); return; }
+    error(e.message); $('resultCount').textContent = t('读取失败');
+  }
+}
+function showNone(text) {
+  state.total = 0; state.totalReady = true; state.countDirty = false; state.items = []; state.pages = new Set(); state.dataVersion++; state.gridKey = '';
+  renderGrid(); updateCount(); renderSelection();
+  $('empty').hidden = false; $('empty').textContent = text;
+  renderHeading();
 }
 // 首页借用网格的列表放它自己的图（详情栏翻页、大图都按这个列表走）。
 // 面板页看一组图的大图（previewList：按组整理、首页「认一认」、身份整理、画师抽查，#424 的 2-2、2-34）时列表先换成那一组，
@@ -289,7 +303,8 @@ function cardHTML(item, i) {
   const names = item.memberships.map(m => m.name), narrow = state.fit && ratio * state.cellW * 4 / 3 < 170 && names.length > 1;
   const shown = narrow ? item.memberships.slice(0, 1) : item.memberships;
   const caption = captionH() ? `<div class="caption" title="${esc(item.memberships.map(nameWithWork).join(t('、')))}">${shown.map(m => `<span class="${m.status}">${esc(m.name)}</span>`).join('<i>·</i>') || `<span class="none">${item.unknown ? t('已跳过') : t('未识别')}</span>`}${narrow ? `<small>+${names.length - 1}</small>` : ''}</div>` : '';
-  const inner = `<img src="/image?id=${encodeURIComponent(item.uuid)}&size=${size}" loading="lazy" decoding="async" alt="" draggable="false">${extra}<span class="check" aria-hidden="true"></span>`;
+  const inner = `<img src="/image?id=${encodeURIComponent(item.uuid)}&size=${size}" loading="lazy" decoding="async" alt="" draggable="false">${extra}`
+    + `${cardHeart(item, state.cellW < 70)}<span class="check" aria-hidden="true"></span>`;
   return `<div class="image-stage">${isSquare() ? inner : `<div class="fit-box${rawRatio(item) && rawRatio(item) !== ratio ? ' whole' : ''}">${inner}</div>`}</div>${caption}`;
 }
 export function renderGrid(relayout = false) {
@@ -524,9 +539,11 @@ export function renderSelection() {
     buttons += `<button class="quiet" data-act="notlib" ${state.sel.all ? `disabled title="${t('全选时请进入角色页移出')}"` : ''}>${t('不是…')} <kbd>⌫</kbd></button>`;
   }
   if (!['excluded', 'pending'].includes(kind)) buttons += `<button class="quiet${arm('exclude')}" data-act="exclude" title="${t('把截图、照片等不是插画的图移到「已排除」')}">${state.armed === 'exclude' ? t('再点一次：排除 {n} 张', {n: number(n)}) : t('排除')} <kbd>X</kbd></button>`;
+  buttons += favButton(n, arm);
   buttons += `<button class="quiet" data-act="tag">${t('标签')} <kbd>G</kbd></button>`;
   buttons += `<button class="quiet" data-act="findartist" title="${t('用像素哈希和 IQDB 查这些图的画师（只发哈希文本，不发图片；一次最多 500 张）')}">${t('查找画师')}</button>`;
   buttons += `<button class="quiet" data-act="export" ${exportActive() ? `disabled title="${t('正在导出，完成后再开始下一次')}"` : `title="${t('把原图复制到一个文件夹')}"`}>${t('导出…')}</button>`;
+  if (!state.sel.all && canLike(n)) buttons += `<button class="quiet" data-act="like">${n === 1 ? t('更多像这张的') : t('更多像这些的')}</button>`;
   if (!state.sel.all && n >= 2 && n <= 12) buttons += `<button class="quiet" data-act="relate" title="${t('两两比较，判断是同一张图、裁剪、差分、局部编辑，还是不同的图')}">${t('判断关系')}</button>`;
   const note = kind === 'audit' ? t('一次最多回答 500 张，这次答前 500 张') : t('超过 500 张需再点一次确认');
   // 重复页上改哪一份都会同步到整组副本：这件事放在动手的地方，不写在副本页常驻的说明里（#528）。
@@ -578,6 +595,7 @@ function runBarAction(act) {
   const payload = () => ({...selectionPayload(), confirm: n > 500});
   if (act === 'audit_yes' || act === 'audit_no') { answerAudit(act === 'audit_yes'); return; }
   if (act === 'export') { openExport(selectionPayload(), n); return; }
+  if (act === 'like') { if (!state.sel.all) go(likeRoute([...state.sel.ids])); return; }
   if (act === 'findartist') {
     const sel = state.sel;
     (sel.all ? api('/api/ids?' + new URLSearchParams({...filters(), limit: 500})).then(ids => ids.filter(u => !sel.exclude.has(u))) : Promise.resolve([...sel.ids].slice(0, 500)))
@@ -611,6 +629,7 @@ function runBarAction(act) {
   }
   else if (act === 'oc') markOc(payload(), true);
   else if (act === 'relate') openRelate([...state.sel.ids]);
+  else if (act === 'fav') { if (!needsArm('fav')) favoriteSelection(payload()); }
   else if (act === 'variant') openVariantMenu(payload);
   else if (act === 'tag') openTagPicker(payload, n, state.sel.all ? null : state.items.filter(x => x && isSelected(x.uuid)));
   else if (act === 'notlib') {
@@ -670,8 +689,6 @@ async function write(path, body, leaving, advance) {
   if (advance) kept.hold = null; else holdCurrent();
   const gone = leaving ? new Set(body.ids || state.items.filter(x => x && isSelected(x.uuid)).map(x => x.uuid)) : null;
   if (gone) for (const el of $('grid').children) if (gone.has(el.dataset.id)) el.classList.add('leaving');
-  // 确认角色之后后台会学习，学完未识别计数和分组还会变（#400）：写入前先记下学习的状态，好知道之后要不要再读。
-  const learner = path === '/api/change' && body.action === 'confirmed' ? learnerState().catch(() => null) : null;
   try {
     const r = await post(path, body);
     quitSelecting();
@@ -685,7 +702,9 @@ async function write(path, body, leaving, advance) {
       else if (advance || !kept.hold) showViewer(Math.min(state.viewer, state.total - 1));
       else { const i = indexOf(kept.hold.uuid); showViewer(i >= 0 ? i : state.viewer, i >= 0 ? state.items[i] : state.viewerItem); }
     }
-    if (learner) learner.then(afterLearning);
+    // 确认角色之后后台会学习，学完未识别计数和分组还会变（#400）：图片离开列表这一步已经是对的，照旧立即重读，
+    // 学到的结果发布以后再读一次。
+    if (path === '/api/change' && body.action === 'confirmed') learningNow().then(afterLearning);
     return true;
   } catch (e) { toast(e.message); for (const el of $('grid').querySelectorAll('.leaving')) el.classList.remove('leaving'); }
 }
@@ -706,28 +725,98 @@ async function reread(why) {
   if (state.focused) inspect(state.focused, true);
   if (state.viewer >= 0) { const i = indexOf(state.viewerItem?.uuid); showViewer(i >= 0 ? i : state.viewer, i >= 0 ? state.items[i] : state.viewerItem); }
 }
-// 写入或撤销之后等后台学习收尾，学到的结果发布了就再读一次（#400，等法见 core/meta.js 的 learningSettled）。那时正有
-// 别的写入在进行，就交给它自己的重读。
-async function afterLearning(before) {
-  if (await learningSettled(before) && !edits.busy) await reread('learned');
+// 确认角色之后等后台学习落定（#404，等法见 core/meta.js 的 learningSettled）。学到的结果发布了，或者等满时限，就再读一次；
+// 学习只会让计数接着往同一个方向变，不会显示错误的结论，所以等待期间不加标记。那时正有别的写入在进行，就交给它自己的重读。
+async function afterLearning(first) {
+  const outcome = await learningSettled(first);
+  if ((outcome === 'done' || outcome === 'timeout') && !edits.busy) await reread('learned');
 }
+// 同步进行中撤销提示的文字（#404 的 Q2）。
+const syncUndone = () => t('已撤销，计数在同步结束后更新');
+// 撤销之后（#404 的 Q1、Q2）：先读一次学习状态。已经落定（没有学习 worker，或者学得快）就立即重读，这次就是最终值；
+// 还在学习就先不重读，计数旁显示「正在更新」，落定后一次重读成最终结果，不显示中间值；同步进行中则立即重读一次，
+// 提示计数在同步结束后更新，同步结束后再重读一次（afterSync）；学习失败、停下或读不到状态时立即重读当前值。
 export async function undo() {
   if (!edits.latest) return;
-  return exclusive(async () => {
-    const learner = learnerState().catch(() => null);
-    try {
-      toast(undoneText(await undoLatest())); await reread('undo');
-      learner.then(afterLearning);
-    } catch (e) {
+  const waiting = await exclusive(async () => {
+    let label;
+    try { label = await undoLatest(); } catch (e) {
       // 历史可能已经往前走了（另一个窗口，或服务端提交之后才失败）：显示它最新的一步。
       // 撤销一次人工结论导入被拒（后面有改动依赖它）时，说清楚为什么（core/human.js）。
       toast(undoRefusal(e, edits.latest)); refreshMeta().catch(err => error(readError(err)));
+      return null;
     }
+    const first = await learningNow();
+    if (first?.state === 'pending') {
+      const settled = learningSettled(first, {marking: true});
+      toast(undoneText(label)); renderHeading();
+      return settled;
+    }
+    // 同步进行中：同步结束后接着等的那一段也显示「正在更新」。
+    learningSettled(first, {marking: true});
+    toast(first?.state === 'sync' ? syncUndone() : undoneText(label)); await reread('undo');
+    return null;
   });
+  if (!waiting) return;
+  const outcome = await waiting;
+  if (outcome === 'superseded') return;
+  if (outcome === 'sync') toast(syncUndone());
+  // 落定时正有别的写入在进行：它自己的重读会读到落定后的值。
+  await exclusive(() => reread('undo'));
+  settled();
+}
+// 等待结束、重读完：去掉「正在更新」。
+function settled() { learningShown(); renderHeading(); }
+// 同步结束（ui/effects.js 的 afterJob）：之前因为同步没等完的学习，用同一个编号接着等，落定后重读一次。
+// 同步结束时没有新图，也要靠这里重读。
+export async function afterSync() {
+  const waiting = afterSyncLearning();
+  if (!waiting) return;
+  renderHeading();
+  const outcome = await waiting;
+  if (outcome === 'superseded') return;
+  if (outcome !== 'sync') await exclusive(() => reread('learned'));
+  settled();
 }
 export async function sweep() {
   const c = state.char; if (!c?.unchecked) return;
   await mutate('/api/sweep', {entity: c.id}, false);
+}
+
+// ---------- 收藏（#447） ----------
+// 心形和不重读的写入在 ui/favorites.js，判断在 core/favorites.js。这一页按收藏筛选、图会离开本页时（「只看收藏」里取消）
+// 照其他写入走 mutate：淡出、重读；否则只在本地改掉这些图和同组副本的心形，面板页（首页）自己重读。
+function favorite(payload, add) {
+  if (favLeaves(add)) return mutate('/api/favorite', {...payload, add}, true);
+  const ids = payload.ids && new Set(payload.ids), exclude = state.sel.exclude;
+  const pick = ids ? x => ids.has(x.uuid) : x => !exclude.has(x.uuid);
+  return writeFavorite({...payload, add}, () => {
+    quitSelecting();
+    const changed = markLocal(state.items, pick, add);
+    if (kept.hold?.item && (changed.has(kept.hold.uuid) || ids?.has(kept.hold.uuid))) { kept.hold.item.fav = add; changed.add(kept.hold.uuid); }
+    noteFavorite(changed, ids, add); paintHearts(changed, add);
+    if (pageOf(state.route).panel) pageOf(state.route).refresh?.('edit');
+  });
+}
+// 一张图：切换它的收藏（卡片上的心形、详情栏和大图的按钮、没有选中时的 F）。
+export function favoriteOne(uuid) {
+  const item = state.items[indexOf(uuid)] || (state.viewerItem?.uuid === uuid ? state.viewerItem : kept.hold?.uuid === uuid ? kept.hold.item : {uuid});
+  return favorite({ids: [uuid]}, !isFav(item));
+}
+// 选中的图：只要有一张还没收藏就全部收藏，否则全部取消（选择栏的按钮和 F）。全选时问一次后端选区里还有没有没收藏的。
+export async function favoriteSelection(payload) {
+  let add;
+  if (state.sel.all) {
+    try { add = (await api('/api/assets/count?' + new URLSearchParams(withCondition(filters(), 'not', FAV)))).total > 0; } catch (e) { toast(readError(e)); return; }
+  } else add = wantsAdd(state.items.filter(x => x && isSelected(x.uuid)), state.sel.ids.size);
+  return favorite(payload, add);
+}
+// 选择栏的按钮：选中的都已收藏时是「取消收藏」。全选时不知道，写「收藏」，点下去再定。
+function favButton(n, arm) {
+  const add = state.sel.all || wantsAdd(state.items.filter(x => x && isSelected(x.uuid)), state.sel.ids.size);
+  const armed = state.armed === 'fav', label = add ? armed ? t('再点一次：收藏 {n} 张', {n: number(n)}) : t('收藏', {context: 'verb'})
+    : armed ? t('再点一次：取消收藏 {n} 张', {n: number(n)}) : t('取消收藏');
+  return `<button class="quiet${arm('fav')}" data-act="fav">${label} <kbd>F</kbd></button>`;
 }
 
 // ---------- 视图选项 ----------
@@ -756,7 +845,7 @@ export function renderViewPop() {
       ${viewSwitch('railCount', t('侧栏显示数量'))}
       ${viewSwitch('footer', t('底部状态栏'), t('已加载张数与操作提示'))}
     </div><h6>${t('详情面板')}</h6><div class="view-group">
-      ${viewSwitch('chart', t('收藏曲线'), t('这个角色每月收了多少张'))}
+      ${viewSwitch('chart', t('每月加入张数'), t('这个角色每月收了多少张'))}
       ${viewSwitch('same', t('同一角色的其它图'))}
       ${viewSwitch('meta', t('文件信息与画面标签'))}
       ${viewSwitch('ask', t('偶尔问一句「是 TA 吗？」'), t('在详情和首页'))}
@@ -824,6 +913,7 @@ export function wireGrid() {
 
   // 在卡片的「+ 角色」引导上点一次：把图设为那个角色，和在选择器里选它一样。
   $('grid').addEventListener('click', e => {
+    const fav = e.target.closest('button[data-fav]'); if (fav) { if (!edits.busy) favoriteOne(fav.dataset.fav); return; }
     const hit = e.target.closest('[data-tagact]');
     if (hit) {
       const item = state.items[Number(hit.closest('.card').dataset.index)], yes = hit.dataset.tagact === 'yes', entity = hit.dataset.entity;
@@ -837,7 +927,7 @@ export function wireGrid() {
     if (item?.hint) mutate('/api/change', {ids: [item.uuid], action: 'confirmed', entity: item.hint.id}, pageOf(state.route).lead);
   });
   $('grid').addEventListener('pointerdown', e => {
-    if (e.button !== 0 || e.pointerType === 'touch' || e.target.closest('[data-hint],[data-tagact]')) return;
+    if (e.button !== 0 || e.pointerType === 'touch' || e.target.closest('[data-hint],[data-tagact],button[data-fav]')) return;
     const card = e.target.closest('.card[data-id]');
     drag = {x: e.clientX, y: e.clientY, start: card ? Number(card.dataset.index) : null, check: !!e.target.closest('.check'), moved: false, id: e.pointerId, base: null, lastY: e.clientY, lastX: e.clientX};
   });
@@ -864,7 +954,7 @@ export function wireGrid() {
     if (!d.moved && d.start !== null) handleCardClick(d.start, e, d.check);
     else if (d.moved && d.start !== null) state.anchor = indexAt(e.clientX, e.clientY);
   });
-  $('grid').addEventListener('dblclick', e => { const card = e.target.closest('.card[data-id]'); if (card) openViewer(Number(card.dataset.index)); });
+  $('grid').addEventListener('dblclick', e => { const card = e.target.closest('.card[data-id]'); if (card && !e.target.closest('button[data-fav]')) openViewer(Number(card.dataset.index)); });
 
   // ---------- 键盘 ----------
   // 按键先看最上面的模式（core/modes.js）：大图打开时它盖住选择栏，单图快捷键都作用于大图里那张。哪些键、在哪生效
@@ -938,9 +1028,9 @@ export function wireGrid() {
     }
     if (e.key === 'Enter' && grid && state.cursor >= 0 && !m.viewer) { e.preventDefault(); const item = state.items[state.cursor]; if (!item) return; if (cleanup() || state.selecting) { setSelected(item.uuid, !isSelected(item.uuid)); state.anchor = state.cursor; renderSelection(); } else inspect(item.uuid); return; }
     if (mod || e.altKey && !/^[1-9]$/.test(e.key)) return;
-    if (['c', 'a', 't', 's', 'g'].includes(key) || /^[1-9]$/.test(e.key)) e.preventDefault(); // 别让这个字母进到命令面板的输入框里
+    if (['c', 'a', 't', 's', 'g', 'f'].includes(key) || /^[1-9]$/.test(e.key)) e.preventDefault(); // 别让这个字母进到命令面板的输入框里
     const remove = e.key === 'Backspace' || e.key === 'Delete';
-    if (remove || ['c', 'a', 't', 'g', 'x', 's'].includes(key)) {
+    if (remove || ['c', 'a', 't', 'g', 'x', 's', 'f'].includes(key)) {
       if (remove) e.preventDefault();
       const item = n ? null : currentItem(); if (!n && !item) return;   // 没有选中也没有当前图：什么都不做
       const act = keyAction(remove ? 'remove' : key, {view, char: character, n, item, maybe: !!state.route.maybe, variants: !!state.char?.variants?.length});

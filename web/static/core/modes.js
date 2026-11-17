@@ -52,7 +52,7 @@ export function viewerTarget(s = state) {
 // 「快捷键作用的那张」（详情栏 ＞ 光标）、Space 再打开的那张（光标）是同一张；不用换时为 null。
 export const detailAfterViewer = (s = state) => s.focused && s.viewerItem?.uuid && s.viewerItem.uuid !== s.focused ? s.viewerItem.uuid : null;
 
-// 单图／选择快捷键在这一页做什么。key：'remove'（⌫、Delete）、'c'、'a'、't'、'g'、'x'、's'。
+// 单图／选择快捷键在这一页做什么。key：'remove'（⌫、Delete）、'c'、'a'、't'、'g'、'x'、's'、'f'。
 // ctx：view 页面注册表里本页的条目（core/pages.js 的 viewOf），char 是否在角色页，maybe 是否在角色页的「可能也是 TA」，
 // variants 本页的角色有没有造型，n 作用于几张选中的图（keySelection），item 当前图（没有选中时用，决定 ⌫ 有没有
 // 可移出的角色）。
@@ -83,6 +83,8 @@ export function keyAction(key, {view, char = false, maybe = false, variants = fa
     // 造型按钮只在角色页、这个角色有造型时画出来。
     case 't': return char && n && !maybe && variants ? {bar: 'variant'} : null;
     case 'g': return n ? {bar: 'tag'} : {single: 'tag'};
+    // F：收藏（#447）。每个选择栏都有「收藏」按钮；没有选中时切换当前这张。
+    case 'f': return n ? {bar: 'fav'} : {single: 'fav'};
     case 'x': { const act = view.bar === 'excluded' ? 'include' : 'exclude'; return n ? {bar: act} : {single: act}; }
     // S：未识别一类是跳过；已跳过页是恢复到未识别，和已排除页的 X 恢复收录对称（#399）。
     case 's':
@@ -117,6 +119,7 @@ export const SHORTCUTS = [
   {keys: 'S', codes: ['s'], does: () => t('跳过（「全部未识别」和各组；没有选中时跳过当前这张）；在「已跳过」页为恢复到未识别')},
   {keys: 'X', codes: ['x'], does: () => t('排除非插画内容（截图、照片等）；在「已排除」页为恢复')},
   {keys: 'G', codes: ['g'], does: () => t('添加或移除自定义标签（与自动标签分开保存）')},
+  {keys: 'F', codes: ['f'], does: () => t('收藏或取消收藏：有选中时，只要有一张还没收藏就全部收藏，否则全部取消')},
   {keys: '1–9', codes: ['1-9'], does: () => t('选详情栏或大图里「也可能是」的第几项；按住 ⌥（Alt）改为追加')},
   {keys: 'Y / N', codes: ['y', 'n'], does: () => t('回答「是 TA 吗？」：随机抽查页回答选中的图，详情栏或大图里回答问题条')},
   {keys: '⌘+ / ⌘−', codes: ['=', '+', '-'], does: () => t('缩放图片网格；大图打开时缩放大图')},

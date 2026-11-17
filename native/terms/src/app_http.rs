@@ -793,6 +793,10 @@ fn run_inner(args: &[String]) -> Result<u8> {
                 handlers.push(thread::spawn(move || handle(request, &host, received)));
             }
         }
+        if host.take_recover_soon() {
+            // 有页面在等后台学习落定（#404）：现在就检查，免得平均多等半秒；整秒的检查照常进行。
+            host.recover();
+        }
         if Instant::now() >= next_recovery {
             host.recover();
             activity.tick(&host);

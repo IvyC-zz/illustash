@@ -48,6 +48,56 @@ pub(crate) fn drain(db: &Path) -> Result<()> {
     }
 }
 
+/// 会话在这一刻对研究的看法（`GET /api/learning`，#404）：在会话锁下取，取完就放锁，再去读数据库。
+#[derive(Clone, Copy, Debug, Default)]
+pub(crate) struct Learner {
+    /// 同步在运行：研究要等它结束才启动（`Research::recover` 的 `sync_busy`）。
+    pub(crate) sync: bool,
+    /// learner 的公开状态是 `error`：约 60 秒后自动重试，重试用完就停。
+    pub(crate) error: bool,
+    /// 本会话里研究不会自己继续：用户取消过、自动重试用完，或者图库是只读的验收图库。
+    pub(crate) stopped: bool,
+}
+
+/// 编号不超过 `upto` 的 verdict 事件是否都已处理完，以及据以判断的 `upto`。
+///
+/// 没有给 `upto` 时取当前最大的 verdict 编号（没有就是 0）：写入提交以后才回复，所以回复之后第一次读到的编号一定不小于
+/// 那次写入的编号。`upto` 不是非负整数，或者比当前最大编号还大（比如换了图库），按请求不合法拒绝。
+/// 只看 `verdict`：`imported`、`index_changed` 没配 worker 时没人确认，算进来就永远等不到。
+pub(crate) fn settled(db: &Path, upto: Option<&str>) -> Result<(i64, bool)> {
+    let c = crate::app_library::read_connection(db)?;
+    let latest: i64 =
+        c.query_row("SELECT coalesce(max(id),0) FROM backend_effects WHERE kind='verdict'", [], |r| r.get(0))?;
+    let upto = match upto {
+        None => latest,
+        Some(text) => match text.parse::<i64>() {
+            Ok(n) if n >= 0 && n <= latest => n,
+            _ => return crate::error::invalid("upto 须为不超过当前最大事件编号的非负整数"),
+        },
+    };
+    let pending: bool = c.query_row(
+        "SELECT EXISTS(SELECT 1 FROM backend_effects WHERE kind='verdict' AND status='pending' AND id<=?)",
+        [upto],
+        |r| r.get(0),
+    )?;
+    Ok((upto, !pending))
+}
+
+/// `GET /api/learning` 的 `state`：从上往下取第一条成立的（契约见 #404）。
+pub(crate) fn learning_state(done: bool, learner: Learner) -> &'static str {
+    if done {
+        "done"
+    } else if learner.sync {
+        "sync"
+    } else if learner.error {
+        "error"
+    } else if learner.stopped {
+        "stopped"
+    } else {
+        "pending"
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -110,5 +160,45 @@ mod tests {
         c.execute_batch("DROP TRIGGER fail_ack").unwrap();
         drain(&f.0).unwrap();
         assert_eq!(c.query_row("SELECT status FROM backend_effects", [], |r| r.get::<_, String>(0)).unwrap(), "done");
+    }
+    #[test]
+    fn settled_defaults_to_latest_verdict_and_ignores_other_kinds() {
+        let f = Fixture::new();
+        assert_eq!(settled(&f.0, None).unwrap(), (0, true));
+        let c = crate::sqlite::open(&f.0).unwrap();
+        c.execute_batch(
+            "INSERT INTO backend_effects(id,kind,status) VALUES (1,'verdict','done'),(2,'verdict','pending'),\
+             (3,'imported','pending'),(4,'verdict','done'),(5,'index_changed','pending');",
+        )
+        .unwrap();
+        assert_eq!(settled(&f.0, None).unwrap(), (4, false));
+        assert_eq!(settled(&f.0, Some("1")).unwrap(), (1, true));
+        assert_eq!(settled(&f.0, Some("2")).unwrap(), (2, false));
+        c.execute("UPDATE backend_effects SET status='done' WHERE id=2", []).unwrap();
+        // imported 和 index_changed 留在 pending 也不挡。
+        assert_eq!(settled(&f.0, Some("4")).unwrap(), (4, true));
+        assert_eq!(settled(&f.0, Some("0")).unwrap(), (0, true));
+    }
+    #[test]
+    fn settled_rejects_bad_or_out_of_range_upto() {
+        let f = Fixture::new();
+        let c = crate::sqlite::open(&f.0).unwrap();
+        c.execute_batch("INSERT INTO backend_effects(id,kind,status) VALUES (7,'verdict','pending');").unwrap();
+        for bad in ["8", "-1", "x", "", "1.5", "99999999999999999999"] {
+            assert!(matches!(settled(&f.0, Some(bad)), Err(Error::Invalid(_))), "{bad}");
+        }
+        assert_eq!(settled(&f.0, Some("7")).unwrap(), (7, false));
+    }
+    #[test]
+    fn state_takes_the_first_matching_row() {
+        let l = |sync, error, stopped| Learner { sync, error, stopped };
+        // 落定优先于一切：同步、出错、停下都不影响已经处理完的事件。
+        for (sync, error, stopped) in [(false, false, false), (true, true, true), (false, true, true)] {
+            assert_eq!(learning_state(true, l(sync, error, stopped)), "done");
+        }
+        assert_eq!(learning_state(false, l(true, true, true)), "sync");
+        assert_eq!(learning_state(false, l(false, true, true)), "error");
+        assert_eq!(learning_state(false, l(false, false, true)), "stopped");
+        assert_eq!(learning_state(false, Learner::default()), "pending");
     }
 }

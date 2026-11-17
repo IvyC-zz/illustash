@@ -10,6 +10,8 @@ import {state} from '../core/state.js';
 import {INSP_ICONS, indexOf, inspect, openViewer, wirePeek} from './detail.js';
 import {$, showArea, toast, workSmall} from './dom.js';
 import {mutate, showList, viewOpts} from './grid.js';
+import {MARKS} from '../core/favorites.js';
+import {homeHeart} from './favorites.js';
 
 // ---------- 首页：按加入日期分组的最新图片 ----------
 const weekday = day => { const [y, m, d] = day.split('-').map(Number); return new Intl.DateTimeFormat(I18N.locale, {weekday: 'short'}).format(new Date(y, m - 1, d)); };
@@ -22,7 +24,7 @@ async function renderHome(keep = false) {
   const gen = ++home.gen, scroll = keep ? $('viewport').scrollTop : 0;
   if (!keep) { home.days = []; home.next = ''; $('viewport').scrollTop = 0; $('homePage').innerHTML = `<div class="loading-line">${t('读取中…')}</div>`; }
   try {
-    const r = await api('/api/home?' + new URLSearchParams({nsfw: state.nsfw, days: Math.min(20, Math.max(5, home.days.length))}));
+    const r = await api('/api/home?' + new URLSearchParams({nsfw: state.nsfw, days: Math.min(20, Math.max(5, home.days.length)), ...MARKS}));
     if (gen !== home.gen || !onPage(state.route, 'home')) return;
     home.days = r.days; home.next = r.next;
     if (!keep) { home.askSkip = []; home.askOff = new Set(); home.ask = await nextAsk(); if (gen !== home.gen || !onPage(state.route, 'home')) return; }
@@ -35,7 +37,7 @@ export async function moreHome() {
   home.loading = true; const gen = home.gen; let appended = false;
   $('homeSentinel').textContent = t('正在读取更早的图…');
   try {
-    const r = await api('/api/home?' + new URLSearchParams({nsfw: state.nsfw, before: home.next}));
+    const r = await api('/api/home?' + new URLSearchParams({nsfw: state.nsfw, before: home.next, ...MARKS}));
     if (gen !== home.gen || !onPage(state.route, 'home')) return;
     const known = new Set(home.days.map(g => g.day)), days = r.days.filter(g => !known.has(g.day) && known.add(g.day));
     home.days.push(...days); home.next = r.next;
@@ -61,7 +63,7 @@ export const ratio = x => x.width && x.height ? Math.min(2.4, Math.max(.4, x.wid
 function homeTile(x, style, rowH) {
   const names = x.memberships.map(m => m.name), ids = x.memberships.map(m => m.id).join(' ');
   const badge = viewOpts.marks && x.dup ? `<span class="home-badge" title="${t('共 {n} 份副本', {n: x.dup.size})}">×${x.dup.size}</span>` : '';
-  return `<button class="home-j${state.focused === x.uuid ? ' on' : ''}" data-id="${esc(x.uuid)}" data-chars="${esc(ids)}" style="${style}"${names.length ? ` title="${esc(x.memberships.map(nameWithWork).join(t('、')))}"` : ''}><img src="/image?id=${encodeURIComponent(x.uuid)}&size=${thumbSize(rowH)}" alt="" loading="lazy" decoding="async" draggable="false">${badge}<span class="home-ov">${names.length ? names.map(esc).join(' · ') : x.unknown ? t('已跳过') : t('未识别')}</span></button>`;
+  return `<button class="home-j${state.focused === x.uuid ? ' on' : ''}" data-id="${esc(x.uuid)}" data-chars="${esc(ids)}" style="${style}"${names.length ? ` title="${esc(x.memberships.map(nameWithWork).join(t('、')))}"` : ''}><img src="/image?id=${encodeURIComponent(x.uuid)}&size=${thumbSize(rowH)}" alt="" loading="lazy" decoding="async" draggable="false">${badge}${homeHeart(x)}<span class="home-ov">${names.length ? names.map(esc).join(' · ') : x.unknown ? t('已跳过') : t('未识别')}</span></button>`;
 }
 // 整行拉伸到满宽（比目标高度略矮）；需要长到目标高度 ROW_GROW 倍以上的行（图片少的一天、一天的最后一行）保持目标
 // 高度，右侧留空。
@@ -75,7 +77,7 @@ export function homeRows(items, width, target) {
 }
 function heroTile(hero, w, h) {
   const top = hero.memberships[0];
-  return `<button class="home-j home-hero${state.focused === hero.uuid ? ' on' : ''}" data-id="${esc(hero.uuid)}" data-chars="${esc(hero.memberships.map(m => m.id).join(' '))}" style="width:${w}px;height:${h}px"><img src="/image?id=${encodeURIComponent(hero.uuid)}&size=${thumbSize(h)}" alt="" loading="lazy" decoding="async" draggable="false">${top ? `<span class="home-cap"><b>${esc(top.name)}${workSmall(top)}</b>${top.tag && top.tag !== top.name ? `<small>${esc(top.tag.replaceAll('_', ' '))}</small>` : ''}</span>` : ''}</button>`;
+  return `<button class="home-j home-hero${state.focused === hero.uuid ? ' on' : ''}" data-id="${esc(hero.uuid)}" data-chars="${esc(hero.memberships.map(m => m.id).join(' '))}" style="width:${w}px;height:${h}px"><img src="/image?id=${encodeURIComponent(hero.uuid)}&size=${thumbSize(h)}" alt="" loading="lazy" decoding="async" draggable="false">${homeHeart(hero)}${top ? `<span class="home-cap"><b>${esc(top.name)}${workSmall(top)}</b>${top.tag && top.tag !== top.name ? `<small>${esc(top.tag.replaceAll('_', ' '))}</small>` : ''}</span>` : ''}</button>`;
 }
 // 宽度放不下的一天横向滚动：先是大图，然后是按最短优先填充的两行。
 function stripRows(items, rowH) {

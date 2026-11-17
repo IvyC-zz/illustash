@@ -7,15 +7,18 @@ import {fetchChar} from '../core/meta.js';
 import {detailAfterViewer, shownUuid} from '../core/modes.js';
 import {keyScope, pageOf, poolIs, viewOf} from '../core/pages.js';
 import {charHash, cleanup, filterRoute, go, hashFor} from '../core/route.js';
+import {likeRoute} from '../core/like.js';
 import {api} from '../core/session.js';
 import {state} from '../core/state.js';
 import {$, readFailure, workSmall} from './dom.js';
-import {PAGE, currentItem, endPreview, kept, loadPage, markDetailKeys, mutate, openTagPicker, previewList, previewing, renderGrid, rowHeight, rowOf, rowTop, setCursor, syncCards, toggleInfo, viewOpts} from './grid.js';
+import {PAGE, currentItem, endPreview, favoriteOne, kept, loadPage, markDetailKeys, mutate, openTagPicker, previewList, previewing, renderGrid, rowHeight, rowOf, rowTop, setCursor, syncCards, toggleInfo, viewOpts} from './grid.js';
 import {newIds, openPicker, targets} from './palette.js';
 import {artistSection, findArtistWorks, findArtists} from './artists.js';
 import {markHomeFocus} from './home.js';
 import {bindFileActions, fileActions, wireDragOut} from './files.js';
 import {createLayer} from './overlay.js';
+import {MARKS} from '../core/favorites.js';
+import {detailHeart, viewerHeart} from './favorites.js';
 
 // 哪一次检查面板读取是当前的：更慢、更早的那次绝不会画到它上面。
 let detailGen = 0;
@@ -50,7 +53,7 @@ export const INSP_ICONS = {
   expand: '<svg viewBox="0 0 20 20" aria-hidden="true"><path d="M12 3.5h4.5V8M8 16.5H3.5V12M16.5 3.5 11 9M3.5 16.5 9 11"/></svg>',
   close: '<svg viewBox="0 0 20 20" aria-hidden="true"><path d="m5 5 10 10M15 5 5 15"/></svg>',
 };
-// 这张图的角色的收藏节奏：按角色缓存，直到下一次写入或 R18 切换。
+// 这张图的角色每月加入多少张：按角色缓存，直到下一次写入或 R18 切换。
 const statsCache = new Map();
 // 详情栏里小图的显示高度（CSS 像素，app.css 的 .cc-same 四列和 .dup-copy img），按它选缩略图档位（#452）。
 const SAME_H = 85, DUP_H = 55;
@@ -62,7 +65,7 @@ async function loadCharStats(id, ident, gen) {
   if (gen !== detailGen || !$('charStats')) return;
   const months = st.months || [], max = Math.max(1, ...months.map(m => m.count)), now = months.at(-1)?.count || 0;
   const recent = (st.recent || []).filter(u => u !== ident).slice(0, 4);
-  $('charStats').innerHTML = (viewOpts.chart ? `<div class="cc-line"><span>${t('收藏 {n} 张', {n: `<b>${number(st.count)}</b>`})}${st.first ? ' · ' + t('始于 {date}', {date: st.first.replace('-', '.')}) : ''}</span>${now ? `<em>${t('本月 +{n}', {n: number(now)})}</em>` : ''}</div>
+  $('charStats').innerHTML = (viewOpts.chart ? `<div class="cc-line"><span>${t('共 {n} 张', {n: `<b>${number(st.count)}</b>`})}${st.first ? ' · ' + t('始于 {date}', {date: st.first.replace('-', '.')}) : ''}</span>${now ? `<em>${t('本月 +{n}', {n: number(now)})}</em>` : ''}</div>
     <div class="cc-bars">${months.map((m, i) => `<i style="height:${Math.max(8, m.count / max * 100)}%" class="${i === months.length - 1 ? 'now' : ''}" title="${monthText(m.month.slice(0, 4), m.month.slice(5, 7)) + ' · ' + t('{n} 张', {n: number(m.count)})}"></i>`).join('')}</div>` : '') +
     (viewOpts.same && recent.length ? `<div class="cc-same"><h5>${t('同一角色')}<a href="${charHash(id)}">${t('全部')} ›</a></h5><div>${recent.map(u => `<button data-copy="${esc(u)}" title="${t('查看这张')}"><img src="/image?id=${encodeURIComponent(u)}&size=${thumbSize(SAME_H)}" alt="" loading="lazy"></button>`).join('')}</div></div>` : '');
   for (const b of $('charStats').querySelectorAll('[data-copy]')) b.onclick = () => inspect(b.dataset.copy);
@@ -72,7 +75,7 @@ export async function inspect(ident, quiet = false) {
   if (!quiet) $('inspector').innerHTML = `<div class="loading-line">${t('读取图片详情…')}</div>`;
   syncCards(); requestAnimationFrame(() => renderGrid());
   try {
-    const d = await api('/api/detail?id=' + encodeURIComponent(ident)); if (gen !== detailGen) return;
+    const d = await api('/api/detail?' + new URLSearchParams({id: ident, ...MARKS})); if (gen !== detailGen) return;
     state.detail = d;
     const primary = primaryOf(d), pc = primary && (state.charMap.get(primary.id) || primary);
     const original = pc?.tag && pc.tag !== pc.name ? pc.tag.replaceAll('_', ' ') : '';
@@ -81,9 +84,10 @@ export async function inspect(ident, quiet = false) {
       : d.pending ? `<button class="secondary large" data-curate="exclude">${t('排除')} <kbd>X</kbd></button><button class="secondary large" data-curate="include">${t('保留')}</button>`
       : `<button class="secondary large" data-curate="exclude" title="${t('截图、照片等不是插画的图')}">${t('排除')} <kbd>X</kbd></button>`;
     const pendingNote = d.excluded ? `<div class="cc-note">${t('已排除 · {reason}', {reason: esc(REASONS[d.excluded.reason] || '')})}</div>` : d.pending ? `<div class="cc-note">${t('待确认：像截图')}</div>` : '';
-    $('inspector').innerHTML = `<div class="inspector-head"><button class="icon" data-nav="-1" aria-label="${t('上一张')}" title="${t('上一张（←）')}">${INSP_ICONS.prev}</button><button class="icon" data-nav="1" aria-label="${t('下一张')}" title="${t('下一张（→）')}">${INSP_ICONS.next}</button><div class="spacer"></div><button class="icon" id="expand" title="${t('大图（Space）')}" aria-label="${t('大图')}">${INSP_ICONS.expand}</button><button class="icon" id="closeInspector" aria-label="${t('关闭详情')}" title="${t('关闭（Esc）')}">${INSP_ICONS.close}</button></div>
+    $('inspector').innerHTML = `<div class="inspector-head"><button class="icon" data-nav="-1" aria-label="${t('上一张')}" title="${t('上一张（←）')}">${INSP_ICONS.prev}</button><button class="icon" data-nav="1" aria-label="${t('下一张')}" title="${t('下一张（→）')}">${INSP_ICONS.next}</button><div class="spacer"></div>${detailHeart(ident, !!d.fav)}<button class="icon" id="expand" title="${t('大图（Space）')}" aria-label="${t('大图')}">${INSP_ICONS.expand}</button><button class="icon" id="closeInspector" aria-label="${t('关闭详情')}" title="${t('关闭（Esc）')}">${INSP_ICONS.close}</button></div>
       <button class="preview" id="previewButton" title="${t('大图查看')}"><img src="/image?id=${encodeURIComponent(ident)}&size=preview" alt="${t('插画预览')}" draggable="false"></button>
       ${shouldAsk(d, ident) ? askHTML(d.question) : ''}
+      <section class="inspector-section"><div class="chips-row"><button class="quiet small" id="likeOne">${t('更多像这张的')}</button></div></section>
       ${pc ? `<section class="inspector-section cc-card"><a class="cc-name" href="${charHash(pc.id)}" title="${t('在图库里只看 TA')}">${esc(pc.name)}${workSmall(pc)}</a>${original ? `<div class="cc-orig">${esc(original)}</div>` : ''}${path.length ? `<div class="cc-path">${path.map(esc).join(' · ')}</div>` : ''}${pendingNote}
         <div id="charStats" class="cc-stats"></div></section>`
         : `<section class="inspector-section cc-card"><div class="cc-name muted">${d.unknown ? t('已跳过') : t('还没认出是谁')}</div>${pendingNote}</section>`}
@@ -99,6 +103,7 @@ export async function inspect(ident, quiet = false) {
     if (pc) loadCharStats(pc.id, ident, gen);
     $('inspector').querySelector('.preview img').addEventListener('error', e => { e.target.parentElement.innerHTML = `<div class="missing">${esc(unreadableText())}</div>`; }, {once: true});
     $('closeInspector').onclick = closeInspector;
+    $('inspector').querySelector('.inspector-head [data-fav]').onclick = () => favoriteOne(ident);
     $('expand').onclick = $('previewButton').onclick = () => openViewer(indexOf(ident));
     for (const b of $('inspector').querySelectorAll('[data-nav]')) b.onclick = () => step(Number(b.dataset.nav));
     // 从详情栏点标签和从工具栏选一样：在图库页上叠加到现有的筛选上，在别的页面去图库只看它（#386 的 2-30）。
@@ -109,6 +114,7 @@ export async function inspect(ident, quiet = false) {
     for (const b of $('inspector').querySelectorAll('[data-curate]')) b.onclick = () => mutate('/api/curate', {ids: [ident], action: b.dataset.curate}, b.dataset.curate === 'exclude' || poolIs(state.route, 'excluded', 'pending'));
     $('skipOne')?.addEventListener('click', () => singleAction('skip'));
     $('addTag').onclick = () => singleAction('tag');
+    $('likeOne').onclick = () => likeOne(ident);
     for (const b of $('inspector').querySelectorAll('[data-artist-verdict]')) b.onclick = () => {
       const v = b.dataset.artistVerdict || null;
       mutate('/api/artist/verdict', {ids: [ident], artist: b.dataset.artist, verdict: v, name: b.dataset.name}, v === 'no' && state.route.artist === b.dataset.artist);
@@ -202,6 +208,7 @@ export async function singleAction(kind) {
   // 大图里跳过、排除之后到下一张，和随机抽查回答之后一样（用户 2026-11-14 定，#424 的 2-1）；改角色仍停在原图。
   } else if (kind === 'skip' && pageOf(r).skip) mutate('/api/change', {ids: [item.uuid], action: 'unknown'}, true, {advance: state.viewer >= 0});
   else if (kind === 'resume') mutate('/api/change', {ids: [item.uuid], action: 'resume'}, poolIs(r, 'skipped'));
+  else if (kind === 'fav') favoriteOne(item.uuid);
   else if (kind === 'exclude' || kind === 'include') mutate('/api/curate', {ids: [item.uuid], action: kind}, true, {advance: kind === 'exclude' && state.viewer >= 0});
   else if (kind === 'swap' || kind === 'also') {
     const d = state.detail?.uuid === item.uuid ? state.detail : await api('/api/detail?id=' + encodeURIComponent(item.uuid));
@@ -209,6 +216,11 @@ export async function singleAction(kind) {
     if (kind === 'swap' && from) swapOne(d, item.uuid, from.id);
     else addOne(d, item.uuid);
   }
+}
+// 收藏写入成功、没有重读时（ui/grid.js 的 favorite）：详情栏和大图里那张也改掉。changed 是列表里改到的图，ids 是这次写入
+// 点名的图（全选时为空）；这里改到的也加进 changed，好让心形跟着改。
+export function noteFavorite(changed, ids, on) {
+  for (const x of [state.detail, state.viewerItem]) if (x && (changed.has(x.uuid) || ids?.has(x.uuid))) { x.fav = on; changed.add(x.uuid); }
 }
 export const indexOf = uuid => state.items.findIndex(x => x?.uuid === uuid);
 export async function step(delta) {
@@ -270,19 +282,28 @@ export async function showViewer(i, held = null) {
   return refreshViewerBar(item, i);
 }
 async function refreshViewerBar(item, i) {
-  let d; try { d = await api('/api/detail?id=' + encodeURIComponent(item.uuid)); } catch (e) { if (state.viewerItem?.uuid === item.uuid) readFailure($('viewerBar'), e); return; }
+  let d; try { d = await api('/api/detail?' + new URLSearchParams({id: item.uuid, ...MARKS})); } catch (e) { if (state.viewerItem?.uuid === item.uuid) readFailure($('viewerBar'), e); return; }
   if (!d || state.viewerItem?.uuid !== item.uuid) return;
   state.detail = d; $('viewerBar').innerHTML = (shouldAsk(d, item.uuid) ? askHTML(d.question, true) : '') + identityChips(d, true) + viewerActions(d);
   bindIdentity($('viewerBar'), d, item.uuid); bindAsk($('viewerBar'), d, item.uuid);
-  for (const b of $('viewerBar').querySelectorAll('[data-vact]')) b.onclick = () => b.dataset.vact === 'info' ? toggleInfo() : singleAction(b.dataset.vact);
+  for (const b of $('viewerBar').querySelectorAll('[data-vact]')) {
+    const act = b.dataset.vact;
+    b.onclick = () => act === 'info' ? toggleInfo() : act === 'like' ? likeOne(item.uuid) : singleAction(act);
+  }
 }
-// 大图底栏的「跳过 S」「排除 X」「信息 I」（#424 的 2-1、2-7）：只在这一页按这个键做的就是它时才画。跳过和详情栏的
+// 「更多像这张的」（#449）：详情栏预览图下面、大图底栏各一个，去相似结果（core/like.js；结果页的标题在 ui/like.js）。
+// 在相似结果里再点，换成这一张作例图，比较方式不变。没有快捷键。
+const likeOne = ident => go(likeRoute([ident], state.route.by));
+// 大图底栏的「跳过 S」「排除 X」「信息 I」（#424 的 2-1、2-7）和「更多像这张的」（#449，没有键）：只在这一页按这个键做的就是它时才画。跳过和详情栏的
 // 「跳过 S」一样，只在能跳过的页、图还没有角色也还没跳过时有（刚跳过、还停在原图时不再显示）；已排除的图 X 是恢复收录，不画；信息在有详情栏的页面才有。
+// 「收藏 F」每页都有（#447）。
 function viewerActions(d) {
   const r = state.route, b = [], btn = (act, key, label) => `<button class="alt" data-vact="${act}"><kbd>${key}</kbd>${label}</button>`;
   if (pageOf(r).skip && !d.memberships.length && !d.unknown) b.push(btn('skip', 'S', t('跳过')));
   if (!d.excluded) b.push(btn('exclude', 'X', t('排除')));
+  b.push(viewerHeart(d.uuid, !!d.fav));
   if (keyScope(viewOf(r)) && !previewing()) b.push(btn('info', 'I', t('信息')));
+  b.push(`<button class="alt" data-vact="like">${t('更多像这张的')}</button>`);
   return b.length ? `<div class="alts"><div class="alt-row">${b.join('')}</div></div>` : '';
 }
 function applyView() { $('viewerImg').style.transform = `translate(${view.x}px,${view.y}px) scale(${view.scale})`; $('viewerStage').classList.toggle('zoomed', view.scale > 1.01); }

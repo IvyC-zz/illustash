@@ -615,20 +615,36 @@ fn combined_gallery_http_contract() {
     assert_eq!(gallery["name"], "1girl · solo · Pixiv · 不含 审完:合成 · 2025");
     assert_eq!(gallery["params"]["has"], r#"["tag:1girl","tag:solo","source:pixiv"]"#);
     assert_eq!(gallery["cover"], "a");
-    assert_eq!(call("/api/galleries", None)[0]["cover"], "b");
+    assert!(gallery["position"].is_i64());
+    let covers = |ids: &Value, nsfw: &str| url("/api/galleries/covers", &[("ids", &ids.to_string()), ("nsfw", nsfw)]);
+    let first_cover = |nsfw| call(&covers(&json!([id]), nsfw), None)[0]["cover"].clone();
+    assert_eq!(
+        call("/api/galleries?nsfw=hide", None),
+        json!([{
+            "id":id,"name":gallery["name"],"params":gallery["params"],"position":gallery["position"],"cover_manual":false
+        }])
+    );
+    assert_eq!(first_cover(""), "b");
     let fixed =
         call("/api/galleries", Some(&json!({"action":"update","id":id,"name":"手动封面","cover":"b","position":8})));
     assert_eq!(fixed["gallery"]["cover"], "a");
     assert_eq!(fixed["gallery"]["cover_manual"], true);
-    assert_eq!(call("/api/galleries?nsfw=only", None)[0]["cover"], "b");
+    assert_eq!(fixed["gallery"]["position"], 8);
+    assert_eq!(first_cover("only"), "b");
+    assert_eq!(first_cover("hide"), "a");
+    let listed = call("/api/galleries?nsfw=hide", None);
+    assert_eq!(listed[0]["cover_manual"], true);
+    assert_eq!(listed[0]["position"], 8);
+    assert!(listed[0].get("cover").is_none());
     let cleared = call("/api/galleries", Some(&json!({"action":"update","id":id,"cover":null})));
     assert_eq!(cleared["gallery"]["cover_manual"], false);
     call("/api/undo", Some(&json!({"id":cleared["undo"]["id"]})));
     assert_eq!(call("/api/galleries", None)[0]["cover_manual"], true);
     let deleted = call("/api/galleries", Some(&json!({"action":"delete","id":id})));
     assert_eq!(call("/api/galleries", None), json!([]));
+    assert_eq!(call(&covers(&json!([id]), "hide"), None), json!([]));
     call("/api/undo", Some(&json!({"id":deleted["undo"]["id"]})));
-    assert_eq!(call("/api/galleries?nsfw=hide", None)[0]["cover"], "a");
+    assert_eq!(first_cover("hide"), "a");
     let position: i64 = db.query_row("SELECT position FROM galleries WHERE id=1", [], |r| r.get(0)).unwrap();
     assert_eq!(position, 8);
 
@@ -637,13 +653,43 @@ fn combined_gallery_http_contract() {
     let exclude = ("not", r#"["utag:审完:合成"]"#);
     let filtered: Vec<_> = filter.into_iter().chain([exclude]).collect();
     assert_eq!(call(&url("/api/ids", &filtered), None), json!(["a"]));
-    assert_eq!(call("/api/galleries", None)[0]["cover"], "a");
+    assert_eq!(first_cover(""), "a");
+
+    // 模拟一个已保存的作品被删除，另存一个合法但空的选区。
+    db.execute(
+        "INSERT INTO galleries(name,params,position,created_at,updated_at)
+         VALUES ('失效画廊',?,2,CURRENT_TIMESTAMP,CURRENT_TIMESTAMP)",
+        [json!({"work":"fixture-removed-work"}).to_string()],
+    )
+    .unwrap();
+    let invalid_id = db.last_insert_rowid();
+    let empty_params = json!({"has":r#"["source:pixiv"]"#,"not":r#"["source:pixiv"]"#});
+    let empty = call("/api/galleries", Some(&json!({"action":"create","params":empty_params})));
+    let empty_id = &empty["gallery"]["id"];
+    let listed = call("/api/galleries", None);
+    assert_eq!(listed[0]["id"], invalid_id);
+    assert_eq!(listed[0]["params"]["work"], "fixture-removed-work");
+    assert_eq!(listed[0]["position"], 2);
+    assert_eq!(listed[1]["id"], *id);
+    assert_eq!(listed[2]["id"], *empty_id);
+    assert_eq!(
+        call(&covers(&json!([empty_id, id, invalid_id, id, -999]), "hide"), None),
+        json!([{"id":invalid_id,"cover":null},{"id":id,"cover":"a"},{"id":empty_id,"cover":null}])
+    );
+    assert_eq!(call(&covers(&json!([]), "hide"), None), json!([]));
+    assert_eq!(request(&origin, "/api/galleries/covers", None, &token).0, 400);
     for (path, filters) in [
         ("/api/ids", vec![("from", "2025-02-29")]),
         ("/api/ids", vec![("from", "2025-12-31"), ("to", "2025-01-01")]),
         ("/api/ids", vec![("has", r#"["tag:synthetic-missing"]"#)]),
         ("/api/ids", vec![("has", r#"["source:invalid"]"#)]),
         ("/api/user-tags", vec![("limit", "1001")]),
+        ("/api/galleries", vec![("nsfw", "invalid")]),
+        ("/api/galleries/covers", vec![("ids", "[1]"), ("nsfw", "invalid")]),
+        ("/api/galleries/covers", vec![("ids", r#"[1,"2"]"#)]),
+        ("/api/galleries/covers", vec![("ids", "1")]),
+        ("/api/galleries/covers", vec![("ids", "[1.5]")]),
+        ("/api/galleries/covers", vec![("ids", r#"{"id":1}"#)]),
     ] {
         assert_eq!(request(&origin, &url(path, &filters), None, &token).0, 400);
     }

@@ -10,7 +10,7 @@ import {readError} from '../core/session.js';
 import {state} from '../core/state.js';
 import {drawShelf} from './catalog.js';
 import {error, toast} from './dom.js';
-import {listChanged, reload, selCount} from './grid.js';
+import {afterSync, listChanged, reload, selCount} from './grid.js';
 import {inspect} from './detail.js';
 import {guideAfterPost, guideRefresh} from './guide.js';
 import {humanImportEnded, renderHumanBlock} from './human.js';
@@ -43,6 +43,8 @@ export async function afterJob(job, change) {
       else if (!SYNC_ACTIVE.includes(state.sync.status)) pageOf(state.route).refresh?.('sync');
     }
     guideRefresh(change.ended);
+    // 同步期间撤销或确认的角色，同步结束后研究才学（#404）：落定后重读一次。
+    if (change.ended) afterSync().catch(e => error(readError(e)));
   } else if (job === 'index') {
     const s = state.index.state;
     if (change.ended && s.status === 'done') { listChanged(); await refreshMeta().catch(e => error(readError(e))); }

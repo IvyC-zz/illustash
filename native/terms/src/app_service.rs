@@ -274,6 +274,8 @@ pub struct Application {
     pub(crate) session: RwLock<Session>,
     pub(crate) generation: AtomicU64,
     closed: Arc<AtomicBool>,
+    /// 有页面在等后台学习落定（`GET /api/learning`，#404）：主循环看到它就提前跑一次恢复检查。
+    recovery_wanted: AtomicBool,
     pub(crate) tags: PathBuf,
     pub(crate) root: PathBuf,
     pub(crate) reference: PathBuf,
@@ -405,6 +407,7 @@ impl Application {
             session: RwLock::new(session),
             generation: AtomicU64::new(1),
             closed: Arc::default(),
+            recovery_wanted: AtomicBool::new(false),
             tags: root.join("tags/tags_v3.csv"),
             root,
             reference,
@@ -461,6 +464,14 @@ impl Application {
             session.start_checks(crate::app_integrity::BACKGROUND_DELAY);
         }
         Ok(())
+    }
+    /// 请主循环尽快跑一次恢复检查，不等到下一个整秒（#404）。
+    pub(crate) fn recover_soon(&self) {
+        self.recovery_wanted.store(true, Ordering::SeqCst);
+    }
+    /// 取走 [`Self::recover_soon`] 留下的请求。
+    pub(crate) fn take_recover_soon(&self) -> bool {
+        self.recovery_wanted.swap(false, Ordering::SeqCst)
     }
     /// 只在持有原来那个图库实例时重放持久化的工作。
     pub fn recover(&self) {
