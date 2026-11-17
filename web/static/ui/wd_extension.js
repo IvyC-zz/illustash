@@ -2,9 +2,8 @@
 // 以及结束时的提示。卡片本身由 ui/settings.js 画（cardHead 在那里），任务面板的一项由 ui/tasks.js 列出；状态、轮询和请求
 // 在 core/wd_extension.js。用户点「下载」之前什么都不下载；启用、重新检查和撤回都不联网。
 import {t, tb} from '../core/i18n.js';
-import {esc, bytes, number, localTime} from '../core/format.js';
+import {esc, bytes, number, localTime, home} from '../core/format.js';
 import {state} from '../core/state.js';
-import {home} from '../core/human.js';
 import {extDownloading, extRunning, extFinished, extDownloadFinished, loadWdExtension, onWdExtension, packageAction, enableExtension,
   withdrawExtension, cancelExtension} from '../core/wd_extension.js';
 import {$, toast, fold, busy} from './dom.js';
