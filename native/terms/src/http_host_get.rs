@@ -145,6 +145,10 @@ pub(super) fn handle(request: Request, host: &Host, received: u64) {
         oc_groups(request, host, received);
         return;
     }
+    if path == "/api/learning" {
+        learning(request, host, received, session);
+        return;
+    }
     let result = read(&request, host, &session, path);
     // 请求持有自己的旧快照；套接字的背压不会阻塞切换或数据库命令。
     // 绝不为了发出这个响应而针对替换后的会话重新打开。
@@ -216,6 +220,28 @@ fn oc_groups(request: Request, host: &Host, received: u64) {
     let result = entity.and_then(|entity| session.research.query(&lib, "oc", serde_json::json!({"entity":entity})));
     drop(session);
     reply_if_current(request, host, received, waited(result), false);
+}
+/// 撤销、确认角色这类写入引起的后台学习是否已经落定（#404）。会话锁下只取研究和同步的标志，放锁后再读数据库，
+/// 从不在服务端等待。还没落定、研究也没在忙时，让主循环提前跑一次恢复检查，不用等到下一个整秒。
+fn learning(request: Request, host: &Host, received: u64, session: RwLockReadGuard<Session>) {
+    let learner_json = session.research.learner_state();
+    let learner = crate::app_effects::Learner {
+        sync: session.syncer.running(),
+        error: learner_json.get("status").map(Json::text) == Some("error"),
+        stopped: session.research.halted() || session.library.frozen(),
+    };
+    let ready = session.research.ready();
+    let db = session.library.db();
+    drop(session);
+    let upto = crate::http_read::query(request.url()).remove("upto");
+    let result = crate::app_effects::settled(&db, upto.as_deref()).map(|(upto, done)| {
+        let state = crate::app_effects::learning_state(done, learner);
+        if state == "pending" && ready {
+            host.recover_soon();
+        }
+        Json::object([("upto", upto.into()), ("state", state.into()), ("learner", learner_json)])
+    });
+    reply_if_current(request, host, received, result, false);
 }
 /// URL 要的是进度（`progress=1`）而不是状态。
 fn progress(request: &Request) -> bool {

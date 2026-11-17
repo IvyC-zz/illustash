@@ -406,6 +406,8 @@
   "筛选造型": "Filter forms",
   "从 {n} 张去掉 {name}": "Remove {name} from {n}",
   "已撤销 · {label}": "Undone · {label}",
+  "已撤销，计数在同步结束后更新": "Undone. Counts update after the sync finishes",
+  "正在更新": "Updating",
   "输入角色 tag 或别名…": "Type a character tag or alias…",
   "去掉已有标签": "Remove existing tags",
   "所选图片中 {n} 张有": "on {n} of the selected",

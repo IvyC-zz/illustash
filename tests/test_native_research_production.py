@@ -441,6 +441,112 @@ child.terminate();child.wait()
 
 
 @unittest.skipUnless(sys.platform in ('darwin', 'win32'), 'Linux is frozen: no local computation')
+class NativeLearningSignalTest(unittest.TestCase):
+    """#404：撤销、确认角色之后的学习落定信号 GET /api/learning，用上面的合成图库和真实安装的 worker。
+
+    借用 NativeResearchPublicationTest 的夹具方法而不继承它，免得把它的用例再跑一遍；NativeRelationPublicationTest
+    继承它，也不会把这里的用例带过去。
+    """
+    setUpClass = InstalledResearchComputeTest.__dict__['setUpClass']
+    package = lifecycle.NativeLifecycleTest.package
+    start = lifecycle.NativeLifecycleTest.start
+    stop = lifecycle.NativeLifecycleTest.stop
+    request = lifecycle.NativeLifecycleTest.request
+    setUp = NativeResearchPublicationTest.setUp
+    restart = NativeResearchPublicationTest.restart
+    state = NativeResearchPublicationTest.state
+    finished = NativeResearchPublicationTest.finished
+    timing_fixture = NativeResearchPublicationTest.timing_fixture
+
+    def learning(self, upto=None):
+        response = self.request('/api/learning' + ('' if upto is None else '?upto=' + str(upto)))
+        self.assertEqual(response['status'], 200, response)
+        return json.loads(response['body'])
+
+    def settle(self, first=None):
+        first = first or self.learning()
+        wait_until(lambda: self.learning(first['upto'])['state'] == 'done')
+        return first['upto']
+
+    def latest_verdict(self):
+        with sqlite3.connect(self.lib.db) as c:
+            return c.execute("SELECT coalesce(max(id),0) FROM backend_effects WHERE kind='verdict'").fetchone()[0]
+
+    def shown(self):
+        """页面撤销以后重读的计数和分组：未识别等各池的计数、各组的组号和成员、图库总数。"""
+        pools = json.loads(self.request('/api/review-pools')['body'])
+        clusters = json.loads(self.request('/api/clusters')['body'])['clusters']
+        return {'pools': {p['kind']: p['count'] for p in pools},
+                'clusters': sorted((c['cid'], sorted(c['members'])) for c in clusters),
+                'total': json.loads(self.request('/api/bootstrap')['body'])['total']}
+
+    def test_learning_signal_after_undo_gives_final_counts_on_first_reread(self):
+        self.timing_fixture()
+        self.mode.write_text('pass')
+        self.settle()
+        before = self.shown()
+        group = next(members for _, members in before['clusters'] if any(m.startswith('unmatched') for m in members))
+        self.assertGreaterEqual(len(group), 3, before)
+        confirmed = self.request('/api/change', {'ids': group, 'action': 'confirmed', 'entity': self.entity})
+        self.assertEqual(confirmed['status'], 200, confirmed)
+        self.settle()
+        learned = self.shown()
+        self.assertNotEqual(learned['clusters'], before['clusters'])
+        # 扣住撤销引起的那一次学习：学到的结果算好了，App 还没看到 worker 退出。
+        for path in (self.ready, self.release, self.pid, self.child):
+            path.unlink(missing_ok=True)
+        self.mode.write_text('hold')
+        undone = self.request('/api/undo', {'id': json.loads(confirmed['body'])['undo']['id']})
+        self.assertEqual(undone['status'], 200, undone)
+        written = self.latest_verdict()
+        first = self.learning()
+        self.assertEqual(first['state'], 'pending', first)
+        self.assertGreaterEqual(first['upto'], written)
+        wait_until(self.ready.exists)
+        self.assertEqual(self.learning(first['upto'])['state'], 'pending')
+        # 这时重读得到的是中间值：测试确实覆盖到了「还没落定」。
+        self.assertNotEqual(self.shown(), before)
+        self.release.write_text('release')
+        self.settle(first)
+        # 落定后的第一次重读就是最终值。
+        self.assertEqual(self.shown(), before)
+        self.assertFalse(self.sentinel.exists())
+
+    def test_learning_signal_without_worker_is_done_on_first_read(self):
+        self.stop(self.process)
+        self.env.pop('ILLUSTASH_RESEARCH_WORKER')
+        self.restart()
+        self.assertEqual(self.learning()['state'], 'done')
+        group = [f'unmatched{i}' for i in range(6, 9)]
+        confirmed = self.request('/api/change', {'ids': group, 'action': 'confirmed', 'entity': self.entity})
+        self.assertEqual(confirmed['status'], 200, confirmed)
+        self.assertEqual(self.learning(), {'upto': self.latest_verdict(), 'state': 'done', 'learner': {'status': 'off'}})
+        undone = self.request('/api/undo', {'id': json.loads(confirmed['body'])['undo']['id']})
+        self.assertEqual(undone['status'], 200, undone)
+        first = self.learning()
+        self.assertEqual((first['upto'], first['state']), (self.latest_verdict(), 'done'))
+        # 早于当前的编号照样能问；不是非负整数、或者比当前最大编号还大的拒绝。
+        self.assertEqual(self.learning(first['upto'] - 1)['state'], 'done')
+        for bad in (first['upto'] + 1, -1, 'x', ''):
+            self.assertEqual(self.request('/api/learning?upto=' + str(bad))['status'], 400, bad)
+
+    def test_learning_signal_reports_error_when_the_worker_fails(self):
+        self.stop(self.process)
+        failing = self.root / 'failing-research-worker'
+        failing.write_text('#!' + sys.executable + '\nimport sys\nsys.exit(3)\n', encoding='utf-8')
+        self.env['ILLUSTASH_RESEARCH_WORKER'] = fixture_command(failing)
+        self.restart()
+        confirmed = self.request('/api/change', {'ids': ['unmatched6'], 'action': 'confirmed', 'entity': self.entity})
+        self.assertEqual(confirmed['status'], 200, confirmed)
+        first = self.learning()
+        self.assertIn(first['state'], ('pending', 'error'), first)
+        wait_until(lambda: self.learning(first['upto'])['state'] == 'error')
+        failed = self.learning(first['upto'])
+        self.assertEqual(failed['learner']['status'], 'error', failed)
+        self.assertIn('diagnostic', failed['learner'])
+
+
+@unittest.skipUnless(sys.platform in ('darwin', 'win32'), 'Linux is frozen: no local computation')
 class InstalledRelationSnapshotTest(relations.NativeSimilarSnapshotTest):
     """同一个独立的缓存/精度参照，经真实的安装后适配器运行。"""
     setUpClass = InstalledResearchComputeTest.__dict__['setUpClass']

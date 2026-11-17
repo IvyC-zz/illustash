@@ -240,7 +240,9 @@ export function renderHeading() {
   const r = state.route, h = $('heading'), c = state.char, view = viewOf(r, c);
   if (view.drawHeading) { view.drawHeading(h, r, c); return; }
   const n = state.totalReady ? number(state.total) : '…';
-  const [title, sub, links = ''] = view.heading(r, {n});
+  const [title, heading, links = ''] = view.heading(r, {n});
+  // 撤销以后在等后台学习落定（#404）：计数还是撤销前的，落定后一次重读成最终值。
+  const sub = state.learning ? [heading, t('正在更新')].filter(Boolean).join(' · ') : heading;
   // 标题下面只放数量、状态和必须一眼看到的警告；这一页是什么、怎么操作收进标题旁的「?」（#527）。网格页的操作提示
   // 就是注册表里的底栏提示（底栏默认隐藏），一个「·」分出一行，英文行首大写。
   const hints = view.helpHint ? (view.hint?.(r) || '').split(' · ').filter(Boolean).map(x => esc(x.charAt(0).toLocaleUpperCase() + x.slice(1))) : [];
