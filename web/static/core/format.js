@@ -14,6 +14,11 @@ export const dateText = (y, m, d, withYear) => I18N.language === 'zh-CN' ? (with
   : new Intl.DateTimeFormat(I18N.locale, withYear ? {year: 'numeric', month: 'numeric', day: 'numeric'} : {month: 'numeric', day: 'numeric'}).format(new Date(+y, m - 1, +d));
 export const monthText = (y, m) => I18N.language === 'zh-CN' ? `${y} 年 ${m} 月` : new Intl.DateTimeFormat(I18N.locale, {year: 'numeric', month: 'short'}).format(new Date(+y, m - 1, 1));
 export const work = w => (w || '').replaceAll('_', ' ');
+// 缩略图档位（#452）：原生端 thumb 长边 400、medium 长边 800。cssPx 是调用处估的显示尺寸（CSS 像素），乘屏幕倍率
+// 换成物理像素，超过 260 用 medium。倍率按 1 封底，1 倍屏的结果和只看 CSS 像素时一样。倍率每次画的时候读：窗口
+// 拖到倍率不同的屏幕后，下次重画换档。
+export const screenScale = (dpr = globalThis.devicePixelRatio) => Math.max(1, Number(dpr) || 1);
+export const thumbSize = (cssPx, dpr) => cssPx * screenScale(dpr) > 260 ? 'medium' : 'thumb';
 // 大小和后端的时间戳，照设置和任务面板显示的样子。
 export const bytes = n => n >= 1e9 ? (n / 1e9).toFixed(1) + ' GB' : n >= 1e6 ? (n / 1e6).toFixed(1) + ' MB' : Math.round(n / 1e3) + ' KB';
 export const stamp = t => (t || '').replace('T', ' ').slice(5, 16);
