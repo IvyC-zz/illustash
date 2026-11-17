@@ -5,6 +5,7 @@
 // 新增一个页面要做什么，见 docs/WEB_UI_MAP.md「新增一个页面」。
 import {isMac} from './format.js';
 import {t} from './i18n.js';
+import {count as conditionCount, queryParams} from './filters.js';
 
 // 字段：
 //   prefix     地址里的前缀，#/g/<id>、#/s/<id>；没有前缀的页面用页面名作路径（#/unmatched）
@@ -28,8 +29,9 @@ import {t} from './i18n.js';
 //   card       卡片上额外的角标
 //   directory  需要完整的角色目录（不是摘要行）
 //   guideTick  进入本页算上手清单的哪一步
+//   gallery    画廊页（#445）：地址总带着条件，不带查询时按保存的条件打开
 const NEWEST = ['newest', 'oldest'];
-const narrowed = r => !!(r.q || r.tag || r.utag || r.check || r.doubt);
+const narrowed = r => !!(r.q || r.tag || r.utag || r.check || r.doubt || conditionCount(r) || r.from || r.to);
 
 // 图库和角色页共用的一组字段：角色页是图库加 char 参数，不是独立页面。
 const libraryBase = {
@@ -37,7 +39,7 @@ const libraryBase = {
   params: r => {
     const f = {};
     if (r.day) f.day = r.day; if (r.work) f.work = r.work; if (r.artist) f.artist = r.artist; if (r.q) f.q = r.q; if (r.tag) f.tag = r.tag; if (r.utag) f.utag = r.utag;
-    return f;
+    return {...f, ...queryParams(r)};
   },
   // 「只看 R18」时没有图，多半是这个筛选造成的：写明，旁边给「显示全部」（#386 的 2-16）。
   empty: (r, {nsfw} = {}) => nsfw === 'only' ? t('「只看 R18」开着，没有符合条件的 R18 图片。') : t('没有符合条件的图片。'),
@@ -48,6 +50,9 @@ const libraryBase = {
 const list = [
   {name: 'home', root: true, area: 'homePage', panel: true, keys: 'shown', click: 'own', nav: 'home', toolbar: 'none'},
   {name: 'library', ...libraryBase, click: 'browse', sortPref: 'sortLibrary'},
+  // 画廊（#445）：全部画廊的封面卡片，和一个画廊里的图（就是带着它的条件的图库）。
+  {name: 'galleries', area: 'groupsPage', panel: true, click: 'own', nav: 'galleries', toolbar: 'none'},
+  {name: 'gallery', prefix: 'gallery', ...libraryBase, click: 'browse', nav: 'galleries', sortPref: 'sortLibrary', gallery: true},
   {name: 'characters', sections: true, area: 'charIndex', panel: true, click: 'own', nav: 'characters', toolbar: 'index', directory: true, guideTick: 'look'},
   {name: 'settings', sections: true, area: 'settingsPage', panel: true, click: 'own', nav: 'settings', toolbar: 'none'},
   {name: 'unmatched', sortPref: 'sortUnmatched', area: 'grid', panel: false, click: 'cleanup', nav: 'unmatched', lead: true, tabs: 'unmatched', tab: 'all',
