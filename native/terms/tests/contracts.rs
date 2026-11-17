@@ -198,6 +198,51 @@ fn materialize_at(fixture: &Value, root: &Path) -> PathBuf {
     package
 }
 
+#[cfg(unix)]
+fn benchmark_root() -> PathBuf {
+    if cfg!(debug_assertions) {
+        panic!("benchmark must be compiled --release");
+    }
+    std::env::var_os("ILLUSTASH_BENCH_ROOT").expect("benchmark fixture directory required").into()
+}
+
+#[cfg(unix)]
+#[test]
+#[ignore = "explicit release performance runner only"]
+fn prepare_benchmark_fixture() {
+    let root = benchmark_root();
+    let binary = std::env::var_os("ILLUSTASH_BENCH_BINARY").expect("explicit baseline release binary");
+    let fixture = load("http_api");
+    fs::create_dir(&root).unwrap();
+    let root = root.canonicalize().unwrap();
+    let package = materialize_at(&fixture, &root);
+    // 固定 4096 个合成的应用侧和来源侧资产，两个参考角色。
+    // 原有的三个资产保留各自的认领；其余未分类，不解码任何文件。
+    for name in ["library.sqlite", "source.sqlite"] {
+        let mut c = Connection::open(package.join(name)).unwrap();
+        let tx = c.transaction().unwrap();
+        for i in 3..4096 {
+            let id = format!("synthetic-{i:05}");
+            let filename = format!("{id}.png");
+            if name == "library.sqlite" {
+                tx.execute("INSERT INTO assets(uuid,filename,src_path,width,height,added_at,src_kind) VALUES (?,?,?,120,150,'2026-09-22','orig')",
+                    rusqlite::params![id, filename, root.join("folder").join(&filename).to_str()]).unwrap();
+            } else {
+                tx.execute("INSERT INTO assets(uuid,filename,src_path,width,height,added_at,src_kind,in_scope,trashed) VALUES (?,?,?,120,150,'2026-09-22','orig',1,0)",
+                    rusqlite::params![id, filename, root.join("folder").join(&filename).to_str()]).unwrap();
+            }
+        }
+        tx.commit().unwrap();
+    }
+    // 基线宿主决定要准备的版本；它和候选都用不带 --upgrade 的普通打开来测量。
+    let done = Command::new(&binary).args(["migrate", "--db"]).arg(package.join("library.sqlite")).output().unwrap();
+    assert!(done.status.success(), "benchmark fixture: upgrade: {}", String::from_utf8_lossy(&done.stderr));
+    let backups = package.join("library-backups");
+    if backups.exists() {
+        fs::remove_dir_all(backups).unwrap();
+    }
+}
+
 fn launch(root: &Path, package: &Path, category: &str, upgrade: bool, binary: &Path) -> (Host, String, String) {
     let listener = TcpListener::bind(("127.0.0.1", 0)).unwrap();
     let port = listener.local_addr().unwrap().port();
@@ -293,11 +338,6 @@ fn check_backup(
     fs::remove_dir_all(&check).unwrap();
 }
 
-fn migrate_fixture(package: &Path, category: &str, binary: &Path) {
-    let done = Command::new(binary).args(["migrate", "--db"]).arg(package.join("library.sqlite")).output().unwrap();
-    assert!(done.status.success(), "{category}: upgrade: {}", String::from_utf8_lossy(&done.stderr));
-}
-
 fn replay(category: &str) {
     let fixture = load(category);
     let (_scratch, root, package) = materialize(&fixture, category);
@@ -313,7 +353,12 @@ fn replay(category: &str) {
     // 较旧的 source.sqlite 布局一并更新，而这不在录制范围内），再检查并删除升级前备份。
     let upgrade = version < recorded;
     if version == recorded && recorded < illustash_terms::SCHEMA_VERSION {
-        migrate_fixture(&package, category, Path::new(env!("CARGO_BIN_EXE_illustash-terms")));
+        let done = Command::new(env!("CARGO_BIN_EXE_illustash-terms"))
+            .args(["migrate", "--db"])
+            .arg(package.join("library.sqlite"))
+            .output()
+            .unwrap();
+        assert!(done.status.success(), "{category}: upgrade: {}", String::from_utf8_lossy(&done.stderr));
         check_backup(&package, &root, &before, recorded, category);
         fs::remove_dir_all(package.join("library-backups")).unwrap();
     }
@@ -389,50 +434,6 @@ fn interrupted_task_recovery_contract() {
 fn request_json(origin: &str, url: &str, body: Option<&Value>, token: &str) -> (u16, Value, Map<String, Value>) {
     let (status, raw, headers) = request(origin, url, body, token);
     (status, serde_json::from_str(&raw).unwrap_or(Value::Null), headers)
-}
-
-#[cfg(unix)]
-fn benchmark_root() -> PathBuf {
-    if cfg!(debug_assertions) {
-        panic!("benchmark must be compiled --release");
-    }
-    std::env::var_os("ILLUSTASH_BENCH_ROOT").expect("benchmark fixture directory required").into()
-}
-
-#[cfg(unix)]
-#[test]
-#[ignore = "explicit release performance runner only"]
-fn prepare_benchmark_fixture() {
-    let root = benchmark_root();
-    let binary = std::env::var_os("ILLUSTASH_BENCH_BINARY").expect("explicit baseline release binary");
-    let fixture = load("http_api");
-    fs::create_dir(&root).unwrap();
-    let root = root.canonicalize().unwrap();
-    let package = materialize_at(&fixture, &root);
-    // 固定 4096 个合成的应用侧和来源侧资产，两个参考角色。
-    // 原有的三个资产保留各自的认领；其余未分类，不解码任何文件。
-    for name in ["library.sqlite", "source.sqlite"] {
-        let mut c = Connection::open(package.join(name)).unwrap();
-        let tx = c.transaction().unwrap();
-        for i in 3..4096 {
-            let id = format!("synthetic-{i:05}");
-            let filename = format!("{id}.png");
-            if name == "library.sqlite" {
-                tx.execute("INSERT INTO assets(uuid,filename,src_path,width,height,added_at,src_kind) VALUES (?,?,?,120,150,'2026-09-22','orig')",
-                    rusqlite::params![id, filename, root.join("folder").join(&filename).to_str()]).unwrap();
-            } else {
-                tx.execute("INSERT INTO assets(uuid,filename,src_path,width,height,added_at,src_kind,in_scope,trashed) VALUES (?,?,?,120,150,'2026-09-22','orig',1,0)",
-                    rusqlite::params![id, filename, root.join("folder").join(&filename).to_str()]).unwrap();
-            }
-        }
-        tx.commit().unwrap();
-    }
-    // 基线宿主决定要准备的版本；它和候选都用不带 --upgrade 的普通打开来测量。
-    migrate_fixture(&package, "benchmark fixture", Path::new(&binary));
-    let backups = package.join("library-backups");
-    if backups.exists() {
-        fs::remove_dir_all(backups).unwrap();
-    }
 }
 
 // 每次调用这个可执行文件做一次独立试验。shell 运行脚本对每个显式指定的 release 宿主恰好做三次试验，报告中位数。
