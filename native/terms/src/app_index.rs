@@ -1050,7 +1050,7 @@ fn prepare_job(
     Ok(job)
 }
 /// 这个任务带不带基础角色索引（#607），以及启用、撤回时要不要改图库内容。带的话把核对过的包复制进任务目录。
-/// - 启用：图库已有同一版本的索引（角色表里有包里的每个角色，且都有锚点阈值）时只装共享锚点（`adopted`），
+/// - 启用：图库已有同一版本的索引（角色表里有包里的每个角色）时只装共享锚点（`adopted`），
 ///   不重写证据、不动主归属；否则按包重建角色表和索引候选（`rebuilt`，版本不同时就是来源替换）。
 /// - 撤回：按启用时的方式还原；`adopted` 的图库内容本来没动，只把共享锚点换回不带包的。
 /// - 其他索引任务：这台电脑启用了基础索引就带上，否则不带，重建的结果与启用状态一致。
@@ -1076,13 +1076,14 @@ fn base_plan(lib: &Library, paths: &PatchPaths<'_>, b: &Value, folder: &Path) ->
     }
     Ok(plan)
 }
-/// 图库的角色表已经是同一版本的精选索引：包里的每个角色都在，并且都有锚点阈值。
+/// 图库的角色表已经是同一版本的精选索引：包里的每个角色都在。不要求每个都有阈值：已有图库当年装载时个别角色
+/// 没算出锚点，这样的角色在图库里本来就不认领，装上共享锚点后仍因阈值为空而不认领，图库不变。
 fn same_version(src: &Connection, entries: &[crate::character_index::Entry]) -> Result<bool> {
     if entries.is_empty() {
         return Ok(false);
     }
     let have = src
-        .prepare("SELECT char_id FROM characters WHERE anchor_p90 IS NOT NULL")?
+        .prepare("SELECT char_id FROM characters")?
         .query_map([], |r| r.get::<_, String>(0))?
         .collect::<rusqlite::Result<BTreeSet<_>>>()?;
     Ok(entries.iter().all(|e| have.contains(&e.id)))

@@ -1,6 +1,6 @@
 # 装不上、打不开怎么办
 
-现行参考，2026-11-14。面向使用者，说明安装、首次启动、下载识别模型和更新时常见的拦截与报错。macOS 部分按 2026-10-15、10-16、10-18、11-14 在 macOS 26.6（arm64）虚拟机里的实测写成；Windows 部分标明了哪些已经实测。开发者从源码构建见 [开发说明](DEVELOPMENT.md)。
+现行参考，2026-11-18。面向使用者，说明安装、首次启动、下载识别模型和更新时常见的拦截与报错。macOS 部分按 2026-10-15、10-16、10-18、11-14 在 macOS 26.6（arm64）虚拟机里的实测写成；Windows 部分标明了哪些已经实测。开发者从源码构建见 [开发说明](DEVELOPMENT.md)。
 
 安装包在 [GitHub Releases](https://github.com/shio-vinyl/illustash/releases) 下载，0.1.0 起正式发布。安装包没有经过 Apple 公证或 Windows 代码签名，所以系统第一次打开时会拦截，按下面的步骤放行一次即可。
 
@@ -49,7 +49,7 @@
 
 ## 识别模型
 
-安装包里没有带识别模型。第一次使用时，应用会提示「识别要用的模型还没下载」，原始模型约 618 MB，Apple 芯片的 macOS 另下载约 467 MB 的 WD 加速文件（合计约 1.1 GB）；下载前可以先建库、浏览和手动整理，模型就位后自动开始识别。模型放在用户目录里，所有图库共用，以后更新 Illustash 不用再下：
+安装包里没有带识别模型。第一次使用时，应用会提示「识别要用的模型还没下载」，原始模型约 618 MB，另有约 26 MB 的基础角色索引，Apple 芯片的 macOS 再加约 467 MB 的 WD 加速文件（合计约 1.1 GB）；下载前可以先建库、浏览和手动整理，模型就位后自动开始识别。模型放在用户目录里，所有图库共用，以后更新 Illustash 不用再下：
 
 - macOS：`~/Library/Application Support/Illustash/Shared/models/`
 - Windows：`%LOCALAPPDATA%\Illustash\Shared\models\`
@@ -58,7 +58,7 @@
 
 ### 下载很慢或下载失败
 
-原始模型先从 Hugging Face 的镜像（默认 hf-mirror.com）下载，不行再换 ModelScope；macOS 的 WD 加速文件从项目 GitHub Release 下载，不经过镜像。下载走系统设置里的 HTTP 代理；不支持自动代理配置（PAC）。
+原始模型先从 Hugging Face 的镜像（默认 hf-mirror.com）下载，不行再换 ModelScope；基础角色索引和 macOS 的 WD 加速文件从项目 GitHub Release 下载，不经过镜像。下载走系统设置里的 HTTP 代理；不支持自动代理配置（PAC）。
 
 - **换镜像**：在「设置 › 数据 › 识别模型」里把「Hugging Face 镜像」换成其他兼容 Hugging Face 的地址；填 `https://huggingface.co` 就是直连 Hugging Face。
 - **自己下载再导入**：用浏览器或下载工具把下表 4 个文件下载下来，在应用里点「从文件导入…」选中它们（可以一次多选，也可以选包含它们的 ZIP）。文件名和所在文件夹都不重要，应用按大小和 SHA-256 认出每个文件，放到正确的位置；对不上的文件会被拒绝。
@@ -71,6 +71,10 @@
 | CCIP 参数 | 147 | `b5535577288e22940b853192cd1661e45c7615b7d89b49a8745c2c81685552d4` | [metrics.json](https://huggingface.co/deepghs/ccip_onnx/resolve/eb2acdd29af1703388d3d0c04221add322bc9110/ccip-caformer-24-randaug-pruned/metrics.json) | [metrics.json](https://modelscope.cn/models/deepghs/ccip_onnx/resolve/master/ccip-caformer-24-randaug-pruned/metrics.json) |
 
 Hugging Face 的地址固定在上游的某个提交上，上游以后改动也不影响；镜像站把 `https://huggingface.co` 换成镜像地址即可。下载后可以自己核对：macOS 用 `shasum -a 256 文件`，Windows 用 `certutil -hashfile 文件 SHA256`。模型的许可见 [第三方组件与许可](THIRD_PARTY.md#模型与数据)。
+
+### 基础角色索引
+
+基础角色索引让识别认得约 7,400 个角色（只有原始模型时只认得 WD 词表里的约 2,700 个），和识别模型一起下载，所有图库共用。它没下好时识别照常进行，「设置 › 数据 › 识别模型」会提示补下载。下载好以后，打开的图库会自动启用它；在同一处可以撤回或再启用，撤回对这台电脑上的所有图库生效，你确认过和移出的结论都保留。手动下载 [基础角色索引 v1](https://github.com/shio-vinyl/illustash/releases/download/character-index-v1/character-index-v1.bin) 后也可从设置导入：文件为 25,787,626 字节，SHA-256 为 `ce814cbcd9619babde566f46d80f7d9b0ce9f1c4dff20d8c679ac2bb0fa1fcb0`。
 
 ### 识别加速（macOS）
 

@@ -187,9 +187,11 @@ class CharacterIndexTest(unittest.TestCase):
     def test_same_version_library_is_recognized_and_left_unchanged(self):
         f = self.fixture
         with closing(sqlite3.connect(f.lib.source)) as c, c:
+            # 已有图库当年装载时个别角色没算出锚点（base_002 的阈值为空），仍算同一版本。
             for i, cid in enumerate(IDS):
+                p90 = None if cid == 'base_002' else .051
                 c.execute('INSERT INTO characters(char_id,danbooru_tag,anchor_p50,anchor_p75,anchor_p90,n_ref,anchor_row) '
-                          'VALUES (?,?,?,?,?,?,?)', (cid, cid + '_(work)', .021, .031, .051, 7, i))
+                          'VALUES (?,?,?,?,?,?,?)', (cid, cid + '_(work)', .021, .031, p90, 7, i))
             c.execute("INSERT INTO labels(uuid,dim,value,conf,source,model_ver) VALUES "
                       "('c','char_ext','base_002',.9,'char_index','character_index@2025-09-25')")
         before = self.tables()

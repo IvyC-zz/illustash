@@ -53,8 +53,8 @@
     "license": "MIT",
     "file": {
       "path": "character-index/character-index-v1.bin",
-      "size": 30000000,
-      "sha256": "0000000000000000000000000000000000000000000000000000000000000000",
+      "size": 25787626,
+      "sha256": "ce814cbcd9619babde566f46d80f7d9b0ce9f1c4dff20d8c679ac2bb0fa1fcb0",
       "url": "https://github.com/shio-vinyl/illustash/releases/download/character-index-v1/character-index-v1.bin"
     }
   },
