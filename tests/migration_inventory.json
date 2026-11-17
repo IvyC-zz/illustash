@@ -1,7 +1,7 @@
 {
 "baseline_commit":"621726f",
 "sources":{
- ".claude/launch.json":"76d4c88e0bca59fd6c3f0c7171350cd1c9c925dbfbaa7694c90309fcce5e9321",
+ ".claude/launch.json":"5860af7fb939c45731c40c0adb85837c235a2db2bc65e9a3b9ef029a1df15d50",
 
  "crates/core/src/backup.rs":"7d5f5abe63adb1620f2847609451fda7b588a927f742a676e16fc4acd2abeeb5",
 
@@ -193,7 +193,7 @@
 
  "desktop/src/notify.rs":"9d22270643d502829f409d5164d83abefe30da5b044533551daceba2a66c7891",
 
- "desktop/src/picker.rs":"eb703f0b3469eb89c3ca5407e4109bd2d08a028ab0e75ded57fe0f3c99d16144",
+ "desktop/src/picker.rs":"8e922d33eea80581499ab5973d8a341d6905f30c874edecfed907b1af947c9bd",
 
  "desktop/src/pixiv.rs":"511b8003b2068c801f336d96a6c130a6796ed1866d1102e64678760d3a906c65",
 
@@ -223,7 +223,7 @@
 
  "native/terms/src/app_asset_files.rs":"a33b3eddb934d5547dac2966c1e4ccbc7c5910ab030bbd2979ad193dac9e6c77",
 
- "native/terms/src/app_ccip_longtail.rs":"515a3a30faea05ceb8f35ce4a57209c33aa429fcd5e22fdbe94bd6fdaca082ba",
+ "native/terms/src/app_ccip_longtail.rs":"ca6d1cc3696e07223a4faffb9759079d176674339f7bb3b25e6ca9be55738082",
 
  "native/terms/src/app_characters.rs":"6c9e9e080970dce30092747ebcf6bdcaee7d99a8463500888e5dab278f4a0cbd",
 
@@ -263,7 +263,7 @@
 
  "native/terms/src/app_identity.rs":"715d41ff00ae564d109fd8c6dde75f3e89e447360832bb2ab16c960bc473da38",
 
- "native/terms/src/app_imports.rs":"5609c08d8a723ab1ffffad638c01731ee68b8a28f22eba361585dde810855314",
+ "native/terms/src/app_imports.rs":"82aefe32aa3ca072d0a6787d531fe7b5e10fd2ee2ee376cf3704f7d859618664",
 
  "native/terms/src/app_index.rs":"07d2e4fe244102d6504d77fa85a2a63a75c403eda2dc5944f7abfc33ac14ba44",
 
@@ -297,7 +297,7 @@
 
  "native/terms/src/app_migration_sql/provenance.sql":"a780f1f8837dd2c90a556539c114d56cdaa513b057fb667bf0c5c9d604f75934",
 
- "native/terms/src/app_models.rs":"ff36ac75628911fc8cff762c9ebf0aabdf21386e83bccf22ae46d5f82db0f3cb",
+ "native/terms/src/app_models.rs":"d1c9b3f03501424cbc47d2b6248caf65515fa7e7c15e402d356b5f2f86c70f64",
 
  "native/terms/src/app_name_sources.rs":"a9d895621405e92c2bdacd7f547f28feec7f294f307d628ea25d5e2bf27f9515",
 
@@ -307,7 +307,7 @@
 
  "native/terms/src/app_photos.rs":"df3a434e0b64f63e395ca93703be19d90b83faefe6901537fdd628d51ddc0326",
 
- "native/terms/src/app_platform.rs":"415b7cfc3b490a12483231ca2b855ff7c9d5459fe051d2195bd0d64bc5a59e6e",
+ "native/terms/src/app_platform.rs":"f62d65d27fccaefc862fc13ec3e0c4894807595cb99bc477b5593f00112d22ec",
 
  "native/terms/src/app_preferences.rs":"da1fa9dfa9c487d164ae55757481c6dbdcc05b74feb00207ebc3e31a01f16303",
 
@@ -347,7 +347,7 @@
 
  "native/terms/src/app_upgrade.rs":"a54111dd23542c882a5ac02a2a0913b0333625af44950108d8af33a2dbd1c5e6",
 
- "native/terms/src/app_wd_extension.rs":"532aeffcc4d61b9cbfb14c70ae270fbb767595b8fe03d2b9cc5054a703e022e8",
+ "native/terms/src/app_wd_extension.rs":"46460a466a3e5948a517194738c068ec41c7fd7620370c9fa47ebf1c696e7814",
 
  "native/terms/src/bin/illustash-terms.rs":"04ee80bb280034a16f8ddd9fe97e8de0700713259c44f76858f70b8713d4c594",
 
@@ -385,7 +385,7 @@
 
  "native/terms/src/http_host_get.rs":"7b31a1cc13c675d6e321111c2c6965c1999874caf094fa661eaa406d33210613",
 
- "native/terms/src/http_host_post.rs":"b6b0e497024b22041203599518f889366c35134df8be4296292c09b14ea7b781",
+ "native/terms/src/http_host_post.rs":"889baa186933507edd8740c0942a80eac6b604688111c9cb567d26397f2213e6",
 
  "native/terms/src/http_json.rs":"42ec65687fad69e430186543d3ef27b8141030e6694b07f683ee91f678478d6b",
 
@@ -651,7 +651,7 @@
  "native/terms/src/app_create.rs":{"database-write":{"ATTACH":1,"dynamic-or-wrapper":9,"INSERT INTO:main.":1,"CREATE INDEX:if":1,"COMMIT":3,"DETACH":1,"ALTER TABLE:assets":1,"INSERT OR IGNORE INTO:meta":1}},
  "native/terms/src/app_index.rs":{"database-write":[[0,7],34,[1,5],33,283,284,285,286,[208,2],12,[199,2],287,249,201,[3,2]],"entrypoint":[4]},
  "native/terms/src/http_browse.rs":{"http-branch":["/api/assets|/api/ids",[246,3],[77,2],[248,3],24,99,89,"/api/assets|/api/assets/count|/api/ids",[78,3],331,332],"database-write":[[7,3],[0,2]]},
- ".claude/launch.json":{"entrypoint":["python3"]},
+ ".claude/launch.json":{"entrypoint":[[333,2]]},
  "crates/core/src/character_sql/tag_memberships.sql":{"database-write":["INSERT INTO:tag_memberships"]},
  "crates/core/src/names_commands.rs":{"database-write":{"INSERT OR IGNORE INTO:term_key_names":1,"dynamic-or-wrapper":8,"DELETE FROM:term_names":4,"DELETE FROM:term_key_names":1,"DELETE FROM:term_key_aliases":1,"INSERT INTO:term_key_aliases":1}},
  "native/terms/src/app_profiles.rs":{"http-branch":[[23,8],[16,5],[17,7],[44,3],[83,3],[242,4],[98,3]],"database-write":[[3,3],0]},
@@ -1103,6 +1103,7 @@
  "ccip-longtail",
  "/api/ccip-longtail",
  "/api/galleries",
- "/api/galleries/covers"
+ "/api/galleries/covers",
+ "python3"
 ]
 }

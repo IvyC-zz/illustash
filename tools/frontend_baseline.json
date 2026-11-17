@@ -47,7 +47,7 @@
    "core/route.js": 3,
    "ui/artists.js": 6,
    "ui/catalog.js": 41,
-   "ui/detail.js": 29,
+   "ui/detail.js": 28,
    "ui/dom.js": 1,
    "ui/grid.js": 24,
    "ui/guide.js": 4,

@@ -112,10 +112,11 @@ def main() -> int:
     parser.add_argument('--images', type=int, default=24, help='新建图库时生成的合成图片张数')
     parser.add_argument('--fixture', choices=['walk'], help='用界面走查的合成图库（带识别结果），见 tools/ui_walk/fixture.py')
     parser.add_argument('--wd-extension', action='store_true', help='给走查图库提供本机合成 WD 扩展包')
+    parser.add_argument('--ccip-longtail', action='store_true', help='给走查图库提供本机合成 CCIP 长尾参考包和基础角色索引（#559）')
     parser.add_argument('host_args', nargs='*', help='在 -- 之后，原样传给 illustash-terms http')
     args = parser.parse_args()
-    if args.wd_extension and args.fixture != 'walk':
-        parser.error('--wd-extension 需要 --fixture walk')
+    if (args.wd_extension or args.ccip_longtail) and args.fixture != 'walk':
+        parser.error('--wd-extension、--ccip-longtail 需要 --fixture walk')
     port = int(os.environ.get('PORT') or args.port)
     core = binary()
 
@@ -134,21 +135,28 @@ def main() -> int:
     library = work / '合成图库.pilib'
     host = None
     jump = None
-    extension = None
+    servers = []
 
     def stop(*_: object) -> None:
         raise KeyboardInterrupt
 
     signal.signal(signal.SIGTERM, stop)
     try:
-        if args.wd_extension:
-            directory = work / 'wd-extension-download'
+        # 合成包各自从一个只听 127.0.0.1 的本机 HTTP 服务下载；宿主经测试清单认它们的身份。
+        for wanted, folder, variable, make in (
+                (args.wd_extension, 'wd-extension-download', 'ILLUSTASH_TEST_WD_EXTENSION',
+                 lambda d, origin: fixture.wd_extension_walk(walk, d, origin)),
+                (args.ccip_longtail, 'ccip-longtail-download', 'ILLUSTASH_TEST_CCIP_LONGTAIL',
+                 lambda d, origin: fixture.ccip_longtail_walk(walk, d, work / 'shared', origin))):
+            if not wanted:
+                continue
+            directory = work / folder
+            directory.mkdir(parents=True, exist_ok=True)
             handler = partial(http.server.SimpleHTTPRequestHandler, directory=str(directory))
             server = http.server.ThreadingHTTPServer(('127.0.0.1', 0), handler)
-            manifest = fixture.wd_extension_walk(walk, directory, f'http://127.0.0.1:{server.server_port}')
-            env['ILLUSTASH_TEST_WD_EXTENSION'] = str(manifest)
+            env[variable] = str(make(directory, f'http://127.0.0.1:{server.server_port}'))
             threading.Thread(target=server.serve_forever, daemon=True).start()
-            extension = server
+            servers.append(server)
         if not library.exists():
             images = work / 'images'
             images.mkdir(exist_ok=True)
@@ -174,9 +182,9 @@ def main() -> int:
     finally:
         if jump is not None:
             jump.shutdown()
-        if extension is not None:
-            extension.shutdown()
-            extension.server_close()
+        for server in servers:
+            server.shutdown()
+            server.server_close()
         if host is not None and host.poll() is None:
             host.terminate()
             try:

@@ -122,6 +122,7 @@
 - `GET /api/wd-extension` 返回 `package`、共享的 `download`、图库的 `library` 和 `task`。图库的 `vectors`、`images`、`assigned` 为现算数；`library.blocked` 为 `null`、`frozen`、`no_vectors`、`syncing` 或 `busy`。
 - `POST /api/wd-extension/package` 的 `action` 为 `download`、`import`（可选 `paths`，缺省打开原生选择器）、`cancel`、`discard` 或 `delete`。选择器取消返回 `{cancelled:true}`，其余成功应答返回完整状态。
 - `POST /api/wd-extension/enable` 和 `/withdraw` 各接收空对象并返回完整状态。同步完成后按当次交付范围启动 `kind=auto` 的后台检查。检查在 `scan` 阶段通过 `POST /api/wd-extension/cancel` 传 `id` 取消，进入 `write` 后完成事务。完成报告用 `result.changed` 表示候选有变的图片数。
+- **设置 › 角色资料 › CCIP 长尾包**（#559）紧跟在 WD 角色扩展后面，用同一套卡片、确认框和任务面板项（`web/static/ui/packs.js`、`core/packs.js`）。`/api/ccip-longtail` 的路由和回复形状与 `/api/wd-extension` 相同；参考包放在共享目录的 `extensions/ccip-longtail-v1/`，启用状态和候选按图库保存。`library` 另带 `needs_scan`（角色索引更新后要重新检查）和 `error`（上次自动检查失败的原文）。已启用时重新检查失败，卡片仍提供撤回。
 - 详情栏「也可能是」把 `WD_EXT` 候选放在原有强线索和弱线索之间。同一角色已有强线索时保留原来的候选项。CCIP 长尾候选排在 WD 扩展候选前，两种包指向同一角色时只显示 CCIP 长尾项，两条证据都保留。人工确认和否定照常保留，撤回操作通过设置完成。
 
 ### 可疑优先

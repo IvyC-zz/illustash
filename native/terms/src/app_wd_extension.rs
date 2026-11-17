@@ -338,6 +338,8 @@ impl Tasks {
         snap
     }
 
+    /// 取消扫描阶段的任务。任务已经结束（取消和完成擦肩而过）时什么都不做，页面读到的是结束后的状态；只有写入阶段
+    /// 回 409（#559 走查）。
     pub(crate) fn cancel(&self, id: &str) -> Result<()> {
         if let Some((task, state)) = &self.active {
             let snap = lock_ignoring_poison(state);
@@ -349,7 +351,7 @@ impl Tasks {
                 return Ok(());
             }
         }
-        Err(Error::Conflict("WD 角色扩展任务已结束或已变化".into()))
+        Ok(())
     }
 
     pub(crate) fn start_for(&mut self, library: &Library, identity: TaskIdentity, operation: Action) -> Result<Value> {

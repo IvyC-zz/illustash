@@ -19,10 +19,12 @@ use std::{
     time::Instant,
 };
 
-pub(crate) const PACKAGE_SHA256: &str = "d36eeab8768e30cc36e2ba5b2788f00a5f608ecad0df264a2830a44c14407fb9";
-pub(crate) const PACKAGE_BYTES: u64 = 1_273_692;
+const PACKAGE_SHA256: &str = "d36eeab8768e30cc36e2ba5b2788f00a5f608ecad0df264a2830a44c14407fb9";
+const PACKAGE_BYTES: u64 = 1_273_692;
 pub(crate) const PACKAGE_NAME: &str = "A-longtail-p75.zip";
 pub(crate) const PACKAGE_VERSION: &str = "ccip-longtail-v1";
+const PACKAGE_URL: &str =
+    "https://github.com/shio-vinyl/illustash/releases/download/ccip-longtail-v1/A-longtail-p75.zip";
 const CCIP_SHA256: &str = "4ea118d16496274f4f6e08d3afc768cc592389e8f7f32f8732ce2215c228ac5f";
 const DIMENSION: usize = 768;
 const DELIVERY_ERROR: &str = "ccip_longtail_delivery_error";
@@ -31,6 +33,62 @@ const LAST_SCAN: &str = "ccip_longtail_last_scan";
 const ROLES: usize = 54;
 type AutoHistory = HashMap<(PathBuf, String), Value>;
 static AUTO_HISTORY: OnceLock<Mutex<AutoHistory>> = OnceLock::new();
+
+/// 参考包的身份：冻结的发布版本，或走查和测试用 `ILLUSTASH_TEST_CCIP_LONGTAIL` 指向的清单换成的本机合成包（#559，
+/// 同 WD 扩展包的 `ILLUSTASH_TEST_WD_EXTENSION`）。合成包的文件名、存放目录和发布版一致，角色数和大小不超过发布版，
+/// 只能从 127.0.0.1 的 HTTP 端口下载；它记的 CCIP 模型摘要换掉冻结值，好让合成识别结果的向量算兼容。
+pub(crate) struct Release {
+    pub(crate) sha256: String,
+    pub(crate) bytes: u64,
+    pub(crate) ccip_sha256: String,
+    pub(crate) roles: usize,
+    pub(crate) url: String,
+}
+
+pub(crate) fn release() -> Result<&'static Release> {
+    #[derive(Deserialize)]
+    struct Fixture {
+        sha256: String,
+        size: u64,
+        ccip_sha256: String,
+        roles: usize,
+        url: String,
+    }
+    static FROZEN: OnceLock<Release> = OnceLock::new();
+    static FIXTURE: OnceLock<std::result::Result<Release, String>> = OnceLock::new();
+    let frozen = FROZEN.get_or_init(|| Release {
+        sha256: PACKAGE_SHA256.into(),
+        bytes: PACKAGE_BYTES,
+        ccip_sha256: CCIP_SHA256.into(),
+        roles: ROLES,
+        url: PACKAGE_URL.into(),
+    });
+    let Some(path) = std::env::var_os("ILLUSTASH_TEST_CCIP_LONGTAIL") else { return Ok(frozen) };
+    FIXTURE
+        .get_or_init(|| {
+            let text = fs::read_to_string(path).map_err(|e| format!("读不到长尾参考包测试清单：{e}"))?;
+            let f: Fixture = serde_json::from_str(&text).map_err(|e| format!("长尾参考包测试清单无效：{e}"))?;
+            let local = url::Url::parse(&f.url).is_ok_and(|u| {
+                u.scheme() == "http"
+                    && u.host_str() == Some("127.0.0.1")
+                    && u.username().is_empty()
+                    && u.password().is_none()
+                    && u.port().is_some()
+            });
+            let hex = |s: &str| s.len() == 64 && s.bytes().all(|b| b.is_ascii_digit() || (b'a'..=b'f').contains(&b));
+            if !local
+                || !(1..=ROLES).contains(&f.roles)
+                || !(1..=PACKAGE_BYTES).contains(&f.size)
+                || !hex(&f.sha256)
+                || !hex(&f.ccip_sha256)
+            {
+                return Err("长尾参考包测试清单无效，下载地址须为 127.0.0.1 的 HTTP 端口".into());
+            }
+            Ok(Release { sha256: f.sha256, bytes: f.size, ccip_sha256: f.ccip_sha256, roles: f.roles, url: f.url })
+        })
+        .as_ref()
+        .map_err(|message| Error::invalid(message.clone()))
+}
 
 fn auto_key(library: &Library) -> (PathBuf, String) {
     (library.instance_path().to_owned(), library.id().into())
@@ -85,8 +143,9 @@ fn floats(bytes: &[u8]) -> Option<Vec<f32>> {
 
 impl Package {
     fn load(path: &Path) -> Result<Self> {
-        let bytes = crate::app_recognition::file(path, PACKAGE_BYTES)?;
-        if bytes.len() as u64 != PACKAGE_BYTES || crate::strict_json::sha256_hex(&bytes) != PACKAGE_SHA256 {
+        let release = release()?;
+        let bytes = crate::app_recognition::file(path, release.bytes)?;
+        if bytes.len() as u64 != release.bytes || crate::strict_json::sha256_hex(&bytes) != release.sha256 {
             return Err(bad());
         }
         let mut archive = zip::ZipArchive::new(Cursor::new(&bytes)).map_err(|_| bad())?;
@@ -103,18 +162,20 @@ impl Package {
             Ok(contents)
         };
         let provenance: Value = serde_json::from_slice(&member("A-provenance.json", 16 * 1024)?).map_err(|_| bad())?;
-        if provenance["format"] != "illustash-557-ccip-offline/1" || provenance["ccip_sha256"] != CCIP_SHA256 {
+        if provenance["format"] != "illustash-557-ccip-offline/1"
+            || provenance["ccip_sha256"] != release.ccip_sha256.as_str()
+        {
             return Err(bad());
         }
         let metadata = member("A-metadata.json", 128 * 1024)?;
-        let packed = member("A-anchors.f32", (ROLES * DIMENSION * size_of::<f32>()) as u64)?;
+        let packed = member("A-anchors.f32", (release.roles * DIMENSION * size_of::<f32>()) as u64)?;
         for (name, value) in [("A-metadata.json", &metadata), ("A-anchors.f32", &packed)] {
             if provenance["files"][name] != crate::strict_json::sha256_hex(value) {
                 return Err(bad());
             }
         }
         let entries: Vec<Entry> = serde_json::from_slice(&metadata).map_err(|_| bad())?;
-        if entries.len() != ROLES || packed.len() != ROLES * DIMENSION * size_of::<f32>() {
+        if entries.len() != release.roles || packed.len() != release.roles * DIMENSION * size_of::<f32>() {
             return Err(bad());
         }
         let mut ids = HashSet::new();
@@ -155,7 +216,8 @@ impl Package {
     }
 
     fn remember(&self, destination: &Path) -> Result<()> {
-        if matches!(crate::app_recognition::file(destination, PACKAGE_BYTES), Ok(previous) if previous == self.bytes) {
+        if matches!(crate::app_recognition::file(destination, release()?.bytes), Ok(previous) if previous == self.bytes)
+        {
             return Ok(());
         }
         fs::create_dir_all(destination.parent().expect("参考包有存放目录"))?;
@@ -264,7 +326,10 @@ fn compatible_model(raw: &str) -> bool {
     } else {
         &manifest["models"]["ccip"]
     };
-    model["version"] == "ccip-model_feat" && model["dimension"] == DIMENSION && model["sha256"] == CCIP_SHA256
+    let Ok(release) = release() else { return false };
+    model["version"] == "ccip-model_feat"
+        && model["dimension"] == DIMENSION
+        && model["sha256"] == release.ccip_sha256.as_str()
 }
 
 /// 扫描阶段使用只读事务，写入前在来源库租约下复核输入版本。
@@ -310,7 +375,7 @@ pub(crate) fn apply(
     package.remember(&package_path(&shared))?;
     let tx = app.transaction_with_behavior(TransactionBehavior::Immediate)?;
     crate::schema::begin_writing(&tx)?;
-    let changed = ccip_longtail::apply(&tx, PACKAGE_SHA256, &hits)?;
+    let changed = ccip_longtail::apply(&tx, &release()?.sha256, &hits)?;
     tx.execute("INSERT OR REPLACE INTO meta(key,value) VALUES (?1,?2)", [INDEX_GENERATION, &generation.to_string()])?;
     tx.execute(
         "INSERT INTO meta(key,value) VALUES (?1,json_object('enabled_at',CURRENT_TIMESTAMP,'checked_at',CURRENT_TIMESTAMP,'scored',?2))
@@ -321,8 +386,10 @@ pub(crate) fn apply(
     check()?;
     let mut tx = Some(tx);
     observer.publish(&mut || crate::schema::commit_writing(tx.take().expect("角色参考包只提交一次")))?;
-    Ok(json!({"package_sha256":PACKAGE_SHA256,"roles":ROLES,"scored":count,"hits":hits.len(),"changed":changed,
-        "missing":rows.missing,"incompatible":rows.incompatible,"scan_ms":scan_ms,"publish_ms":publish.elapsed().as_millis()}))
+    Ok(
+        json!({"package_sha256":release()?.sha256,"roles":release()?.roles,"scored":count,"hits":hits.len(),"changed":changed,
+        "missing":rows.missing,"incompatible":rows.incompatible,"scan_ms":scan_ms,"publish_ms":publish.elapsed().as_millis()}),
+    )
 }
 
 pub(crate) fn withdraw(library: &Library, observer: &dyn Observer) -> Result<Value> {
@@ -379,7 +446,8 @@ pub(crate) fn status(library: &Library, root: &Path) -> Result<Value> {
     } else {
         false
     };
-    Ok(json!({"roles":ROLES,"package_sha256":PACKAGE_SHA256,"package_bytes":PACKAGE_BYTES,"enabled":enabled,
+    let release = release()?;
+    Ok(json!({"roles":release.roles,"package_sha256":release.sha256,"package_bytes":release.bytes,"enabled":enabled,
         "needs_scan":needs_scan,"available":available,"candidates":candidates,"assigned":memberships,"error":error,
         "writable":!library.frozen(),"vectors":vectors,"enabled_at":enabled_at,"checked_at":checked_at,"scored":scored}))
 }
@@ -391,7 +459,7 @@ fn delivery_snapshot(
     check: &dyn Fn() -> Result<()>,
 ) -> Result<Option<LongtailSnapshot>> {
     let path = package_path(shared);
-    if ccip_longtail::enabled_package(app)?.as_deref() != Some(PACKAGE_SHA256) || !path.try_exists()? {
+    if ccip_longtail::enabled_package(app)?.as_deref() != Some(release()?.sha256.as_str()) || !path.try_exists()? {
         return Ok(None);
     }
     let package = Package::load(&path)?;
@@ -422,7 +490,10 @@ pub(crate) fn score_prepared(
     check: &dyn Fn() -> Result<()>,
 ) -> Result<Vec<Hit>> {
     let model = &models["ccip"];
-    if model["version"] != "ccip-model_feat" || model["dimension"] != DIMENSION || model["sha256"] != CCIP_SHA256 {
+    if model["version"] != "ccip-model_feat"
+        || model["dimension"] != DIMENSION
+        || model["sha256"] != release()?.ccip_sha256.as_str()
+    {
         return Err(Error::Conflict("本次识别使用的 CCIP 模型与参考包不兼容".into()));
     }
     if vectors.len() != ids.len() * DIMENSION * size_of::<f32>() {
@@ -467,7 +538,7 @@ pub(crate) fn publish_delivery(
     }
     let task = match result {
         Ok(Some(hits)) => {
-            let changed = ccip_longtail::refresh(app, PACKAGE_SHA256, ids, &hits)?;
+            let changed = ccip_longtail::refresh(app, &release()?.sha256, ids, &hits)?;
             app.execute("DELETE FROM meta WHERE key=?1", [DELIVERY_ERROR])?;
             json!({"id":digest,"kind":"auto","phase":"write","status":"done","result":{"changed":changed}})
         }

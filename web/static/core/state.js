@@ -35,8 +35,8 @@ export const state = {
   integrity: null,
   // ---- 识别模型的状态：core/models.js ----
   models: null,
-  // ---- WD 角色扩展的状态（GET /api/wd-extension，#550）：core/wd_extension.js ----
-  wdExtension: null,
+  // ---- 角色数据包的状态（wd：GET /api/wd-extension，#550；ccip：GET /api/ccip-longtail，#559）：core/packs.js ----
+  packs: {wd: null, ccip: null},
   // ---- 画廊列表（GET /api/galleries，#445）：core/galleries.js ----
   galleries: null,
   // ---- 上手引导的进度：ui/guide.js ----
