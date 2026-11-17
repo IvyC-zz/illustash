@@ -773,8 +773,8 @@ mod tests {
             "CREATE TABLE meta(key TEXT PRIMARY KEY,value TEXT);
              INSERT INTO meta VALUES ('terms_names','core');
              CREATE TABLE term_links(system TEXT,key TEXT,term_id INTEGER,current INTEGER,source TEXT,added_at TEXT);
-             CREATE TABLE terms(id INTEGER PRIMARY KEY,key TEXT,kind TEXT);
-             INSERT INTO terms VALUES (1,'x','character');
+             CREATE TABLE terms(id INTEGER PRIMARY KEY,key TEXT,kind TEXT,origin TEXT NOT NULL);
+             INSERT INTO terms VALUES (1,'x','character','user');
              CREATE TABLE term_tree(term_id INTEGER PRIMARY KEY,parent_id TEXT,merged_into TEXT,work_id TEXT,
                work_text TEXT,variant TEXT,artist TEXT,label_only INTEGER,mascot INTEGER,mascot_origin TEXT,
                original INTEGER,seq INTEGER);
@@ -786,6 +786,8 @@ mod tests {
              INSERT INTO term_key_names VALUES ('work','unprojected','zh','user','未投影🙂');
              CREATE TABLE term_key_aliases(kind TEXT,key TEXT,value TEXT,position INTEGER);
              CREATE TABLE assets(uuid TEXT PRIMARY KEY);
+             CREATE TABLE candidates(uuid TEXT,entity TEXT,source TEXT,score REAL);
+             CREATE TABLE term_projection(term_id INTEGER);
              CREATE TABLE memberships(uuid TEXT,entity TEXT);
              CREATE TABLE tag_memberships(uuid TEXT,entity TEXT);
              CREATE TABLE duplicates(uuid TEXT,hidden INTEGER);
