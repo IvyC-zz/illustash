@@ -168,6 +168,11 @@ fn materialize(fixture: &Value, category: &str) -> (Sandbox, PathBuf, PathBuf) {
     // Windows 规范化路径带有 `\\?\` 原样前缀，而宿主从不产生这种前缀。
     #[cfg(windows)]
     let root = PathBuf::from(root.to_str().unwrap().strip_prefix(r"\\?\").unwrap());
+    let package = materialize_at(fixture, &root);
+    (scratch, root, package)
+}
+
+fn materialize_at(fixture: &Value, root: &Path) -> PathBuf {
     let package = root.join("fixture.pilib");
     for dir in ["fixture.pilib", "fixture.pilib/thumbnails", "folder", "bin", "home", "support", "shared"] {
         fs::create_dir_all(root.join(dir)).unwrap();
@@ -193,7 +198,52 @@ fn materialize(fixture: &Value, category: &str) -> (Sandbox, PathBuf, PathBuf) {
             fs::set_permissions(path, fs::Permissions::from_mode(0o755)).unwrap();
         }
     }
-    (scratch, root, package)
+    package
+}
+
+#[cfg(unix)]
+fn benchmark_root() -> PathBuf {
+    if cfg!(debug_assertions) {
+        panic!("benchmark must be compiled --release");
+    }
+    std::env::var_os("ILLUSTASH_BENCH_ROOT").expect("benchmark fixture directory required").into()
+}
+
+#[cfg(unix)]
+#[test]
+#[ignore = "explicit release performance runner only"]
+fn prepare_benchmark_fixture() {
+    let root = benchmark_root();
+    let binary = std::env::var_os("ILLUSTASH_BENCH_BINARY").expect("explicit baseline release binary");
+    let fixture = load("http_api");
+    fs::create_dir(&root).unwrap();
+    let root = root.canonicalize().unwrap();
+    let package = materialize_at(&fixture, &root);
+    // 固定 4096 个合成的应用侧和来源侧资产，两个参考角色。
+    // 原有的三个资产保留各自的认领；其余未分类，不解码任何文件。
+    for name in ["library.sqlite", "source.sqlite"] {
+        let mut c = Connection::open(package.join(name)).unwrap();
+        let tx = c.transaction().unwrap();
+        for i in 3..4096 {
+            let id = format!("synthetic-{i:05}");
+            let filename = format!("{id}.png");
+            if name == "library.sqlite" {
+                tx.execute("INSERT INTO assets(uuid,filename,src_path,width,height,added_at,src_kind) VALUES (?,?,?,120,150,'2026-09-22','orig')",
+                    rusqlite::params![id, filename, root.join("folder").join(&filename).to_str()]).unwrap();
+            } else {
+                tx.execute("INSERT INTO assets(uuid,filename,src_path,width,height,added_at,src_kind,in_scope,trashed) VALUES (?,?,?,120,150,'2026-09-22','orig',1,0)",
+                    rusqlite::params![id, filename, root.join("folder").join(&filename).to_str()]).unwrap();
+            }
+        }
+        tx.commit().unwrap();
+    }
+    // 基线宿主决定要准备的版本；它和候选都用不带 --upgrade 的普通打开来测量。
+    let done = Command::new(&binary).args(["migrate", "--db"]).arg(package.join("library.sqlite")).output().unwrap();
+    assert!(done.status.success(), "benchmark fixture: upgrade: {}", String::from_utf8_lossy(&done.stderr));
+    let backups = package.join("library-backups");
+    if backups.exists() {
+        fs::remove_dir_all(backups).unwrap();
+    }
 }
 
 fn launch(root: &Path, package: &Path, category: &str, upgrade: bool, binary: &Path) -> (Host, String, String) {
@@ -275,7 +325,8 @@ fn load(category: &str) -> Value {
     let path =
         Path::new(env!("CARGO_MANIFEST_DIR")).join(format!("tests/fixtures/baseline/contracts/{category}.json.gz"));
     let mut text = String::new();
-    flate2::read::GzDecoder::new(fs::File::open(&path).unwrap()).read_to_string(&mut text).unwrap();
+    let file = fs::File::open(&path).unwrap_or_else(|error| panic!("{}: {error}", path.display()));
+    flate2::read::GzDecoder::new(file).read_to_string(&mut text).unwrap();
     let fixture: Value = serde_json::from_str(&text).unwrap();
     assert_eq!(fixture["format"], baseline::FORMAT);
     fixture
@@ -826,44 +877,16 @@ fn benchmark_artist_directory() {
 #[test]
 #[ignore = "explicit release performance runner only"]
 fn benchmark_release_host() {
-    if cfg!(debug_assertions) {
-        panic!("benchmark must be compiled --release");
+    let root = benchmark_root().canonicalize().expect("prepared benchmark fixture directory missing");
+    let package = root.join("fixture.pilib");
+    let replacement = root.join("replacement.pilib");
+    for input in [&package, &replacement] {
+        for name in ["library.sqlite", "source.sqlite", "library.json"] {
+            let path = input.join(name);
+            assert!(path.is_file(), "prepared benchmark input missing: {}", path.display());
+        }
     }
     let binary = std::env::var_os("ILLUSTASH_BENCH_BINARY").expect("explicit release binary");
-    let (_scratch, root, package) = materialize(&load("http_api"), "benchmark");
-    // 固定 4096 个合成的应用侧和来源侧资产，两个参考角色。
-    // 原有的三个资产保留各自的认领；其余未分类，不解码任何文件。
-    for name in ["library.sqlite", "source.sqlite"] {
-        let mut c = Connection::open(package.join(name)).unwrap();
-        let tx = c.transaction().unwrap();
-        for i in 3..4096 {
-            let id = format!("synthetic-{i:05}");
-            let filename = format!("{id}.png");
-            if name == "library.sqlite" {
-                tx.execute("INSERT INTO assets(uuid,filename,src_path,width,height,added_at,src_kind) VALUES (?,?,?,120,150,'2026-09-22','orig')",
-                    rusqlite::params![id, filename, root.join("folder").join(&filename).to_str()]).unwrap();
-            } else {
-                tx.execute("INSERT INTO assets(uuid,filename,src_path,width,height,added_at,src_kind,in_scope,trashed) VALUES (?,?,?,120,150,'2026-09-22','orig',1,0)",
-                    rusqlite::params![id, filename, root.join("folder").join(&filename).to_str()]).unwrap();
-            }
-        }
-        tx.commit().unwrap();
-    }
-    // 一个物理上不同的图库包使用同一个图库 ID；每次切换都必须打开那个实例。
-    fn copy_tree(from: &Path, to: &Path) {
-        fs::create_dir(to).unwrap();
-        for entry in fs::read_dir(from).unwrap() {
-            let entry = entry.unwrap();
-            let dest = to.join(entry.file_name());
-            if entry.file_type().unwrap().is_dir() {
-                copy_tree(&entry.path(), &dest);
-            } else {
-                fs::copy(entry.path(), dest).unwrap();
-            }
-        }
-    }
-    let replacement = root.join("replacement.pilib");
-    copy_tree(&package, &replacement);
     // 测量完整过程：启动进程 -> 校验和恢复图库包 -> bootstrap 就绪。
     let mut opens = Vec::new();
     for _ in 0..7 {

@@ -57,7 +57,11 @@
 
 `tools/bench_native_contracts.sh /absolute/release/contracts-executable /absolute/main-host /absolute/candidate-host` 固定对两个显式 release 二进制交错运行各三次，分别取三次独立进程的中位数；测试入口用 `cargo test --release --locked --manifest-path native/terms/Cargo.toml --test contracts --no-run` 构建，debug 入口拒绝测量。main 二进制须从记录的远端 main 提交用 `cargo build --release --locked` 构建并单独保存，不能使用候选替代；脚本不读取用户包，全部输入由本仓库 HTTP 合成契约恢复至新临时目录。
 
-数据集固定为 4,096 张合成资产、2 个参考角色：保留夹具中 3 图的证据与裁决，其余 4,093 图按固定编号/尺寸/日期加入 source 与应用表且未分类，不读取或解码图片。每轮只测原生宿主；启动、SQL 恢复/扩容不计延迟。浏览分页 `limit=100&offset=2000`、计数、单图详情各预热 5 次后测 50 次，标签加到 a/b 两图与撤销各测 20 次；每轮取平均请求时间（包含 loopback HTTP、JSON 解析及核心执行），最后取三轮平均值的中位数。内存为 `wait4` 返回的宿主整个生命周期峰值 RSS，macOS 以字节、Linux 以 KiB 转成 MiB（1,048,576 字节），不含测试进程；这是合成基础宿主口径，不覆盖大图库刷新、模型/worker 峰值或 Windows。
+数据集固定为 4,096 张合成资产、2 个参考角色：保留夹具中 3 图的证据与裁决，其余 4,093 图按固定编号/尺寸/日期加入 source 与应用表且未分类，不读取或解码图片。
+
+计时前一次性重建和扩容合成包，用显式基线宿主的 `migrate --db` 迁移到它要求的版本。两个宿主都以普通模式打开，遇到版本不兼容时基准失败。每轮复制同一份已准备的输入，含物理上独立、图库 ID 相同的切换目标。开库取 7 次宿主启动到 bootstrap 就绪的中位数，切库取 20 次切换到 bootstrap 就绪的中位数（第一次切换预热）。SQL 恢复、扩容、迁移和复制均发生在计时前。
+
+浏览分页 `limit=100&offset=2000`、计数、单图详情各预热 5 次后测 50 次，标签加到 a/b 两图与撤销各测 20 次；每轮取平均请求时间（包含 loopback HTTP、JSON 解析及核心执行），最后取三轮平均值的中位数。内存为 `wait4` 返回的宿主整个生命周期峰值 RSS，macOS 以字节、Linux 以 KiB 转成 MiB（1,048,576 字节），不含测试进程；这是合成基础宿主口径，不覆盖大图库刷新、模型/worker 峰值或 Windows。
 
 用户允许直接接受的门槛：候选内存增加严格小于 10 MiB，各项延迟退化严格小于 20%；脚本逐项打印 accepted/exceeds-threshold，超阈值以非零退出，零/负退化也接受。保持同数据、release、三次中位数，不以单次测量或 debug 数字替换。性能脚本不会更改任何契约期望或既有 golden。
 
