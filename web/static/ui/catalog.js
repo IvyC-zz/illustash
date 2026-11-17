@@ -21,13 +21,15 @@ import {charHash, charRoute, go} from '../core/route.js';
 import {fetchChar, refreshMeta} from '../core/meta.js';
 import {closeInspector} from './detail.js';
 import {renderHeading} from './shell.js';
+import {refreshArtistDir, renderArtistDir} from './artist_dir.js';
 
 // ---------- 角色：书架（作品标签页、海报、分档）和列表 ----------
 // 「角色」页显示什么：书架还是列表、哪个作品标签页、搜索结果、列表的排序和档位。
 export const cast = {mode: prefs.get('castMode', 'shelf'), tab: 'all', list: null, sort: 'count', dir: -1, bucket: 'all', pop: false, popQ: ''};
-async function renderIndex() {
+async function renderIndex(opts) {
   showArea(); closeInspector(); $('selectionBar').hidden = true;
   $('resultCount').textContent = '';
+  if (state.route.section === 'artists') { await renderArtistDir(opts); return; }
   if (state.route.section === 'works') { renderShelf(); return; }
   drawn.clear();
   $('hint').textContent = t('点角色，在图库里只看 TA');
@@ -57,7 +59,10 @@ export async function searchIndex() {
   if (route === state.route && token === session.token && q === $('charSearch').value.trim()) { cast.list = list; drawCast(); }
 }
 // 留给元数据变化后刷新页面的调用方。
-export function renderIndexBody() { if (!onPage(state.route, 'characters')) return; if (state.route.section === 'works') drawShelf(); else { drawCast(); loadActivity(); } }
+export function renderIndexBody() {
+  if (!onPage(state.route, 'characters') || state.route.section === 'artists') return;
+  if (state.route.section === 'works') drawShelf(); else { drawCast(); loadActivity(); }
+}
 const cover = (c, size = 'thumb') => c?.cover ? `<img src="/image?id=${encodeURIComponent(c.cover)}&size=${size}" alt="" loading="lazy" decoding="async">` : '';
 const avatar = (c, px) => `<i class="cast-av" style="width:${px}px;height:${px}px">${cover(c)}</i>`;
 // ---------- 海报的图片：静止时随机一张，指针下看其他的（#293） ----------
@@ -547,8 +552,9 @@ export function wireCatalog() {
   });
 }
 
-// 元数据刷新角色目录，撤销后还要重读作品计数或「只当标签」清单。
-implement({characters: {render: () => renderIndex(), refresh: async why => {
+// 元数据刷新角色目录，撤销后还要重读作品计数或「只当标签」清单；画师子页由 ui/artist_dir.js 自己重读。
+implement({characters: {render: opts => renderIndex(opts), refresh: async why => {
+  if (state.route.section === 'artists') { refreshArtistDir(why); return; }
   if (why === 'nsfw') { forgetActivity(); readActivity(); }
   if (why !== 'undo') return;
   const route = state.route;

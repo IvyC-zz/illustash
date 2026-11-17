@@ -11,6 +11,7 @@ import {canGoBack, cleanup, defaultSort, go, hashFor, historyEntry, noteHistory,
 import {api, readError} from '../core/session.js';
 import {state} from '../core/state.js';
 import {cast, createWork, drawCast, drawShelf, openTagged, renderIndexBody, searchIndex, shelf} from './catalog.js';
+import {dirDrawn, dirHeading, dirToolbar, onDir, wireDirToolbar} from './artist_dir.js';
 import {$, emptyLink, error, helpTip, searchIcon, showArea, wireHelpTip, workSmall} from './dom.js';
 import {renderSettings, settingsSection} from './settings.js';
 import {closeInspector, closeViewer} from './detail.js';
@@ -129,9 +130,10 @@ export function renderChrome() {
   if (view.toolbar === 'none') { bar.innerHTML = ''; return; }
   if (view.toolbar === 'tabs') { bar.innerHTML = tabs; return; }
   if (view.toolbar === 'index') {
-    // 资料库：「角色」用来浏览，「作品」用来管理；两者各自搜索自己的列表。
+    // 资料库：「角色」「画师」用来浏览，「作品」用来管理；各自搜索自己的列表。画师的工具栏在 ui/artist_dir.js（#448）。
     const works = r.section === 'works';
-    const views = `<div class="segmented lib-views" role="tablist" aria-label="${t('资料库')}">${[['', t('角色')], ['works', t('作品')]].map(([v, label]) => `<a role="tab" href="#/characters${v ? '/' + v : ''}" class="${(r.section || '') === v ? 'on' : ''}" aria-selected="${(r.section || '') === v}">${label}</a>`).join('')}</div>`;
+    const views = `<div class="segmented lib-views" role="tablist" aria-label="${t('资料库')}">${[['', t('角色')], ['works', t('作品')], ['artists', t('画师')]].map(([v, label]) => `<a role="tab" href="#/characters${v ? '/' + v : ''}" class="${(r.section || '') === v ? 'on' : ''}" aria-selected="${(r.section || '') === v}">${label}</a>`).join('')}</div>`;
+    if (r.section === 'artists') { bar.innerHTML = views + dirToolbar(); wireDirToolbar(); return; }
     bar.innerHTML = views + `<div class="search-wrap wide">${searchIcon()}<input type="search" id="charSearch" spellcheck="false" autocorrect="off" autocapitalize="off" value="${esc(works ? shelf.q : '')}" placeholder="${works ? t('搜索作品') : t('搜索角色或作品')}" aria-label="${works ? t('搜索作品') : t('搜索角色')}"></div><div class="spacer"></div>` +
       (works ? `<button class="quiet" id="newWork">${t('新建作品')}</button>` : `<button class="quiet" id="taggedButton" title="${t('不算角色、只当标签的吉祥物和玩家化身')}">${t('只当标签')}${state.tagged?.length ? ` <small>${number(state.tagged.length)}</small>` : ''}</button><div class="segmented" id="charMode">${[['shelf', t('书架')], ['list', t('列表')]].map(([v, label]) => `<button data-mode="${v}" class="${cast.mode === v ? 'on' : ''}">${label}</button>`).join('')}</div>`);
     if (works) {
@@ -255,6 +257,7 @@ export function renderHeading() {
 // 页面这一部分注册的处理函数。页面启动时调用一次。
 export function wireShell() {
   onMeta(metaShown);
+  dirDrawn.on(() => { if (onDir(state.route)) renderHeading(); });
   // 后退（#526）：标题左边的「‹」（只在能后退时显示）、Alt+← 或 ⌘[（键盘处理在 ui/grid.js）、鼠标侧键，都走
   // core/route.js 的 stepHistory，只在这个图库的页面之间走。鼠标侧键在 mouseup 时拦下浏览器自己的后退，否则
   // 它会退出图库页面。
@@ -275,7 +278,7 @@ implement({
   character: {drawHeading: drawCharHeading},
   home: {heading: (r, {n}) => [t('首页'), state.recentCount ? t('最近一次同步新加入 {n} 张', {n: number(state.recentCount)}) : '']},
   library: {heading: (r, {n}) => [r.artist ? t('画师 · {name}', {name: esc(artistName(r.artist))}) : r.day ? t('{day} 加入', {day: esc(dayLabel(r.day))}) : r.work ? esc((state.workTree || []).find(w => w.id === r.work)?.name || t('作品筛选')) : r.utag ? '# ' + esc(r.utag) : t('图库'), t('{n} 张', {n})]},
-  characters: {heading: (r, {n}) => [t('资料库'), r.section === 'works' ? t('{n} 部作品', {n: number(state.index?.works?.length || 0)}) + (state.index?.watch?.works.length ? ' · ' + t('关注 {n} 部', {n: number(state.index.watch.works.length)}) : '') : t('{n} 位角色 · {works} 部作品', {n: number(state.chars.length), works: number(new Set(state.chars.map(workKey).filter(k => k !== 'oc' && k !== 'other')).size)}), !r.section && state.localLinks?.length ? `<span class="heading-links"><button class="quiet" id="localLinksButton" title="${t('补上中文名、别名和作品，和已有角色重复的可以合并')}">${t('{n} 个自建角色能对上 Danbooru', {n: number(state.localLinks.length)})}</button></span>` : '']},
+  characters: {heading: (r, {n}) => [t('资料库'), r.section === 'artists' ? dirHeading() : r.section === 'works' ? t('{n} 部作品', {n: number(state.index?.works?.length || 0)}) + (state.index?.watch?.works.length ? ' · ' + t('关注 {n} 部', {n: number(state.index.watch.works.length)}) : '') : t('{n} 位角色 · {works} 部作品', {n: number(state.chars.length), works: number(new Set(state.chars.map(workKey).filter(k => k !== 'oc' && k !== 'other')).size)}), !r.section && state.localLinks?.length ? `<span class="heading-links"><button class="quiet" id="localLinksButton" title="${t('补上中文名、别名和作品，和已有角色重复的可以合并')}">${t('{n} 个自建角色能对上 Danbooru', {n: number(state.localLinks.length)})}</button></span>` : '']},
   audit: {heading: (r, {n}) => [t('随机抽查'), t('还剩 {left} / {n} 张', {left: number(state.pools.audit || 0), n}) + (state.nsfw ? ` · <b>${t('R18 筛选开着：抽查要看全部才准，按 H 切换')}</b>` : '')]},
   unmatched: {heading: (r, {n}) => [t('未识别'), '']},
   skipped: {heading: (r, {n}) => [t('未识别'), '']},
