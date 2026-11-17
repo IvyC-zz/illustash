@@ -115,7 +115,7 @@
 
  "crates/core/src/schema.rs":"c209b0bcb6f7d6b97d8557565042f5e2c3c8c71c78a54b94896e132def1620d3",
 
- "crates/core/src/store.rs":"96741c48b704acb8d7aef81a13136f06b41216f8486fa1cddf8ecd771a57f4b5",
+ "crates/core/src/store.rs":"359adce05ae8dd383981c4c8c23edee6615e2d395e7b8b97731021529a08798c",
 
  "crates/core/src/strict_json.rs":"dc1bf3fd4e0ceb6316af6a95ab00915c52ffdd8fd759544326f371df39e67da6",
 
@@ -315,9 +315,9 @@
 
  "native/terms/src/app_profiles.rs":"34b2f5ab3486b4d88b01aebad9cf82f45a3fbfd286123b479733a3434f04abae",
 
- "native/terms/src/app_provenance.rs":"af3104f3ac2255ebb325ee2719eaf9a70258eb95d73f076a9b94941c6fdc3239",
+ "native/terms/src/app_provenance.rs":"b9c35c0a08b62db14e4706509a6db854059cfde6a39c10918eb97d30c52b5b1d",
 
- "native/terms/src/app_provenance_cache.rs":"440757a5a3d3fd37e79ac5a4400befe0503e3d792dd213b4cd2ff6f5af1655f4",
+ "native/terms/src/app_provenance_cache.rs":"d5b6a51a203c8697f56bc98a9c5c2cb652f2794218756966619d92c21f42448f",
 
  "native/terms/src/app_provenance_net.rs":"237b7f45478031c5fa79ea3eca96d85417e6c6d4c8e6461ed1463bddea14610c",
 
@@ -592,7 +592,7 @@
  "crates/core/src/character_names.rs":{"database-write":{"UPDATE:term_names":1,"dynamic-or-wrapper":2,"INSERT INTO:term_names":1,"UPDATE:set":1}},
  "native/terms/src/app_migration_sql/effects.sql":{"database-write":[126]},
  "native/terms/src/app_provenance_sources.rs":{"database-write":{"INSERT OR IGNORE INTO:artists":1,"@0":10,"@243":1,"UPDATE:leads":2,"INSERT OR IGNORE INTO:seeds":2,"@1":4,"@244":1,"INSERT INTO:artist_names|UPDATE:set":1,"INSERT OR REPLACE INTO:ext_cache":1,"@236":3,"INSERT OR REPLACE INTO:image_sources":2,"INSERT OR REPLACE INTO:image_artists":1,"INSERT OR IGNORE INTO:image_artists":1}},
- "native/terms/src/app_provenance_cache.rs":{"database-write":{"ALTER TABLE:native_delivery":1,"ALTER TABLE:ref_sigs":1,"COMMIT":1,"CREATE TABLE IF NOT EXISTS:content_versions":1,"CREATE TABLE IF NOT EXISTS:native_delivery":1,"CREATE TABLE IF NOT EXISTS:native_meta":1,"DELETE FROM:image_artists":1,"DELETE FROM:image_sources":1,"DELETE FROM:lookups":1,"DELETE FROM:marks":1,"INSERT INTO:content_versions|UPDATE:set":1,"INSERT INTO:native_delivery":1,"PRAGMA:c.execute_batch(\"pragma foreign_keys":1,"UPDATE:native_delivery":2,"dynamic-or-wrapper":3}},
+ "native/terms/src/app_provenance_cache.rs":{"database-write":{"PRAGMA:c.execute_batch(\"pragma foreign_keys":1,"dynamic-or-wrapper":5,"ALTER TABLE:ref_sigs":1,"CREATE TABLE IF NOT EXISTS:native_delivery":1,"ALTER TABLE:native_delivery":2,"CREATE TABLE IF NOT EXISTS:native_meta":1,"CREATE TABLE IF NOT EXISTS:content_versions":1,"DELETE FROM:lookups":1,"DELETE FROM:image_sources":1,"DELETE FROM:image_artists":1,"DELETE FROM:marks":1,"INSERT INTO:content_versions|UPDATE:set":1,"COMMIT":2,"INSERT INTO:native_delivery":1,"UPDATE:native_delivery":2}},
  "crates/core/src/character_sql/memberships.sql":{"database-write":["INSERT INTO:memberships"]},
  "crates/core/src/character_sql/single_assets.sql":{"database-write":["INSERT INTO:single_assets"]},
  "native/terms/src/app_commands.rs":{"http-branch":[247,231,74,259,260,88,24,261,"/api/favorite",331,"/api/similar/seen"],"database-write":[[0,6],[1,3],[3,2],175,262,34,178,263,190,[35,3]]},
