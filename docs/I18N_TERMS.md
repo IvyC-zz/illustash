@@ -25,7 +25,8 @@
 | 人工整理（记录） | your organizing | 用户手工做的判断，备份和撤销都围绕它 |
 | 任务面板 | task panel | |
 | 大图 | Large view | |
-| 收藏 | saved | 收藏 {n} 张 {n} saved；收藏曲线 Collection chart |
+| 收藏 | favorite | 人工标记的收藏（#447）：侧栏「收藏」Favorites，按钮「收藏」Favorite、「取消收藏」Unfavorite。存进图库的图不叫收藏，叫「加入」 |
+| 加入 | saved / added | 图进图库：共 {n} 张 {n} saved；每月加入张数 Collection chart；最后加入 Last saved |
 
 ## 页面与分组
 

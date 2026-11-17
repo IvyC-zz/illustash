@@ -10,6 +10,7 @@ import {implement, pageOf, viewOf} from '../core/pages.js';
 import {canGoBack, cleanup, defaultSort, go, hashFor, historyEntry, noteHistory, parseHash, replaceRoute, setRoute, sortKey, stepHistory} from '../core/route.js';
 import {api, readError} from '../core/session.js';
 import {state} from '../core/state.js';
+import {navFor} from '../core/favorites.js';
 import {cast, createWork, drawCast, drawShelf, openTagged, renderIndexBody, searchIndex, shelf} from './catalog.js';
 import {dirDrawn, dirHeading, dirToolbar, onDir, wireDirToolbar} from './artist_dir.js';
 import {$, emptyLink, error, helpTip, searchIcon, showArea, wireHelpTip, workSmall} from './dom.js';
@@ -73,7 +74,9 @@ export async function applyRoute() {
   if (!samePage) closeInspector();
   $('sidebar').classList.remove('mobile-open');
   const page = pageOf(route);
-  for (const a of document.querySelectorAll('.nav')) a.classList.toggle('active', a.dataset.page === page.nav);
+  // 侧栏「收藏」是只按收藏筛选的图库（#447），这时亮它、不亮「图库」。
+  const nav = navFor(route, page);
+  for (const a of document.querySelectorAll('.nav')) a.classList.toggle('active', a.dataset.page === nav);
   $('settingsLink').classList.toggle('active', page.nav === 'settings');
   setChar(null);
   if (page.prepare && await page.prepare(route) === false) return;

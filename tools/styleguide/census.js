@@ -1,9 +1,9 @@
 // 由 tools/styleguide/census.py 从 web/static/app.css 生成，不要手改。
 window.CENSUS = {
  "source": "web/static/app.css",
- "sha256": "7332e9eb291e73f8f160053cbff96d9f72c3cf06d712fe663067e661b4db60a2",
- "lines": 1401,
- "rules": 1236,
+ "sha256": "aeb4a6380b97e5f6b89833f6845371c2b3469912751009e943159a7ab4a31584",
+ "lines": 1418,
+ "rules": 1249,
  "themeVars": {
   "light": {
    "--canvas": "#f4f4f6",
@@ -74,6 +74,8 @@ window.CENSUS = {
    "--scroll-thumb": "#d7d7de",
    "--select-arrow": "url(\"data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 20 20'%3E%3Cpath d='m6 8 4 4 4-4' fill='none' stroke='%238b8b94' stroke-width='1.6' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E\")",
    "--r18-on": "#fff",
+   "--fav": "#e5484d",
+   "--on-image": "#fff",
    "--ok": "#34c38f",
    "--bad": "#d9534f",
    "--err": "#b5523b"
@@ -145,14 +147,16 @@ window.CENSUS = {
    "--tag-on-ink": "var(--accent-ink)",
    "--scroll-thumb": "#4a4a52",
    "--select-arrow": "url(\"data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 20 20'%3E%3Cpath d='m6 8 4 4 4-4' fill='none' stroke='%238d8d96' stroke-width='1.6' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E\")",
-   "--r18-on": "#2a0f17"
+   "--r18-on": "#2a0f17",
+   "--fav": "#ff6b6f",
+   "--on-image": "#fff"
   },
   "uses": {
    "--ink": 44,
    "--canvas": 11,
    "--fs-13": 24,
    "--hair": 30,
-   "--sh": 35,
+   "--sh": 36,
    "--muted": 117,
    "--sheet": 54,
    "--soft": 65,
@@ -178,8 +182,10 @@ window.CENSUS = {
    "--faint": 15,
    "--z-popover": 1,
    "--gutter": 12,
-   "--z-page-2": 5,
+   "--z-page-2": 6,
    "--line": 51,
+   "--on-image": 2,
+   "--fav": 3,
    "--fs-11": 98,
    "--z-page-4": 2,
    "--z-page-3": 2,
@@ -378,6 +384,13 @@ window.CENSUS = {
      "--scroll-thumb",
      "--select-arrow",
      "--r18-on"
+    ]
+   },
+   {
+    "title": "收藏（#447）：心形的颜色；图片上的图标用的白色",
+    "names": [
+     "--fav",
+     "--on-image"
     ]
    },
    {
@@ -625,7 +638,7 @@ window.CENSUS = {
    {
     "name": "--z-page-2",
     "value": "2",
-    "uses": 5
+    "uses": 6
    },
    {
     "name": "--z-page-3",
@@ -1072,7 +1085,7 @@ window.CENSUS = {
    }
   ]
  },
- "rgbaCalls": 88,
+ "rgbaCalls": 89,
  "fontSize": {
   "kinds": 22,
   "uses": 285,
@@ -1559,16 +1572,16 @@ window.CENSUS = {
  },
  "padding": {
   "kinds": 107,
-  "uses": 211,
+  "uses": 212,
   "table": [
    {
     "value": "0",
-    "uses": 20,
+    "uses": 21,
     "examples": [
      ".heading-main h1>.link-button,.heading-main h1>input",
+     ".fav-mark",
      ".preview",
-     ".alt kbd",
-     "dialog.palette"
+     ".alt kbd"
     ]
    },
    {
@@ -1789,8 +1802,8 @@ window.CENSUS = {
   ]
  },
  "height": {
-  "kinds": 46,
-  "uses": 87,
+  "kinds": 47,
+  "uses": 89,
   "table": [
    {
     "value": "height: 1px",
@@ -1912,8 +1925,9 @@ window.CENSUS = {
    },
    {
     "value": "height: 19px",
-    "uses": 1,
+    "uses": 2,
     "examples": [
+     ".fav-mark svg",
      ".nav-icon svg"
     ]
    },
@@ -1953,6 +1967,13 @@ window.CENSUS = {
     "uses": 1,
     "examples": [
      ".img-broken"
+    ]
+   },
+   {
+    "value": "height: 26px",
+    "uses": 1,
+    "examples": [
+     ".fav-mark"
     ]
    },
    {
@@ -2144,7 +2165,7 @@ window.CENSUS = {
  },
  "zIndex": {
   "kinds": 16,
-  "uses": 24,
+  "uses": 25,
   "table": [
    {
     "value": "var(--z-page-1)",
@@ -2155,12 +2176,12 @@ window.CENSUS = {
    },
    {
     "value": "var(--z-page-2)",
-    "uses": 5,
+    "uses": 6,
     "examples": [
      ".check",
+     ".fav-mark",
      ".settings-nav",
-     ".strip-nav",
-     ".cast-poster .ticks"
+     ".strip-nav"
     ]
    },
    {
