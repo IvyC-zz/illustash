@@ -19,6 +19,8 @@
   --btn-hover-filter:brightness(.96);--badge-bg:var(--soft);--badge-ink:var(--ink2);--tag-on-ink:var(--accent);--scroll-thumb:#d7d7de;
   --select-arrow:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 20 20'%3E%3Cpath d='m6 8 4 4 4-4' fill='none' stroke='%238b8b94' stroke-width='1.6' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E");
   --r18-on:#fff;
+  /* 收藏（#447）：心形的颜色；图片上的图标用的白色 */
+  --fav:#e5484d;--on-image:#fff;
   /* 不随主题变化的状态色 */
   --ok:#34c38f;--bad:#d9534f;--err:#b5523b}
 /* 暗色主题：html[data-theme=dark]，由 theme.js 设置；颜色成对写在这里，规则里只引用变量。 */
@@ -42,7 +44,8 @@
   --btn-hover-filter:brightness(1.12);--badge-bg:var(--accent-soft);--badge-ink:var(--accent-ink);--tag-on-ink:var(--accent-ink);
   --scroll-thumb:#4a4a52;
   --select-arrow:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 20 20'%3E%3Cpath d='m6 8 4 4 4-4' fill='none' stroke='%238d8d96' stroke-width='1.6' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E");
-  --r18-on:#2a0f17}
+  --r18-on:#2a0f17;
+  --fav:#ff6b6f;--on-image:#fff}
 /* TOKENS-BEGIN */
 /* 字号 --fs-N、圆角 --radius-N、间距 --space-N（gap 与 padding 共用）、控件高度 --h-N、层级 --z-*：数字就是 px 值。新写的值取最近的一档，不要再写档位之外的数。 */
 :root{--fs-10:10px;--fs-11:11px;--fs-12:12px;--fs-13:13px;--fs-14:14px;--fs-15:15px;--fs-16:16px;--fs-20:20px;--fs-22:22px}
@@ -142,6 +145,16 @@ p{margin:0;font-size:var(--fs-12);line-height:1.6}
 .card.selected .check{opacity:1;border-color:#fff}
 .card.selected .check::after{content:"";position:absolute;left:6px;top:2.5px;width:5px;height:10px;border:solid #fff;border-width:0 2px 2px 0;transform:rotate(45deg)}
 .machine-dot{position:absolute;right:7px;bottom:7px;width:8px;height:8px;border-radius:var(--radius-round);border:1.5px solid var(--line);box-shadow:0 0 0 .5px #0004;background:transparent}
+/* 收藏的心形（#447）：卡片右下角，收藏过的一直显示实心，没收藏的悬停时出现空心；.still 只显示、不能点（小格子、首页） */
+.fav-mark{position:absolute;z-index:var(--z-page-2);right:4px;bottom:4px;width:26px;height:26px;display:inline-flex;align-items:center;justify-content:center;padding:0;border:0;background:transparent;color:var(--on-image);opacity:0;cursor:pointer;transition:opacity .12s ease,transform .12s ease}
+.fav-mark svg{width:19px;height:19px;fill:transparent;stroke:currentColor;stroke-width:1.7;stroke-linejoin:round;filter:drop-shadow(0 0 1.5px rgba(var(--sh),.55))}
+.card:hover .fav-mark,.fav-mark.on{opacity:1}
+.fav-mark:hover{transform:scale(1.1)}
+.fav-mark.on{color:var(--fav)}
+.fav-mark.on svg{fill:currentColor;stroke:var(--on-image);stroke-width:1.4}
+.fav-mark.still{pointer-events:none}
+.fav-mark.still:not(.on){display:none}
+.machine-dot~.fav-mark{right:18px}
 .chips{position:absolute;left:6px;bottom:6px;display:flex;gap:var(--space-4);flex-wrap:wrap;max-width:calc(100% - 24px)}
 .chips span{font-size:var(--fs-10);-webkit-backdrop-filter:blur(10px);backdrop-filter:blur(10px)}
 .caption{height:28px;display:flex;align-items:center;padding:0 var(--space-8);gap:var(--space-4);flex-shrink:0;overflow:hidden;white-space:nowrap}
@@ -232,6 +245,7 @@ details[open].inspector-section summary::before{transform:rotate(90deg)}
 .viewer-bar .none-yet{color:#9696a2}
 .viewer-bar .alts{margin:0}
 .viewer-bar .alt{background:#ffffff0d;border-color:#ffffff24;color:#e2e2e8}
+.viewer-bar .fav-act.on{color:var(--fav)}
 .viewer-bar .alt kbd,.viewer-bar .add-identity kbd{color:#a2a2b0;border-color:#ffffff33;border-style:solid;border-width:1px;background:transparent;box-shadow:none}
 
 /* 命令面板与对话框 */
@@ -715,6 +729,8 @@ body:not(.show-rail-count) .nav-count:not(#countHome){display:none}
 .inspector-head{display:flex;gap:var(--space-4);padding:var(--space-12) var(--space-14) var(--space-8)}
 .inspector-head .icon{width:var(--h-32);height:var(--h-32);border-radius:var(--radius-pill)}
 .inspector-head .icon svg{width:16px;height:16px;fill:none;stroke:currentColor;stroke-width:1.7;stroke-linecap:round;stroke-linejoin:round}
+.inspector-head .fav-toggle.on{color:var(--fav)}
+.inspector-head .fav-toggle.on svg{fill:currentColor}
 .preview{height:280px;box-shadow:inset 0 0 0 1px var(--hair)}
 .inspector>*{flex-shrink:0}
 .cc-card{display:grid;gap:var(--space-2);padding-bottom:var(--space-20);min-width:0}
@@ -849,6 +865,7 @@ body:has(#settingsPage:not([hidden])) .nudge,body:has(#selectionBar:not([hidden]
 .home-cap{position:absolute;left:0;right:0;bottom:0;display:grid;gap:var(--space-2);padding:56px var(--space-16) var(--space-14);background:linear-gradient(transparent,rgba(12,12,18,.18) 40%,rgba(12,12,18,.58));color:#fff;text-align:left;pointer-events:none}
 .home-cap b{font-size:var(--fs-display-21);font-weight:750;letter-spacing:-.5px;line-height:1.15}
 .home-cap small{font-size:var(--fs-11);opacity:.85}
+.home-j .fav-mark{top:4px;bottom:auto}
 .home-badge{position:absolute;right:8px;bottom:8px;font-size:var(--fs-11);font-weight:650;color:#fff;background:rgba(18,18,24,.42);-webkit-backdrop-filter:blur(12px);backdrop-filter:blur(12px);border-radius:var(--radius-pill);padding:var(--space-4) var(--space-8);pointer-events:none}
 .home-day.focus .home-j:not(.hit){opacity:.28;filter:saturate(.4)}
 .home-more-line{text-align:center;color:var(--muted);font-size:var(--fs-12);padding:var(--space-10) 0 var(--space-20)}

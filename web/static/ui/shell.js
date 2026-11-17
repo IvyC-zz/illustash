@@ -17,6 +17,7 @@ import {closeInspector, closeViewer} from './detail.js';
 import {filters, markSelectButton, placeFor, rememberPlace, reload, resetForRoute, selectAll, setNsfw, short, sweep, toggleFit, toggleSelecting} from './grid.js';
 import {guideTick} from './guide.js';
 import {createLayer} from './overlay.js';
+import {navFor} from '../core/favorites.js';
 import {listNav} from './combo.js';
 import {editProfile, markOc, mergeCharacter, openLocalLinks, openRelate, splitOc, toggleMascot, toggleOc} from './palette.js';
 
@@ -74,7 +75,9 @@ export async function applyRoute() {
   if (!samePage) closeInspector();
   $('sidebar').classList.remove('mobile-open');
   const page = pageOf(route);
-  for (const a of document.querySelectorAll('.nav')) a.classList.toggle('active', a.dataset.page === page.nav);
+  // 侧栏「收藏」是只按收藏筛选的图库（#447），这时亮它、不亮「图库」。
+  const nav = navFor(route, page);
+  for (const a of document.querySelectorAll('.nav')) a.classList.toggle('active', a.dataset.page === nav);
   $('settingsLink').classList.toggle('active', page.nav === 'settings');
   setChar(null);
   if (page.prepare && await page.prepare(route) === false) return;
