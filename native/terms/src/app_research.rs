@@ -682,7 +682,7 @@ fn copy_rows(
     while let Some(row) = rows.next()? {
         check()?;
         for i in 0..fields.len() {
-            insert.raw_bind_parameter(i + 1, row.get_ref(i)?)?;
+            insert.raw_bind_parameter(i + 1, rusqlite::types::ToSqlOutput::Borrowed(row.get_ref(i)?))?;
         }
         insert.raw_execute()?;
     }
@@ -1825,8 +1825,7 @@ mod tests {
         assert!(accept().is_ok());
         fs::write(f.root.join("a.png"), "new external content").unwrap();
         assert!(conflict(&accept()));
-        fs::write(f.root.join("a.png"), "a").unwrap();
-        // 重建快照才能采纳新的原图修改时间。独立核对源库的版本失效分支。
+        // 独立核对源库的版本失效分支。
         let old =
             read_snapshot(&[&src], || source_digest(&src, &inputs, Some(&taken.hashes.source), &|| Ok(()))).unwrap();
         f.source().execute("INSERT INTO embeddings VALUES ('a','ccip',X'01')", []).unwrap();
