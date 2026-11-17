@@ -30,15 +30,17 @@ for (const [name, method] of [['works', 'renderShelf'], ['characters', 'searchIn
   });
 }
 test('a late failed watch query cannot overwrite newer local results', async () => {
+  const page = web.fakePage();
   const {wireWatchAdd} = await web.load('ui/catalog.js'), {session} = web.core();
-  const pending = []; const input = {value: 'A', setAttribute() {}}, menu = {};
-  session.token = 'a';
-  globalThis.document = {getElementById: id => id === 'watchAdd' ? input : menu, activeElement: null};
+  const pending = [], input = page.el('watchAdd'), menu = page.el('watchMenu');
+  input.value = 'A'; session.token = 'a';
   globalThis.fetch = () => new Promise((resolve, reject) => pending.push({resolve: body => resolve({status: 200, ok: true, json: async () => body}), reject}));
-  const setTimeout = globalThis.setTimeout; globalThis.setTimeout = () => 0;
+  // 防抖立刻执行：两次读取都在等回答。
+  const setTimeout = globalThis.setTimeout; globalThis.setTimeout = fn => { fn(); return 0; };
+  const focus = () => { for (const fn of input.listeners.focus) fn(); };
   try {
     wireWatchAdd({watch: {works: []}}, () => {});
-    input.onfocus(); input.value = 'B'; input.onfocus();
+    focus(); input.value = 'B'; focus();
     pending[1].resolve([{id: 'b', name: 'B', tag: 'b', watchable: true}]); await tick(); await tick();
     const current = menu.innerHTML; assert.match(current, />B</);
     pending[0].reject(new Error('old failure')); await tick(); await tick(); assert.equal(menu.innerHTML, current);

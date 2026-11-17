@@ -891,6 +891,11 @@ fn package_info(place: &Place, job: impl FnOnce() -> Value) -> Json {
     }))
 }
 
+/// 正在进行或刚结束的下载、导入（`GET /api/models` 的 `job`），只读内存；桌面外壳用它（#451）。
+pub(crate) fn job() -> Value {
+    APP.snapshot()
+}
+
 /// GET /api/models.
 pub(crate) fn info(resources: &Path) -> Result<Json> {
     let place = Place::app(resources)?;

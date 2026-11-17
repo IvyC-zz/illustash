@@ -225,6 +225,8 @@ fn read(request: &Request, host: &Host, session: &Session, path: &str) -> Result
     match path {
         "/api/diagnostics" => Ok(Some((crate::diagnostics::report().into(), 200))),
         "/api/provenance" => session.provenance.info().map(|v| Some((v, 200))),
+        // 上次检查时每个关注作品的覆盖情况（#561）；/api/index 的回复冻结，另开这个路由。
+        "/api/index/coverage" => Ok(Some((session.index.coverage(), 200))),
         "/api/index" => {
             if progress(request) {
                 Ok(Some((session.index.progress(), 200)))
@@ -264,6 +266,14 @@ fn read(request: &Request, host: &Host, session: &Session, path: &str) -> Result
             crate::app_onboarding::Onboarding::read(session, &host.root, &session.context(&host.tags), works)
                 .map(|p| Some((p, 200)))
         }
+        // 用图动作（#450）：能不能拖出（只在桌面 App 里），以及最近一次导出到文件夹的状态。
+        "/api/files" => Ok(Some((
+            Json::object([
+                ("drag", crate::app_desktop::available().into()),
+                ("export", session.asset_exports.state(session.generation)),
+            ]),
+            200,
+        ))),
         // 导入槽位属于应用：切换图库后，页面仍能读到上一次导入为什么停下。
         "/api/imports" => Ok(Some((host.imports.state(), 200))),
         "/api/human-conclusions" => Ok(Some((
@@ -289,6 +299,11 @@ fn read(request: &Request, host: &Host, session: &Session, path: &str) -> Result
         }
         "/api/settings" => host.library_settings(&session.library).map(|mut p| {
             p.set("tasks", Json::object([("similar", session.research.similar_state())]));
+            // 只有桌面外壳读的全应用设置（#451）：浏览器里打开的图库页没有这一节。
+            if crate::app_desktop::available() {
+                let after = crate::app_preferences::after_tasks();
+                p.set("desktop", Json::object([(crate::app_preferences::AFTER_TASKS, after.into())]));
+            }
             Some((p, 200))
         }),
         "/api/libraries" => libraries(host, session).map(|p| Some((p, 200))),

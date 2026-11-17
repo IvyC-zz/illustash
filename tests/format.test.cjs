@@ -25,3 +25,12 @@ test('a UTC timestamp shows as the local date', () => {
   assert.equal(localDate('2026-11-01'), '11 月 1 日');
   assert.equal(localDate(''), '');
 });
+
+// 缩略图按物理像素选档（#452）：CSS 尺寸乘屏幕倍率和 260 比；倍率按 1 封底，1 倍屏的结果和只看 CSS 像素一样。
+test('thumbnail tier follows physical pixels', () => {
+  const {thumbSize, screenScale} = web.core();
+  assert.deepEqual([180, 260, 261].map(px => thumbSize(px, 1)), ['thumb', 'thumb', 'medium']);
+  assert.deepEqual([130, 131, 180].map(px => thumbSize(px, 2)), ['thumb', 'medium', 'medium']);
+  assert.deepEqual([180, 261].map(px => thumbSize(px, .5)), ['thumb', 'medium']);
+  assert.deepEqual([undefined, 0, NaN, .5, 1.5, 2].map(screenScale), [1, 1, 1, 1, 1.5, 2]);
+});

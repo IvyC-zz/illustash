@@ -65,10 +65,23 @@
 | 全量、`local_acceptance.py run`、单独的 release 构建 | `collab_run.py run -- <命令>` | 占 heavy 槽，被占时排队 |
 | 计时、性能测量 | `collab_run.py timing -- <命令>` | 等待期间不占槽：先等 heavy 和 vm 都空出、且没有普通 `run` 在排队（有就让它们先走），再等整机 CPU 最近 30 秒平均占用不超过 20%，然后同时占两个槽开始；已开跑的照常跑完。槽位空着、CPU 却累计 15 分钟都没闲下来，就退出 75 并列出最占 CPU 的进程。门槛可在 `run.json` 的 `timing` 一节或用 `--idle-cpu`、`--idle-for`、`--idle-timeout` 调。开跑时 stderr 有一行 `CPU idle: …% busy on average over the last 30s (max …; limit …)`，照抄进 PR 的测量口径 |
 | 虚拟机 | `collab_run.py run --slot vm -- tart run …` | 见下文「macOS 实机测试」 |
-| Windows 远端构建与验收 | `collab_run.py run --slot windows -- …` | 与本机槽位互不阻塞 |
+| Windows 远端构建与验收 | `collab_run.py run --slot windows -- …` | 与本机槽位互不阻塞。容量 2（本机 `run.json` 的 `slots.windows.capacity`），对应验收机的两份常驻检出，见下文「Windows 验收」；加 `--exclusive` 时等两个位置都空出、一起占下，用于要独占验收机的计时和验收 |
 | 开发期的编译和定向测试 | `collab_run.py bg -- <命令>` | 不排队，直接以后台优先级运行 |
 
 `bg` 在 macOS 上用 `taskpolicy -b`：进程只跑能效核，磁盘 I/O 被节流，cargo、rustc、测试进程和 Python 子进程都继承（`ps -o pri=` 显示 4，普通进程是 31）。其他系统退回 `nice -n 10`，没设 `CARGO_BUILD_JOBS` 时设为核数的一半。在 `run` / `timing` 里面调用 `bg` 时保持正常优先级，所以全量和计时不会被降级。对时间敏感的定向测试在后台优先级下失败时，先在 `run` 里重跑排除负载，再下结论（#219）。
+
+**检查放哪台机器**（2026-11-16 用户定，#587）：多个会话并行时，本机的负载主要来自各工作树以后台优先级跑的编译和定向测试，它们不占槽，排队管不住；Windows 验收机核数更多，平时大多闲着。所以开发期的定向检查按下表分到两台机器：
+
+| 检查 | 放哪 | 怎么跑 |
+|---|---|---|
+| 定向 Rust 测试、clippy，不碰 macOS 专用代码 | Windows 验收机（优先） | `collab_run.py run --slot windows -- win_run.sh --steps terms-clippy,terms-test <head>`，步骤名见 `win_run.sh` 开头；另加定向 unittest 用 `--python "tests.x"` |
+| `cargo fmt --check` | Mac | 验收机没装 rustfmt；fmt 不编译，直接跑 |
+| 碰到 macOS 专用代码（`cfg(target_os = "macos")` 的分支）的编译、clippy 和测试 | Mac | `collab_run.py bg -- cargo …` |
+| 虚拟机走查要用的 macOS 构建 | Mac | release 构建，`collab_run.py run -- …` 排 heavy 槽 |
+| 界面级的 `tests.test_frontend_architecture`、`tests.test_styleguide_sync` | PR 上的 CI | `ci.yml` 的「Frontend checker tests」一步；CI 只在非草稿 PR 上跑，草稿阶段要看结果就在本机跑 |
+| 合入门槛 | Mac | 集成会话在候选上跑 `tools/check_all.sh`，不变 |
+
+验收机上的结果只代表 Windows：碰到平台分支的改动，两边各跑一次。clippy 在 Windows 上看不到 `cfg(target_os = "macos")` 的代码，反过来也一样。
 
 **拦截**：Claude Code 和 Codex 都接了 `PreToolUse` 钩子，按本机的 `~/.config/agent-collab/run.json` 拦下没按规定运行的命令，并给出改写后的完整命令。2026-10-19 起的范围：
 
@@ -88,6 +101,16 @@
 **编译缓存（sccache）**：2026-11-12 起，本机 illustash 的开发编译共用一份 sccache 缓存；全量、计时、`local_acceptance`、release 构建和 `cargo run` 不走缓存，编译行为不变。用户级的 `~/.cargo/config.toml` 用 `[build] rustc-wrapper` 指向包装脚本 `~/.local/bin/illustash-rustc-wrapper`。这个脚本只在四个条件同时满足时调 sccache：输出目录在 illustash 的检出或 worktree 里，调用的是 rustc 本身，不是 incremental 编译，进程是后台优先级。不满足时直接执行 rustc，所以本机其他 Rust 项目不受影响。这样分是因为 sccache 的编译由常驻服务进程执行，服务的优先级取自启动它的那个进程，`taskpolicy -b` 不会随每次请求传过去。服务如果由普通进程启动，`bg` 编译在未命中时会跑到性能核上；反过来，全量又会被降到能效核。官方文档规定同一份本地缓存只能由一个服务使用，所以只让后台编译用，服务也总在后台优先级下启动。仓库内的 `.cargo/config.toml` 不加 wrapper，因为 Windows 验收机和 CI 上没有 sccache。效果和测量口径见 [#240 的评论](https://github.com/shio-vinyl/illustash/issues/240#issuecomment-6806900035)。
 
 用法：`illustash-rustc-wrapper --stats` 查看命中率和缓存占用；单条命令前加 `ILLUSTASH_SCCACHE=0` 临时不用缓存；回退就删掉 `~/.cargo/config.toml` 里的 `rustc-wrapper` 一行。缓存放在 `~/Library/Caches/sccache-illustash`，上限 10 GB（`SCCACHE_CACHE_SIZE`）。加上或去掉 wrapper 都不会让已有的 target 重新编译。`local_acceptance.py` 会记录 `~/.cargo/config.toml` 的摘要，所以这个文件一改，已有的验收记录下次复用时就会以「环境改变」被拒一次，重跑一次 `local_acceptance.py run` 就能生成新记录。
+
+**#587 复测和自家 crate 的限制**（2026-11-17）：同一改动（main `49703ec4` 上往 `native/terms/src/app_names.rs` 追加一个函数）在三个新建的工作树里先后跑 `cargo test --locked --no-run --all-features --manifest-path native/terms/Cargo.toml`，都从空 target 开始，用正式的包装脚本、另用一套端口和缓存目录，`taskpolicy -b`（同 `bg`），经 `collab_run.py timing` 开跑（开跑前 30 秒平均 19.6%，门槛 20%；跑的过程中别的会话的后台编译没停，1 分钟负载 8～12），每项单次，Apple M2 8 核、macOS 26.7.1、Rust 1.94.1：
+
+| 情况 | 墙钟 | Rust 命中 |
+|---|---|---|
+| 第一个工作树，sccache 空缓存 | 913 秒 | 0 / 153 |
+| 第二个工作树，缓存已热 | 506 秒 | 117 / 153（76%） |
+| 第三个工作树，不开 sccache（`ILLUSTASH_SCCACHE=0`） | 863 秒 | — |
+
+第二个工作树比不开 sccache 快约四成，空缓存时多花约 6%，缓存共 144 MiB。没命中的是 illustash 自己的 crate 和带 build script 的依赖（实测 `crates/core` 时，第二个工作树统计里 6 个未命中，服务日志里报未命中的是 `illustash_core`、`proc_macro2`、`serde`、`serde_core`、`serde_json`、`libsqlite3_sys`、`rusqlite`）。sccache 0.19 把 `CARGO_MANIFEST_DIR`、`OUT_DIR` 这类带工作树绝对路径的环境变量算进缓存键，换一个工作树就对不上；关掉 incremental（`CARGO_INCREMENTAL=0`）、再设 `SCCACHE_BASEDIRS` 指向各工作树根目录，未命中数一样，所以 wrapper 维持上面的接法，不为自家 crate 关 incremental。自家 crate 要省编译，只能靠把定向检查挪到验收机（见上文「检查放哪台机器」）。
 
 ## 修改测试的导航
 
@@ -326,9 +349,15 @@ python3 -m tools.ui_walk list                      # 流程和它们拦的 #386 
 
 ## Windows 验收（常驻检出）
 
-2026-11-12 起（#240），Windows 验收机上的定向检查和完整 Windows 检查都在同一个常驻检出里增量编译，不再每次新建目录冷编译、跑完删掉。验收机经本机的 SSH 别名访问，主机名、IP 和 SSH 配置不写进仓库。
+2026-11-12 起（#240），Windows 验收机上的定向检查和完整 Windows 检查都在常驻检出里增量编译，不再每次新建目录冷编译、跑完删掉。2026-11-17 起（#587）有两份常驻检出，同一时间能跑两个作业。验收机经本机的 SSH 别名访问，主机名、IP 和 SSH 配置不写进仓库。
 
-**布局**：验收机上的 `D:\illustash-build\persistent`。`src` 是 git 检出（本地分支 `win-acceptance`）；`sccache` 是编译缓存；`runs\<run-id>` 放每次的步骤日志、`status.txt` 和 sccache 统计；`tools` 放入口脚本（`run.cmd`、`run.ps1`、`pyrun.py`、`clean.ps1`）和 sccache。入口脚本和本机这一侧的驱动脚本 `win_run.sh` 都不进仓库，因为里面有 SSH 别名。
+**布局**：验收机上的 `D:\illustash-build\persistent`。`src` 和 `src2` 是两份互相独立的 git 检出（`src2` 从 `src` 本地克隆，各自的本地分支 `win-acceptance`）；`sccache` 是两份共用的编译缓存；`runs\<run-id>` 放每次的步骤日志、`status.txt` 和 sccache 统计；`tools` 放入口脚本（`run.cmd`、`run.ps1`、`pyrun.py`、`clean.ps1`）和 sccache。入口脚本和本机这一侧的驱动脚本 `win_run.sh` 都不进仓库，因为里面有 SSH 别名。
+
+**两份检出**（#587）：
+- `collab_run.py` 经环境变量 `COLLAB_RUN_SLOT_INDEX` 告诉 `win_run.sh` 拿到的是 `windows` 槽的第几个位置，0 用 `src`，1 用 `src2`；`win_run.sh --checkout src|src2` 可以手动指定。同一时间两个作业不会落到同一份检出上；验收机上每份检出另有一把锁（`src` 沿用 `lock.txt`，`src2` 是 `lock-src2.txt`），同一份已有作业在跑时报 `busy` 退出。
+- 按检出分开的：锁、toolchain 记录、临时目录（`tmp\<检出>`）、送过去的 bundle 和 target。两份共用的：sccache 缓存和服务。服务不再每次结束时停掉，空闲 30 分钟后自己退出；统计不清零，每次运行记下开跑前后两份统计，`win_summary.py` 相减得出本次的命中数，另一份检出同时在跑时会混进它的数字（`status.txt` 里有 `concurrent` 一行）。设了 `SCCACHE_IGNORE_SERVER_IO_ERROR=1`，服务中途被停掉时编译退回直接用 rustc，不会失败。
+- 每次运行先把 `tools\run.cmd` 复制成 `runs\<run-id>.cmd` 再执行，`run.ps1` 也把 `pyrun.py` 复制进运行目录，所以 `win_run.sh --deploy` 重新部署脚本不会打断正在跑的作业。
+- `--jobs N` 设本次的 `CARGO_BUILD_JOBS`，默认值见下文「耗时」。
 
 **一次运行**：
 - 仓库是私有的，验收机没有 GitHub 凭据。本机打一个以验收机当前 HEAD 为基的增量 git bundle，经 scp 送过去。验收机 `git fetch` 以后 checkout 到 `win-acceptance`，再 `git clean -ffdx`，只保留 5 个 Cargo 项目的 `target`。各项目用仓库内默认的 target，不设 `CARGO_TARGET_DIR`。不用 detached HEAD，原因见 #327。
@@ -336,13 +365,15 @@ python3 -m tools.ui_walk list                      # 流程和它们拦的 #386 
 - 完整检查的 14 步：core、platform、terms、desktop 的 clippy，core、platform、desktop、terms、iqdb 的 test，js，terms、examples、iqdb 的 release 构建，Python 全套。也可以只跑其中几步，或者另加定向 unittest。
 - 长任务经 WMI 启动，SSH 断开或本机休眠都不会中断。本机用 `collab_run.py run --slot windows -- win_run.sh …` 包住，轮询 `status.txt`，直到出现 `done`。
 
-**清理规则**（2026-11-12 定）：入口脚本每次同步之后检查下面三条，命中任一条就清掉 5 个项目的 target（检出保留）：
+**清理规则**（2026-11-12 定，2026-11-17 扩展到两份检出）：入口脚本每次同步之后检查本次这份检出，命中下面任一条就清掉它 6 个项目的 target（检出保留，另一份不动）：
 
-- `rustc -V` 和上次记录的不同；
-- 所有 target 合计超过 40 GB（一次完整构建约 14.5 GB）；
+- `rustc -V` 和这份检出上次记录的不同；
+- 这份检出的 target 合计超过 40 GB（一次完整构建约 14.5 GB）；
 - D 盘剩余空间低于 30 GB。
 
-Cargo.lock 变了不清，交给增量编译处理。sccache 上限 20 GB，超了自动淘汰最旧的。手动全清（target 和 sccache 缓存）在验收机上运行 `powershell -NoProfile -ExecutionPolicy Bypass -File D:\illustash-build\persistent\tools\clean.ps1`，加 `-TargetsOnly` 时只清 target。需要隔离的特殊验收（打包、安装）仍可以临时建一个一次性目录，用完删掉。
+两份检出的 target 最多约 80 GB，加上 sccache 上限 20 GB，2026-11-17 时 D 盘剩余约 145 GB，够用。Cargo.lock 变了不清，交给增量编译处理。sccache 上限 20 GB，超了自动淘汰最旧的。`win_run.sh --clean all` 只清本次这份检出的 target；`--clean cache` 再清共用的 sccache 缓存，另一份检出有作业在跑时跳过这一项（`status.txt` 写 `clean-sccache-skipped`）。手动全清在验收机上运行 `powershell -NoProfile -ExecutionPolicy Bypass -File D:\illustash-build\persistent\tools\clean.ps1`：默认清两份检出的 target 和 sccache 缓存，`-Checkout src|src2` 只清一份，`-TargetsOnly` 只清 target；有作业在跑的检出拒绝清，sccache 缓存只在两份都空闲时才删。需要隔离的特殊验收（打包、安装）仍可以临时建一个一次性目录，用完删掉。
+
+`tools` 里还有一些会话按 #587 之前的 `run.ps1` 复制的一次性入口脚本，它们只认 `src` 和 `lock.txt`，开跑和结束时会停掉 sccache 服务。新的入口照 `run.ps1` 写：按检出取锁，不停共用的服务。
 
 **耗时**（2026-11-12，head `687bb63`，完整 14 步，`CARGO_BUILD_JOBS=4`，单次）：
 
@@ -354,6 +385,18 @@ Cargo.lock 变了不清，交给增量编译处理。sccache 上限 20 GB，超�
 | target 被清掉、sccache 是热的（命中 89%） | 10 分 18 秒 |
 
 重跑的下限主要是测试执行：terms 测试约 2 分 10 秒，Python 全套约 2 分 20 秒。#327 修好之前，普通检出里每次 cargo 调用都会重编 terms，重跑和小改动各因此多约 1 分钟。各步的详细数字见 #240。
+
+**并发数和两个作业同时跑**（2026-11-17，#587）：`CARGO_BUILD_JOBS` 默认 8。测的是开发期最常见的定向检查 `terms-clippy,terms-test`，head `49703ec4`，每次先 `--clean all` 清掉这份检出的 target、sccache 是热的（相当于一份检出第一次编这个 head），每项单次，经 `collab_run.py run --slot windows --exclusive` 独占验收机：
+
+| 情况 | 每个作业的墙钟 | 两个作业都跑完 |
+|---|---|---|
+| 单作业，`CARGO_BUILD_JOBS=4` | 4 分 56 秒 | — |
+| 单作业，8 | 4 分 42 秒 | 依次跑约 9 分 24 秒 |
+| 单作业，16 | 4 分 44 秒 | — |
+| 两个作业同时跑，各 8 | 6 分 40 秒 / 6 分 46 秒 | 6 分 46 秒 |
+| 两个作业同时跑，各 4 | 6 分 22 秒 / 6 分 29 秒 | 6 分 29 秒 |
+
+单作业时并发数 4、8、16 分不开：这项检查的大头是 terms 自己的编译和测试执行，依赖都从 sccache 取（Rust 命中 88.7%）。两个作业同时跑，每个慢约四成，但两个一起跑完比依次跑快约 30%。各 4 和各 8 只差约 4%，都在单次测量的误差以内。默认取 8 的理由：只有一个作业时，依赖没命中的宽构建（换工具链、Cargo.lock 大改、release）能用满 16 个线程；两个作业同时跑时合计 16，正好等于线程数。要改就用 `win_run.sh --jobs N`。
 
 **注意**：
 - cmd 和 Windows PowerShell 5.1 按系统代码页（GBK）读没有 BOM 的脚本，UTF-8 中文注释可能吞掉换行：`.cmd` 只写 ASCII，`.ps1` 要带 UTF-8 BOM。

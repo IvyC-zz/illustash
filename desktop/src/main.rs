@@ -2,19 +2,26 @@
 //! 核心命令直接执行、不创建窗口；窗口关闭等待宿主任务收尾。
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
+mod background;
 mod bridge;
 #[cfg(any(windows, target_os = "macos", test))]
 mod bundled_workers;
+mod drag;
 mod i18n;
+mod notify;
 mod picker;
 mod pixiv;
 mod server;
 mod updater;
 mod welcome;
+mod window_state;
 
 #[cfg(not(windows))]
 use tauri::menu::{Menu, MenuItem, PredefinedMenuItem, Submenu};
 use tauri::{Manager, RunEvent, WebviewUrl, WebviewWindowBuilder, WindowEvent};
+
+/// 主窗口的最小尺寸（逻辑像素）。
+const MIN_SIZE: (f64, f64) = (720.0, 480.0);
 
 fn main() {
     #[cfg(any(windows, target_os = "macos"))]
@@ -30,7 +37,12 @@ fn main() {
         std::process::exit(illustash_terms::cli::run(&args).into());
     }
     illustash_terms::diagnostics::initialize();
-    let app = tauri::Builder::default()
+    let builder = tauri::Builder::default();
+    // 窗口隐藏在后台时再从开始菜单打开 Illustash：回到已在运行的那个，不另开第二个去抢同一个图库（#451）。
+    // macOS 由系统负责，不会另开。
+    #[cfg(windows)]
+    let builder = builder.plugin(tauri_plugin_single_instance::init(|app, _args, _cwd| background::reveal(app)));
+    let app = builder
         .plugin(tauri_plugin_dialog::init())
         // 应用内更新（#279）：只用它的 Rust 接口（updater.rs），页面没有调用它的权限。
         .plugin(tauri_plugin_updater::Builder::new().build())
@@ -42,6 +54,8 @@ fn main() {
         .manage(server::Launch::default())
         .manage(welcome::Import::default())
         .manage(welcome::Requests::default())
+        .manage(window_state::Memory::default())
+        .manage(background::Background::default())
         .invoke_handler(tauri::generate_handler![
             pixiv::pixiv_reply,
             welcome::welcome_pick,
@@ -110,7 +124,9 @@ fn main() {
                 .title("Illustash")
                 .initialization_script(i18n::page_script())
                 .inner_size(1280.0, 840.0)
-                .min_inner_size(720.0, 480.0)
+                .min_inner_size(MIN_SIZE.0, MIN_SIZE.1)
+                // 先不显示：放回记下的位置和大小以后再显示，免得窗口先在默认位置闪一下（#451）。
+                .visible(false)
                 .on_page_load(|window, payload| {
                     if payload.event() == tauri::webview::PageLoadEvent::Finished {
                         server::page_loaded(&window);
@@ -122,6 +138,8 @@ fn main() {
                     tauri::webview::NewWindowResponse::Deny
                 })
                 .build()?;
+            window_state::restore(&main, MIN_SIZE);
+            main.show()?;
             if let Err(error) = &computation {
                 server::blocked(&main, error);
                 return Ok(());
@@ -146,9 +164,16 @@ fn main() {
         match event {
             RunEvent::WindowEvent { label, event: WindowEvent::CloseRequested { api, .. }, .. } if label == "main" => {
                 api.prevent_close();
-                handle.exit(0); // 隐藏的 Pixiv 窗口不能让服务一直活着。
+                // 有任务在跑就隐藏窗口、在后台做完（#451）；否则退出：隐藏的 Pixiv 窗口不能让服务一直活着。
+                if !background::close_requested(handle) {
+                    handle.exit(0);
+                }
             }
+            // 点 Dock 图标回到隐藏着的窗口。
+            #[cfg(target_os = "macos")]
+            RunEvent::Reopen { .. } => background::reveal(handle),
             RunEvent::Exit => {
+                window_state::save(handle);
                 if let Some(child) = handle.try_state::<server::Child>() {
                     child.stop();
                 }
