@@ -238,8 +238,10 @@ export function withdrawMessage(key, x = current(key)) {
 
 async function act(key, what) {
   const u = ui(key), name = u.name();
+  // 导入的结果只留到下一个动作：启用、重新检查、撤回、删除以后不再列出（#559 走查）。
+  if (what !== 'import') importedHere.delete(key);
   try {
-    if (what === 'download') { importedHere.delete(key); await packageAction(key, 'download'); }
+    if (what === 'download') await packageAction(key, 'download');
     else if (what === 'import') { const r = await packageAction(key, 'import'); if (!r?.cancelled) importedHere.add(key); }
     else if (what === 'package-cancel') await packageAction(key, 'cancel');
     else if (what === 'discard') {

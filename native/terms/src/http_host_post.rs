@@ -364,8 +364,11 @@ fn ccip_status_current(host: &Host, received: u64) -> Result<Json> {
 }
 fn ccip_package(request: Request, host: &Host, received: u64, mut body: Json, translate: Translate) {
     if body.get("action").map(Json::text) == Some("import") && body.get("paths").is_none() {
-        match model_paths("models", translate) {
-            Ok(Some(paths)) => body.set("paths", paths),
+        // 参考包是一个 ZIP：单选，只列 .zip（#559 走查：原来借用识别模型的选择器，能多选 .onnx、.json）。
+        let picked = crate::app_platform::choose("ccip-longtail", false, &crate::platform_process::stopping, translate)
+            .map_err(management_error);
+        match picked.map(|p| p.get("path").filter(|p| !p.text().is_empty()).cloned()) {
+            Ok(Some(path)) => body.set("paths", Json::Array(vec![path])),
             Ok(None) => return cancelled(request),
             Err(e) => return failure(request, e, true),
         }

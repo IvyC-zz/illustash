@@ -16,6 +16,8 @@ pub fn choose(
         "zip" => illustash_platform::picker::Kind::Zip,
         "archive" => illustash_platform::picker::Kind::Archive,
         "models" | "wd-extension" => illustash_platform::picker::Kind::Models,
+        // CCIP 长尾参考包只认一个 ZIP（#559）。
+        "ccip-longtail" => illustash_platform::picker::Kind::Zip,
         "human-conclusions" => illustash_platform::picker::Kind::HumanConclusions,
         "export" => illustash_platform::picker::Kind::Export,
         _ => return Err(Error::Invalid("未知的选择类型".into())),
@@ -44,7 +46,11 @@ pub fn choose(
         }
         return Ok(selection(kind, paths, multiple));
     }
-    let title = translate(if kind == "wd-extension" { "从文件导入…" } else { choice_kind.title() });
+    let title = translate(if matches!(kind, "wd-extension" | "ccip-longtail") {
+        "从文件导入…"
+    } else {
+        choice_kind.title()
+    });
     let choice = illustash_platform::picker::choose(choice_kind, &title, multiple, stopping, Duration::from_secs(600))?;
     let paths = match choice {
         illustash_platform::picker::Choice::Selected(paths) => paths,

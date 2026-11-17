@@ -298,6 +298,8 @@ impl Imports {
     pub(crate) fn cancel_import(&self) -> Json {
         self.cancel_where(CANCELLED, |c| !c.kind.ccip())
     }
+    /// 取消扫描阶段的参考包任务。任务已经结束（取消和完成擦肩而过，#559 走查）时什么都不做，页面读到的是结束后的
+    /// 状态；只有写入阶段回 409。
     pub(crate) fn cancel_ccip(&self, generation: u64, id: &str) -> Result<()> {
         let context = {
             let current = lock_ignoring_poison(&self.current);
@@ -307,7 +309,7 @@ impl Imports {
                     && c.task.running()
                     && c.task.context().identity().task_id == id
             });
-            let item = item.ok_or_else(|| Error::Conflict("这个参考包任务已结束或已切换图库".into()))?;
+            let Some(item) = item else { return Ok(()) };
             if item.kind == Kind::CcipWithdraw || item.snapshot().get("stage").map(Json::text) == Some("committing") {
                 return Err(Error::Conflict("正在写入参考包结果，请等任务结束".into()));
             }

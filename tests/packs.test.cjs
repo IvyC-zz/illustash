@@ -99,6 +99,10 @@ test('这个页面导入以后逐个列出所选文件的结果；别处的导�
   assert.match(html, /again.bin<\/bdi> · 已经有了/);
   assert.equal(c.packImportSummary('wd', ext({download: {kind: 'download', status: 'done', results: []}})), '');
   assert.equal(c.packImportSummary('ccip', imported), '', '按包记：另一个包没导入过');
+  // 接着点启用：导入的结果不再列出。
+  server([{body: imported}]);
+  await click('enable');
+  assert.equal(c.packImportSummary('wd', imported), '', '启用以后不再列导入结果');
 });
 
 test('已下载、本图库未启用：启用…；不能启用时按钮禁用，提示写原因', () => {
