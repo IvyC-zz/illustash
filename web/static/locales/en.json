@@ -59,7 +59,6 @@
   "语言、外观、图片网格与默认排序": "Language, appearance, picture grid and default sorting",
   "当前图库、来源、同步与排除": "Current library, sources, sync and exclusions",
   "角色资料": "Characters",
-  "新角色检查、角色名称与翻译": "New-character checks, character names and translation",
   "画师": "Artists",
   "找回画师与绑定的账号": "Finding artists and linked accounts",
   "网络与隐私": "Network and privacy",
@@ -3010,5 +3009,87 @@
   "数据包覆盖": "In data packs",
   "自己补过": "Added by you",
   "还缺": "Missing",
-  "数据包覆盖 {packs} 个 · 自己补过 {own} 个 · 还缺 {missing} 个": "In data packs {packs} · added by you {own} · missing {missing}"
+  "数据包覆盖 {packs} 个 · 自己补过 {own} 个 · 还缺 {missing} 个": "In data packs {packs} · added by you {own} · missing {missing}",
+  "这个图库还没有 WD 识别结果": "This library has no WD recognition results yet",
+  "正在同步，等它结束": "Syncing; wait for it to finish",
+  "图库正在导入或导出": "The library is being imported or exported",
+  "已启用 · 没有扩展候选": "Enabled · no extension candidates",
+  "已启用 · {n} 张图有扩展候选，其中 {assigned} 张由它补上归属": {
+    "one": "Enabled · {n} picture with extension candidates, {assigned} assigned by it",
+    "other": "Enabled · {n} pictures with extension candidates, {assigned} assigned by it"
+  },
+  "已启用 · {n} 张图有扩展候选": {
+    "one": "Enabled · {n} picture with extension candidates",
+    "other": "Enabled · {n} pictures with extension candidates"
+  },
+  "正在撤回…": "Withdrawing…",
+  "正在写入…": "Writing…",
+  "正在检查 {done} / {total} 张": "Checking {done} / {total} pictures",
+  "撤回没有完成，图库没有改动：{reason}": "Withdrawal did not finish; the library is unchanged: {reason}",
+  "启用没有完成，图库没有改动：{reason}": "Enabling did not finish; the library is unchanged: {reason}",
+  "已取消，图库没有改动": "Cancelled; the library is unchanged",
+  "扩展包没能下载：{reason}": "The extension package could not be downloaded: {reason}",
+  "每个来源都试过了": "every source was tried",
+  "已取消": "Cancelled",
+  "扩展包还没下载完（已有 {have}，共 {size}）": "Extension package partly downloaded ({have} of {size})",
+  "扩展包还没下载（约 {size}）": "Extension package not downloaded (about {size})",
+  "本图库未启用": "Not enabled for this library",
+  "正在写入，不能取消": "Writing; cannot be cancelled",
+  "撤回…": "Withdraw…",
+  "下载扩展包（约 {size}）": "Download extension package (about {size})",
+  "启用…": "Enable…",
+  "扩展包不在这台电脑上，新识别的图不检查": "The extension package is not on this computer; newly recognized pictures are not checked",
+  "不是扩展包": "not an extension package",
+  "删除扩展包": "Delete extension package",
+  "正在下载或检查，等它结束再删除": "Downloading or checking; delete after it finishes",
+  "扩展包": "Extension package",
+  "{n} 个角色": {
+    "one": "{n} character",
+    "other": "{n} characters"
+  },
+  "许可": "License",
+  "多认 {n} 个 WD 词表里没有的较新角色。": {
+    "one": "Recognizes {n} newer character missing from the WD tag list.",
+    "other": "Recognizes {n} newer characters missing from the WD tag list."
+  },
+  "撤回 WD 角色扩展中": "Withdrawing WD character extension",
+  "检查 WD 角色扩展中": "Checking with WD character extension",
+  "下载 WD 角色扩展包中": "Downloading WD character extension package",
+  "WD 角色扩展": "WD character extension",
+  "已撤回 WD 角色扩展": "WD character extension withdrawn",
+  "没有变化": "No changes",
+  "WD 角色扩展已更新：{n} 张图有扩展候选": {
+    "one": "WD character extension updated: {n} picture with extension candidates",
+    "other": "WD character extension updated: {n} pictures with extension candidates"
+  },
+  "WD 角色扩展已启用：{n} 张图有扩展候选": {
+    "one": "WD character extension enabled: {n} picture with extension candidates",
+    "other": "WD character extension enabled: {n} pictures with extension candidates"
+  },
+  "WD 角色扩展已启用，没有找到扩展候选": "WD character extension enabled; no extension candidates found",
+  "扩展包已就位": "Extension package in place",
+  "还没有归属、也没有人工确认的图会补上一个机器归属，已有的归属和人工结论不变。以后可以撤回。": "Pictures with no character and no confirmation of yours get a machine assignment; existing assignments and your decisions stay as they are. This can be withdrawn later.",
+  "用扩展包检查本图库 {n} 张图。": {
+    "one": "Check {n} picture in this library with the extension package. ",
+    "other": "Check {n} pictures in this library with the extension package. "
+  },
+  "用扩展包检查本图库的图。": "Check the pictures in this library with the extension package. ",
+  "去掉本图库的全部扩展候选，以及由它补上的 {n} 个机器归属。": {
+    "one": "Remove all extension candidates in this library and the {n} machine assignment they added. ",
+    "other": "Remove all extension candidates in this library and the {n} machine assignments they added. "
+  },
+  "去掉本图库的全部扩展候选。": "Remove all extension candidates in this library. ",
+  "你确认过、否定过的保留。撤回不进撤销历史，要恢复就重新启用。": "What you confirmed or rejected is kept. Withdrawing is not part of undo history; to restore, enable again.",
+  "删除扩展包？已启用的图库保留现有的扩展候选，新识别的图不再检查；再用要重新下载。": "Delete the extension package? Libraries where it is enabled keep their existing extension candidates, but newly recognized pictures are no longer checked. Using it again requires downloading it again.",
+  "扩展包已删除": "Extension package deleted",
+  "启用 WD 角色扩展": "Enable WD character extension",
+  "启用": "Enable",
+  "撤回 WD 角色扩展": "Withdraw WD character extension",
+  "新角色检查、WD 角色扩展、角色名称与翻译": "New-character checks, WD character extension, character names and translation",
+  "WD 词表以外的较新角色": "Newer characters beyond the WD tag list",
+  "下载 WD 角色扩展包": "Download WD character extension package",
+  "一次普通的 HTTPS 下载，取回扩展包；不发送图库里的任何信息": "A plain HTTPS download of the extension package; nothing from your library is sent",
+  "WD 扩展": "WD ext",
+  "扩展": "ext",
+  "检查新识别的图没有完成，图库没有改动：{reason}": "Checking newly recognized pictures did not finish; the library is unchanged: {reason}"
 }

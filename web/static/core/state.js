@@ -33,6 +33,8 @@ export const state = {
   integrity: null,
   // ---- 识别模型的状态：core/models.js ----
   models: null,
+  // ---- WD 角色扩展的状态（GET /api/wd-extension，#550）：core/wd_extension.js ----
+  wdExtension: null,
   // ---- 上手引导的进度：ui/guide.js ----
   guide: null,
 

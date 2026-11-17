@@ -1,6 +1,7 @@
 // 一次写入或一个后台任务的回应会改动页面别处的什么（桌面布局，#199）：图库的计数和图片、显示任务的设置卡片、向导。
 // app.js 把这些交给 onPost() 和 onJob()。
 import {SYNC_ACTIVE, importLine} from '../core/jobs.js';
+import {extFinished} from '../core/wd_extension.js';
 import {HUMAN_IMPORT} from '../core/human.js';
 import {metaWritten, refreshMeta} from '../core/meta.js';
 import {onPage, pageOf} from '../core/pages.js';
@@ -10,6 +11,7 @@ import {state} from '../core/state.js';
 import {drawShelf} from './catalog.js';
 import {error, toast} from './dom.js';
 import {listChanged, reload, selCount} from './grid.js';
+import {inspect} from './detail.js';
 import {guideAfterPost, guideRefresh} from './guide.js';
 import {humanImportEnded, renderHumanBlock} from './human.js';
 import {renderIndexCard, renderLibrariesCard, renderNamesCard, renderProvenanceCard} from './settings.js';
@@ -20,6 +22,14 @@ export function afterWrite(path, body) {
   listChanged();
   // 防止更早的元数据读取覆盖刚完成的改动。
   metaWritten(path === '/api/tag');
+}
+// WD 角色扩展的启用、重新检查或撤回改了图库（#550，result.changed 不为 0）：候选、归属和计数都可能变了，详情栏开着的那张图重新读取。
+export async function afterWdExtension(before) {
+  const task = extFinished(before);
+  if (task?.status !== 'done' || !task.result?.changed) return;
+  listChanged();
+  await refreshMeta().catch(e => error(readError(e)));
+  if (state.focused) inspect(state.focused, true);
 }
 // 后台任务的回应在任务面板之外改动什么：图库的计数和图片、显示这个任务的设置卡片，以及向导。
 export async function afterJob(job, change) {
