@@ -423,7 +423,7 @@ export function workDialog(w, {watch = false} = {}) {
     q('#wdFind').addEventListener('keydown', e => { if (!composing(e) && e.key === 'Enter') e.preventDefault(); });
     combo(q('#wdFind'), q('#wdFindMenu'), (text, show) => {
       if (!text) { show([]); return; }
-      show([{label: 'Danbooru', items: [], note: t('正在查 Danbooru…（只发送你输入的文字）')}]);
+      show([{label: 'Danbooru', items: [], note: t('正在查 Danbooru…')}]);
       remoteNames('/api/works?' + new URLSearchParams({q: text, remote: 1})).then(r => show([r.found
         ? {label: 'Danbooru', items: r.found.map(x => { const mine = works.find(y => y.tag === x.tag && y.id !== w?.id);
           return {tag: x.tag, label: workName(x.tag) || x.tag, detail: x.tag, extra: mine ? t('图库里已有：{name}', {name: mine.name}) : t('D 站 {n}', {n: number(x.posts)})}; }),
@@ -491,7 +491,7 @@ export function wireWatchAdd(x, add) {
     if (g !== gen || token !== session.token || input !== $('watchAdd')) return;
     if (!q) { render([{label: t('你的图库里还没关注的作品'), items: local.filter(r => !watched.has(r.id)).slice(0, 10)}]); return; }
     const mine = local.slice(0, 8);
-    render([{label: t('你的图库里有'), items: mine}], t('正在查 Danbooru…（只发送你输入的文字）'));
+    render([{label: t('你的图库里有'), items: mine}], t('正在查 Danbooru…'));
     clearTimeout(remoteTimer);
     remoteTimer = setTimeout(async () => {
       const result = await remoteNames('/api/works?' + new URLSearchParams({q, remote: 1})), remote = result.found;
