@@ -94,7 +94,7 @@ function taskAsks() {
     <ul><li>${t('发给 Danbooru：图片的像素哈希和感知哈希（IQDB 签名，都是一串文本，不是图片）、画师名和账号')}</li>
     <li>${state.accounts?.pixiv?.bound ? t('用你绑定的 Pixiv 登录状态读取你的关注列表（只读）') : t('没有绑定 Pixiv：只看公开作品，不含 R18')}</li>
     <li>${t('本次最多 {mb} MB；遇到拒绝、限流或验证码就停，不绕过', {mb: number(p.budgets?.full || 1024)})}</li></ul>
-    <p class="muted-note">${t('授权只对这一次有效，下次开始会再问。图片本身不会上传。查过的图和画师不会重查，可以随时停止。')}</p>
+    <p class="muted-note">${t('授权只对这一次有效，下次开始会再问。查过的图和画师不会重查。')}</p>
     <div class="prov-confirm-btns"><button class="primary" data-prov="start" data-network="1">${t('授权并开始')}</button><button class="quiet" data-prov="start">${t('只跑本地（签名识别）')}</button><button class="quiet" data-prov="cancel">${t('取消')}</button></div></div>`);
   if (photosRefused(s)) asks.push(`<div class="task-ask"><span>${photosHelp()}</span><button class="primary small" data-task="photos-privacy">${t('打开系统设置')}</button></div>`);
   const ix = state.index?.state || {};
