@@ -178,10 +178,10 @@ test('the report counts each kind on its own, says conflicts kept this library, 
   assert.match(html, /依赖的角色和作品.*对上了已有的/s);
   assert.match(html, /口径不同，不能相加/);
   assert.doesNotMatch(html, /<td>7<\/td>/, 'nothing is summed across kinds');
-  assert.match(html, /可以整步撤销/);
+  assert.match(html, /已经写进这个图库/);
   const none = ui.reportSummary(summary({undo: null, counts: {already_present: 4}}));
   assert.match(none, /没有新内容/);
-  assert.doesNotMatch(none, /可以整步撤销/);
+  assert.doesNotMatch(none, /已经写进这个图库/);
   assert.match(ui.reportSummary(summary({pending_effects: true})), /不需要重新导入/);
   const empty = ui.reportSummary(summary({undo: null, counts: {}, asset_counts: {}, definition_counts: {}, definition_fields: {}, detail_count: 0}));
   assert.match(empty, /没有人工结论/);
