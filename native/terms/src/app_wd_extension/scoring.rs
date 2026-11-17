@@ -78,9 +78,10 @@ pub(super) struct Heads<'a> {
     cuts: Vec<f64>,
 }
 
-/// 每块的行数：输出矩阵（行数 × 头数）不超过 2²⁰ 个 f32（4 MiB），最多 256 行。
+/// 每块的行数：输出矩阵（行数 × 头数）不超过 2²² 个 f32（16 MiB），最多 1,024 行。Windows 的 OpenBLAS 每次调用都要
+/// 重新打包整个权重矩阵，块越大摊得越薄；实测 4,013 头时 1,024 行以后不再变快（#582）。
 fn block_rows(heads: usize) -> usize {
-    ((1 << 20) / heads.max(1)).clamp(16, 256)
+    ((1 << 22) / heads.max(1)).clamp(16, 1024)
 }
 
 impl<'a> Heads<'a> {
@@ -331,9 +332,9 @@ mod tests {
         assert_eq!(cut(-1.0), f64::NEG_INFINITY);
         assert_eq!(cut(1.0 + 1e-12), f64::INFINITY);
         assert_eq!(cut(f64::NAN), f64::INFINITY);
-        assert_eq!(block_rows(228), 256);
-        assert_eq!(block_rows(4013), 256);
-        assert_eq!(block_rows(8192), 128);
+        assert_eq!(block_rows(228), 1024);
+        assert_eq!(block_rows(4013), 1024);
+        assert_eq!(block_rows(8192), 512);
         assert_eq!(block_rows(1 << 20), 16);
     }
 }
