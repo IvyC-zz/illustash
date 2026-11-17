@@ -403,7 +403,8 @@ fn pack_action(host: &Host, session: &mut Session, action: &str, body: &Json) ->
             return session.wd_extension.cancel(id);
         }
         "download" | "import" | "cancel" | "discard" | "delete" => {
-            if action == "delete" && (session.wd_extension.running() || host.imports.recognition_running(session.generation))
+            if action == "delete"
+                && (session.wd_extension.running() || host.imports.recognition_running(session.generation))
             {
                 return Err(Error::Conflict("正在检查角色，请等任务结束后再删除角色资料包".into()));
             }
@@ -447,8 +448,8 @@ fn pack_action(host: &Host, session: &mut Session, action: &str, body: &Json) ->
         let ccip_scan = crate::app_ccip_longtail::stored_vectors(&session.library)? > 0;
         Action::Pack {
             root: host.root.clone(),
-            wd: Some(Part { pack: pack.wd.clone(), path: wd_path, scan: wd_scan }),
-            ccip: Some(Part { pack: pack.ccip.clone(), path: ccip_path, scan: ccip_scan }),
+            wd: Some(Box::new(Part { pack: pack.wd.clone(), path: wd_path, scan: wd_scan })),
+            ccip: Some(Box::new(Part { pack: pack.ccip.clone(), path: ccip_path, scan: ccip_scan })),
         }
     };
     let identity = crate::app_tasks::TaskIdentity::new(&session.library, session.generation, &session.token)?;

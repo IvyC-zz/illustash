@@ -64,7 +64,8 @@ pub(super) fn packs(host: &Host, session: &Session) -> Result<Json> {
         None => Value::Null,
     };
     let wd = host.wd_status(session)?;
-    let ccip: Value = serde_json::from_str(&ccip_status(host, session, None)?.dump()).map_err(|e| Error::invalid(e.to_string()))?;
+    let ccip: Value =
+        serde_json::from_str(&ccip_status(host, session, None)?.dump()).map_err(|e| Error::invalid(e.to_string()))?;
     let prompt = crate::app_packs::default_state(&host.root, &session.library, &lib)?;
     // 两个组成部分合起来的数：有扩展候选的图按图去重，补上的归属按来源算。
     let app = crate::app_library::read_connection(&session.library.db())?;

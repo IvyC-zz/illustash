@@ -1563,7 +1563,9 @@ fn pack_post(resources: &Path, body: &Json, current: &Pack, unknown: &str) -> Re
     match action {
         "download" => {
             let (component, label) = match &version {
-                Some(version) => (crate::app_packs::by_version(resources, version)?.component(kind).clone(), version.clone()),
+                Some(version) => {
+                    (crate::app_packs::by_version(resources, version)?.component(kind).clone(), version.clone())
+                }
                 None => (current.clone(), current.version.clone()),
             };
             if !start_download(resources, &component, &label)? {

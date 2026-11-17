@@ -425,7 +425,8 @@ pub(crate) fn apply(
 pub(crate) fn mark_enabled(library: &Library, root: &Path, pack: &Pack) -> Result<Value> {
     writable(library)?;
     // 记下当时的角色索引版本：没有向量时不用「索引更新过、要重新检查」。
-    let generation = crate::app_resources::shared_path(root).and_then(|shared| crate::index_generation::current(&shared));
+    let generation =
+        crate::app_resources::shared_path(root).and_then(|shared| crate::index_generation::current(&shared));
     let mut app = writer(&library.db())?;
     crate::schema::require_current(&app)?;
     let tx = app.transaction_with_behavior(TransactionBehavior::Immediate)?;
@@ -437,7 +438,10 @@ pub(crate) fn mark_enabled(library: &Library, root: &Path, pack: &Pack) -> Resul
         [LAST_SCAN],
     )?;
     if let Ok(generation) = generation {
-        tx.execute("INSERT OR REPLACE INTO meta(key,value) VALUES (?1,?2)", [INDEX_GENERATION, &generation.to_string()])?;
+        tx.execute(
+            "INSERT OR REPLACE INTO meta(key,value) VALUES (?1,?2)",
+            [INDEX_GENERATION, &generation.to_string()],
+        )?;
     }
     crate::schema::commit_writing(tx)?;
     Ok(json!({"package_sha256":pack.file.sha256,"roles":pack.heads,"scored":0,"hits":0,"changed":changed}))

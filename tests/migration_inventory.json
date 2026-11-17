@@ -1,7 +1,7 @@
 {
 "baseline_commit":"621726f",
 "sources":{
- ".claude/launch.json":"2ff5edd8772568cedf4b8bbf0e59bd5a92edf67665aaf4992c373026adaf002c",
+ ".claude/launch.json":"e13e4805fcf99fe7c82587aae6264a71fe016678f42a2331684616427ca1c990",
 
  "crates/core/src/backup.rs":"7d5f5abe63adb1620f2847609451fda7b588a927f742a676e16fc4acd2abeeb5",
 
@@ -223,7 +223,7 @@
 
  "native/terms/src/app_asset_files.rs":"a33b3eddb934d5547dac2966c1e4ccbc7c5910ab030bbd2979ad193dac9e6c77",
 
- "native/terms/src/app_ccip_longtail.rs":"fa03b80ee91ac108a9ea2f7591adde31ee5c83e4aa9b3462f76381729e307d93",
+ "native/terms/src/app_ccip_longtail.rs":"7669195f5724ebd72647dad1d717d77bd189b13e579625c4da0c39389a01ea18",
 
  "native/terms/src/app_characters.rs":"6c9e9e080970dce30092747ebcf6bdcaee7d99a8463500888e5dab278f4a0cbd",
 
@@ -297,7 +297,7 @@
 
  "native/terms/src/app_migration_sql/provenance.sql":"a780f1f8837dd2c90a556539c114d56cdaa513b057fb667bf0c5c9d604f75934",
 
- "native/terms/src/app_models.rs":"fa5666d229db315badcf4ec3f075cf1c9f27b6a6f2a9538d53edcce91668eb08",
+ "native/terms/src/app_models.rs":"73ea47823727e8163a15c4c4d09638c104e56f71cff11a00b92caef15df1d80b",
 
  "native/terms/src/app_name_sources.rs":"a9d895621405e92c2bdacd7f547f28feec7f294f307d628ea25d5e2bf27f9515",
 
@@ -305,7 +305,7 @@
 
  "native/terms/src/app_onboarding.rs":"5e0d950d43ad03ffeb44e19a9090795c479a9e4a6199fcbafe93e107fe9a62a9",
 
- "native/terms/src/app_packs.rs":"9a9030de1a0366ba260b7425dfcf6603b1231b6631caefd805f8b2752861cc91",
+ "native/terms/src/app_packs.rs":"fbbd7a42559ccbd48232b110d257caba0ec2eca4670b9b36fdcddf6791d8889f",
 
  "native/terms/src/app_photos.rs":"df3a434e0b64f63e395ca93703be19d90b83faefe6901537fdd628d51ddc0326",
 
@@ -349,7 +349,7 @@
 
  "native/terms/src/app_upgrade.rs":"a54111dd23542c882a5ac02a2a0913b0333625af44950108d8af33a2dbd1c5e6",
 
- "native/terms/src/app_wd_extension.rs":"ccb490bb64f5f69a188b1a2b2e1e44c0f17afd99aa19f583ace1f2eb7decc89a",
+ "native/terms/src/app_wd_extension.rs":"823c2e92b278356d427dd085b0e2a0740db94ab806a7727bd2f95d21950121c1",
 
  "native/terms/src/bin/illustash-terms.rs":"04ee80bb280034a16f8ddd9fe97e8de0700713259c44f76858f70b8713d4c594",
 
@@ -385,9 +385,9 @@
 
  "native/terms/src/http_example_search.rs":"37086571f127c0c437a4fa223184fddd7c26adb61c1c1883f8f05ee17011ab10",
 
- "native/terms/src/http_host_get.rs":"0999ace4433cc003b17ed294f8bcf68766e79a1ba698a4bf00171ccb9e10a88d",
+ "native/terms/src/http_host_get.rs":"3e6b1b624408e4facf2548e260783f3197c4c3df819da6c93124454502af7332",
 
- "native/terms/src/http_host_post.rs":"262ad75f2bdc4d35bf758e0a688e95d420ef1585a7bad6733ee96ba1c58f086a",
+ "native/terms/src/http_host_post.rs":"6caf6d4d704d2d7626aee5dd3da1d60fcbe7dbe7fadd293a1651fea02ce64cdd",
 
  "native/terms/src/http_json.rs":"42ec65687fad69e430186543d3ef27b8141030e6694b07f683ee91f678478d6b",
 

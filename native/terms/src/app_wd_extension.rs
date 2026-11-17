@@ -515,11 +515,18 @@ pub(crate) enum Action {
     /// 同步后用本图库启用的版本检查新识别的图。
     Auto(Pack, PathBuf, Vec<String>),
     Withdraw,
-    /// 角色资料包（#602）：先用 WD 部分、再用 CCIP 部分检查整个图库，各自提交。没有对应向量的组成部分（`None`）只记下
-    /// 启用了哪个文件，等识别结果交付时再检查。
-    Pack { root: PathBuf, wd: Option<Part>, ccip: Option<Part> },
+    /// 角色资料包（#602）：先用 WD 部分、再用 CCIP 部分检查整个图库，各自提交。图库里还没有对应向量的组成部分
+    /// （`Part::scan` 为假）只记下启用了哪个文件，等识别结果交付时再检查。
+    Pack {
+        root: PathBuf,
+        wd: Option<Box<Part>>,
+        ccip: Option<Box<Part>>,
+    },
     /// 撤回角色资料包：两个组成部分里启用了的都撤回。
-    PackWithdraw { wd: bool, ccip: bool },
+    PackWithdraw {
+        wd: bool,
+        ccip: bool,
+    },
 }
 
 /// 角色资料包的一个组成部分：这个文件，和要不要现在检查（图库里有这一种向量时）。
@@ -564,8 +571,8 @@ fn changed(result: &Value) -> u64 {
 fn pack_enable(
     library: &Library,
     root: &Path,
-    wd: Option<Part>,
-    ccip: Option<Part>,
+    wd: Option<Box<Part>>,
+    ccip: Option<Box<Part>>,
     progress: &Progress<'_>,
     done: &mut Value,
 ) -> Result<Value> {

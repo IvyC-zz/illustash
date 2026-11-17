@@ -284,7 +284,9 @@ impl Catalog {
         let mut entries: Vec<Entry> = Vec::new();
         for raw in raw.packs {
             let entry = Self::entry(raw)?;
-            if entries.iter().any(|e| e.version == entry.version || (e.kind == entry.kind && e.revision == entry.revision))
+            if entries
+                .iter()
+                .any(|e| e.version == entry.version || (e.kind == entry.kind && e.revision == entry.revision))
             {
                 return Err(bad("版本或修订号重复"));
             }
@@ -346,9 +348,9 @@ impl Catalog {
                 model: hex(&raw.base.wd_model_sha256).ok_or_else(|| bad("缺少 WD 模型的 SHA-256"))?,
                 tags: hex(&raw.base.wd_tags_sha256).ok_or_else(|| bad("缺少 WD 标签表的 SHA-256"))?,
             },
-            Kind::Ccip => {
-                Base::Ccip { model: hex(&raw.base.ccip_model_sha256).ok_or_else(|| bad("缺少 CCIP 模型的 SHA-256"))? }
-            }
+            Kind::Ccip => Base::Ccip {
+                model: hex(&raw.base.ccip_model_sha256).ok_or_else(|| bad("缺少 CCIP 模型的 SHA-256"))?,
+            },
         };
         Ok(Pack {
             kind,
@@ -685,7 +687,8 @@ pub(crate) fn enabled_pack<'a>(
     wd: Option<&str>,
     ccip: Option<&str>,
 ) -> Option<&'a CharacterPack> {
-    let has = |p: &CharacterPack, kind: Kind, sha: Option<&str>| sha.is_some_and(|s| p.component(kind).file.sha256 == s);
+    let has =
+        |p: &CharacterPack, kind: Kind, sha: Option<&str>| sha.is_some_and(|s| p.component(kind).file.sha256 == s);
     packs
         .iter()
         .rev()
@@ -754,8 +757,8 @@ pub(crate) fn default_state(
     if crate::app_wd_extension::declined(&app)? {
         return Ok("declined".into());
     }
-    let vectors = crate::app_wd_extension::stored_vectors(library)? > 0
-        || crate::app_ccip_longtail::stored_vectors(library)? > 0;
+    let vectors =
+        crate::app_wd_extension::stored_vectors(library)? > 0 || crate::app_ccip_longtail::stored_vectors(library)? > 0;
     Ok(if vectors { "ask" } else { "auto" }.into())
 }
 

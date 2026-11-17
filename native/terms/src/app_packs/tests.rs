@@ -109,11 +109,13 @@ fn catalog_fields_are_checked_entry_by_entry() {
     assert!(parse(&shared).is_ok());
     // 以后的种类：通用字段照查，没有组成部分也行。
     let mut future = good.clone();
-    future["packs"][1] = json!({"kind":"future-pack","revision":1,"version":"future-v1","min_app":"9.0.0","license":"MIT"});
+    future["packs"][1] =
+        json!({"kind":"future-pack","revision":1,"version":"future-v1","min_app":"9.0.0","license":"MIT"});
     assert!(parse(&future).is_ok());
 
     let wd = |c: &mut Value| c["packs"][0]["components"]["wd"].take();
-    let broken: Vec<(&str, Box<dyn Fn(&mut Value)>)> = vec![
+    type Change = Box<dyn Fn(&mut Value)>;
+    let broken: Vec<(&str, Change)> = vec![
         ("目录格式", Box::new(|c| c["format"] = "illustash-packs/2".into())),
         ("序号为零", Box::new(|c| c["serial"] = 0.into())),
         ("序号不是整数", Box::new(|c| c["serial"] = "3".into())),
@@ -122,7 +124,10 @@ fn catalog_fields_are_checked_entry_by_entry() {
         ("修订号重复", Box::new(|c| c["packs"][1]["revision"] = 2.into())),
         ("缺组成部分", Box::new(|c| drop(c["packs"][0].as_object_mut().unwrap().remove("components")))),
         ("缺 CCIP 部分", Box::new(|c| drop(c["packs"][0]["components"].as_object_mut().unwrap().remove("ccip")))),
-        ("SHA-256 不是十六进制", Box::new(|c| c["packs"][0]["components"]["wd"]["file"]["sha256"] = "x".repeat(64).into())),
+        (
+            "SHA-256 不是十六进制",
+            Box::new(|c| c["packs"][0]["components"]["wd"]["file"]["sha256"] = "x".repeat(64).into()),
+        ),
         ("SHA-256 大写", Box::new(|c| c["packs"][0]["components"]["ccip"]["file"]["sha256"] = "A".repeat(64).into())),
         ("大小为零", Box::new(|c| c["packs"][0]["components"]["wd"]["file"]["size"] = 0.into())),
         ("文件过大", Box::new(|c| c["packs"][0]["components"]["wd"]["file"]["size"] = (FILE_LIMIT + 1).into())),
@@ -132,9 +137,14 @@ fn catalog_fields_are_checked_entry_by_entry() {
         ),
         (
             "地址里的文件名和 name 不同",
-            Box::new(|c| c["packs"][0]["components"]["wd"]["file"]["url"] = format!("{RELEASE_PREFIX}tag/other.bin").into()),
+            Box::new(|c| {
+                c["packs"][0]["components"]["wd"]["file"]["url"] = format!("{RELEASE_PREFIX}tag/other.bin").into()
+            }),
         ),
-        ("地址没有 tag", Box::new(|c| c["packs"][0]["components"]["ccip"]["file"]["url"] = format!("{RELEASE_PREFIX}x.zip").into())),
+        (
+            "地址没有 tag",
+            Box::new(|c| c["packs"][0]["components"]["ccip"]["file"]["url"] = format!("{RELEASE_PREFIX}x.zip").into()),
+        ),
         ("文件名带路径", Box::new(|c| c["packs"][0]["components"]["wd"]["file"]["name"] = "../x.bin".into())),
         ("版本名带路径", Box::new(|c| c["packs"][0]["version"] = "character/pack".into())),
         ("版本名有 ..", Box::new(|c| c["packs"][0]["version"] = "pack..v2".into())),
@@ -145,11 +155,17 @@ fn catalog_fields_are_checked_entry_by_entry() {
         ("缺少许可", Box::new(|c| c["packs"][0]["license"] = " ".into())),
         ("组成部分缺少许可", Box::new(|c| c["packs"][0]["components"]["ccip"]["license"] = "".into())),
         ("说明带控制字符", Box::new(|c| c["packs"][0]["note"] = json!({"zh-CN":"一\n行","en":"x"}))),
-        ("缺 WD 标签表", Box::new(|c| c["packs"][0]["components"]["wd"]["base"] = json!({"wd_model_sha256": "a".repeat(64)}))),
+        (
+            "缺 WD 标签表",
+            Box::new(|c| c["packs"][0]["components"]["wd"]["base"] = json!({"wd_model_sha256": "a".repeat(64)})),
+        ),
         ("CCIP 缺模型", Box::new(|c| c["packs"][0]["components"]["ccip"]["base"] = json!({}))),
         ("缺字段", Box::new(|c| drop(c["packs"][0].as_object_mut().unwrap().remove("min_app")))),
         ("组成部分不是对象", Box::new(move |c| drop(wd(c)))),
-        ("条目过多", Box::new(|c| c["packs"] = json!((1..=65).map(|i| entry(&format!("v{i}"), i)).collect::<Vec<_>>()))),
+        (
+            "条目过多",
+            Box::new(|c| c["packs"] = json!((1..=65).map(|i| entry(&format!("v{i}"), i)).collect::<Vec<_>>())),
+        ),
     ];
     for (what, change) in broken {
         let mut value = good.clone();
@@ -283,7 +299,8 @@ fn card_shows_the_enabled_or_newest_present_version_and_offers_newer_ones() {
     assert_eq!(card(None, &["v1", "v2"]), "v2");
     assert_eq!(card(None, &[]), "v3");
 
-    let offered = |version: &str| offer(&packs, packs.iter().find(|p| p.version == version).unwrap()).map(|p| p.version);
+    let offered =
+        |version: &str| offer(&packs, packs.iter().find(|p| p.version == version).unwrap()).map(|p| p.version);
     assert_eq!(offered("v1").as_deref(), Some("v3"));
     assert_eq!(offered("v2").as_deref(), Some("v3"));
     assert_eq!(offered("v3"), None);
