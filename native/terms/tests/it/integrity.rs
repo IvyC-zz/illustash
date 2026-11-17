@@ -127,6 +127,19 @@ impl Host {
             Err(e) => panic!("GET {url}: {e}"),
         }
     }
+    /// 同步点必须在检查期间到达。若检查提前结束，直接给出完整性状态。
+    fn wait_for_read(&self, marker: &Path) -> Value {
+        let deadline = crate::common::wait::deadline();
+        loop {
+            let at_marker = marker.is_file();
+            let status = self.get("/api/integrity");
+            if at_marker {
+                return status;
+            }
+            assert!(status["running"].is_object() && Instant::now() < deadline, "未到达 {marker:?}：{status}");
+            thread::sleep(Duration::from_millis(20));
+        }
+    }
     fn post(&self, url: &str, body: Value) -> (u16, Value) {
         let token = self.get("/api/bootstrap")["token"].as_str().unwrap().to_owned();
         let response = match ureq::post(&format!("{}{url}", self.origin))
@@ -327,14 +340,15 @@ fn checks_after_a_crash_in_the_background_and_on_request_and_stop_writing_on_dam
     let (_, errors) = Host::launch(&root, &overdue).err().expect("damaged library.sqlite must not open");
     assert!(errors.contains("library.sqlite"), "{errors}");
 
-    // CHECK 约束在真实 quick_check 的读事务里求值。首轮读到旧值 0，重查才能读到已提交的新值 1。
+    // quick_check 在只读事务中验证虚拟列的 NOT NULL 时会求值。首轮读到 0，重查才能读到已提交的 1。
     let busy = create("busy");
     let writer = Connection::open(busy.join("source.sqlite")).unwrap();
     writer.create_scalar_function("writer_gate", 1, GATE_FLAGS, |_| Ok(true)).unwrap();
     // 标记行后面还有普通行，解除同步点后 SQLite 会再次调用产品的进度处理函数，检查写入日志。
     writer
         .execute_batch(
-            "CREATE TABLE check_gate(phase INTEGER CHECK(phase < 0 OR writer_gate(phase)));
+            "CREATE TABLE check_gate(phase INTEGER, checked AS
+                 (CASE WHEN phase >= 0 THEN writer_gate(phase) ELSE 1 END) VIRTUAL NOT NULL);
              INSERT INTO check_gate VALUES (0);
              WITH RECURSIVE n(i) AS (SELECT 1 UNION ALL SELECT i+1 FROM n WHERE i<1000)
              INSERT INTO check_gate SELECT -i FROM n;",
@@ -342,8 +356,7 @@ fn checks_after_a_crash_in_the_background_and_on_request_and_stop_writing_on_dam
         .unwrap();
     let host = Host::launch_with_gate(&root, &busy, true).unwrap();
     let gates = root.join("support");
-    wait_for(&gates.join("reading-0"));
-    let status = host.get("/api/integrity");
+    let status = host.wait_for_read(&gates.join("reading-0"));
     assert_eq!(status["running"]["database"], "source.sqlite", "{status}");
     assert!(status["running"]["done"].as_f64().unwrap() > 0.05, "{status}");
 
@@ -357,8 +370,7 @@ fn checks_after_a_crash_in_the_background_and_on_request_and_stop_writing_on_dam
     drop(writer);
 
     // 首轮快照看不到 1。只有检查让路并重新打开数据库，才会进入这个同步点。取样后才允许重查完成。
-    wait_for(&gates.join("reading-1"));
-    let status = host.get("/api/integrity");
+    let status = host.wait_for_read(&gates.join("reading-1"));
     assert_eq!(status["running"]["database"], "source.sqlite", "{status}");
     assert!(status["checked"]["source.sqlite"].is_null(), "{status}");
     fs::write(gates.join("continue-1"), b"").unwrap();
@@ -369,7 +381,9 @@ fn checks_after_a_crash_in_the_background_and_on_request_and_stop_writing_on_dam
     host.quit();
 }
 
-const GATE_FLAGS: FunctionFlags = FunctionFlags::SQLITE_UTF8.union(FunctionFlags::SQLITE_INNOCUOUS);
+// 函数的 SQL 结果恒为 true；同步文件只在独立宿主的合成目录中使用。
+const GATE_FLAGS: FunctionFlags =
+    FunctionFlags::SQLITE_UTF8.union(FunctionFlags::SQLITE_INNOCUOUS).union(FunctionFlags::SQLITE_DETERMINISTIC);
 
 fn wait_for(path: &Path) {
     let deadline = crate::common::wait::deadline();
@@ -379,7 +393,7 @@ fn wait_for(path: &Path) {
     }
 }
 
-// SQLite 给每个宿主连接注册夹具 CHECK 函数。只有合成表的标记行会调用它。
+// SQLite 给每个宿主连接注册虚拟列用的函数。只有合成表的标记行会调用它。
 unsafe extern "C" fn install_gate(
     db: *mut ffi::sqlite3,
     error: *mut *mut std::ffi::c_char,
