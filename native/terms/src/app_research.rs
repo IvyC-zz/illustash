@@ -696,7 +696,7 @@ impl Research {
     pub fn ready(&self) -> bool {
         !self.paused
             && !self.task.as_ref().is_some_and(Task::running)
-            && !self.retry_at.is_some_and(|t| std::time::Instant::now() < t)
+            && self.retry_at.is_none_or(|t| std::time::Instant::now() >= t)
     }
     pub fn stop(&mut self) {
         if let Some(mut t) = self.task.take() {
