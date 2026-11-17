@@ -13,6 +13,10 @@ fn db() -> Connection {
     c
 }
 
+fn term_key(c: &Connection, term: TermId) -> Result<String> {
+    Ok(c.query_row("SELECT key FROM terms WHERE id=?1", [term], |r| r.get(0))?)
+}
+
 fn manifest(assets: &[&str]) -> Value {
     json!({
         "format": FORMAT, "library_id": "lib-1",

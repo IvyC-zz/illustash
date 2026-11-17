@@ -26,11 +26,15 @@ pub enum Kind {
     Similar,
     Cluster,
     Session,
+    /// 人工标记，例如收藏。
+    Mark,
 }
 
 /// 机器证据怎样变成「机器认定」或「也可能是」。人的裁决永远先于判定器。
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub enum Judge {
+    /// 只投影人工确认，不使用机器证据。
+    Human,
     /// 判定器还没收编（后续步骤实现）：机器证据只到「也可能是」，不进逛的界面。
     Pending,
     /// 只收强证据：方法在列表里的算机器认定，其他只到「也可能是」。
@@ -71,7 +75,7 @@ pub struct Policy {
 const WD: &str = "wd_probability";
 
 impl Kind {
-    pub const ALL: [Kind; 13] = [
+    pub const ALL: [Kind; 14] = [
         Kind::Character,
         Kind::Skin,
         Kind::Work,
@@ -85,6 +89,7 @@ impl Kind {
         Kind::Similar,
         Kind::Cluster,
         Kind::Session,
+        Kind::Mark,
     ];
 
     pub fn as_str(self) -> &'static str {
@@ -102,6 +107,7 @@ impl Kind {
             Kind::Similar => "similar",
             Kind::Cluster => "cluster",
             Kind::Session => "session",
+            Kind::Mark => "mark",
         }
     }
 
@@ -153,6 +159,7 @@ impl Kind {
             Kind::Similar => p("相似组", Judge::System, Exclusive::None, true, None, false),
             Kind::Cluster => p("聚类", Judge::System, Exclusive::None, true, None, false),
             Kind::Session => p("保存段", Judge::System, Exclusive::AtMostOne, true, None, false),
+            Kind::Mark => p("人工标记", Judge::Human, Exclusive::None, false, None, false),
         }
     }
 }
@@ -197,6 +204,9 @@ pub const RESERVED_SOURCES: [&str; 5] = ["user", "human", "album", "legacy", "ve
 
 pub const SCHEMA_VERSION: i64 = 10;
 
+/// 收藏在各图库中共用的人工标记词条键。
+pub const FAVORITE_KEY: &str = "mark:favorite";
+
 /// 可替换的机器证据（`source`, `method`）：按有效批次生效（`term_active_evidence`），成功的空结果让旧证据失效。
 /// 其余来源的证据全部有效。与当前 `term_evidence_sets` 的 CHECK 一致，加一种要一次迁移。
 pub const REPLACEABLE: [(&str, &str); 4] = [
@@ -213,7 +223,7 @@ pub const REPLACEABLE_SOURCES: [&str; 1] = ["provenance"];
 
 /// 这条证据是否只经证据批次生效。
 pub fn replaceable(source: &str, method: &str) -> bool {
-    REPLACEABLE_SOURCES.contains(&source) || REPLACEABLE.contains(&(source, method))
+    source == "example" || REPLACEABLE_SOURCES.contains(&source) || REPLACEABLE.contains(&(source, method))
 }
 
 /// 第 6 版只压缩派生表的物理布局，证据、历史和各列值不变。
@@ -659,13 +669,29 @@ fn v3(conn: &Connection) -> Result<()> {
     Ok(())
 }
 
-/// 第 10 版增加独立的 WD 扩展和 CCIP 长尾候选批次。复制原批次与有效集。
+/// 第 10 版增加人工标记，以及 WD 扩展、CCIP 长尾和按标签替换的例图候选批次。复制原批次与有效集。
 fn v10(conn: &Connection) -> Result<()> {
     const V3_SOURCES: &str = "'wd.wd_character','ccip_index.char_ext'";
     const V10_SOURCES: &str =
         "'wd.wd_character','ccip_index.char_ext','wd_extension.linear_head','ccip_longtail.anchor_p75'";
-    conn.execute_batch(&V3_SETS.replace(V3_SOURCES, V10_SOURCES))?;
-    conn.execute_batch(&V3.replace(V3_SOURCES, V10_SOURCES))?;
+    conn.execute_batch(
+        &V3_SETS
+            .replace(V3_SOURCES, V10_SOURCES)
+            .replace("CHECK((source='provenance'", "CHECK((source='example' AND method<>'*') OR (source='provenance'"),
+    )?;
+    conn.execute_batch(
+        &V3.replace(V3_SOURCES, V10_SOURCES)
+            .replace("NOT (e.source='provenance' OR", "NOT (e.source IN ('provenance','example') OR"),
+    )?;
+    let kinds = Kind::ALL.map(|k| format!("'{}'", k.as_str())).join(",");
+    conn.execute_batch(&format!(
+        "DROP TRIGGER terms_kind_insert;
+         DROP TRIGGER terms_kind_update;
+         CREATE TRIGGER terms_kind_insert BEFORE INSERT ON term_records
+          WHEN new.kind NOT IN ({kinds}) BEGIN SELECT RAISE(ABORT,'unknown term kind'); END;
+         CREATE TRIGGER terms_kind_update BEFORE UPDATE OF kind ON term_records
+          WHEN new.kind NOT IN ({kinds}) BEGIN SELECT RAISE(ABORT,'unknown term kind'); END;"
+    ))?;
     let view: Option<String> = conn
         .query_row("SELECT sql FROM sqlite_schema WHERE type='view' AND name='variant_memberships'", [], |r| r.get(0))
         .optional()?;
@@ -1690,8 +1716,89 @@ mod tests {
         assert_eq!(ids(&c).len(), with_wd_extension.len() + 1);
         crate::store::publish_asset_batch(&c, "withdraw", longtail, &[1], &Default::default(), None).unwrap();
         assert_eq!(ids(&c), with_wd_extension);
+
+        c.execute_batch(
+            "INSERT INTO terms(key,kind,origin) VALUES ('tag-a','concept','user'),('tag-b','concept','user');
+             INSERT INTO term_evidence(asset_id,term_id,source,method,version,fingerprint) VALUES
+               (1,2,'example','tag-a','test',zeroblob(16)),(1,3,'example','tag-b','test',zeroblob(16));",
+        )
+        .unwrap();
+        assert_eq!(ids(&c), with_wd_extension);
+        for (method, row) in [("tag-a", 6), ("tag-b", 7)] {
+            crate::store::publish_asset_batch(
+                &c,
+                "example",
+                ("example", method),
+                &[1],
+                &[row].into_iter().collect(),
+                None,
+            )
+            .unwrap();
+        }
+        assert_eq!(ids(&c).len(), with_wd_extension.len() + 2);
+        crate::store::publish_asset_batch(&c, "example", ("example", "tag-a"), &[1], &Default::default(), None)
+            .unwrap();
+        assert_eq!(ids(&c).len(), with_wd_extension.len() + 1);
+        assert_eq!(rows(&c, "SELECT method FROM term_current_evidence WHERE source='example'").len(), 1);
+        assert!(c
+            .query_row("SELECT method='tag-b' FROM term_current_evidence WHERE source='example'", [], |r| r
+                .get::<_, bool>(0))
+            .unwrap());
+        assert!(c
+            .execute(
+                "INSERT INTO term_evidence_sets(producer,source,method,scope) VALUES ('t','example','*','all')",
+                []
+            )
+            .is_err());
         assert!(crate::store::rebuild_active_evidence(&c).unwrap().is_empty());
         assert!(rows(&c, "PRAGMA foreign_key_check").is_empty());
+    }
+
+    #[test]
+    fn v9_to_v10_keeps_old_undo_and_rebuilds_both_kind_triggers() {
+        use crate::store::{self, Verdict, VerdictTarget};
+        let mut c = Connection::open_in_memory().unwrap();
+        crate::configure(&c).unwrap();
+        migrate_to(&mut c, 9).unwrap();
+        let tag = store::create_term(&c, Kind::Concept, Some("tag"), "user").unwrap();
+        let asset = store::register_asset(&c, "library", "a", None).unwrap();
+        let action =
+            store::judge(&mut c, &[VerdictTarget::Image { asset, term: tag }], Verdict::Yes, "user", "", "测试标签")
+                .unwrap();
+        assert!(store::create_term(&c, Kind::Mark, Some(FAVORITE_KEY), "user").is_err());
+        assert_eq!(migrate_to(&mut c, 10).unwrap(), 9);
+        assert!(store::term_by_key(&c, FAVORITE_KEY).unwrap().is_none());
+        assert_eq!(store::state(&c, asset, tag).unwrap().as_deref(), Some("confirmed"));
+        store::undo(&mut c, Some(action)).unwrap();
+        assert_ne!(store::state(&c, asset, tag).unwrap().as_deref(), Some("confirmed"));
+        let mark = store::create_term(&c, Kind::Mark, Some(FAVORITE_KEY), "user").unwrap();
+        c.execute("UPDATE terms SET kind='mark' WHERE key='tag'", []).unwrap();
+        assert!(c.execute("UPDATE terms SET kind='unknown' WHERE key=?1", [FAVORITE_KEY]).is_err());
+        let targets = [VerdictTarget::Image { asset, term: mark }];
+        assert!(store::judge(&mut c, &targets, Verdict::No, "user", "", "测试标记").is_err());
+        store::judge(&mut c, &targets, Verdict::Yes, "user", "", "测试标记").unwrap();
+        assert_eq!(store::state(&c, asset, mark).unwrap().as_deref(), Some("confirmed"));
+        store::judge(&mut c, &targets, Verdict::Clear, "user", "", "清除标记").unwrap();
+        assert!(store::state(&c, asset, mark).unwrap().is_none());
+    }
+
+    #[test]
+    fn v9_to_v10_rolls_back_batches_if_rebuilding_kind_triggers_fails() {
+        let mut c = Connection::open_in_memory().unwrap();
+        crate::configure(&c).unwrap();
+        migrate_to(&mut c, 9).unwrap();
+        // 模拟升级到重建类型触发器时失败，前面的批次表已被重建。
+        c.execute_batch(
+            "INSERT INTO term_evidence_sets(producer,source,method,scope) VALUES ('t','wd','wd_character','all');
+             DROP TRIGGER terms_kind_update;",
+        )
+        .unwrap();
+        let objects = "SELECT name,sql FROM sqlite_schema ORDER BY name";
+        let before = rows(&c, objects);
+        assert!(migrate_to(&mut c, 10).is_err());
+        assert_eq!(version(&c).unwrap(), 9);
+        assert_eq!(rows(&c, objects), before);
+        assert_eq!(rows(&c, "SELECT * FROM term_evidence_sets").len(), 1);
     }
 
     #[test]

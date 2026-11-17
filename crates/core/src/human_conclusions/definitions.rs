@@ -102,6 +102,10 @@ pub(crate) fn create(c: &Connection, action: i64, source_library: &str, definiti
         let e = &new.definition;
         let kind = Kind::parse(&e.kind).ok_or_else(|| Error::invalid("定义类型不正确"))?;
         let id = store::create_term(c, kind, Some(&new.target_key), &e.origin)?;
+        // 公用标记词条是裁决的固定端点。撤销导入只撤裁决，保留端点供下次收藏或恢复使用。
+        if kind == Kind::Mark {
+            continue;
+        }
         c.execute("INSERT INTO human_object_contributions(kind,object_id,owner_action_id,definition_json) VALUES ('term',?1,?2,?3)",
             params![id,action,json!(e).to_string()])?;
         c.execute("INSERT INTO human_entity_origins(source_library,source_key,target_key,owner_action_id) VALUES (?1,?2,?3,?4)",
@@ -158,7 +162,7 @@ pub(crate) fn create(c: &Connection, action: i64, source_library: &str, definiti
         )?;
     }
     let mut created = Vec::new();
-    for new in definitions {
+    for new in definitions.iter().filter(|new| new.definition.kind != "mark") {
         let id = c.query_row("SELECT id FROM terms WHERE key=?1", [&new.target_key], |r| r.get(0))?;
         created.push(Created { id, key: new.target_key.clone(), signature: signature(c, id)? });
     }

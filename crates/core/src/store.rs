@@ -141,10 +141,6 @@ pub fn term_by_link(conn: &Connection, system: &str, key: &str) -> Result<Option
         .optional()?)
 }
 
-fn term_key(conn: &Connection, term: TermId) -> Result<String> {
-    Ok(conn.query_row("SELECT key FROM terms WHERE id=?1", [term], |r| r.get(0))?)
-}
-
 pub fn add_name(conn: &Connection, term: TermId, lang: &str, value: &str, role: &str, source: &str) -> Result<()> {
     conn.execute(
         "INSERT OR IGNORE INTO term_names(term_id,lang,value,role,source) VALUES (?1,?2,?3,?4,?5)",
@@ -283,6 +279,13 @@ pub fn judge_in(
                 )?;
                 if !live {
                     return invalid("图或词条不存在");
+                }
+                if verdict == Verdict::No
+                    && conn
+                        .prepare_cached("SELECT kind='mark' FROM terms WHERE id=?")?
+                        .query_row([term], |r| r.get::<_, bool>(0))?
+                {
+                    return invalid("人工标记只能添加或取消");
                 }
                 let reviewed = evidence_ids(conn, "asset_id=?1 AND term_id=?2", &[asset, term])?;
                 conn.execute(
@@ -617,6 +620,9 @@ pub fn project(conn: &Connection, assets: &[AssetId]) -> Result<()> {
         for row in rows {
             let (term, kind, source, method, score, metric) = row?;
             let kind = Kind::parse(&kind).expect("类型由触发器约束");
+            if kind == Kind::Mark {
+                continue;
+            }
             let a = acc.entry((kind, term)).or_default();
             a.sources.insert(format!("{source}.{method}"));
             match kind.policy().judge {
@@ -641,6 +647,7 @@ pub fn project(conn: &Connection, assets: &[AssetId]) -> Result<()> {
                 Some("yes") => "confirmed",
                 Some(_) => "rejected",
                 None => match kind.policy().judge {
+                    Judge::Human => continue,
                     Judge::Pending => "maybe",
                     Judge::System => "machine",
                     Judge::Strong(_) if a.strong => "machine",
@@ -1018,7 +1025,13 @@ fn resolve<'p>(
             }
         },
     };
-    let hit = (id, term_key(conn, id)?);
+    let (key, mark): (String, bool) = conn
+        .prepare_cached("SELECT key,kind='mark' FROM terms WHERE id=?")?
+        .query_row([id], |r| Ok((r.get(0)?, r.get(1)?)))?;
+    if mark {
+        return invalid("证据包不能使用人工标记词条");
+    }
+    let hit = (id, key);
     cache.insert(r, hit.clone());
     Ok(hit)
 }

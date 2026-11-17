@@ -378,8 +378,76 @@ fn interrupted_task_recovery_contract() {
     replay("task_recovery");
 }
 
-/// 把响应解析成 JSON（基准测试要从响应里读值）。
-#[cfg(unix)]
+#[test]
+fn favorite_http_contract() {
+    let (_scratch, root, _) = materialize(&json!({"input": {}}), "favorites");
+    let package = root.join("favorites.pilib");
+    illustash_terms::app_create::create_folder(&package, &root.join("folder"), Some("收藏夹具"), None, None).unwrap();
+    let db = Connection::open(package.join("library.sqlite")).unwrap();
+    db.execute_batch(
+        "INSERT INTO assets(uuid,added_at) VALUES ('a','2026-09-22'),('copy','2026-09-22'),('b','2026-09-21');
+         INSERT INTO duplicates VALUES ('a','g',2,0,'2026-09-22',1,0),('copy','g',2,1,'2026-09-22',0,1);",
+    )
+    .unwrap();
+    let (_host, origin, token) =
+        launch(&root, &package, "favorites", false, Path::new(env!("CARGO_BIN_EXE_illustash-terms")));
+    let call = |url: &str, data: Option<&Value>| {
+        let (status, result, _) = request_json(&origin, url, data, &token);
+        assert_eq!(status, 200, "{url}: {result}");
+        result
+    };
+    let verdicts = || db.query_row("SELECT count(*) FROM term_verdicts", [], |r| r.get::<_, i64>(0)).unwrap();
+    let fav = "has=%5B%22fav%22%5D";
+    let not_fav = "not=%5B%22fav%22%5D";
+    let ids = || call(&format!("/api/ids?{fav}"), None);
+    assert_eq!(call("/api/favorite", Some(&json!({"ids":["a"],"add":false}))), json!({"undo":null}));
+    assert_eq!(verdicts(), 0);
+    assert_eq!(ids(), json!([]));
+    let (status, _, _) = request_json(&origin, "/api/favorite", Some(&json!({"ids":vec!["a"; 501]})), &token);
+    assert_eq!(status, 400);
+    let first = call("/api/favorite", Some(&json!({"ids":["a"]})));
+    assert_eq!(first["undo"]["label"], "已收藏 1 张");
+    assert_eq!(verdicts(), 2);
+    let batch = call("/api/favorite", Some(&json!({"ids":["a","b"]})));
+    assert_eq!(batch["undo"]["label"], "已收藏 2 张");
+    assert_eq!(verdicts(), 5);
+    assert_eq!(call("/api/user-tags", None), json!([]));
+    db.execute_batch(
+        "INSERT INTO assets(uuid,added_at) VALUES ('late','2026-09-23'),('plain','2026-09-20');
+         UPDATE duplicates SET rep=0,hidden=1,size=3 WHERE grp='g';
+         INSERT INTO duplicates VALUES ('late','g',3,2,'2026-09-23',1,0);",
+    )
+    .unwrap();
+    assert_eq!(ids(), json!(["late", "b"]));
+    let page = call(&format!("/api/assets?{fav}&marks=fav"), None);
+    assert_eq!(page["total"], 2);
+    assert_eq!(page["items"][0]["uuid"], "late");
+    assert_eq!(page["items"][0]["fav"], true);
+    assert_eq!(call(&format!("/api/assets/count?{fav}"), None)["total"], 2);
+    assert_eq!(call(&format!("/api/ids?{not_fav}"), None), json!(["plain"]));
+    assert_eq!(call(&format!("/api/ids?{fav}&{not_fav}"), None), json!([]));
+    assert_eq!(call(&format!("/api/ids?{fav}&day=2026-09-21"), None), json!(["b"]));
+    assert_eq!(call("/api/home?marks=fav", None)["days"][0]["items"][0]["fav"], true);
+    assert_eq!(call("/api/detail?id=late&marks=fav", None)["fav"], true);
+    assert_eq!(call("/api/detail?id=plain&marks=other,fav", None)["fav"], false);
+    assert!(call("/api/detail?id=late", None).get("fav").is_none());
+
+    for query in ["has=fav", "has=%5B1%5D", "not=%5B%22fav%3Ax%22%5D"] {
+        assert_eq!(request(&origin, &format!("/api/ids?{query}"), None, &token).0, 400);
+    }
+    let too_many = format!("has=%5B{}%5D&{not_fav}", vec!["%22fav%22"; 20].join(","));
+    assert_eq!(request(&origin, &format!("/api/assets/count?{too_many}"), None, &token).0, 400);
+
+    let clear = call("/api/favorite", Some(&json!({"filter":{"has":"[\"fav\"]"},"exclude":["b"],"add":false})));
+    assert_eq!(clear["undo"]["label"], "已取消收藏 1 张");
+    assert_eq!(verdicts(), 8);
+    assert_eq!(ids(), json!(["b"]));
+    assert_eq!(call("/api/detail?id=late&marks=fav", None)["fav"], false);
+    call("/api/undo", Some(&json!({"id":clear["undo"]["id"]})));
+    assert_eq!(ids(), json!(["late", "b"]));
+}
+
+/// 把响应解析成 JSON，供契约扩展和基准读取字段。
 fn request_json(origin: &str, url: &str, body: Option<&Value>, token: &str) -> (u16, Value, Map<String, Value>) {
     let (status, raw, headers) = request(origin, url, body, token);
     (status, serde_json::from_str(&raw).unwrap_or(Value::Null), headers)

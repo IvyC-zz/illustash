@@ -343,6 +343,15 @@ impl Record {
                 {
                     return invalid("词条定义类型或来源不正确");
                 }
+                if e.kind == "mark"
+                    && (e.origin != "user"
+                        || e.tree.is_some()
+                        || e.baseline.is_some()
+                        || !e.names.is_empty()
+                        || !e.links.is_empty())
+                {
+                    return invalid("人工标记定义不能携带身份、名字或链接");
+                }
                 bounded(self.identity().1, 1, 128)?;
                 bounded(&e.origin, 1, 80)?;
                 if let Some(t) = &e.tree {
@@ -633,6 +642,13 @@ impl Snapshot {
                 || record.terms().iter().any(|k| !entities.contains_key(k))
             {
                 return invalid("人工结论缺少引用的资产或词条定义");
+            }
+            if let Record::ImageVerdict { term, decision, .. } = record {
+                if decision.verdict == "no"
+                    && matches!(entities[term.as_str()], Record::Entity { definition, .. } if definition.kind == "mark")
+                {
+                    return invalid("人工标记只能添加或取消");
+                }
             }
         }
         // 当前结构与 hybrid 原始基线属于不同时间的图，分别查环；跨时间相反的边不能拼成假环。
