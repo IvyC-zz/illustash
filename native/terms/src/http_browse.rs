@@ -1414,7 +1414,8 @@ pub fn read(c: &Connection, context: &LibraryContext, path: &str, q: &HashMap<St
             Json::object([("kinds", kinds)])
         }
         "/api/review-pools" => pools(c, value(q, "nsfw"))?,
-        "/api/galleries" => crate::app_galleries::read(c, context, value(q, "nsfw"))?,
+        "/api/galleries" => crate::app_galleries::read(c, value(q, "nsfw"))?,
+        "/api/galleries/covers" => crate::app_galleries::covers(c, context, value(q, "nsfw"), value(q, "ids"))?,
         "/api/detail" => {
             let mut item = detail(c, context, value(q, "id"))?;
             if marks_favorite(q) {
