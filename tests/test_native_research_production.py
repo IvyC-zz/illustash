@@ -527,8 +527,10 @@ class NativeLearningSignalTest(unittest.TestCase):
         self.assertEqual((first['upto'], first['state']), (self.latest_verdict(), 'done'))
         # 早于当前的编号照样能问；不是非负整数、或者比当前最大编号还大的拒绝。
         self.assertEqual(self.learning(first['upto'] - 1)['state'], 'done')
-        for bad in (first['upto'] + 1, -1, 'x', ''):
+        for bad in (first['upto'] + 1, -1, 'x', '1.5'):
             self.assertEqual(self.request('/api/learning?upto=' + str(bad))['status'], 400, bad)
+        # 空值和别的查询参数一样按没带处理（http_read::query）。
+        self.assertEqual(json.loads(self.request('/api/learning?upto=')['body'])['upto'], first['upto'])
 
     def test_learning_signal_reports_error_when_the_worker_fails(self):
         self.stop(self.process)

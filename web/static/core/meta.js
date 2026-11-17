@@ -34,9 +34,10 @@ const learningAt = upto => api('/api/learning?upto=' + upto);
 export const LEARN_LIMIT = 60000;
 const LEARN_FAST = 2000;
 let learnRun = 0, syncWait = null;
-// 等待期间计数旁显示「正在更新」（state.learning，ui/shell.js 的标题读它）。只改字段、不重画：设上时由调用方重画，
-// 落定时由随后的重读重画，免得重读之前先闪一下没有标记的旧计数。
+// 等待期间计数旁显示「正在更新」（state.learning，ui/shell.js 的标题读它）。这里只改字段、不重画，设上时由调用方重画。
+// 等待结束时不去掉：调用方重读完列表、计数和分组以后再调 learningShown，免得分组还没重画，标记先没了。
 const mark = on => { state.learning = on; };
+export const learningShown = () => mark(false);
 // 从 learningNow 读到的 first 接着等，解析为：
 //   'done'        学到的结果已经发布，现在重读就是最终值；
 //   'sync'        同步进行中，同步结束后才学，afterSyncLearning 接着等同一个 upto；
@@ -53,14 +54,13 @@ export async function learningSettled(first, {marking = false} = {}) {
     if (s.state === 'done') return 'done';
     if (s.state === 'sync') { syncWait = {upto: s.upto, marking}; return 'sync'; }
     if (s.state !== 'pending') return 'error';
-    if (waited >= LEARN_LIMIT) { mark(false); return 'timeout'; }
+    if (waited >= LEARN_LIMIT) return 'timeout';
     if (marking) mark(true);
     const step = waited < LEARN_FAST ? 250 : 1000;
     await new Promise(done => setTimeout(done, step)); waited += step;
     if (run !== learnRun) return 'superseded';
     try { s = await learningAt(first.upto); } catch { s = null; }
     if (run !== learnRun) return 'superseded';
-    if (s?.state !== 'pending') mark(false);
   }
 }
 // 同步结束了：之前因为同步而没等完的那次（learningSettled 解析为 'sync'），用同一个 upto 接着等，返回它的 promise；没有就返回 null。

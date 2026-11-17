@@ -73,13 +73,16 @@ test('polls every 250 ms for the first 2 s, then every second, up to the limit',
   assert.ok(waits.slice(8).every(w => w === 1000), `waited ${waits}`);
 });
 
-test('marking shows the updating flag while pending and clears it once settled', async () => {
+test('marking shows the updating flag while pending; the caller clears it after rereading', async () => {
   const {core, marks} = harness(['pending', 'pending', 'done']);
   const settled = core.learningSettled(first('pending'), {marking: true});
   // 第一次等之前就标上，调用方随即重画。
   assert.equal(core.state.learning, true);
   assert.equal(await settled, 'done');
   assert.deepEqual(marks, [true, true, true]);
+  // 重读完之前一直留着，免得分组还没重画标记先没了。
+  assert.equal(core.state.learning, true);
+  core.learningShown();
   assert.equal(core.state.learning, false);
 });
 
@@ -89,10 +92,10 @@ test('without marking the flag stays off', async () => {
   assert.deepEqual(marks, [false, false]);
 });
 
-test('timeout clears the flag', async () => {
+test('timeout keeps the flag for the caller to clear after rereading', async () => {
   const {core} = harness(['pending']);
   assert.equal(await core.learningSettled(first('pending'), {marking: true}), 'timeout');
-  assert.equal(core.state.learning, false);
+  assert.equal(core.state.learning, true);
 });
 
 test('a newer wait supersedes the older one and takes over the flag', async () => {
@@ -110,8 +113,8 @@ test('a wait cut short by sync resumes with the same upto after the sync ends', 
   const {core, urls} = harness(['sync', 'pending', 'done'], 9);
   assert.equal(core.afterSyncLearning(), null);
   assert.equal(await core.learningSettled(first('pending', 9), {marking: true}), 'sync');
-  // 同步进行中不标记、不再轮询。
-  assert.equal(core.state.learning, false);
+  // 同步进行中不再轮询；调用方重读完去掉标记。
+  core.learningShown();
   const resumed = core.afterSyncLearning();
   assert.equal(core.state.learning, true);
   assert.equal(await resumed, 'done');

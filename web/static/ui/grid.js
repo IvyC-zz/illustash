@@ -6,7 +6,7 @@ import {t} from '../core/i18n.js';
 import {composing} from '../core/keys.js';
 import {REASONS, nameWithWork} from '../core/labels.js';
 import {undoRefusal} from '../core/human.js';
-import {afterSyncLearning, learningNow, learningSettled, metaSoon, refreshMeta} from '../core/meta.js';
+import {afterSyncLearning, learningNow, learningSettled, learningShown, metaSoon, refreshMeta} from '../core/meta.js';
 import {prefs} from '../core/prefs.js';
 import {SHORTCUTS, currentSource, keyAction, keySelection, modes, selectionSize, shownUuid, viewerTarget} from '../core/modes.js';
 import {keyScope, pageOf, viewOf} from '../core/pages.js';
@@ -744,7 +744,10 @@ export async function undo() {
   if (outcome === 'sync') toast(syncUndone());
   // 落定时正有别的写入在进行：它自己的重读会读到落定后的值。
   await exclusive(() => reread('undo'));
+  settled();
 }
+// 等待结束、重读完：去掉「正在更新」。
+function settled() { learningShown(); renderHeading(); }
 // 同步结束（ui/effects.js 的 afterJob）：之前因为同步没等完的学习，用同一个编号接着等，落定后重读一次。
 // 同步结束时没有新图，也要靠这里重读。
 export async function afterSync() {
@@ -752,7 +755,9 @@ export async function afterSync() {
   if (!waiting) return;
   renderHeading();
   const outcome = await waiting;
-  if (outcome !== 'superseded' && outcome !== 'sync') await exclusive(() => reread('learned'));
+  if (outcome === 'superseded') return;
+  if (outcome !== 'sync') await exclusive(() => reread('learned'));
+  settled();
 }
 export async function sweep() {
   const c = state.char; if (!c?.unchecked) return;
