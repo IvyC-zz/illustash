@@ -24,6 +24,21 @@ use std::{
     time::Duration,
 };
 
+/// 显式开启时向宿主 stderr 写固定阶段名和耗时。阶段内出错或取消也记录已用时间。
+struct Phase(&'static str, Option<std::time::Instant>);
+impl Phase {
+    fn start(name: &'static str) -> Self {
+        Self(name, std::env::var_os("ILLUSTASH_RESEARCH_TIMING").is_some().then(std::time::Instant::now))
+    }
+}
+impl Drop for Phase {
+    fn drop(&mut self) {
+        if let Some(start) = self.1 {
+            eprintln!("research-timing {} {:.3} ms", self.0, start.elapsed().as_secs_f64() * 1000.0);
+        }
+    }
+}
+
 pub fn configured() -> bool {
     std::env::var_os("ILLUSTASH_RESEARCH_WORKER").is_some_and(|p| !p.is_empty())
 }
@@ -322,6 +337,7 @@ fn combine(app: &[u8], source: &[u8]) -> String {
     format!("{:x}", h.finalize())
 }
 fn source_digest(src: &Connection, inputs: &Inputs<'_>, check: &dyn Fn() -> Result<()>) -> Result<Vec<u8>> {
+    let _phase = Phase::start("hash_source");
     let mut h = Sha256::new();
     hash_db(src, &mut h, inputs.scope.source(), &["backend_effects", "research_runs"], check)?;
     Ok(h.finalize().to_vec())
@@ -329,6 +345,7 @@ fn source_digest(src: &Connection, inputs: &Inputs<'_>, check: &dyn Fn() -> Resu
 /// 应用表、共享文件和原图。共享锚点文件在一次完整的索引发布（index_generation）之内读取。`check` 在行与文件块之间
 /// 运行：检查停止，调用方持有源库读锁时还检查源库写入方。
 fn app_digest(app: &Connection, inputs: &Inputs<'_>, check: &dyn Fn() -> Result<()>) -> Result<Vec<u8>> {
+    let _phase = Phase::start("hash_app");
     if inputs.scope == Scope::Learning {
         crate::index_generation::stable(inputs.anchors, || app_digest_once(app, inputs, check))
     } else {
@@ -914,7 +931,10 @@ fn snapshot(
     writers.read(src, |src| {
         read_snapshot(&[c, src], || {
             let app = app_digest(c, inputs, &|| ctx.check())?;
-            backup(c, &dir.join("library.sqlite"), ctx, None)?;
+            {
+                let _phase = Phase::start("copy_app");
+                backup(c, &dir.join("library.sqlite"), ctx, None)?;
+            }
             let events: Vec<i64> = c
                 .prepare(
                     "SELECT id FROM backend_effects WHERE status='pending' AND kind IN ('verdict','imported','index_changed') ORDER BY id",
@@ -940,6 +960,7 @@ fn snapshot(
                     )? || !intents.is_empty());
             // 源库放最后：从第一次读起，研究就持有它的读锁。
             let source = source_digest(src, inputs, &|| ctx.check())?;
+            let _phase = Phase::start("copy_source");
             backup(src, &dir.join("source.sqlite"), ctx, Some(writers))?;
             Ok(Snapshot { version: combine(&app, &source), events, intents, regroup })
         })
@@ -967,6 +988,7 @@ fn run(
         .execute("DELETE FROM name_settings WHERE key IN ('model_key','deepseek_key')", [])?;
     // 只有学习类的种类发布学习批次；其他种类跳过它完整的输入戳。
     let learning = if inputs.scope == Scope::Learning {
+        let _phase = Phase::start("learning_token");
         crate::character_learning::snapshot(&mut crate::sqlite::open(scratch.0.join("library.sqlite"))?)?["token"]
             .clone()
     } else {
@@ -997,6 +1019,7 @@ fn run(
         .arg(&output)
         .env("ILLUSTASH_RESEARCH_PROGRESS", &progress);
     let mut last = std::time::Instant::now();
+    let worker_phase = Phase::start("worker");
     let status = ctx.process_observed(&mut cmd, || {
         if last.elapsed() < Duration::from_millis(100) {
             return Ok(());
@@ -1018,6 +1041,7 @@ fn run(
         }
         Ok(())
     })?;
+    drop(worker_phase);
     ctx.check()?;
     if !status.success() {
         return Err(Error::Invalid("研究 worker 崩溃或依赖不可用".into()));
@@ -1068,6 +1092,7 @@ fn run(
                     Some(&writers),
                     || {},
                     |tx| {
+                        let _phase = Phase::start("publish");
                         crate::schema::begin_writing(&tx)?;
                         if kind != "similar" {
                             if let Some(batch) = response.learning.as_ref().filter(|v| !v.is_null()) {
