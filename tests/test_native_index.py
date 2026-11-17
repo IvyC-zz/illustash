@@ -313,6 +313,7 @@ class NativeIndexTest(unittest.TestCase):
     def test_repeat_busy_cancel_switch_same_id_and_shutdown(self):
         self.mode.write_text('sleep');self.check();self.index({'action':'apply','tags':['carol_example']})
         self.assertEqual(self.request('/api/index',{'action':'check','allow_network':True})['status'],400)
+        # 这个夹具图库没有文件夹来源，同步本来就关着；索引写入期间的同步排队见 test_native_character_index（#607）。
         self.assertEqual(self.request('/api/sync',{})['status'],400)
         other = self.package('other');other.config['id']=self.lib.config['id'];(other.path/'library.json').write_text(json.dumps(other.config))
         before=snapshot(other.source)

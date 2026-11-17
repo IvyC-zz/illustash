@@ -15,7 +15,7 @@ use crate::http_json::Json;
 
 pub(crate) const ROUTE: &str = "/platform/activity";
 /// 与 web/static/core/jobs.js 的同名列表相同。
-pub(crate) const SYNC_ACTIVE: &[&str] = &["scanning", "recognising", "importing"];
+pub(crate) const SYNC_ACTIVE: &[&str] = &["waiting", "scanning", "recognising", "importing"];
 pub(crate) const INDEX_ACTIVE: &[&str] = &["checking", "fetching", "cleaning", "building", "scanning", "importing"];
 pub(crate) const NAMES_ACTIVE: &[&str] = &["fetching", "matching", "translating", "running"];
 pub(crate) const SIMILAR_ACTIVE: &[&str] = &["reading", "pairing", "comparing", "waiting"];

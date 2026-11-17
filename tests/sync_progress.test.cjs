@@ -145,3 +145,15 @@ test('a sync the system refused the Photos library says what to do, by its code 
   assert.doesNotMatch(el('taskPanel').innerHTML, /photos-privacy/);
   toggleTasks(false);
 });
+
+// #607 走查：首次准备时宿主正在启用基础角色索引，页面发起的同步排在后面。页面显示在等，并且继续读，等宿主自己开始。
+test('a sync queued behind a background task says so and keeps the poll running (#607)', async () => {
+  const core = web.core();
+  assert.equal(context.syncLine({status: 'waiting'}), '等后台任务结束后开始同步');
+  assert.ok(core.SYNC_ACTIVE.includes('waiting'));
+  globalThis.fetch = async () => ({ok: true, status: 200, json: async () => ({started: false, queued: true})});
+  try {
+    await core.startSync();
+    assert.equal(core.state.sync.status, 'waiting');
+  } finally { delete globalThis.fetch; }
+});

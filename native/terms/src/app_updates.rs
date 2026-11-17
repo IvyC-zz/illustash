@@ -83,6 +83,10 @@ impl Version {
     pub(crate) fn prerelease(&self) -> bool {
         !self.pre.is_empty()
     }
+    /// 不看预发布后缀的 X.Y.Z（数据包目录的最低应用版本按它比，#602：0.3.0 的测试版也能用要求 0.3.0 的包）。
+    pub(crate) fn core(&self) -> [u64; 3] {
+        self.core
+    }
 }
 impl Ord for Version {
     fn cmp(&self, other: &Self) -> Ordering {
@@ -279,6 +283,15 @@ fn base() -> std::result::Result<String, String> {
 fn downloads() -> std::result::Result<String, String> {
     test_base().unwrap_or_else(|| Ok(DOWNLOADS.into()))
 }
+/// 本项目 Release 资源的下载地址（#602 的数据包目录和目录里的包）：照原样，测试时把 `https://github.com/` 换成
+/// ILLUSTASH_UPDATE_BASE 指向的本机测试服务。别的地址一律拒绝。
+pub(crate) fn asset_url(address: &str) -> std::result::Result<String, String> {
+    let rest = address
+        .strip_prefix(DOWNLOADS)
+        .filter(|rest| rest.starts_with(&format!("{REPOSITORY}/releases/download/")))
+        .ok_or_else(|| "数据包的下载地址不在本项目的 Release 里".to_string())?;
+    Ok(format!("{}{rest}", downloads()?))
+}
 fn test_base() -> Option<std::result::Result<String, String>> {
     let base = std::env::var("ILLUSTASH_UPDATE_BASE").ok()?;
     Some(local(base))
@@ -419,8 +432,40 @@ pub(crate) fn info() -> Result<Json> {
 /// - `{"action": "dismiss"}` 不再提示已知的最新 Release（有更新的版本时会再次提示）；
 /// - `{"action": "download"}` 让外壳下载并校验检查查到的那个新版本（#279），`{"action": "cancel"}` 取消下载，
 ///   `{"action": "install"}` 安装下好的版本并重启。外壳不在时这三个返回错误。
-pub(crate) fn post(body: &Json) -> Result<Json> {
-    post_at(&Place::app()?, body, &current(), fetch)
+///
+/// 真的去查了 GitHub 时（手动检查，或领到了自动检查），顺带读一次数据包目录（#602，`app_packs::refresh`）：
+/// 读到的结果记在 updates.json 的 `packs_checked_at`、`packs_error` 里，不进这里的回复。
+pub(crate) fn post(resources: &Path, body: &Json) -> Result<Json> {
+    let place = Place::app()?;
+    let mut checked = false;
+    let reply = post_at(&place, body, &current(), |current| {
+        checked = true;
+        fetch(current)
+    })?;
+    if checked {
+        if let Some(result) = crate::app_packs::refresh(resources) {
+            record_packs(&place, result.map(|_| ()))?;
+        }
+    }
+    Ok(reply)
+}
+
+fn record_packs(place: &Place, result: std::result::Result<(), String>) -> Result<()> {
+    let at = place.now.to_rfc3339_opts(chrono::SecondsFormat::Secs, false);
+    update(&place.state, |fields| {
+        fields.insert("packs_checked_at".into(), at.into());
+        match result {
+            Ok(()) => fields.remove("packs_error"),
+            Err(message) => fields.insert("packs_error".into(), message.into()),
+        };
+    })
+}
+
+/// 最近一次读数据包目录的时间和错误（`GET /api/packs`）。
+pub(crate) fn packs_state() -> Result<(Option<String>, Option<String>)> {
+    let state = read(&Place::app()?.state);
+    let text = |key: &str| state.get(key).and_then(Value::as_str).map(str::to_owned);
+    Ok((text("packs_checked_at"), text("packs_error")))
 }
 
 fn post_at(

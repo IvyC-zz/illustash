@@ -223,6 +223,11 @@ impl Session {
             halted: false,
         })
     }
+    /// 同步要等的后台任务正在进行（#607）：角色索引在写入，或 WD 扩展检查在跑。这时的同步请求先排着
+    /// （[`crate::app_sync::Syncer::queue`]），由恢复检查在它们结束后开始。
+    pub(crate) fn sync_waits(&self) -> bool {
+        self.index.writing() || self.wd_extension.running()
+    }
     /// 这个图库包记录在案的损坏：会话不再写入任何东西（#212）。
     pub(crate) fn damage(&self) -> Option<crate::app_integrity::Damage> {
         self.owner.as_ref().and_then(|owner| owner.health.damage())
@@ -457,9 +462,8 @@ impl Application {
                 let lib = session.library.clone();
                 let token = session.token.clone();
                 let generation = session.generation;
-                if !session.index.writing() {
-                    session.syncer.automatic(&lib, generation, &token)?;
-                }
+                let wait = session.sync_waits();
+                session.syncer.automatic(&lib, generation, &token, wait)?;
             }
             session.start_checks(crate::app_integrity::BACKGROUND_DELAY);
         }
@@ -500,6 +504,24 @@ impl Application {
         }
         let busy = session.syncer.running() || session.wd_extension.running();
         session.index.recover(&library, busy);
+        let base_busy = busy
+            || self.imports.busy()
+            || self.exports.running()
+            || session.human_exports.running()
+            || self.imports.recognition_running(session.generation);
+        session.index.sync_base(&library, base_busy);
+        // 排着的同步（#607）：挡着它的后台任务结束后接着开始。基础索引的启用排在前面，这次识别用的就是新的锚点。
+        if session.syncer.queued()
+            && !session.syncer.running()
+            && !session.sync_waits()
+            && !self.imports.recognition_running(session.generation)
+            && session.syncer.take_queued()
+        {
+            let (generation, token) = (session.generation, session.token.clone());
+            if let Err(error) = session.syncer.start(&library, generation, &token) {
+                eprintln!("排着的同步未能开始：{error}");
+            }
+        }
         session.names.recover(&library);
         if let Err(error) = session.research.recover(&library, busy) {
             eprintln!("研究事件恢复失败：{error}");
@@ -532,12 +554,12 @@ impl Application {
         if ids.is_empty() {
             return Ok(());
         }
-        let Some(path) = crate::app_models::extension_file(&self.root)? else { return Ok(()) };
-        if !crate::app_wd_extension::auto_enabled(&session.library)? {
-            return Ok(());
-        }
+        let app = crate::app_library::read_connection(&session.library.db())?;
+        let Some((pack, path)) = crate::app_wd_extension::enabled_pack(&self.root, &app)? else { return Ok(()) };
+        drop(app);
         let identity = crate::app_tasks::TaskIdentity::new(&session.library, session.generation, &session.token)?;
-        session.wd_extension.start_for(&session.library, identity, crate::app_wd_extension::Action::Auto(path, ids))?;
+        let action = crate::app_wd_extension::Action::Auto(pack, path, ids);
+        session.wd_extension.start_for(&session.library, identity, action)?;
         Ok(())
     }
 
@@ -663,7 +685,8 @@ impl Application {
             let lib = session.library.clone();
             let token = session.token.clone();
             let gen = session.generation;
-            if let Err(e) = session.syncer.automatic(&lib, gen, &token) {
+            let wait = session.sync_waits();
+            if let Err(e) = session.syncer.automatic(&lib, gen, &token, wait) {
                 eprintln!("同步自动启动失败：{e}");
             }
         }

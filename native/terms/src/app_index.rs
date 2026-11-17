@@ -29,6 +29,12 @@ const DEFAULTS: [&str; 8] = [
     "honkai_impact_3rd",
     "zenless_zone_zero",
 ];
+/// 共享目录里记着这台电脑启用还是撤回了基础角色索引（#607）：{enabled, sha256, version}。没有这个文件就是还没启用过。
+/// 随锚点一起在同一次索引发布里换上（index_generation）。
+const BASE_MARK: &str = "char-index-base.json";
+/// 图库启用基础角色索引的记录（应用库 meta）：{sha256, mode}。`mode` 为 `rebuilt` 时图库的角色表和索引候选按包重建过；
+/// 为 `adopted` 时图库已有同一版本的索引，只装了共享锚点，图库内容没动。撤回时删掉。
+const BASE_META: &str = "character_index_base";
 fn now() -> String {
     chrono::Local::now().format("%Y-%m-%d %H:%M:%S").to_string()
 }
@@ -361,6 +367,8 @@ pub(crate) struct Updater {
     network: bool,
     pub automatic: bool,
     next_retry: Instant,
+    /// 自动启用或撤回基础角色索引（#607）失败后，隔一段时间再试。
+    base_retry: Instant,
 }
 impl Updater {
     pub fn new(
@@ -384,6 +392,7 @@ impl Updater {
             network,
             automatic,
             next_retry: Instant::now(),
+            base_retry: Instant::now(),
         })
     }
     /// 这个图库关注新角色的作品（#96 在推荐作品里标出它们）。
@@ -588,6 +597,83 @@ impl Updater {
         };
         self.info(lib)
     }
+    /// 基础角色索引（#607）的状态（GET /api/index/base）；GET /api/index 的回复冻结，另开这个路由。
+    pub fn base_info(&self, lib: &Library) -> Result<Json> {
+        let release = crate::character_index::release();
+        let meta = base_meta(lib)?;
+        let mark = read(&self.shared.join(BASE_MARK), Value::Null);
+        let running = self.task.as_ref().is_some_and(Task::running)
+            && self.state.lock().expect("index state mutex poisoned").value()["kind"] == "base";
+        Ok(Json::from(json!({
+            "included": release.is_some(),
+            "version": release.map(|(r, _)| r.version.clone()),
+            "characters": release.map(|(r, _)| r.characters),
+            "file": release.map(|(_, f)| json!({"path": f.path, "size": f.size, "sha256": f.sha256})),
+            "available": crate::character_index::present(&self.resources),
+            "enabled": meta.is_some(),
+            "mode": meta.as_ref().map(|m| m["mode"].clone()),
+            "withdrawn": mark["enabled"] == false,
+            "running": running,
+            "writable": !lib.frozen(),
+        })))
+    }
+    /// POST /api/index/base `{"enable": true|false}`：用户启用或撤回基础角色索引，同一台电脑的其他图库下次打开时跟着同步。
+    pub fn base_post(&mut self, lib: &Library, body: &Json, busy: bool) -> Result<Json> {
+        let enable = match body {
+            Json::Object(fields) if fields.len() == 1 => match body.get("enable") {
+                Some(Json::Scalar(Value::Bool(enable))) => *enable,
+                _ => return invalid("基础角色索引请求字段不正确"),
+            },
+            _ => return invalid("基础角色索引请求字段不正确"),
+        };
+        if lib.frozen() {
+            return invalid("测试图库不能更新索引");
+        }
+        if busy {
+            return invalid("正在与 Photos 同步，完成后再更新角色索引");
+        }
+        if self.journal.exists() {
+            return invalid("上次索引任务尚待恢复，请先重试原任务");
+        }
+        self.start(lib, json!({"action":"base","enable":enable}))?;
+        self.base_info(lib)
+    }
+    /// 让这个图库跟上这台电脑的基础角色索引（#607）：包已下载、没有撤回过、图库还没启用（或启用的是旧版本）时启用；
+    /// 在别的图库撤回过、这个图库还启用着时撤回。不联网。失败后十分钟内不再自动重试。
+    pub fn sync_base(&mut self, lib: &Library, busy: bool) {
+        if busy
+            || lib.frozen()
+            || self.task.as_ref().is_some_and(Task::running)
+            || self.journal.exists()
+            || Instant::now() < self.base_retry
+        {
+            return;
+        }
+        let Some(enable) = self.base_wanted(lib) else { return };
+        self.base_retry = Instant::now() + Duration::from_secs(600);
+        if let Err(error) = self.start(lib, json!({"action":"base","enable":enable})) {
+            eprintln!("基础角色索引未能自动{}：{error}", if enable { "启用" } else { "撤回" });
+        }
+    }
+    fn base_wanted(&self, lib: &Library) -> Option<bool> {
+        std::env::var_os("ILLUSTASH_INDEX_WORKER")?;
+        let (_, file) = crate::character_index::release()?;
+        if crate::app_models::waiting(&self.resources) {
+            return None;
+        }
+        let meta = base_meta(lib).ok()?;
+        if read(&self.shared.join(BASE_MARK), Value::Null)["enabled"] == false {
+            return meta.is_some().then_some(false);
+        }
+        if !crate::character_index::present(&self.resources) {
+            return None;
+        }
+        match meta {
+            None => Some(true),
+            Some(m) if m["sha256"] != file.sha256.as_str() => Some(true),
+            Some(_) => None,
+        }
+    }
     pub fn recover(&mut self, lib: &Library, busy: bool) {
         if self.task.as_ref().is_some_and(Task::running) || Instant::now() < self.next_retry || lib.frozen() {
             return;
@@ -662,6 +748,14 @@ impl Updater {
         if action != "check" && action != "resume" && crate::app_models::waiting(&self.resources) {
             return invalid("识别模型还没下载；下载后才能更新角色索引");
         }
+        if action == "base" {
+            if crate::character_index::release().is_none() {
+                return invalid("这个版本没有基础角色索引");
+            }
+            if b["enable"] == true && !crate::character_index::present(&self.resources) {
+                return Err(Error::Conflict(crate::character_index::MISSING.into()));
+            }
+        }
         self.task.take();
         let identity = TaskIdentity::new(lib, self.generation, &self.session)?;
         let lib = lib.clone();
@@ -678,19 +772,27 @@ impl Updater {
             ("resume", Some(bytes)) => {
                 match serde_json::from_slice::<Value>(&bytes).ok().map(|j| j["action"].clone()) {
                     Some(Value::String(a)) if a == "drop" => "drop",
+                    Some(Value::String(a)) if a == "base" => "base",
                     _ => "add",
                 }
             }
             ("check", _) => "check",
             ("drop", _) => "drop",
+            ("base", _) => "base",
             _ => "add",
         };
         let status = match action {
             "check" => "checking",
-            "drop" => "building",
+            "drop" | "base" => "building",
             _ => "fetching",
         };
-        *state.lock().expect("index state mutex poisoned") = json!({"status":status,"started_at":now()}).into();
+        let mut initial = json!({"status":status,"started_at":now()});
+        // 基础角色索引的任务从一开始就带 kind，`GET /api/index/base` 才看得出它在运行（#607）。其他动作的运行中状态
+        // 是冻结的 /api/index 回复，照旧不带。
+        if kind == "base" {
+            initial["kind"] = kind.into();
+        }
+        *state.lock().expect("index state mutex poisoned") = initial.into();
         self.task = Some(Task::start_with(identity, deadline(), move |ctx| {
             let run = || {
                 let net = crate::app_name_sources::Source::new(lib.db(), ctx.cancellation_arc(), network, true)?;
@@ -707,7 +809,7 @@ impl Updater {
                 } else {
                     patch(
                         &lib,
-                        &PatchPaths { shared: &shared, dir: &dir, journal: &journal },
+                        &PatchPaths { resources: &resources, shared: &shared, dir: &dir, journal: &journal },
                         &b,
                         &rows,
                         &net,
@@ -860,6 +962,7 @@ fn paused(journal: &Path) -> Option<Value> {
     job.extra.get(PAUSED).filter(|_| job.phase == protocol::JobPhase::Prepared).cloned()
 }
 struct PatchPaths<'a> {
+    resources: &'a Path,
     shared: &'a Path,
     dir: &'a Path,
     journal: &'a Path,
@@ -922,6 +1025,7 @@ fn prepare_job(
 ) -> Result<protocol::IndexJob> {
     let (shared, dir, journal) = (paths.shared, paths.dir, paths.journal);
     let id = &ctx.identity().task_id;
+
     let folder = lib.instance_path().join("index-jobs").join(id);
     std::fs::create_dir_all(&folder)?;
     let mut prepared = PreparedStage(folder.clone(), false);
@@ -938,16 +1042,80 @@ fn prepare_job(
         }
     }
     write(&folder.join("char-patch/plan.json"), &json!(plan))?;
+    let base = base_plan(lib, paths, b, &folder)?;
     let job = protocol::parse(
         json!({
             "version":1,"package":lib.instance_path(),"job_id":id,"identity":ctx.identity(),"action":b["action"],
-            "reason":b["reason"],"rows":rows,"folder":folder,"before":before,"phase":"prepared"
+            "reason":b["reason"],"rows":rows,"folder":folder,"before":before,"phase":"prepared","base":base
         }),
         journal,
     )?;
+
     write(journal, &protocol::value(&job)?)?;
     prepared.1 = true;
     Ok(job)
+}
+/// 这个任务带不带基础角色索引（#607），以及启用、撤回时要不要改图库内容。带的话把核对过的包复制进任务目录。
+/// - 启用：图库已有同一版本的索引（角色表里有包里的每个角色）时只装共享锚点（`adopted`），
+///   不重写证据、不动主归属；否则按包重建角色表和索引候选（`rebuilt`，版本不同时就是来源替换）。
+/// - 撤回：按启用时的方式还原；`adopted` 的图库内容本来没动，只把共享锚点换回不带包的。
+/// - 其他索引任务：这台电脑启用了基础索引就带上，否则不带，重建的结果与启用状态一致。
+fn base_plan(lib: &Library, paths: &PatchPaths<'_>, b: &Value, folder: &Path) -> Result<Value> {
+    let mark = read(&paths.shared.join(BASE_MARK), Value::Null);
+    let include = if b["action"] == "base" { b["enable"] == true } else { mark["enabled"] == true };
+    let mut plan = json!({"include": include});
+    if include {
+        plan["sha256"] = json!(crate::character_index::copy_verified(
+            paths.resources,
+            &folder.join(crate::character_index::JOB_FILE)
+        )?);
+    }
+    if b["action"] == "base" {
+        let rebuild = if include {
+            let entries = crate::character_index::load_job(folder)?.unwrap_or_default();
+            !same_version(&crate::app_library::read_connection(&folder.join("pi.db"))?, &entries)?
+        } else {
+            base_meta(lib)?.is_some_and(|m| m["mode"] == "rebuilt")
+        };
+        plan["enable"] = json!(include);
+        plan["write_source"] = json!(rebuild);
+    }
+    Ok(plan)
+}
+/// 图库的角色表已经是同一版本的精选索引：包里的每个角色都在。不要求每个都有阈值：已有图库当年装载时个别角色
+/// 没算出锚点，这样的角色在图库里本来就不认领，装上共享锚点后仍因阈值为空而不认领，图库不变。
+fn same_version(src: &Connection, entries: &[crate::character_index::Entry]) -> Result<bool> {
+    if entries.is_empty() {
+        return Ok(false);
+    }
+    let have = src
+        .prepare("SELECT char_id FROM characters")?
+        .query_map([], |r| r.get::<_, String>(0))?
+        .collect::<rusqlite::Result<BTreeSet<_>>>()?;
+    Ok(entries.iter().all(|e| have.contains(&e.id)))
+}
+/// 图库启用基础角色索引的记录；没启用时为 None。
+fn base_meta(lib: &Library) -> Result<Option<Value>> {
+    let c = crate::app_library::read_connection(&lib.db())?;
+    let raw: Option<String> =
+        c.query_row("SELECT value FROM meta WHERE key=?", [BASE_META], |r| r.get(0)).optional()?;
+    Ok(raw.and_then(|v| serde_json::from_str(&v).ok()))
+}
+/// 启用或撤回之后记下这个图库的状态。重放同一任务时结果相同。
+fn record_base(lib: &Library, job: &protocol::IndexJob) -> Result<()> {
+    let base = job.extra.get("base").cloned().unwrap_or(Value::Null);
+    let mut app = writer(&lib.db())?;
+    let tx = app.transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)?;
+    crate::schema::begin_writing(&tx)?;
+    if base["enable"] == true {
+        let mode = if base["write_source"] == true { "rebuilt" } else { "adopted" };
+        let value = json!({"sha256": base["sha256"], "mode": mode}).to_string();
+        tx.execute("INSERT OR REPLACE INTO meta(key,value) VALUES (?,?)", params![BASE_META, value])?;
+    } else {
+        tx.execute("DELETE FROM meta WHERE key=?", [BASE_META])?;
+    }
+    crate::schema::commit_writing(tx)?;
+    Ok(())
 }
 /// 任务等待期间图库可能改动的内容在任务里的副本：来源数据库、图库的 features 和相册映射。
 /// 共享索引文件只在索引任务里改变，而索引任务会等这个任务。
@@ -1204,11 +1372,16 @@ fn commit(
     ctx.check()?;
     let id = job.job_id.clone();
     let folder = job.folder.clone();
+    let base = job.extra.get("base").cloned().unwrap_or(Value::Null);
+    // 只装共享锚点的启用和撤回（#607 的 `adopted`）不改来源库，也就没有要投影的候选。
+    let write_source = job.action != protocol::IndexAction::Base || base["write_source"] == true;
     let mut src = writer(&lib.source())?;
-    if let Some(stored) = stored_run(&src, &id)? {
-        *job = stored;
-    } else {
-        commit_source(lib, shared, dir, journal, job, ctx, &mut src)?;
+    if write_source {
+        if let Some(stored) = stored_run(&src, &id)? {
+            *job = stored;
+        } else {
+            commit_source(lib, shared, dir, journal, job, ctx, &mut src)?;
+        }
     }
     // 已提交源结果的重放仍可能遇到新的识别回执；在发布共享文件和应用候选之前再检查。
     let app = crate::app_library::read_connection(&lib.db())?;
@@ -1222,7 +1395,21 @@ fn commit(
     drop(app);
     publish(shared, dir, &folder, job)?;
     update(state, json!({"status":"importing"}));
-    let changed = import(lib, &src, job, ctx)?;
+    let changed = if write_source { import(lib, &src, job, ctx)? } else { 0 };
+    if job.action == protocol::IndexAction::Base {
+        if write_source {
+            prune_backups(dir)?;
+        }
+        record_base(lib, job)?;
+        std::fs::remove_file(journal)?;
+        let _ = std::fs::remove_dir_all(&folder);
+        update(
+            state,
+            json!({"status":"done","kind":"base","enabled":base["enable"] == true,"changed":changed,"finished_at":now()}),
+        );
+        pause_after_done();
+        return Ok(());
+    }
     let drop = job.action == protocol::IndexAction::Drop;
     let chars = outcomes(job, shared, dir, &src)?;
     record(dir, &id, &chars, changed, drop)?;
@@ -1384,6 +1571,14 @@ fn sourced_label(c: &Connection, r: &(String, String, f64), id: &str) -> Result<
 /// 之后才在同一次发布 generation 内把它们改名到位，所以读方从不会拿到新旧混杂的文件（index_generation）。
 fn publish(shared: &Path, dir: &Path, folder: &Path, job: &protocol::IndexJob) -> Result<()> {
     let allowed = job.rows.iter().map(|r| r.short_tag.as_str()).collect::<BTreeSet<_>>();
+    if job.action == protocol::IndexAction::Base {
+        let base = job.extra.get("base").cloned().unwrap_or(Value::Null);
+        let version = crate::character_index::release().map(|(r, _)| r.version.clone());
+        write(
+            &folder.join(BASE_MARK),
+            &json!({"enabled": base["enable"] == true, "sha256": base["sha256"], "version": version}),
+        )?;
+    }
     let mut staged: Vec<(PathBuf, PathBuf)> = Vec::new();
     let mut retired: Vec<PathBuf> = Vec::new();
     if let Err(e) = stage_all(shared, folder, &allowed, &mut staged, &mut retired) {
@@ -1443,7 +1638,7 @@ fn stage_all(
             }
         }
     }
-    for name in ["char-anchors.npy", "char-anchors.txt"] {
+    for name in ["char-anchors.npy", "char-anchors.txt", BASE_MARK] {
         if folder.join(name).exists() {
             stage(&folder.join(name), shared.join(name))?;
         }

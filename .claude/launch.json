@@ -26,6 +26,22 @@
       ],
       "port": 8778,
       "url": "http://127.0.0.1:8778"
+    },
+    {
+      "name": "web-pack-catalog",
+      "runtimeExecutable": "python3",
+      "runtimeArgs": [
+        "tools/dev_preview.py",
+        "--port",
+        "8779",
+        "--fixture",
+        "walk",
+        "--wd-extension",
+        "--ccip-longtail",
+        "--pack-catalog"
+      ],
+      "port": 8779,
+      "url": "http://127.0.0.1:8779"
     }
   ]
 }

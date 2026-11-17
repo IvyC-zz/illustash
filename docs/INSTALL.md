@@ -1,6 +1,6 @@
 # 装不上、打不开怎么办
 
-现行参考，2026-11-14。面向使用者，说明安装、首次启动、下载识别模型和更新时常见的拦截与报错。macOS 部分按 2026-10-15、10-16、10-18、11-14 在 macOS 26.6（arm64）虚拟机里的实测写成；Windows 部分标明了哪些已经实测。开发者从源码构建见 [开发说明](DEVELOPMENT.md)。
+现行参考，2026-11-18。面向使用者，说明安装、首次启动、下载识别模型和更新时常见的拦截与报错。macOS 部分按 2026-10-15、10-16、10-18、11-14 在 macOS 26.6（arm64）虚拟机里的实测写成；Windows 部分标明了哪些已经实测。开发者从源码构建见 [开发说明](DEVELOPMENT.md)。
 
 安装包在 [GitHub Releases](https://github.com/shio-vinyl/illustash/releases) 下载，0.1.0 起正式发布。安装包没有经过 Apple 公证或 Windows 代码签名，所以系统第一次打开时会拦截，按下面的步骤放行一次即可。
 
@@ -49,7 +49,7 @@
 
 ## 识别模型
 
-安装包里没有带识别模型。第一次使用时，应用会提示「识别要用的模型还没下载」，原始模型约 618 MB，Apple 芯片的 macOS 另下载约 467 MB 的 WD 加速文件（合计约 1.1 GB）；下载前可以先建库、浏览和手动整理，模型就位后自动开始识别。模型放在用户目录里，所有图库共用，以后更新 Illustash 不用再下：
+安装包里没有带识别模型。第一次使用时，应用会提示「识别要用的模型还没下载」，原始模型约 618 MB，另有约 26 MB 的基础角色索引，Apple 芯片的 macOS 再加约 467 MB 的 WD 加速文件（合计约 1.1 GB）；下载前可以先建库、浏览和手动整理，模型就位后自动开始识别。模型放在用户目录里，所有图库共用，以后更新 Illustash 不用再下：
 
 - macOS：`~/Library/Application Support/Illustash/Shared/models/`
 - Windows：`%LOCALAPPDATA%\Illustash\Shared\models\`
@@ -58,7 +58,7 @@
 
 ### 下载很慢或下载失败
 
-原始模型先从 Hugging Face 的镜像（默认 hf-mirror.com）下载，不行再换 ModelScope；macOS 的 WD 加速文件从项目 GitHub Release 下载，不经过镜像。下载走系统设置里的 HTTP 代理；不支持自动代理配置（PAC）。
+原始模型先从 Hugging Face 的镜像（默认 hf-mirror.com）下载，不行再换 ModelScope；基础角色索引和 macOS 的 WD 加速文件从项目 GitHub Release 下载，不经过镜像。下载走系统设置里的 HTTP 代理；不支持自动代理配置（PAC）。
 
 - **换镜像**：在「设置 › 数据 › 识别模型」里把「Hugging Face 镜像」换成其他兼容 Hugging Face 的地址；填 `https://huggingface.co` 就是直连 Hugging Face。
 - **自己下载再导入**：用浏览器或下载工具把下表 4 个文件下载下来，在应用里点「从文件导入…」选中它们（可以一次多选，也可以选包含它们的 ZIP）。文件名和所在文件夹都不重要，应用按大小和 SHA-256 认出每个文件，放到正确的位置；对不上的文件会被拒绝。
@@ -71,6 +71,10 @@
 | CCIP 参数 | 147 | `b5535577288e22940b853192cd1661e45c7615b7d89b49a8745c2c81685552d4` | [metrics.json](https://huggingface.co/deepghs/ccip_onnx/resolve/eb2acdd29af1703388d3d0c04221add322bc9110/ccip-caformer-24-randaug-pruned/metrics.json) | [metrics.json](https://modelscope.cn/models/deepghs/ccip_onnx/resolve/master/ccip-caformer-24-randaug-pruned/metrics.json) |
 
 Hugging Face 的地址固定在上游的某个提交上，上游以后改动也不影响；镜像站把 `https://huggingface.co` 换成镜像地址即可。下载后可以自己核对：macOS 用 `shasum -a 256 文件`，Windows 用 `certutil -hashfile 文件 SHA256`。模型的许可见 [第三方组件与许可](THIRD_PARTY.md#模型与数据)。
+
+### 基础角色索引
+
+基础角色索引让识别认得约 7,400 个角色（只有原始模型时只认得 WD 词表里的约 2,700 个），和识别模型一起下载，所有图库共用。它没下好时识别照常进行，「设置 › 数据 › 识别模型」会提示补下载。下载好以后，打开的图库会自动启用它；在同一处可以撤回或再启用，撤回对这台电脑上的所有图库生效，你确认过和移出的结论都保留。手动下载 [基础角色索引 v1](https://github.com/shio-vinyl/illustash/releases/download/character-index-v1/character-index-v1.bin) 后也可从设置导入：文件为 25,787,626 字节，SHA-256 为 `ce814cbcd9619babde566f46d80f7d9b0ce9f1c4dff20d8c679ac2bb0fa1fcb0`。
 
 ### 识别加速（macOS）
 
@@ -85,6 +89,15 @@ Hugging Face 的地址固定在上游的某个提交上，上游以后改动也�
 扩展默认关闭。打开「设置 › 角色资料 › WD 角色扩展」，下载扩展包后点「启用」。离线安装时，从 [模型 Release](https://github.com/shio-vinyl/illustash/releases/tag/wd-extension-v1) 下载 `wd-extension-v1.zip`，用「从文件导入」选择 ZIP 或解出的模型文件。扩展包有 228 个角色头，文件的大小和 SHA-256 见[第三方组件与许可](THIRD_PARTY.md#模型与数据)。
 
 启用时会检查现有的 WD 向量。之后同步交付新的 WD 识别结果时，会在后台检查这批图片。删除扩展包会保留各图库现有的扩展候选，并暂停后续自动检查。「重新检查」可手动重扫整库。「撤回」移除本图库的扩展候选和由它补上的机器归属，保留人工结论。撤回后可以重新启用。
+
+**角色资料包**（#602）：2026-11-17 起，WD 角色扩展和下面的 CCIP 长尾角色参考包合成一个「角色资料包」，设置里只有一张「角色资料包」卡片、一个开关，默认启用。上面说的扩展包和长尾参考包就是它的两个组成部分，原来的第一版合起来算角色资料包 0.1（测试版）。版本号后面写「（测试版）」的版本，行为和正式版一样，也默认启用。
+
+- **下载**：首次准备时点下载识别模型，角色资料包会一起下载；也可以在卡片上点「下载角色资料包」，或「从文件导入…」。
+- **默认启用**：新图库（还没有任何识别结果）第一次同步时就启用，之后识别的图照常检查。从旧版本升级上来、已经有识别结果的图库不自动启用，卡片上提示一次：点「启用…」才检查，点「不用」就不再提示。撤回以后同样不再自动启用。
+- **新版本**：新版本不随应用发布，列在本项目一份签过名的包目录里。应用只在检查更新时（打开了自动检查，或手动点「检查更新」）顺带读这份目录；关掉检查更新、也没有手动检查，就不读。目录里有更新的版本时，卡片上多一行「有新版本：N 个角色」。点「下载新版本」才下载；下好以后，已经启用的图库点「换成新版本…」才用新版本重新检查，换掉旧版本给出的候选和由它补上的归属，人工结论不变。换了以后照样可以撤回；没有启用的图库，卡片上直接是本机已有的最新版本。
+- **只给候选的角色**：分级的新版本里有只给候选的角色，它们只出现在「也可能是」里，不补主归属，也不改已有的归属。
+- **签名**：签名对不上的目录整份不用；应用只认内置的 0.1 和最近一份验过签的目录里列出、这个版本能用的版本。
+- **离线**：从新版本的 Release（如 `character-pack-0.2`）下载 `character-pack-<版本>-offline.zip`，在卡片上「从文件导入…」选它。离线包里有两个组成部分的文件和签过名的包目录，应用先核对目录的签名，再按目录认包文件；只有包文件、没有目录时，只能导入内置的 0.1。
 
 也可以离线使用命令行。先在桌面应用里完成图库升级并退出，再从 ZIP 中解出模型文件。
 
@@ -102,13 +115,13 @@ $cli = '<安装目录>\compute\bin\illustash-terms.exe'
 & $cli wd-extension --library 'C:\path\to\图库.pilib' --package 'C:\path\to\wd-extension-v1.bin'
 ```
 
-要通过命令行撤回扩展，将末尾的 `--package` 和文件路径换成 `--withdraw`。命令行指定的文件只供本次启用使用。要让桌面应用自动检查新图，仍需在设置中下载或导入共享扩展包。
+要通过命令行撤回扩展，将末尾的 `--package` 和文件路径换成 `--withdraw`。命令行指定的文件只供本次启用使用，按文件的 SHA-256 认它是哪个角色资料包版本里的 WD 部分：内置的 0.1，或本机最近一份验过签的包目录里列出的版本（先在桌面应用里检查一次更新或导入离线包）。要让桌面应用自动检查新图，仍需在设置中下载或导入共享扩展包。
 
 ### 可选的 CCIP 长尾角色参考包
 
 对当前图库运行 `ccip-longtail --library <图库.pilib> --root <应用资源目录> --package <参考包>` 启用并重扫已保存的 768 维 CCIP 向量。命令报告缺少向量和向量不兼容的张数。启用后的新图沿用识别时生成的向量。已有基础归属和 WD 扩展归属优先，包只为没有主归属的图提供机器归属。基础角色索引更新后，重新运行命令。用 `ccip-longtail --library <图库.pilib> --withdraw` 撤回。
 
-冻结包为 `A-longtail-p75.zip`（1,273,692 B，54 个角色），SHA-256 为 `d36eeab8768e30cc36e2ba5b2788f00a5f608ecad0df264a2830a44c14407fb9`。下载地址见 [模型 Release](https://github.com/shio-vinyl/illustash/releases/tag/ccip-longtail-v1)。安装后所有图库共用这个文件，每个图库分别启用。启用需要兼容的基础角色索引和 CCIP 模型。来源与许可见[第三方组件与许可](THIRD_PARTY.md#模型与数据)。维护者用 `python3.12 tools/build_ccip_longtail.py <冻结成员目录> <输出目录>` 复封并校验同一 ZIP。
+冻结包为 `A-longtail-p75.zip`（1,273,692 B，54 个角色），SHA-256 为 `d36eeab8768e30cc36e2ba5b2788f00a5f608ecad0df264a2830a44c14407fb9`。下载地址见 [模型 Release](https://github.com/shio-vinyl/illustash/releases/tag/ccip-longtail-v1)。安装后所有图库共用这个文件，每个图库分别启用。它是角色资料包的 CCIP 部分，下载、启用、换包和离线导入见上一节；命令行的 `--package` 同样按 SHA-256 认内置的或目录里的版本。启用需要兼容的基础角色索引和 CCIP 模型。来源与许可见[第三方组件与许可](THIRD_PARTY.md#模型与数据)。维护者用 `python3.12 tools/build_ccip_longtail.py <冻结成员目录> <输出目录>` 复封并校验同一 ZIP。
 
 ## Windows
 

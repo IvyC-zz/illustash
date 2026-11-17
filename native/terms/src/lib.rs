@@ -34,6 +34,7 @@ mod app_migrate;
 mod app_migrate_data;
 pub mod app_models;
 mod app_onboarding;
+mod app_packs;
 pub mod app_service;
 use illustash_platform::app_paths;
 mod app_ccip_longtail;
@@ -76,6 +77,7 @@ pub use illustash_core::character_projection;
 pub use illustash_core::character_relations;
 pub use illustash_core::character_review;
 pub use illustash_core::character_structure;
+mod character_index;
 pub mod cli;
 pub(crate) use illustash_core::compat_text;
 

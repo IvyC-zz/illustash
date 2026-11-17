@@ -47,6 +47,9 @@ url = "=2.5.8"
 regex = "=1.13.1"
 httpdate = "=1.0.3"
 serde_path_to_error = "0.1"
+# 数据包目录的签名（#602）：和应用更新同一种 minisign 格式，校验库与桌面外壳的更新插件同一版本。
+minisign-verify = "=0.3.0"
+base64 = "0.22"
 
 # 读路由测试用的核心读宿主只存在于需显式构建的 example 中，从不进入发布的 CLI。
 [features]
