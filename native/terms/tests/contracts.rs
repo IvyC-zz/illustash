@@ -30,6 +30,8 @@ mod wait;
 
 #[path = "contracts/library_50k.rs"]
 mod library_50k;
+#[path = "contracts/library_scale.rs"]
+mod library_scale;
 
 const DATABASES: [&str; 3] = ["source.sqlite", "library.sqlite", "provenance.sqlite"];
 
