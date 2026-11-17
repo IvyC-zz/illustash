@@ -1476,6 +1476,23 @@ mod tests {
         cleanup.unwrap();
     }
 
+    // 夹具子进程先报告首个失败，再给真实析构路径一个回收任务的机会。
+    // 析构卡住时这里仍会失败退出，父测试在子进程退出后清理目录。
+    fn fail_scan_wait(service: Application, reason: String, limit: Duration) -> ! {
+        eprintln!("{reason}");
+        let (done_tx, done_rx) = mpsc::channel();
+        std::thread::spawn(move || {
+            drop(service);
+            let _ = done_tx.send(());
+        });
+        let cleanup = match done_rx.recv_timeout(limit) {
+            Ok(()) => "析构已完成",
+            Err(mpsc::RecvTimeoutError::Timeout) => "析构也超时",
+            Err(mpsc::RecvTimeoutError::Disconnected) => "析构线程异常退出",
+        };
+        panic!("{reason}，{cleanup}");
+    }
+
     #[test]
     #[ignore = "isolated synthetic sync fixture, invoked by parent test"]
     fn scan_boundary_fixture() {
@@ -1539,14 +1556,14 @@ mod tests {
                 c.execute("INSERT INTO backend_effects(kind) VALUES ('synthetic-pending')", []).unwrap();
                 drop(c);
                 let source_before = snapshot(&lib.source());
-                let service = Arc::new(Application::open(&first, options.clone()).unwrap());
+                let mut service = Application::open(&first, options.clone()).unwrap();
                 let generation = service.generation();
                 let (ready_tx, ready_rx) = mpsc::channel();
                 let (cancel_tx, cancel_rx) = mpsc::channel();
                 let (release_tx, release_rx) = mpsc::channel();
                 let context;
                 {
-                    let mut session = service.session.write().unwrap();
+                    let session = service.session.get_mut().unwrap();
                     let identity =
                         crate::app_tasks::TaskIdentity::new(&session.library, generation, &session.token).unwrap();
                     let task_lib = session.library.clone();
@@ -1575,23 +1592,30 @@ mod tests {
                     context = task.context();
                     session.syncer.state = Arc::new(Mutex::new(State::from(json!({"status":"scanning"}))));
                     session.syncer.install_fixture_task(task);
-                    if !cancelled {
-                        assert!(session.syncer.task.as_mut().unwrap().wait(crate::test_wait::limit()));
-                        assert_eq!(
-                            session.syncer.task.as_ref().unwrap().outcome(),
-                            crate::app_tasks::TaskOutcome::Done
+                }
+                let limit = crate::test_wait::limit();
+                if cancelled {
+                    if let Err(error) = ready_rx.recv_timeout(limit) {
+                        let _ = release_tx.send(());
+                        fail_scan_wait(
+                            service,
+                            format!("{finish}/{stage}：等待同步到达提交边界失败（{error}）"),
+                            limit,
                         );
                     }
-                }
-                if cancelled {
-                    ready_rx.recv_timeout(crate::test_wait::limit()).unwrap();
-                    let mut session = service.session.write().unwrap();
+                    let session = service.session.get_mut().unwrap();
                     let library = session.library.clone();
                     let token = session.token.clone();
                     assert!(!session.syncer.start(&library, generation, &token).unwrap());
                     if stage == "before_source_commit" {
                         assert_eq!(snapshot(&lib.source()), source_before);
                     }
+                } else {
+                    let task = service.session.get_mut().unwrap().syncer.task.as_mut().unwrap();
+                    if !task.wait(limit) {
+                        fail_scan_wait(service, format!("{finish}/{stage}：同步线程在 {limit:?} 内未退出"), limit);
+                    }
+                    assert_eq!(task.outcome(), crate::app_tasks::TaskOutcome::Done);
                 }
                 let source_at_finish = snapshot(&lib.source());
                 let src = crate::app_library::read_connection(&lib.source()).unwrap();
@@ -1605,6 +1629,7 @@ mod tests {
                 let mut app_at_finish = snapshot(&lib.db());
                 app_at_finish.remove("sync_runs");
                 let completed_run = (!cancelled).then(|| snapshot(&lib.db())["sync_runs"].clone());
+                let service = Arc::new(service);
                 let observer = (finish != "drop").then(|| service.clone());
                 let target = second.clone();
                 let (done_tx, done_rx) = mpsc::channel();

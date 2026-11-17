@@ -18,15 +18,6 @@
       "expires": "2026-11-29"
     },
     {
-      "kind": "rust",
-      "crate": "native/terms",
-      "id": "app_sync::tests::scan_cancellation_and_completed_lifecycle_have_explicit_boundaries",
-      "platforms": ["windows"],
-      "issue": 497,
-      "added": "2026-11-15",
-      "expires": "2026-11-29"
-    },
-    {
       "kind": "python",
       "id": "test_native_names.NativeNamesTest.test_busy_refresh_cancel_switch_same_id_and_late_result",
       "platforms": ["macos"],
