@@ -28,6 +28,7 @@ pub(super) fn handle(request: Request, host: &Host, received: u64, text: &str, b
         }
         "/api/models" => return models(request, host, body, &translate),
         "/api/ccip-longtail/package" => return ccip_package(request, host, received, body, &translate),
+        url if url.starts_with("/api/files/") => return files(request, host, received, &body, &translate),
         _ => {}
     }
     let mut body = body;
@@ -140,6 +141,105 @@ pub(super) fn handle(request: Request, host: &Host, received: u64, text: &str, b
         }
         None => unavailable(request),
     }
+}
+/// 用图动作（#450，app_asset_files、app_asset_export）。页面只传资产 ID；先核对会话和 CSRF，再弹选择窗口或叫外壳，
+/// 这期间不持有会话锁。这些请求不写图库，图库包损坏时照样应答。
+fn files(request: Request, host: &Host, received: u64, body: &Json, translate: Translate) {
+    let (library, generation) = {
+        let session = host.session.read().expect("http_host_post session lock poisoned");
+        if !host.accepts(&session, received) || header(&request, "X-CSRF-Token") != Some(session.token.as_str()) {
+            drop(session);
+            return expired(request);
+        }
+        (session.library.clone(), session.generation)
+    };
+    let id = || match body.get("id") {
+        Some(Json::Scalar(serde_json::Value::String(id))) if !id.is_empty() => Ok(id.as_str()),
+        _ => Err(Error::invalid("请选择图片")),
+    };
+    let result: Result<Json> = match request.url() {
+        "/api/files/open" => id().and_then(|id| crate::app_asset_files::open(&library, id)).map(Into::into),
+        "/api/files/reveal" => id().and_then(|id| crate::app_asset_files::reveal(&library, id)).map(Into::into),
+        "/api/files/drag" => {
+            let ids = match body.get("ids") {
+                Some(Json::Array(ids)) => ids.iter().map(|v| v.text().to_owned()).filter(|v| !v.is_empty()).collect(),
+                _ => Vec::new(),
+            };
+            crate::app_asset_files::drag(&library, &ids, |located| {
+                crate::app_files::cached_icon(&library, &located.uuid, &located.path)
+            })
+            .map(Into::into)
+        }
+        "/api/files/export" => return export(request, host, received, body, translate),
+        "/api/files/export/cancel" => {
+            let session = host.session.read().expect("http_host_post session lock poisoned");
+            Ok(session.asset_exports.cancel())
+        }
+        "/api/files/export/reveal" => {
+            let destination = host
+                .session
+                .read()
+                .expect("http_host_post session lock poisoned")
+                .asset_exports
+                .destination(generation);
+            match destination {
+                Some(folder) => crate::app_asset_files::show_folder(&folder).map(Into::into),
+                None => Err(Error::invalid("没有导出过")),
+            }
+        }
+        _ => return unavailable(request),
+    };
+    reply_if_current(request, host, received, result, true);
+}
+/// 选中的图导出到文件夹：先在选择窗口里选目录（不持有会话），再按页面的选择（ID 或筛选条件）开后台任务。
+fn export(request: Request, host: &Host, received: u64, body: &Json, translate: Translate) {
+    let group = match crate::app_asset_export::Group::parse(body.get("group").map(Json::text).unwrap_or("")) {
+        Ok(group) => group,
+        Err(e) => return failure(request, e, true),
+    };
+    let mut selection = body.clone();
+    if let Json::Object(fields) = &mut selection {
+        fields.retain(|(k, _)| k == "ids" || k == "filter" || k == "exclude");
+    }
+    // 导出只复制、不改图库：超过 500 张也不用再确认一次。
+    selection.set("confirm", true.into());
+    if host.session.read().expect("http_host_post session lock poisoned").asset_exports.running() {
+        return failure(request, Error::invalid("正在导出，完成后再开始下一次"), true);
+    }
+    let destination = match pick_file(host, received, translate, "export") {
+        Picked::Path(path) => PathBuf::from(path.text()),
+        Picked::Cancelled => return cancelled(request),
+        Picked::Switched => return expired(request),
+        Picked::Failed(e) => return failure(request, e, true),
+    };
+    let session = host.session.read().expect("http_host_post session lock poisoned");
+    if !host.accepts(&session, received) {
+        drop(session);
+        return expired(request);
+    }
+    let context = session.context(&host.tags);
+    let ids = (|| {
+        let c = crate::sqlite::open_with_flags(
+            &context.db,
+            rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY | rusqlite::OpenFlags::SQLITE_OPEN_URI,
+        )?;
+        c.busy_timeout(std::time::Duration::from_secs(10))?;
+        crate::http_read::register_names(&c)?;
+        // 只导出选中的这几张，不带上它们的重复副本。
+        crate::app_commands::selected_scope(&c, &context, &selection, false)
+    })();
+    let result = ids.and_then(|ids| {
+        session.asset_exports.start(
+            &session.library,
+            session.generation,
+            ids,
+            group,
+            translate(group.fallback()),
+            destination,
+        )
+    });
+    drop(session);
+    reply(request, result, true);
 }
 fn cancelled(request: Request) {
     respond(request, Json::object([("cancelled", true.into())]), 200, "core");

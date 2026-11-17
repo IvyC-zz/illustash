@@ -6,7 +6,7 @@ tools/check_architecture.py 对 crate 依赖方向的检查。规则（说明见
   1 import-core-ui       core/ 不得导入 ui/（硬规则，没有基线）
   1 import-cycle         ui/ 循环导入里的导入边；现有的登记为基线，不得新增边或新的环
   2 undeclared-state     `state.<字段>` 必须在 core/state.js 声明
-  3 document-listener    不得新增 document/window/body 级的 keydown、keyup、click、mousedown、pointerdown 监听
+  3 document-listener    不得新增 document/window/body 级的 keydown、keyup、click、mousedown、pointerdown、change 监听
   4 dialog-element       ui/dialog.js 以外不得 `document.createElement('dialog')`，也不得在字符串里拼 `<dialog`（硬规则，没有基线）
   5 long-line            不得新增超过 200 字符的行（app.js、core/、ui/）
   6 page-name            页面名只能在 core/pages.js（页面注册表，#342）里比较（硬规则，没有基线）
@@ -243,8 +243,9 @@ def new_rules():
         Rule('undeclared-state', '2', 'state 上使用了未在 core/state.js 声明的字段',
              'state 上的字段必须先在 core/state.js 的 state 对象里声明（并写初始值），现有未声明字段已冻结为基线。',
              '在 core/state.js 里加上这个字段和初始值；如果它只是某个模块自己的局部状态，改成该模块里的 let/const，不要挂在 state 上。'),
-        Rule('document-listener', '3', '新增了 document/window/body 级的键盘、点击监听',
-             '全局键盘、点击监听（keydown、keyup、click、mousedown、pointerdown）让 Esc 的先后、点外关闭各写一套（#316）。现有的已冻结为基线，不得新增。',
+        Rule('document-listener', '3', '新增了 document/window/body 级的键盘、点击或 change 监听',
+             '全局键盘、点击监听（keydown、keyup、click、mousedown、pointerdown）让 Esc 的先后、点外关闭各写一套（#316）；'
+             '表单的 change 同样挂在控件所在的面板上，不挂在 document 上（#431）。现有的已冻结为基线，不得新增。',
              '把监听挂在具体元素或 <dialog> 上（dialog 用 cancel/close 事件，点外关闭在 dialog 自己的 click 里判断）；'
              '要新开浮层就向 ui/overlay.js 登记（createLayer / openModal），它是唯一放行的入口；确需别的全局监听时，在 Issue 里提出请用户决定，由用户改本检查的规则，不要往基线里添加。'),
         Rule('dialog-element', '4', '新增了运行时拼出的 <dialog>（createElement 或字符串里的 <dialog）',
@@ -283,7 +284,7 @@ def new_rules():
     ]}
 
 
-LISTENER_EVENTS = 'keydown|keyup|click|mousedown|pointerdown'
+LISTENER_EVENTS = 'keydown|keyup|click|mousedown|pointerdown|change'
 LISTENER_RE = re.compile(r'''\b(?:document(?:\s*\.\s*(?:body|documentElement))?|window)\s*\.\s*(?:addEventListener\s*\(\s*(['"`])(%s)\1|on(%s)\s*=(?!=))''' % (LISTENER_EVENTS, LISTENER_EVENTS))
 DIALOG_RE = re.compile(r'''createElement\s*\(\s*(['"`])dialog\1\s*\)|<dialog\b''')
 # 页面名判断：`page === '…'`、`route.page !== '…'`，以及 `[…].includes(route.page)`。

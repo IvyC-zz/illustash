@@ -14,6 +14,8 @@ pub enum Kind {
     Models,
     /// 便携人工结论文件。
     HumanConclusions,
+    /// 选中的图导出到哪个文件夹（#450）。
+    Export,
 }
 impl Kind {
     fn id(&self) -> &'static str {
@@ -24,6 +26,7 @@ impl Kind {
             Self::Archive => "archive",
             Self::Models => "models",
             Self::HumanConclusions => "human-conclusions",
+            Self::Export => "export",
         }
     }
     /// 选择窗口的提示语，用中文写；调用方可以显示翻译后的文案（即 `choose` 的 `title`）。
@@ -35,6 +38,7 @@ impl Kind {
             Self::Archive => "选择 X 数据归档（.zip）",
             Self::Models => "选择下载好的模型文件（.onnx、.json 或 .zip）",
             Self::HumanConclusions => "选择人工结论文件（.illustash-human.jsonl）",
+            Self::Export => "选择导出到的文件夹",
         }
     }
 }
@@ -57,7 +61,7 @@ pub fn choose(
     // 转成 AppleScript 字符串字面量。
     let title = title.replace('\\', "\\\\").replace('"', "\\\"");
     let kind = kind.id();
-    let command = if matches!(kind, "folder" | "library") { "choose folder" } else { "choose file" };
+    let command = if matches!(kind, "folder" | "library" | "export") { "choose folder" } else { "choose file" };
     let filter = if matches!(kind, "zip" | "archive") { " of type {\"zip\", \"public.zip-archive\"}" } else { "" };
     // 多个路径用列表和 NUL 分隔（文件名可能含换行）。
     let script = if multiple {

@@ -54,7 +54,7 @@ async function open(profile, {works = [], remote = []} = {}) {
   d.querySelector('#pfName').value = d.innerHTML.match(/id="pfName"[^>]* value="([^"]*)"/)[1];  // 页面上 value 属性给出的初值
   return {d, posts, restore: () => { globalThis.setTimeout = setTimeout; }};
 }
-// 在「所属作品」里输入 text，在下拉菜单里按下名为 label 的一项。
+// 在「所属作品」里输入 text，在下拉菜单里点名为 label 的一项（按下时焦点留在输入框里，松开时选中，#432）。
 async function pick(d, text, label) {
   const input = d.querySelector('#pfWork'), menu = d.querySelector('#pfWorkMenu');
   input.value = text; for (const fn of input.listeners.input) fn();
@@ -64,6 +64,7 @@ async function pick(d, text, label) {
   assert.ok(hit, `菜单里没有「${label}」：${labels.map(m => m[2]).join('、')}`);
   const target = {closest: () => ({dataset: {i: hit[1]}})};
   for (const fn of menu.listeners.mousedown) fn({target, preventDefault() {}});
+  for (const fn of menu.listeners.click) fn({target, type: 'click', preventDefault() {}});
 }
 const save = async d => { await d.querySelector('form').onsubmit({preventDefault() {}}); await tick(); };
 

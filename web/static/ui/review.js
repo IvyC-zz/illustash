@@ -1,7 +1,7 @@
 // 「整理」各页（桌面布局，#199）：未识别图片的相似分组、整个图库里的相似图片、相似的角色对，以及画师抽查。
-import {edits, setLatest} from '../core/edits.js';
+import {edits, exclusive} from '../core/edits.js';
 import {esc, number, stamp} from '../core/format.js';
-import {t, tb} from '../core/i18n.js';
+import {t} from '../core/i18n.js';
 import {SIMILAR_ACTIVE, similarLine} from '../core/jobs.js';
 import {RELATION_KINDS, RELATION_NAMES} from '../core/labels.js';
 import {refreshMeta, setIdentityCount} from '../core/meta.js';
@@ -11,24 +11,24 @@ import {charHash, go, hashFor} from '../core/route.js';
 import {api, post, readError} from '../core/session.js';
 import {state} from '../core/state.js';
 import {closeInspector, peekAt, wirePeek} from './detail.js';
-import {$, error, readFailure, reconcileSections, toast} from './dom.js';
+import {$, emptyLink, error, readFailure, reconcileSections, showArea, toast, written} from './dom.js';
 import {mutate} from './grid.js';
 import {markOc, openPicker, targets} from './palette.js';
 import {navCount, renderHeading} from './shell.js';
 
 // ---------- 未匹配图片的相似分组 ----------
 // 'look'：中心接近；'trait'：离得更远，但有相同的独特 WD 特征（较弱的线索）。
-export const nearText = g => g.near_kind === 'trait' ? t('外观相似：第 {n} 组', {n: g.near}) : t('可能和第 {n} 组是同一人', {n: g.near});
+const nearText = g => g.near_kind === 'trait' ? t('外观相似：第 {n} 组', {n: g.near}) : t('可能和第 {n} 组是同一人', {n: g.near});
 // 未识别，按组整理：CCIP 即使叫不出名字（45%），也能可靠地把同一个人的图放在一起（99%）。
 // 大多数代表图意见一致的组整组问「是 TA 吗？」；其余的组给出「设为…」/「原创角色」/「跳过」。
 // 点一张图，把它排除在这组的回答之外。回答过的组原地离开页面（不会因重新加载而跳动）。
 export const groups = {list: [], shown: 40, off: new Map(), revision: 0};
 // 各组的先后：一键就能确认的组排在前面（大的在前），然后是还要起名字的组。组页空了时的「下一组」也按它走。
-export const groupOrder = clusters => [...clusters].sort((a, b) => !!b.lead - !!a.lead || b.size - a.size || a.cid - b.cid);
+const groupOrder = clusters => [...clusters].sort((a, b) => !!b.lead - !!a.lead || b.size - a.size || a.cid - b.cid);
 export async function renderGroups(keep = false) {
   if (!onPage(state.route, 'groups')) return;
-  $('grid').hidden = true; $('empty').hidden = true; $('charIndex').hidden = true; $('settingsPage').hidden = true; $('groupsPage').hidden = false;
-  closeInspector(); $('selectionBar').hidden = true; $('resultCount').textContent = ''; $('hint').textContent = t('点一下图片：不算在这组里 · 长按或 Space 看大图 · 组头的按钮对整组生效，都可以撤销');
+  showArea();
+  closeInspector(); $('selectionBar').hidden = true; $('resultCount').textContent = ''; $('hint').textContent = t('点一下图片：不算在这组里 · 长按或 Space 看大图 · 组头的按钮对整组生效');
   const scroll = $('viewport').scrollTop, revision = ++groups.revision, nsfw = state.nsfw;
   let result; try { result = await api('/api/clusters?nsfw=' + state.nsfw); } catch (e) { if (onPage(state.route, 'groups') && revision === groups.revision && nsfw === state.nsfw) readFailure($('groupsPage'), e); return; }
   const {clusters, learner} = result;
@@ -43,7 +43,7 @@ export function drawGroups() {
   const rest = Math.max(0, (state.pools.unmatched || 0) - images), named = list.filter(g => g.lead).length;
   if (!$('groupsPage').querySelector('.gsecs')) $('groupsPage').innerHTML = '<div class="groups-controls"></div><div class="gsecs"></div><div class="groups-more"></div>';
   $('groupsPage').querySelector('.groups-controls').innerHTML = `<div class="groups-bar"><span class="muted-note">${t('{n} 组 · 共 {images} 张', {n: number(list.length), images: number(images)})}${named ? ' · ' + t('{n} 组能直接确认是谁', {n: number(named)}) : ''}${list[0] ? ' · ' + t('分组于 {time}', {time: esc(stamp(list[0].built_at))}) : ''}${busy ? ' · ' + esc(groups.learner.status === 'waiting' ? groups.learner.message || '' : t('正在学习…')) : ''}</span><div class="spacer"></div>${rest ? `<a class="quiet link" href="#/unmatched">${t('没成组的 {n} 张', {n: number(rest)})} →</a>` : ''}<button class="quiet" id="regroup" title="${t('用当前的未识别图重新分组')}">${t('重新分组')}</button></div>`;
-  reconcileSections($('groupsPage').querySelector('.gsecs'), list.slice(0, groups.shown).map(g => [String(g.cid), groupSection(g)]), t('没有成组的未识别图。可以点「重新分组」。'));
+  reconcileSections($('groupsPage').querySelector('.gsecs'), list.slice(0, groups.shown).map(g => [String(g.cid), groupSection(g)]), t('没有成组的未识别图。'));
   $('groupsPage').querySelector('.groups-more').innerHTML = `${list.length > groups.shown ? `<div class="gsec-more"><button class="quiet" id="moreGroups">${t('再显示 {n} 组', {n: number(Math.min(40, list.length - groups.shown))})}</button></div>` : ''}`;
   $('regroup').onclick = async () => { try { await post('/api/regroup', {}); toast(t('正在重新分组…')); setTimeout(() => renderGroups(), 3000); } catch (e) { toast(e.message); } };
   $('moreGroups')?.addEventListener('click', () => { groups.shown += 40; drawGroups(); });
@@ -51,7 +51,7 @@ export function drawGroups() {
 function groupSection(g) {
   const off = groups.off.get(g.cid) || new Set(), n = g.members.length - off.size, max = 16;
   // 「是 X 吗？」的组同样能整组标为原创角色或跳过（#386 的 2-41）；原创角色新建一个独立的，和组页的「整组标为原创角色」一样（2-29）。
-  const ocSkip = `<button class="quiet" data-gact="oc" title="${t('整组都是同一个原创角色：新建一个原创角色，把这组图都设为它')}">${t('原创角色')}</button><button class="quiet" data-gact="skip">${t('跳过')}</button>`;
+  const ocSkip = `<button class="quiet" data-gact="oc" title="${t('新建一个原创角色，把这组图都设为它')}">${t('原创角色')}</button><button class="quiet" data-gact="skip">${t('跳过')}</button>`;
   const head = g.lead
     ? `<span class="gsec-q">${t('是 {name} 吗？', {name: `<a href="${charHash(g.lead.id)}">${esc(g.lead.name)}</a>`})}<small>${t('{n} 张的线索都指向 TA', {n: number(g.lead.count)})}</small></span>
        <button class="primary" data-gact="yes"${n ? '' : ' disabled'}>${off.size ? t('其余 {n} 张是', {n: number(n)}) : t('都是')} ✓</button><button class="secondary" data-gact="no">${t('都不是')} ✗</button><button class="quiet" data-gact="assign">${t('是别人…')}</button>${ocSkip}`
@@ -65,7 +65,7 @@ let similarTimer = 0;
 export async function renderSimilar() {
   if (!onPage(state.route, 'similar')) return;
   clearTimeout(similarTimer);
-  $('grid').hidden = true; $('empty').hidden = true; $('charIndex').hidden = true; $('settingsPage').hidden = true; $('groupsPage').hidden = false;
+  showArea();
   closeInspector(); $('selectionBar').hidden = true; $('resultCount').textContent = ''; $('hint').textContent = t('点一组进去看');
   const kind = state.route.kind || '';
   let result; try { result = await api('/api/similar?' + new URLSearchParams({kind, nsfw: state.nsfw})); } catch (e) { if (onPage(state.route, 'similar') && kind === (state.route.kind || '')) readFailure($('groupsPage'), e); return; }
@@ -74,7 +74,7 @@ export async function renderSimilar() {
   const busy = SIMILAR_ACTIVE.includes(s.status);
   $('groupsPage').innerHTML = `<div class="similar-status"><span class="local-dot${busy ? ' busy' : ''}"></span><span class="muted-note">${t('{n} 组 · 共 {images} 张', {n: number(groups.length), images: number(groups.reduce((n, g) => n + g.size, 0))})}${similarLine(s) ? ' · ' + esc(similarLine(s)) : ''}</span></div>
     <div class="groups-bar"><div class="segmented">${RELATION_KINDS.map(([k, label]) => `<button class="${k === kind ? 'on' : ''}" data-kind="${k}">${label}</button>`).join('')}</div>
-      <div class="spacer"></div><button class="quiet" id="similarScan" ${busy || s.status === 'off' ? 'disabled' : ''} title="${t('给新加入的图算签名，比较还没比较过的候选')}">${t('重新检查')}</button></div>
+      <div class="spacer"></div><button class="quiet" id="similarScan" ${busy || s.status === 'off' ? 'disabled' : ''} title="${t('比较新加入的图和还没比较过的候选')}">${t('重新检查')}</button></div>
     ${busy && s.total ? `<div class="progress"><span style="width:${Math.round((s.done || 0) / s.total * 100)}%"></span></div>` : ''}
     <div class="group-grid">${groups.map(g => `<a class="group-card" href="#/s/${g.gid}"><div class="group-covers">${g.covers.map(u => `<img src="/image?id=${encodeURIComponent(u)}&size=thumb" loading="lazy" alt="">`).join('')}</div>
       <div class="group-meta"><b>${t('相似组 {id}', {id: g.gid})}</b><span>${t('{n} 张', {n: number(g.size)})}</span></div>
@@ -116,15 +116,15 @@ function identityCard(x, i) {
       ${btn('same', t('记为同一角色（不搬图）'), t('把两个角色合在一起显示，图和人工结论留在原处'))}
       ${btn('b_of_a', t('B 是 A 的一个造型'), t('B 挂到 A 下面作为造型（服装、异格、变身等）'))}
       ${btn('a_of_b', t('A 是 B 的一个造型'), t('A 挂到 B 下面作为造型'))}
-      ${btn('different', t('不同角色'), t('只是长得像、经常同框，或是 TA 的吉祥物、宠物：记下来，以后不再问'))}
-      <span class="spacer"></span>${btn('skip', t('暂不判断'), t('先放一边，队列里不再出现（可撤销）'))}
+      ${btn('different', t('不同角色'), t('记为不同角色，以后不再问这一对'))}
+      <span class="spacer"></span>${btn('skip', t('暂不判断'), t('先放一边，队列里不再出现'))}
     </div></article>`;
 }
 // how：'more' 在后面再接一页；'keep' 判断或撤销之后，按现在显示的对数从头重读、留在原来的滚动位置，判过的那对原地
 // 移走、撤销的那对回到原处，点过「再显示一些」的人不被带回前 12 对（#386 的 2-36）；不给就是从头显示前 12 对。
-export async function renderIdentity(how = '') {
+async function renderIdentity(how = '') {
   if (!onPage(state.route, 'identity')) return;
-  $('grid').hidden = true; $('empty').hidden = true; $('charIndex').hidden = true; $('settingsPage').hidden = true; $('groupsPage').hidden = false;
+  showArea();
   closeInspector(); $('selectionBar').hidden = true; $('hint').textContent = t('点角色名看全部图 · 高亮的是外部资料建议的做法');
   const keep = how === 'keep', scroll = $('viewport').scrollTop, limit = keep ? Math.max(IDENTITY_PAGE, identity.items.length) : IDENTITY_PAGE;
   const offset = how === 'more' ? identity.items.length : 0;
@@ -153,8 +153,8 @@ async function decideIdentity(i, act) {
         a_of_b: {a: x.a.id, b: x.b.id, kind: 'form_of'}, different: {a: x.a.id, b: x.b.id, kind: 'different_from'}}[act]};
   try {
     const r = act === 'skip' ? await post('/api/identity/skip', {a: x.a.id, b: x.b.id}) : await post('/api/identity/decision', body);
-    setLatest(r.undo); toast(act === 'skip' ? t('已暂不判断') : {same: t('已把 {a} 和 {b} 记为同一角色', {a: small.name, b: big.name}), b_of_a: t('{a} 已作为 {b} 的一个造型', {a: x.b.name, b: x.a.name}),
-      a_of_b: t('{a} 已作为 {b} 的一个造型', {a: x.a.name, b: x.b.name}), different: t('已记下 {a} 和 {b} 是不同角色', {a: x.a.name, b: x.b.name})}[act], true);
+    written(r.undo, act === 'skip' ? t('已暂不判断') : {same: t('已把 {a} 和 {b} 记为同一角色', {a: small.name, b: big.name}), b_of_a: t('{a} 已作为 {b} 的一个造型', {a: x.b.name, b: x.a.name}),
+      a_of_b: t('{a} 已作为 {b} 的一个造型', {a: x.a.name, b: x.b.name}), different: t('已记下 {a} 和 {b} 是不同角色', {a: x.a.name, b: x.b.name})}[act]);
     card?.classList.add('leaving');
     await new Promise(done => setTimeout(done, 170));
     await renderIdentity('keep');
@@ -169,11 +169,11 @@ async function decideIdentity(i, act) {
 const AUDIT_METHODS = {pixel_hash: [t('像素哈希'), t('和 Danbooru 上的帖子是同一个文件，画师取自帖子的画师标签')],
   gallery_match: [t('本地比对'), t('和 TA 公开作品的小图逐张比对一致')], ocr: [t('签名识别'), t('图上的签名或水印')]};
 const auditMethod = a => a.methods?.includes('pixel_hash') ? 'pixel_hash' : a.methods?.[0] || '';
-export async function renderArtistAudit() {
+async function renderArtistAudit() {
   if (!onPage(state.route, 'artist-audit')) return;
-  $('grid').hidden = true; $('empty').hidden = true; $('charIndex').hidden = true; $('settingsPage').hidden = true; $('groupsPage').hidden = false;
+  showArea();
   closeInspector(); $('selectionBar').hidden = true; $('resultCount').textContent = '';
-  $('hint').textContent = t('点原帖或画师主页对照 · 看不出来就先留着 · 都可以撤销');
+  $('hint').textContent = t('点原帖或画师主页对照 · 看不出来就先留着');
   const n = Number(prefs.get('artistAuditN', 50)) || 50, scroll = $('viewport').scrollTop;
   let d;
   try { d = await api('/api/artist-audit?n=' + n); } catch (e) { $('groupsPage').innerHTML = `<p class="muted-note">${esc(readError(e))}</p>`; return; }
@@ -204,18 +204,18 @@ export async function renderArtistAudit() {
       <div class="prov-stat"><b>${number(tl.done)}<em> / ${number(tl.all)}</em></b><span>${t('已判断')}<small>${t('对 {yes} · 不对 {no}', {yes: number(tl.yes), no: number(tl.no)})}</small></span></div>
       ${byMethod.map(([m, x]) => `<div class="prov-stat"><b>${x.done ? (x.yes / x.done * 100).toFixed(0) + '%' : '—'}</b><span>${esc(AUDIT_METHODS[m][0])}<small>${t('{done} / {all} 已判', {done: number(x.done), all: number(x.all)})}</small></span></div>`).join('')}
     </div>
-    <p class="muted-note">${t('从 {pool} 张有画师的图里按固定的随机顺序取前 {n} 张，每次打开都是同一批。判断会写进图库（「不对」的画师这张图就不再显示），和详情面板里的「是 TA / 不是」一样可以撤销。', {pool: number(d.pool), n: number(d.items.length)})}</p>
+    <p class="muted-note">${t('从 {pool} 张有画师的图里按固定的随机顺序取的前 {n} 张。判断会写进图库，判为「不对」的画师不再显示在这张图上。', {pool: number(d.pool), n: number(d.items.length)})}</p>
     <div class="aa-grid">${d.items.map(card).join('')}</div>
     ${d.items.length < d.pool ? `<p class="aa-more"><button class="quiet" id="aaMore">${t('再加 10 张')}</button></p>` : ''}`;
   $('viewport').scrollTop = scroll;
   for (const b of $('groupsPage').querySelectorAll('[data-aa]')) b.onclick = async () => {
-    if (edits.busy) return; edits.busy = true; b.disabled = true;
-    try {
-      const r = await post('/api/artist/verdict', {ids: [b.dataset.uuid], artist: b.dataset.artist, verdict: b.dataset.aa || null, name: b.dataset.name});
-      setLatest(r.undo); toast(tb(r.undo.label), true);
-    } catch (e) { toast(e.message); }
-    finally { edits.busy = false; setLatest(edits.latest); }
-    renderArtistAudit();
+    const ran = await exclusive(async () => {
+      b.disabled = true;
+      try { written((await post('/api/artist/verdict', {ids: [b.dataset.uuid], artist: b.dataset.artist, verdict: b.dataset.aa || null, name: b.dataset.name})).undo); }
+      catch (e) { toast(e.message); }
+      return true;
+    });
+    if (ran) renderArtistAudit();
   };
   $('aaMore')?.addEventListener('click', () => { prefs.set('artistAuditN', n + 10); renderArtistAudit(); });
 }
@@ -269,4 +269,23 @@ implement({
   identity: {render: () => renderIdentity(), refresh: why => { if (why === 'undo') renderIdentity('keep'); else if (why === 'nsfw') renderIdentity(); }},
   // 画师抽查不按 R18 筛选（固定的一批随机图）：切换 R18 只重画标题里的提醒（#386 的 2-35）。
   'artist-audit': {render: () => renderArtistAudit(), refresh: why => { if (why === 'undo') renderArtistAudit(); else if (why === 'nsfw') renderHeading(); }},
+  // 一组图的页面（#/g/<id>，网格页）要先读分组：标题里相近的一组和这组的特征，以及空了时「下一组」的先后。
+  group: {prepare: async route => {
+    let result; try { result = await api('/api/clusters?nsfw=' + state.nsfw); } catch (e) { if (state.route === route) error(readError(e)); return false; }
+    if (state.route !== route) return false;  // 分组加载期间已经导航走了：这个回应不属于任何页面
+    const g = result.clusters.find(x => String(x.cid) === route.id);
+    state.groupNear = g?.near ? nearText(g) : null; state.groupNearId = g?.near || null; state.groupTraits = g?.traits || [];
+    state.groupOrder = groupOrder(result.clusters).map(x => String(x.cid));
+  },
+  // 一组整理完了（#386 的 2-12）：去下一组，或回到按组整理。
+  emptyNext: r => (state.groupOrder.some(id => id !== r.id) ? `<button class="quiet" data-empty="next-group">${t('下一组')} →</button>` : '') + emptyLink('#/groups', t('回到按组整理')),
+  emptyAct: act => { if (act === 'next-group') nextGroup(); }},
 });
+// 「下一组」：重读分组，取原来排在这组后面、还在的第一组；后面都没了就取最前面那组；一组都没了回到按组整理。
+async function nextGroup() {
+  const at = state.route.id, order = state.groupOrder, from = order.indexOf(at);
+  let result; try { result = await api('/api/clusters?nsfw=' + state.nsfw); } catch (e) { error(readError(e)); return; }
+  const left = new Set(result.clusters.map(x => String(x.cid))); left.delete(at);
+  const pick = order.slice(from + 1).find(id => left.has(id)) || groupOrder(result.clusters).map(x => String(x.cid)).find(id => id !== at);
+  location.hash = pick ? '#/g/' + encodeURIComponent(pick) : '#/groups';
+}

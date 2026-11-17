@@ -551,6 +551,10 @@ fn evidence(v: &Json, fields: &[&str]) -> Json {
 fn shown(c: &Connection, v: Json, skin: bool) -> Result<Json> {
     crate::http_read::display_skin(c, v, skin)
 }
+/// 图上现有角色的显示名，顺序同详情栏（导出时按角色建子文件夹用，#450）。
+pub(crate) fn character_names(c: &Connection, id: &str) -> Result<Vec<String>> {
+    Ok(rows(c, &members("= ?"), &[id])?.into_iter().map(|r| get(&r, "name").text().to_owned()).collect())
+}
 fn memberships(c: &Connection, id: &str) -> Result<Vec<Json>> {
     let mut out = Vec::new();
     for r in rows(c, &members("= ?"), &[id])? {
