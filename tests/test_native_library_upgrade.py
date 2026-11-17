@@ -464,6 +464,49 @@ class NativeLibraryUpgradeTest(unittest.TestCase):
                 self.failed(lib, upgrade=False)
                 assert_only_startup_diagnostics_written(self, self.root, before)
 
+    def test_desktop_upgrade_prompt_and_success_are_not_errors(self):
+        lib, _ = self.package(6, 'desktop-upgrade')
+        env = {**self.env, 'ILLUSTASH_DESKTOP_STDIN': '1'}
+        before = tree(self.root)
+        result = subprocess.run(self.args(lib, upgrade=False), env=env, input=b'\x01',
+                                capture_output=True, timeout=WAIT)
+        self.assertEqual(result.returncode, 6, result.stderr)
+        self.assertEqual(result.stderr, b'')
+        self.assertEqual(tree(self.root), {**before, 'dir:support': None, 'dir:support/diagnostics': None,
+                                           'file:support/diagnostics/.lock': EMPTY_SHA256})
+
+        port = free_port()
+        with tempfile.TemporaryFile() as stdout, tempfile.TemporaryFile() as stderr:
+            process = subprocess.Popen(self.args(lib, port=port), env=env, stdin=subprocess.PIPE,
+                                       stdout=stdout, stderr=stderr, **SPAWN)
+            try:
+                with process.stdin:
+                    process.stdin.write(b'\x01')
+                    process.stdin.flush()
+                    enter(f'http://127.0.0.1:{port}', stdout, process)
+                self.assertEqual(process.wait(WAIT), 0)
+                stderr.seek(0)
+                self.assertEqual(stderr.read(), b'')
+            finally:
+                self.stop(process)
+        with closing(sqlite3.connect(lib.db)) as c:
+            self.assertEqual(c.execute("SELECT value FROM meta WHERE key='terms_schema'").fetchone()[0],
+                             str(TERMS_VERSION))
+        self.assertFalse(list((self.support / 'diagnostics').glob('D-*.json')))
+        self.assertFalse((self.root / LOG_DIRECTORY / 'runtime.log').exists())
+
+    def test_desktop_incompatible_schema_still_records_a_failure(self):
+        lib, _ = self.package(6, 'unsupported-schema')
+        with closing(sqlite3.connect(lib.db)) as c:
+            c.execute("UPDATE meta SET value=? WHERE key='terms_schema'", (str(TERMS_VERSION + 1),))
+            c.commit()
+        before = tree(self.root)
+        result = subprocess.run(self.args(lib, upgrade=False), env={**self.env, 'ILLUSTASH_DESKTOP_STDIN': '1'},
+                                input=b'\x01', capture_output=True, timeout=WAIT)
+        self.assertEqual(result.returncode, 4, result.stderr)
+        self.assertTrue(result.stderr)
+        assert_only_startup_diagnostics_written(self, self.root, before)
+
     def test_historical_source_default_auto_sync_records_each_start_and_imports_new_file(self):
         for version in (5, 6):
             with self.subTest(version=version):
