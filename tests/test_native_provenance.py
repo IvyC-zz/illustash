@@ -283,6 +283,9 @@ class NativeProvenanceTest(unittest.TestCase):
             manifest = self.lib.path / path / f'part-{part}' / 'manifest.json'
             sizes.append(len(json.loads(manifest.read_text(encoding='utf-8'))['assets']))
         self.assertEqual(sizes, [100000, total - 100000])
+        covered = self.sql("""SELECT count(*) FROM term_active_evidence x JOIN term_assets a ON a.id=x.asset_id
+            JOIN assets live ON live.uuid=a.key WHERE a.namespace='library' AND x.source='provenance' AND x.method='*'""")
+        self.assertEqual(covered, [(total,)])
         self.assertTrue(self.sql("""SELECT 1 FROM term_current_evidence e JOIN term_assets a ON a.id=e.asset_id
             WHERE a.key='a' AND e.source='provenance'"""))
 
