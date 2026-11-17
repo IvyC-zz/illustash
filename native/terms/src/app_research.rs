@@ -675,7 +675,7 @@ fn copy_rows(
     use crate::app_create::quote_id;
     let name = quote_id(table);
     let mut read = from.prepare(&format!("SELECT {columns} FROM {name}{filter}"))?;
-    let fields = read.column_names().into_iter().map(quote_id).collect::<Vec<_>>();
+    let fields = read.column_names().map(quote_id).collect::<Vec<_>>();
     let marks = vec!["?"; fields.len()].join(",");
     let mut insert = to.prepare(&format!("INSERT INTO {name} ({}) VALUES ({marks})", fields.join(",")))?;
     let mut rows = read.query(args)?;
@@ -689,19 +689,69 @@ fn copy_rows(
     Ok(())
 }
 
+#[derive(Clone, Copy)]
+enum SnapshotDb {
+    App { regroup: bool },
+    Source,
+}
+impl SnapshotDb {
+    /// 核心学习发布在副本中按需重建角色投影。只有随后还要分组时才从 general_hits 读取原有的主题投影。
+    fn copies_rows(self, scope: Scope, name: &str) -> bool {
+        let Self::App { regroup } = self else { return true };
+        if scope != Scope::Learning {
+            return true;
+        }
+        if name == "term_projection" {
+            return regroup;
+        }
+        // 学习戳、核心发布与分组共享术语和身份数据。用户扩展、导入报告、备份及任务历史无需交给 worker。
+        name.starts_with("term_")
+            || name.starts_with("identity_")
+            || matches!(
+                name,
+                "terms"
+                    | "meta"
+                    | "actions"
+                    | "human_object_contributions"
+                    | "assets"
+                    | "assertions"
+                    | "candidates"
+                    | "memberships"
+                    | "tag_memberships"
+                    | "single_assets"
+                    | "lead_assets"
+                    | "duplicates"
+                    | "excluded"
+                    | "deferred"
+                    | "general_hits"
+                    | "family_evidence"
+                    | "learn_state"
+                    | "prototypes"
+                    | "proto_claims"
+                    | "weak_claims"
+                    | "relations"
+                    | "image_sigs"
+                    | "similar_paired"
+                    | "similar_retry"
+                    | "clusters"
+                    | "cluster_info"
+            )
+    }
+}
 /// 应用学习副本还要在本地运行核心发布、重算投影，因而保留其视图、约束和触发器。其他计算只读自己的表；
 /// OC 单独物化 general_hits 视图，relate 只取点名图片的路径。源库始终只复制 worker 会读取的输入。
 fn copy_inputs(
     c: &Connection,
     path: &Path,
     inputs: &Inputs<'_>,
-    source: bool,
+    part: SnapshotDb,
     check: &dyn Fn() -> Result<()>,
 ) -> Result<()> {
     use crate::app_create::quote_id;
     check()?;
     #[cfg(test)]
     tests::backup_step(path);
+    let source = matches!(part, SnapshotDb::Source);
     let mut out = crate::sqlite::open(path)?;
     // 任务私有文件在副本事务完成后才交给 worker，进程中断后整份丢弃。
     out.pragma_update(None, "synchronous", "OFF")?;
@@ -723,8 +773,8 @@ fn copy_inputs(
         let only = if source { Some(inputs.scope.source()) } else { inputs.scope.app() };
         let mut schema = c.prepare(
             "SELECT s.type,s.name,s.tbl_name,s.sql,coalesce(t.wr,0)
-             FROM sqlite_schema s LEFT JOIN pragma_table_list t ON t.schema='main' AND t.name=s.name
-             WHERE s.name NOT GLOB 'sqlite_*' AND s.sql IS NOT NULL
+             FROM sqlite_schema s LEFT JOIN pragma_table_list t ON t.schema='main' AND t.name=s.tbl_name
+             WHERE t.type IN ('table','view') AND s.name NOT GLOB 'sqlite_*' AND s.sql IS NOT NULL
              ORDER BY CASE s.type WHEN 'table' THEN 0 WHEN 'index' THEN 1 WHEN 'view' THEN 2 ELSE 3 END,s.rowid",
         )?;
         let mut objects = schema.query([])?;
@@ -739,7 +789,7 @@ fn copy_inputs(
             if kind == "view" && only.is_some() {
                 // 只复制这个视图的可见值，不把它所连接的术语库交给只读 worker。
                 let query = c.prepare(&format!("SELECT * FROM {}", quote_id(&name)))?;
-                let cols = query.column_names().into_iter().map(quote_id).collect::<Vec<_>>();
+                let cols = query.column_names().map(quote_id).collect::<Vec<_>>();
                 tx.execute(&format!("CREATE TABLE {} ({})", quote_id(&name), cols.join(",")), [])?;
                 copy_rows(c, &tx, &name, "*", "", &[], check)?;
                 continue;
@@ -749,7 +799,7 @@ fn copy_inputs(
             }
             let sql: String = row.get(3)?;
             tx.execute(&sql, [])?;
-            if kind == "table" && (source || !UNREAD.contains(&name.as_str())) {
+            if kind == "table" && part.copies_rows(inputs.scope, &name) {
                 let without_rowid: bool = row.get(4)?;
                 let cols = if without_rowid { "*" } else { "rowid AS rowid,*" };
                 let filter = if source && name == "embeddings" { CCIP_ROWS } else { "" };
@@ -1082,10 +1132,6 @@ fn snapshot(
     writers.read(src, |src| {
         read_snapshot(&[c, src], || {
             let (app_hash, app) = app_digest(c, inputs, None, &|| ctx.check())?;
-            {
-                let _phase = Phase::start("copy_app");
-                copy_inputs(c, &dir.join("library.sqlite"), inputs, false, &|| ctx.check())?;
-            }
             let events: Vec<i64> = c
                 .prepare(
                     "SELECT id FROM backend_effects WHERE status='pending' AND kind IN ('verdict','imported','index_changed') ORDER BY id",
@@ -1109,11 +1155,15 @@ fn snapshot(
                         [],
                         |r| r.get::<_, bool>(0),
                     )? || !intents.is_empty());
+            {
+                let _phase = Phase::start("copy_app");
+                copy_inputs(c, &dir.join("library.sqlite"), inputs, SnapshotDb::App { regroup }, &|| ctx.check())?;
+            }
             // 源库放最后：从第一次读起，研究就持有它的读锁。
             let check = poll(ctx, Some(writers));
             let source = source_digest(src, inputs, None, &check)?;
             let _phase = Phase::start("copy_source");
-            copy_inputs(src, &dir.join("source.sqlite"), inputs, true, &check)?;
+            copy_inputs(src, &dir.join("source.sqlite"), inputs, SnapshotDb::Source, &check)?;
             let version = combine(&app, &source.digest.clone().finalize());
             Ok(Snapshot { version, hashes: InputHashes { app: app_hash, source }, events, intents, regroup })
         })
@@ -1719,6 +1769,8 @@ mod tests {
             .execute_batch(
                 "INSERT INTO name_settings VALUES ('model_key','synthetic-key');
              INSERT INTO memberships VALUES ('a','e1');
+             CREATE TABLE local_archive(v,display AS (v+1)); INSERT INTO local_archive(v) VALUES (5);
+             CREATE TABLE term_projection(id INTEGER PRIMARY KEY); INSERT INTO term_projection VALUES (1);
              DROP TABLE general_hits;
              CREATE TABLE tag_input(uuid TEXT,value TEXT);
              INSERT INTO tag_input VALUES ('a','blue_hair');
@@ -1756,6 +1808,12 @@ mod tests {
             };
             assert_eq!(tables(&source, "labels"), 0);
             if scope == Scope::Learning {
+                for table in ["local_archive", "term_projection"] {
+                    assert_eq!(
+                        app.query_row(&format!("SELECT count(*) FROM {table}"), [], |r| r.get::<_, i64>(0)).unwrap(),
+                        0
+                    );
+                }
                 assert_eq!(app.query_row("SELECT count(*) FROM name_settings", [], |r| r.get::<_, i64>(0)).unwrap(), 0);
             }
             assert_eq!(tables(&source, "characters"), i64::from(scope == Scope::Learning));
@@ -2440,7 +2498,7 @@ mod tests {
                     src,
                     &f.root.join("snapshot.sqlite"),
                     &f.inputs(Scope::Learning),
-                    true,
+                    SnapshotDb::Source,
                     &poll(&f.ctx, Some(&writers)),
                 )
             })
