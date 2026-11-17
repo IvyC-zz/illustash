@@ -83,7 +83,8 @@ class NativeCcipLongtailTest(SyntheticWdLibrary, unittest.TestCase):
         self.assertEqual(auto['task']['result']['changed'], 1)
         self.assertEqual((auto['library']['images'], auto['library']['assigned']), (2, 2))
 
-        # 撤回：两张图都回到没有角色。
+        # 撤回：两张图都回到没有角色。同步还在收尾时撤回回 409（卡片上按钮是禁用的），等它结束。
+        wait_until(lambda: json.loads(self.request('/api/sync')['body'])['state']['status'] == 'done')
         self.state('/withdraw', {})
         withdrawn = self.finish('withdraw')
         self.assertEqual(withdrawn['task']['status'], 'done', withdrawn)
