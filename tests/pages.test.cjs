@@ -85,7 +85,7 @@ test('文档点击列里没有归到浏览／整理的，注册表里是页面�
 
 test('注册表里的每个页面都在总表里有一行，反过来也是', () => {
   const inTable = new Set(Object.values(ROWS).map(x => x.page));
-  for (const name of pages.pageNames()) assert.ok(inTable.has(name), `${name} 没有出现在 docs/WEB_UI_MAP.md 2.1 总表（新增页面要加一行）`);
+  for (const name of Object.keys(pages.PAGES)) assert.ok(inTable.has(name), `${name} 没有出现在 docs/WEB_UI_MAP.md 2.1 总表（新增页面要加一行）`);
   for (const name of inTable) assert.ok(pages.PAGES[name], `${name} 没有在注册表里登记`);
 });
 
@@ -101,7 +101,7 @@ const OLD = {
 };
 test('cleanup()、browsing()、panelPage、LEAD_PAGES、侧栏高亮和改造前的手写清单一致', () => {
   const {cleanup, browsing, defaultSort} = route, {prefs} = web.core();
-  for (const name of pages.pageNames()) for (const char of ['', 'c1']) {
+  for (const name of Object.keys(pages.PAGES)) for (const char of ['', 'c1']) {
     state.route = {page: name, char};
     assert.equal(cleanup(), !!char || OLD.cleanup.includes(name), `cleanup ${name} ${char}`);
     assert.equal(browsing(), !char && OLD.browsing.includes(name), `browsing ${name} ${char}`);
@@ -124,7 +124,7 @@ test('cleanup()、browsing()、panelPage、LEAD_PAGES、侧栏高亮和改造前
 });
 
 test('主区是网格以外的页面都是面板页；单图快捷键的范围从注册表读', () => {
-  for (const name of pages.pageNames()) {
+  for (const name of Object.keys(pages.PAGES)) {
     const p = pages.PAGES[name];
     assert.equal(!!p.panel, p.area !== 'grid', `${name}：panel 与主区`);
     assert.equal(pages.keyScope(p), p.area === 'grid' ? 'grid' : name === 'home' ? 'shown' : '', `${name}：快捷键范围`);
@@ -181,7 +181,7 @@ test('地址：能认出的页面名、带编号的页面、子页和旧角色�
 
 test('implement() 只接受登记过的页面名；每个页面都有标题以外的必要字段', () => {
   assert.throws(() => pages.implement({nope: {}}), /没有登记过的页面/);
-  for (const name of pages.pageNames()) {
+  for (const name of Object.keys(pages.PAGES)) {
     const p = pages.PAGES[name];
     assert.ok(['grid', 'homePage', 'charIndex', 'settingsPage', 'groupsPage'].includes(p.area), `${name}.area`);
     assert.ok(['browse', 'cleanup', 'select', 'own'].includes(p.click), `${name}.click`);

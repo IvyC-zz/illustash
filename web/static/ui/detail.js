@@ -1,5 +1,5 @@
 // 近看一张图（桌面布局，#199）：网格旁边的检查面板、偶尔出现的「是 TA 吗？」提问，以及全屏查看器。
-import {esc, monthText, number} from '../core/format.js';
+import {esc, monthText, number, thumbSize} from '../core/format.js';
 import {unreadableText} from '../core/jobs.js';
 import {t} from '../core/i18n.js';
 import {REASONS, nameWithWork} from '../core/labels.js';
@@ -11,9 +11,10 @@ import {api} from '../core/session.js';
 import {state} from '../core/state.js';
 import {$, readFailure, workSmall} from './dom.js';
 import {PAGE, currentItem, endPreview, kept, loadPage, markDetailKeys, mutate, openTagPicker, previewList, previewing, renderGrid, rowHeight, rowOf, rowTop, setCursor, syncCards, toggleInfo, viewOpts} from './grid.js';
-import {newIds, openPicker, stage, targets} from './palette.js';
+import {newIds, openPicker, targets} from './palette.js';
 import {artistSection, findArtistWorks, findArtists} from './artists.js';
 import {markHomeFocus} from './home.js';
+import {bindFileActions, fileActions, wireDragOut} from './files.js';
 import {createLayer} from './overlay.js';
 
 // 哪一次检查面板读取是当前的：更慢、更早的那次绝不会画到它上面。
@@ -40,6 +41,8 @@ export const INSP_ICONS = {
 };
 // 这张图的角色的收藏节奏：按角色缓存，直到下一次写入或 R18 切换。
 const statsCache = new Map();
+// 详情栏里小图的显示高度（CSS 像素，app.css 的 .cc-same 四列和 .dup-copy img），按它选缩略图档位（#452）。
+const SAME_H = 85, DUP_H = 55;
 async function loadCharStats(id, ident, gen) {
   const box = $('charStats'); if (!box || (!viewOpts.chart && !viewOpts.same)) return;
   const key = `${id}|${state.nsfw}|${state.readEpoch}`;
@@ -49,8 +52,8 @@ async function loadCharStats(id, ident, gen) {
   const months = st.months || [], max = Math.max(1, ...months.map(m => m.count)), now = months.at(-1)?.count || 0;
   const recent = (st.recent || []).filter(u => u !== ident).slice(0, 4);
   $('charStats').innerHTML = (viewOpts.chart ? `<div class="cc-line"><span>${t('收藏 {n} 张', {n: `<b>${number(st.count)}</b>`})}${st.first ? ' · ' + t('始于 {date}', {date: st.first.replace('-', '.')}) : ''}</span>${now ? `<em>${t('本月 +{n}', {n: number(now)})}</em>` : ''}</div>
-    <div class="cc-bars">${months.map((m, i) => `<i style="height:${Math.max(8, m.count / max * 100)}%${i === months.length - 1 ? '' : ''}" class="${i === months.length - 1 ? 'now' : ''}" title="${monthText(m.month.slice(0, 4), m.month.slice(5, 7)) + ' · ' + t('{n} 张', {n: number(m.count)})}"></i>`).join('')}</div>` : '') +
-    (viewOpts.same && recent.length ? `<div class="cc-same"><h5>${t('同一角色')}<a href="${charHash(id)}">${t('全部')} ›</a></h5><div>${recent.map(u => `<button data-copy="${esc(u)}" title="${t('查看这张')}"><img src="/image?id=${encodeURIComponent(u)}&size=thumb" alt="" loading="lazy"></button>`).join('')}</div></div>` : '');
+    <div class="cc-bars">${months.map((m, i) => `<i style="height:${Math.max(8, m.count / max * 100)}%" class="${i === months.length - 1 ? 'now' : ''}" title="${monthText(m.month.slice(0, 4), m.month.slice(5, 7)) + ' · ' + t('{n} 张', {n: number(m.count)})}"></i>`).join('')}</div>` : '') +
+    (viewOpts.same && recent.length ? `<div class="cc-same"><h5>${t('同一角色')}<a href="${charHash(id)}">${t('全部')} ›</a></h5><div>${recent.map(u => `<button data-copy="${esc(u)}" title="${t('查看这张')}"><img src="/image?id=${encodeURIComponent(u)}&size=${thumbSize(SAME_H)}" alt="" loading="lazy"></button>`).join('')}</div></div>` : '');
   for (const b of $('charStats').querySelectorAll('[data-copy]')) b.onclick = () => inspect(b.dataset.copy);
 }
 export async function inspect(ident, quiet = false) {
@@ -68,15 +71,16 @@ export async function inspect(ident, quiet = false) {
       : `<button class="secondary large" data-curate="exclude" title="${t('截图、照片等不是插画的图')}">${t('排除')} <kbd>X</kbd></button>`;
     const pendingNote = d.excluded ? `<div class="cc-note">${t('已排除 · {reason}', {reason: esc(REASONS[d.excluded.reason] || '')})}</div>` : d.pending ? `<div class="cc-note">${t('待确认：像截图')}</div>` : '';
     $('inspector').innerHTML = `<div class="inspector-head"><button class="icon" data-nav="-1" aria-label="${t('上一张')}" title="${t('上一张（←）')}">${INSP_ICONS.prev}</button><button class="icon" data-nav="1" aria-label="${t('下一张')}" title="${t('下一张（→）')}">${INSP_ICONS.next}</button><div class="spacer"></div><button class="icon" id="expand" title="${t('大图（Space）')}" aria-label="${t('大图')}">${INSP_ICONS.expand}</button><button class="icon" id="closeInspector" aria-label="${t('关闭详情')}" title="${t('关闭（Esc）')}">${INSP_ICONS.close}</button></div>
-      <button class="preview" id="previewButton" title="${t('大图查看')}"><img src="/image?id=${encodeURIComponent(ident)}&size=preview" alt="${t('插画预览')}"></button>
+      <button class="preview" id="previewButton" title="${t('大图查看')}"><img src="/image?id=${encodeURIComponent(ident)}&size=preview" alt="${t('插画预览')}" draggable="false"></button>
       ${shouldAsk(d, ident) ? askHTML(d.question) : ''}
       ${pc ? `<section class="inspector-section cc-card"><a class="cc-name" href="${charHash(pc.id)}" title="${t('在图库里只看 TA')}">${esc(pc.name)}${workSmall(pc)}</a>${original ? `<div class="cc-orig">${esc(original)}</div>` : ''}${path.length ? `<div class="cc-path">${path.map(esc).join(' · ')}</div>` : ''}${pendingNote}
         <div id="charStats" class="cc-stats"></div></section>`
         : `<section class="inspector-section cc-card"><div class="cc-name muted">${d.unknown ? t('已跳过') : t('还没认出是谁')}</div>${pendingNote}</section>`}
-      <section class="inspector-section"><h3 class="section-title">${t('角色')}</h3>${identityChips(d)}${(d.tag_identities || []).length ? `<div class="tag-ids"><span>${t('标签')}</span>${d.tag_identities.map(x => `<a class="variant-chip" href="${charHash(x.id)}" title="${t('只当标签、不算角色的身份；点开可以改回角色')}">${esc(x.name)}</a>`).join('')}</div>` : ''}</section>
-      ${artistSection(d, ident)}
+      <section class="inspector-section"><h3 class="section-title">${t('角色')}</h3>${identityChips(d)}${(d.tag_identities || []).length ? `<div class="tag-ids"><span>${t('标签')}</span>${d.tag_identities.map(x => `<a class="variant-chip" href="${charHash(x.id)}" title="${t('只当标签、不算角色的身份')}">${esc(x.name)}</a>`).join('')}</div>` : ''}</section>
+      ${artistSection(d)}
       <section class="inspector-section"><h3 class="section-title">${t('我的标签')}</h3><div class="user-tags">${(d.user_tags || []).map(tag => `<span class="variant-chip"><a href="${hashFor(filterRoute({utag: tag}))}" data-utag-filter="${esc(tag)}"># ${esc(tag)}</a><button data-untag="${esc(tag)}" title="${t('去掉标签')}">×</button></span>`).join('')}<button class="variant-add" id="addTag">＋ ${t('标签')} <kbd>G</kbd></button></div></section>
-      ${d.duplicates?.length ? `<section class="inspector-section"><h3 class="section-title">${t('重复副本 · 共 {n} 份', {n: d.duplicates.length + 1})}</h3><div class="dup-list">${d.duplicates.map(x => `<button class="dup-copy" data-copy="${esc(x.uuid)}" title="${t('查看这份副本')}"><img src="/image?id=${encodeURIComponent(x.uuid)}&size=thumb" alt="" loading="lazy"><span><b>${x.pos}/${x.size}</b> ${esc((x.added_at || '').slice(0, 10))}<br><small>${x.names.length ? x.names.map(esc).join(' · ') : t('未识别')}</small></span></button>`).join('')}</div></section>` : ''}
+      ${d.duplicates?.length ? `<section class="inspector-section"><h3 class="section-title">${t('重复副本 · 共 {n} 份', {n: d.duplicates.length + 1})}</h3><div class="dup-list">${d.duplicates.map(x => `<button class="dup-copy" data-copy="${esc(x.uuid)}" title="${t('查看这份副本')}"><img src="/image?id=${encodeURIComponent(x.uuid)}&size=${thumbSize(DUP_H)}" alt="" loading="lazy"><span><b>${x.pos}/${x.size}</b> ${esc((x.added_at || '').slice(0, 10))}<br><small>${x.names.length ? x.names.map(esc).join(' · ') : t('未识别')}</small></span></button>`).join('')}</div></section>` : ''}
+      ${fileActions()}
       ${viewOpts.meta ? `<section class="inspector-section"><dl class="facts"><div><dt>${t('尺寸')}</dt><dd class="mono">${number(d.width)} × ${number(d.height)}</dd></div><div><dt>${t('加入')}</dt><dd class="mono">${esc((d.added_at || '').slice(0, 16).replace('T', ' '))}</dd></div><div><dt>${t('文件')}</dt><dd title="${esc(d.filename)}">${esc(d.filename)}</dd></div><div><dt>${t('文件形态')}</dt><dd>${d.src_kind === 'deriv' ? t('本地副本') : t('原图')}</dd></div></dl></section>
       <details class="inspector-section"><summary>${t('画面标签')}</summary><div class="tags">${d.tags.map(x => `<button class="tag" data-tag="${esc(x.value)}" title="${t('按此标签筛选图库 · WD {conf}', {conf: x.conf.toFixed(2)})}">${esc(x.value.replaceAll('_', ' '))}</button>`).join('') || `<p>${t('暂无')}</p>`}</div></details>` : ''}
       <div class="inspector-actions">${pageOf(state.route).skip && !d.memberships.length && !d.unknown ? `<button class="secondary large" id="skipOne">${t('跳过')} <kbd>S</kbd></button>` : ''}${d.unknown ? `<button class="secondary large" id="resumeOne">${t('恢复到未识别')}${viewOf(state.route).bar === 'skipped' ? ' <kbd>S</kbd>' : ''}</button>` : ''}${curate}</div>`;
@@ -103,6 +107,9 @@ export async function inspect(ident, quiet = false) {
     for (const b of $('inspector').querySelectorAll('[data-untag]')) b.onclick = () => mutate('/api/tag', {ids: [ident], tag: b.dataset.untag, add: false}, state.route.utag === b.dataset.untag);
     $('resumeOne')?.addEventListener('click', () => mutate('/api/change', {ids: [ident], action: 'resume'}, poolIs(state.route, 'skipped')));
     bindIdentity($('inspector'), d, ident); bindAsk($('inspector'), d, ident);
+    bindFileActions($('inspector'), ident);
+    // 按住预览图拖动：把这张图拖到别的应用（#450）。
+    wireDragOut($('previewButton'), () => [ident]);
   } catch (e) { if (gen === detailGen) { $('inspector').innerHTML = `<div class="loading-line">${esc(e.message)}<br><button class="quiet" id="closeInspector">${t('关闭')}</button></div>`; $('closeInspector').onclick = closeInspector; } }
 }
 function bindIdentity(root, d, ident) {
@@ -141,7 +148,7 @@ function shouldAsk(d, ident) {
 }
 // 导出给样式清单页调用（tools/styleguide/live.js，#352）：改名或改参数时，tools/check_styleguide.py 会报出来。
 export function askHTML(q, dark = false) {
-  const why = q.kind === 'audit' ? t('随机抽查') : q.kind === 'hint' ? t('和你确认过的 TA 很像') + (q.current_name ? ' · ' + t('现在算作 {name}', {name: esc(q.current_name)}) : '') : q.kind === 'ambiguous' ? t('和 {name} 分不太清', {name: esc(q.rival_name)}) : q.confirmed < 5 ? t('再确认 {n} 张就能学会认 TA', {n: 5 - q.confirmed}) : '';
+  const why = q.kind === 'audit' ? t('随机抽查') : q.kind === 'hint' ? t('和你确认过的 TA 很像') + (q.current_name ? ' · ' + t('现在算作 {name}', {name: esc(q.current_name)}) : '') : q.kind === 'ambiguous' ? t('和 {name} 分不太清', {name: esc(q.rival_name)}) : '';
   return `<div class="ask-bar${dark ? ' on-dark' : ''}"><div class="ask-q">${t('是 {name} 吗？', {name: `<b>${esc(q.name)}</b>${workSmall({id: q.entity, name: q.name})}`})}${why ? `<small>${why}</small>` : ''}</div>
     <div class="ask-btns"><button class="ask-b yes" data-ask="yes">${t('是')} <kbd>Y</kbd></button><button class="ask-b" data-ask="no">${t('不是')} <kbd>N</kbd></button>${q.rival ? `<button class="ask-b" data-ask="switch" title="${t('换成 {name}', {name: esc(q.rival_name)})}">${t('是 {name}', {name: esc(q.rival_name)})}</button>` : ''}</div></div>`;
 }
@@ -218,7 +225,7 @@ export function ensureVisible(i) {
 }
 
 // ---------- 全屏查看器 ----------
-const view = {scale: 1, x: 0, y: 0, fit: 1};
+const view = {scale: 1, x: 0, y: 0};
 // 大图是盖满页面的层：Esc 关它（焦点在层外的输入框里时让位给输入框失焦），关闭时焦点还给打开它的地方。
 // 开着时焦点在大图上，它盖住的页面、选择栏和任务面板设成 inert，Tab 只在大图的按钮间走（#422）；提示条（撤销）不盖。
 const viewerLayer = createLayer({kind: 'overlay', id: 'viewer', el: () => $('viewer'), yieldToInput: true, focusIn: 'self',
@@ -330,6 +337,8 @@ export function wireDetail() {
     const img = $('viewerImg'), actual = img.naturalWidth / img.clientWidth;
     if (view.scale > 1.01) { Object.assign(view, {scale: 1, x: 0, y: 0}); applyView(); } else zoomView(Math.max(2, actual), e.clientX, e.clientY);
   });
+  // 没放大时按住大图拖动：把这张图拖到别的应用（#450）；放大后按住拖动是平移。
+  wireDragOut($('viewerImg'), () => [state.viewerItem?.uuid].filter(Boolean), () => view.scale <= 1.01);
   $('viewerStage').addEventListener('pointerdown', e => { if (view.scale > 1) { pan = {x: e.clientX - view.x, y: e.clientY - view.y}; $('viewerStage').setPointerCapture(e.pointerId); } });
   $('viewerStage').addEventListener('pointermove', e => { if (pan) { view.x = e.clientX - pan.x; view.y = e.clientY - pan.y; applyView(); } });
   $('viewerStage').addEventListener('pointerup', () => { pan = null; });

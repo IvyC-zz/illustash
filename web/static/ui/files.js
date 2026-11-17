@@ -1,0 +1,63 @@
+// 用图动作的界面（#450）：详情栏的「打开」「在访达中显示」、把图拖到别的应用、选择栏的「导出…」对话框。
+// 请求和导出状态在 core/files.js；导出的进度在任务面板（ui/tasks.js）。
+import {t} from '../core/i18n.js';
+import {number} from '../core/format.js';
+import {DRAG_LIMIT, canDrag, canReveal, dragFiles, openFile, revealFile, revealLabel, startExport} from '../core/files.js';
+import {openDialog} from './dialog.js';
+import {toast} from './dom.js';
+
+// 详情栏「文件」下面的两个按钮。
+export function fileActions() {
+  return `<section class="inspector-section"><div class="chips-row"><button class="quiet small" data-file="open" title="${t('用默认应用打开原图')}">${t('打开')}</button>`
+    + (canReveal() ? `<button class="quiet small" data-file="reveal">${revealLabel()}</button>` : '') + '</div></section>';
+}
+export function bindFileActions(root, id) {
+  for (const b of root.querySelectorAll('[data-file]')) b.onclick = () => (b.dataset.file === 'open' ? openFile(id) : revealFile(id)).catch(e => toast(e.message));
+}
+
+// 鼠标按下后移动超过这么多像素，就算开始拖。
+const SLOP = 6;
+// 在 el 上按住拖动时，把 ids() 给的图拖到别的应用（外壳起系统的拖放，只允许复制）。when() 为假时（比如大图放大了在
+// 平移）不拖。拖出之后吞掉松手时的那次点击，免得点开大图。只在桌面 App 里有效。
+export function wireDragOut(el, ids, when = () => true) {
+  let start = null, dragged = false;
+  el.addEventListener('pointerdown', e => {
+    dragged = false;
+    start = e.button === 0 && e.pointerType !== 'touch' && canDrag() && when() ? [e.clientX, e.clientY] : null;
+  });
+  el.addEventListener('pointermove', e => {
+    if (!start || !(e.buttons & 1) || Math.hypot(e.clientX - start[0], e.clientY - start[1]) < SLOP) return;
+    start = null; dragged = true;
+    startDrag(ids());
+  });
+  for (const type of ['pointerup', 'pointercancel']) el.addEventListener(type, () => { start = null; });
+  el.addEventListener('click', e => { if (dragged) { e.preventDefault(); e.stopImmediatePropagation(); } dragged = false; }, true);
+}
+// 拖出这几张。超过上限时只提示，不拖。
+export function startDrag(ids) {
+  if (!ids.length) return;
+  if (ids.length > DRAG_LIMIT) { toast(t('一次最多拖出 {n} 张', {n: number(DRAG_LIMIT)})); return; }
+  dragFiles(ids).catch(e => toast(e.message));
+}
+// 选择栏的「导出…」：选子文件夹的分法，再弹系统的选目录窗口。selection 是 {ids} 或 {filter, exclude}；n 是张数。
+// 带选项的表单，点背景不关。
+export function openExport(selection, n) {
+  const groups = [['none', t('不分')], ['character', t('按角色')], ['artist', t('按画师')]];
+  let group = 'none';
+  const d = openDialog({title: t('导出 {n} 张', {n: number(n)}), backdropClose: false,
+    body: `<p class="muted-note dialog-message">${t('把原图复制到选的文件夹，不覆盖已有的文件。')}</p>
+      <div class="setting-line"><span>${t('子文件夹')}</span><div class="segmented">${groups.map(([v, label]) =>
+        `<button type="button" class="${v === group ? 'on' : ''}" data-group="${v}">${label}</button>`).join('')}</div></div>`,
+    actions: `<button value="cancel" class="quiet">${t('取消')}</button><button value="ok" class="primary" autofocus>${t('选择文件夹…')}</button>`,
+    onClose: d => {
+      if (d.returnValue !== 'ok') return;
+      startExport(selection, group).then(started => {
+        if (started) toast(t('开始导出 {n} 张，进度在「任务」里', {n: number(n)}));
+      }).catch(e => toast(e.message));
+    }});
+  for (const b of d.querySelectorAll('[data-group]')) b.onclick = () => {
+    group = b.dataset.group;
+    for (const x of d.querySelectorAll('[data-group]')) x.classList.toggle('on', x === b);
+  };
+  return d;
+}

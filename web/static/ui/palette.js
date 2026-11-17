@@ -1,7 +1,7 @@
 // 对角色的操作（桌面布局，#199）：命令面板（换成 / 也是 / 设为角色 / 跳到角色）、原创角色、编辑角色资料、合并，以及
 // 选中图片之间的关系。
 import {forgetLocalLinks, workName} from '../core/catalog.js';
-import {edits, setLatest} from '../core/edits.js';
+import {exclusive} from '../core/edits.js';
 import {esc, number} from '../core/format.js';
 import {t, tb} from '../core/i18n.js';
 import {composing} from '../core/keys.js';
@@ -14,17 +14,20 @@ import {api, post, readError} from '../core/session.js';
 import {currentLibraryId, remoteNames, remoteNote} from '../core/settings.js';
 import {state} from '../core/state.js';
 import {refreshLocalLinks} from './catalog.js';
-import {$, toast} from './dom.js';
+import {$, namesAllowButton, toast, written} from './dom.js';
 import {openDialog} from './dialog.js';
-import {createLayer, openModal} from './overlay.js';
+import {openModal} from './overlay.js';
+import {combo, listNav} from './combo.js';
 import {mutate, reload} from './grid.js';
-import {namesAllowButton} from './settings.js';
 import {renderHeading} from './shell.js';
 
 // 命令面板搜索的防抖。
 let pickerTimer = 0;
 // ---------- command palette (换成 / 也是 / 设为角色 / 跳到角色) ----------
 let palette = null;
+// 命令面板结果的键盘和鼠标（ui/combo.js 的 listNav），高亮的是第几项在它的 index 里。wirePalette 之前（只有测试会这样）
+// 用一个只记位置的替身。
+let pickerNav = {index: 0, mark() {}};
 // 多选面板（设为角色 / 也是）：⇧+点击、⇧+↵ 或行上的 ＋ 收集角色；↵ 一次全部应用。
 export const targets = list => list.length > 1 ? {entities: list.map(e => e.id)} : {entity: list[0].id};
 // 「换成」接受多个角色；只有一个时照以前的方式发送。
@@ -70,7 +73,7 @@ async function paletteSearch() {
     if (!p.jump) {
       // 还不在图库里：Danbooru 角色（只用输入的文字）稍后就到；只在本地新建的一项留在最后。
       const create = list.some(e => e.name.toLowerCase() === q.toLowerCase()) ? [] : [{create: q, name: q, hint: t('只在本地新建，不关联 Danbooru')}, {create: q, oc: true, name: q, hint: t('画师的原创角色，不属于任何作品')}];
-      const remote = {label: t('Danbooru 角色 · 选中即新建并关联'), items: [], note: t('正在查 Danbooru…（只发送你输入的文字）')};
+      const remote = {label: t('Danbooru 角色 · 选中即新建并关联'), items: [], note: t('正在查 Danbooru…')};
       sections.push(remote, {label: '', items: create});
       clearTimeout(p.remoteTimer);
       p.remoteTimer = setTimeout(async () => {
@@ -80,7 +83,7 @@ async function paletteSearch() {
         remote.note = result.found ? '' : result.unauthorized ? t('{reason}，也可以先只在本地新建', {reason: remoteNote(result)}) : t('{reason}，可以稍后再试，或先只在本地新建', {reason: remoteNote(result)});
         remote.allow = result.unauthorized;
         // 没动过：最佳匹配获得高亮（第一个本地结果，否则是第一个 Danbooru 结果）。
-        renderPalette(sections, q, p.touched && p.index > 0);
+        renderPalette(sections, q, p.touched && pickerNav.index > 0);
       }, 380);
     }
   } else {
@@ -98,11 +101,11 @@ async function paletteSearch() {
   renderPalette(sections, q);
 }
 function renderPalette(sections, q, keep = false) {
-  const p = palette, current = keep ? p.list[p.index] : null;
+  const p = palette, current = keep ? p.list[pickerNav.index] : null;
   p.list = sections.flatMap(s => s.items);
-  p.index = current ? Math.max(0, p.list.indexOf(current)) : 0;
+  pickerNav.index = current ? Math.max(0, p.list.indexOf(current)) : 0;
   // 只在本地新建是兜底：只要有别的匹配，它绝不是默认项。
-  if (!current && p.list[p.index]?.create) p.index = Math.max(0, p.list.findIndex(e => !e.create));
+  if (!current && p.list[pickerNav.index]?.create) pickerNav.index = Math.max(0, p.list.findIndex(e => !e.create));
   let n = 0;
   $('pickerResults').innerHTML = sections.filter(s => s.items.length || s.note).map(s => (s.label ? `<div class="palette-label">${s.label}</div>` : '') + (s.note && !s.items.length ? `<p class="palette-note">${esc(s.note)}${s.allow ? ' ' + namesAllowButton : ''}</p>` : '') + s.items.map(e => {
     const i = n++, char = e.id && state.charMap.get(e.id), cover = char?.cover;
@@ -116,9 +119,8 @@ function renderPalette(sections, q, keep = false) {
 }
 function highlight() {
   const p = palette; if (!p) return;
-  for (const el of $('pickerResults').querySelectorAll('.palette-item')) el.classList.toggle('on', Number(el.dataset.i) === p.index);
-  $('pickerResults').querySelector('.palette-item.on')?.scrollIntoView({block: 'nearest'});
-  const e = p.list[p.index], chosen = p.multi ? finalList(e, p.touched) : e ? [e] : [];
+  pickerNav.mark();
+  const e = p.list[pickerNav.index], chosen = p.multi ? finalList(e, p.touched) : e ? [e] : [];
   const sentence = chosen.length ? (p.sentence ? p.sentence({...chosen[0], name: chosen.map(x => x.name).join(t('、'))}) : chosen.map(x => x.name).join(t('、'))) : '';
   $('pickerFoot').innerHTML = chosen.length ? `<kbd>↵</kbd> ${esc(sentence)}${p.multi ? `<span class="palette-tip"><kbd>⇧↵</kbd> ${p.staged.length ? t('继续加') : t('多选')}</span>` : ''}` : `<span>${esc(p.title || '')}</span>`;
 }
@@ -146,6 +148,7 @@ function renderStaged() {
   box.hidden = !p?.staged.length;
   box.innerHTML = (p?.staged || []).map((e, i) => `<button class="staged-chip" data-unstage="${i}" title="${t('移除')}">${esc(e.create ? t('新建「{name}」', {name: e.name}) : e.name)} ×</button>`).join('');
 }
+// 导出给样式清单页调用（tools/styleguide/live.js，#352）：改名或改参数时，tools/check_styleguide.py 会报出来。
 export function stage(e) {
   const p = palette, k = stageKey(e), at = p.staged.findIndex(x => stageKey(x) === k);
   if (at >= 0) p.staged.splice(at, 1); else p.staged.push(e);
@@ -177,9 +180,9 @@ async function choose(i, more = false, explicit = false) {
 }
 export function mergeCharacter(c) {
   openPicker({title: t('把 {name} 合并到…', {name: c.name}), placeholder: t('输入同一个人的另一个角色'), jump: true, exclude: [c.id],
-    sentence: e => t('把 {name} 并入 {target}：图、人工结论、造型和别名都过去，可撤销', {name: c.name, target: e.name}),
+    sentence: e => t('把 {name} 并入 {target}：图、人工结论、造型和别名都过去', {name: c.name, target: e.name}),
     pick: async e => {
-      try { const r = await post('/api/merge', {source: c.id, target: e.id}); setLatest(r.undo); toast(tb(r.undo.label), true); await refreshMeta(); go(charRoute(e.id)); }
+      try { const r = await post('/api/merge', {source: c.id, target: e.id}); written(r.undo); await refreshMeta(); go(charRoute(e.id)); }
       catch (err) { toast(err.message); }
     }});
 }
@@ -198,12 +201,12 @@ export async function markOc(body, leaving, separate = false) {
 export async function splitOc(c) {
   const d = $('ocSplitDialog'), body = $('ocSplitBody');
   $('ocSplitTitle').textContent = t('按相似细分 · {name}', {name: c.name});
-  body.innerHTML = `<p class="muted-note">${t('正在比较长相…只在本机计算')}</p>`;
+  body.innerHTML = `<p class="muted-note">${t('正在比较长相…')}</p>`;
   openModal(d, {backdropClose: true, id: 'oc-split'});
   let r; try { r = await api('/api/oc/groups?' + new URLSearchParams({entity: c.id})); } catch (e) { body.innerHTML = `<p class="muted-note">${esc(readError(e))}</p>`; return; }
   const grouped = r.groups.reduce((n, g) => n + g.length, 0);
   body.innerHTML = `<p class="muted-note">${t('{n} 张里有 {groups} 组长得像（共 {grouped} 张）；其余的不像任何一张，留在这里。', {n: number(r.total), groups: number(r.groups.length), grouped: number(grouped)})}</p>` +
-    (r.groups.map((g, i) => `<section class="oc-split-group" data-g="${i}"><div class="oc-split-thumbs">${g.slice(0, 8).map(u => `<img src="/image?id=${encodeURIComponent(u)}" alt="" loading="lazy">`).join('')}${g.length > 8 ? `<span>+${number(g.length - 8)}</span>` : ''}</div><div class="oc-split-meta"><span>${t('{n} 张', {n: number(g.length)})}</span><button class="quiet" data-split="${i}">${t('设为新的原创角色')}</button></div></section>`).join('') || `<p class="palette-empty">${t('没有长得像、能成组的图。可以在图库里选中后用「换成…」新建原创角色。')}</p>`);
+    (r.groups.map((g, i) => `<section class="oc-split-group" data-g="${i}"><div class="oc-split-thumbs">${g.slice(0, 8).map(u => `<img src="/image?id=${encodeURIComponent(u)}" alt="" loading="lazy">`).join('')}${g.length > 8 ? `<span>+${number(g.length - 8)}</span>` : ''}</div><div class="oc-split-meta"><span>${t('{n} 张', {n: number(g.length)})}</span><button class="quiet" data-split="${i}">${t('设为新的原创角色')}</button></div></section>`).join('') || `<p class="palette-empty">${t('没有长得像、能成组的图。')}</p>`);
   for (const b of body.querySelectorAll('[data-split]')) b.onclick = async () => {
     const ids = r.groups[Number(b.dataset.split)]; b.disabled = true;
     let entity; try { entity = await post('/api/entities', {kind: 'oc'}); } catch (e) { toast(e.message); b.disabled = false; return; }
@@ -212,37 +215,12 @@ export async function splitOc(c) {
   };
 }
 // ---------- 角色资料（编辑资料） ----------
-// 带结果菜单的搜索框：`search(q)` 解析为若干部分 [{label, items, note}]，`pick(item)` 取其中一项。
-// 菜单是非模态浮层，叠在输入框所在的对话框或页面上面：Esc 只关菜单（由浮层管理器 ui/overlay.js 处理），再按一次才轮到下面那层。
-export function combo(input, menu, search, pick) {
-  let list = [], index = 0, gen = 0, timer = 0;
-  const layer = createLayer({kind: 'popover', id: 'combo', el: menu, anchor: input, onDismiss: reason => show(false, reason)});
-  const show = (on, reason) => { menu.hidden = !on; if (on) layer.open(); else layer.close(reason); };
-  const render = sections => {
-    list = sections.flatMap(x => x.items); index = Math.min(index, Math.max(0, list.length - 1));
-    let i = 0;
-    menu.innerHTML = sections.filter(x => x.items.length || x.note).map(x => (x.label ? `<div class="palette-label">${esc(x.label)}</div>` : '') + (x.note ? `<p class="palette-note">${esc(x.note)}${x.allow ? ' ' + namesAllowButton : ''}</p>` : '') +
-      x.items.map(r => `<button type="button" class="menu-item watch-option${i === index ? ' on' : ''}" data-i="${i++}"><span class="watch-name">${esc(r.label)}</span><small>${esc(r.detail || '')}</small><em>${esc(r.extra || '')}</em></button>`).join('')).join('');
-    show(!!menu.innerHTML);
-  };
-  const run = () => { const g = ++gen; clearTimeout(timer); timer = setTimeout(() => search(input.value.trim(), sections => { if (g === gen) render(sections); }), 160); };
-  const choose = i => { const r = list[i]; if (!r) return; show(false); pick(r); };
-  input.addEventListener('input', () => { index = 0; run(); });
-  input.addEventListener('focus', run);
-  input.addEventListener('blur', () => setTimeout(() => show(false, 'outside'), 150));
-  input.addEventListener('keydown', e => {
-    if (composing(e) || menu.hidden || !list.length) return;
-    if (e.key === 'ArrowDown' || e.key === 'ArrowUp') { e.preventDefault(); index = (index + (e.key === 'ArrowDown' ? 1 : list.length - 1)) % list.length; for (const b of menu.querySelectorAll('[data-i]')) b.classList.toggle('on', Number(b.dataset.i) === index); }
-    else if (e.key === 'Enter') { e.preventDefault(); choose(index); }
-  });
-  menu.addEventListener('mousedown', e => { const b = e.target.closest('[data-i]'); if (b) { e.preventDefault(); choose(Number(b.dataset.i)); } });
-}
 // 先是本地结果（即时），然后只用输入的文字查 Danbooru。
 export function twoStage(local, remote, extra = () => []) {
   return (q, show) => {
     local(q).then(mine => {
       if (!q) { show([{label: '', items: mine}, ...extra(q)]); return; }
-      show([{label: '', items: mine}, {label: 'Danbooru', items: [], note: t('正在查 Danbooru…（只发送你输入的文字）')}, ...extra(q)]);
+      show([{label: '', items: mine}, {label: 'Danbooru', items: [], note: t('正在查 Danbooru…')}, ...extra(q)]);
       remote(q).then(result => {
         // 图库里已有的 Danbooru 条目只显示一次，显示为本地的那条。
         const found = result.found, fresh = found && found.filter(r => !mine.some(m => m.detail && m.detail === r.detail));
@@ -260,7 +238,7 @@ export async function editProfile(c) {
       <small id="pfTagNote"></small></label>`}
     <label class="field"><span>${t('显示名')}</span><input id="pfName" maxlength="120" value="${esc(p.user_name)}" placeholder="${esc(autoName ? t('留空：用自动名称「{name}」', {name: autoName}) : t('角色名称'))}">
       <small>${p.tag ? t('关联了 Danbooru 时可以留空，中文名会自动补全') : t('没有关联 Danbooru 时需要一个名称')}</small></label>
-    <div class="field"><span>${t('别名')}</span><div class="alias-box" id="pfAliases"></div><input id="pfAlias" maxlength="120" placeholder="${t('输入别名后按回车，搜索时都能找到')}">
+    <div class="field"><span>${t('别名')}</span><div class="alias-box" id="pfAliases"></div><input id="pfAlias" maxlength="120" placeholder="${t('输入别名后按回车')}">
       <small>${p.other_aliases ? t('另有 {n} 个来自 Danbooru 等来源的别名，会自动更新', {n: number(p.other_aliases)}) : ''}</small></div>
     <label class="field"><span>${t('所属作品')}</span>${p.oc ? `<small>${t('原创角色不属于任何作品')}</small>` : `<div class="combo"><input id="pfWork" autocomplete="off" placeholder="${t('搜索作品，找不到可以新建')}"><div class="combo-menu" id="pfWorkMenu" hidden></div></div><small id="pfWorkNote"></small>`}</label>`;
   // 填了内容（和打开时不一样，或输入框里还有没按回车、没选中的字）时 Esc 先确认（#422 的 2-20）。
@@ -274,12 +252,12 @@ export async function editProfile(c) {
   q('#pfAliases').onclick = e => { const b = e.target.closest('[data-a]'); if (b) { draft.aliases.splice(Number(b.dataset.a), 1); aliases(); } };
   q('#pfAlias').onkeydown = e => { if (composing(e)) return; const v = e.target.value.trim(); if (e.key === 'Enter') { e.preventDefault(); if (v && !draft.aliases.includes(v)) draft.aliases.push(v); e.target.value = ''; aliases(); } };
   aliases();
-  const tagNote = () => { if (!q('#pfTagNote')) return; q('#pfTag').value = draft.tag ? draft.tag.replaceAll('_', ' ') : ''; q('#pfTagNote').innerHTML = draft.tag ? `${t('已关联 {tag}', {tag: `<code>${esc(draft.tag)}</code>`})} · <button type="button" class="link-button" id="pfUnlink">${t('取消关联')}</button>` : t('关联后自动补中文名、别名和所属作品'); q('#pfUnlink')?.addEventListener('click', () => { draft.tag = ''; tagNote(); }); };
+  const tagNote = () => { if (!q('#pfTagNote')) return; q('#pfTag').value = draft.tag ? draft.tag.replaceAll('_', ' ') : ''; q('#pfTagNote').innerHTML = draft.tag ? `${t('已关联 {tag}', {tag: `<code>${esc(draft.tag)}</code>`})} · <button type="button" class="link-button" id="pfUnlink">${t('取消关联')}</button>` : t('补上中文名、别名和所属作品'); q('#pfUnlink')?.addEventListener('click', () => { draft.tag = ''; tagNote(); }); };
   const workNote = () => { if (!q('#pfWork')) return; q('#pfWork').value = draft.work?.label || ''; q('#pfWorkNote').innerHTML = draft.work ? `${draft.work.create ? t('保存时新建这个作品') + ' · ' : draft.work.tag ? t('保存时从 Danbooru 建立这个作品') + ' · ' : ''}<button type="button" class="link-button" id="pfNoWork">${t('不归属任何作品')}</button>` : (draft.tag && draft.tag !== p.tag && !p.work_id ? (draft.tagWork ? t('留空：按 Danbooru 自动设置（{work}）', {work: draft.tagWork}) : t('留空：按 Danbooru 自动设置')) : t('未归类')); q('#pfNoWork')?.addEventListener('click', () => { draft.work = null; workNote(); }); };
   tagNote(); workNote();
   if (q('#pfTag')) combo(q('#pfTag'), q('#pfTagMenu'), (text, show) => {
     if (!text) { show([]); return; }
-    show([{label: 'Danbooru', items: [], note: t('正在查 Danbooru…（只发送你输入的文字）')}]);
+    show([{label: 'Danbooru', items: [], note: t('正在查 Danbooru…')}]);
     remoteNames('/api/entities?' + new URLSearchParams({q: text, remote: 1})).then(({found, ...result}) => show([found
       ? {label: 'Danbooru', items: found.map(r => ({...r, label: r.name, detail: r.tag, extra: [r.work_name, t('D 站 {n}', {n: number(r.posts)})].filter(Boolean).join(' · ')})), note: found.length ? '' : t('没有找到，或已经在图库里（那就用「合并到另一个角色」）')}
       : {label: 'Danbooru', items: [], note: remoteNote(result), allow: result.unauthorized}]));
@@ -310,7 +288,7 @@ export async function editProfile(c) {
     q('#pfSave').disabled = true;
     try {
       const r = await post('/api/character/profile', body);
-      close(); setLatest(r.undo); toast(tb(r.undo.label), true);
+      close(); written(r.undo);
       forgetLocalLinks(); await refreshMeta(); renderHeading();
     } catch (err) { q('#pfSave').disabled = false; toast(err.message); }
   };
@@ -318,9 +296,9 @@ export async function editProfile(c) {
 export async function openLocalLinks() {
   const items = state.localLinks || [];
   const links = items.filter(x => x.kind === 'link'), merges = items.filter(x => x.kind === 'merge');
-  const body = `${links.length ? `<p class="muted-note">${t('关联后自动补中文名、别名和所属作品，原来的名字留作别名，可以一步撤销。名字和 tag 完全一致的已勾选；标「可能是」的是按名字搜到的最像的一个，请确认后再勾。')}</p>
+  const body = `${links.length ? `<p class="muted-note">${t('关联后补上中文名、别名和所属作品，原来的名字留作别名。名字和 tag 完全一致的已勾选；标「可能是」的是按名字搜到的最接近的一个，确认后再勾选。')}</p>
       <div class="link-list">${links.map(x => `<label class="link-row"><input type="checkbox" data-link="${esc(x.id)}"${x.guess ? '' : ' checked'}><span><b>${esc(x.name)}${x.guess ? ` <i class="guess">${t('可能是')}</i>` : ''}</b><small>${esc(x.tag)}${x.work_name ? ' · ' + esc(x.work_name) : ''} · ${t('D 站 {n} 张', {n: number(x.posts)})}</small></span><em>${t('{n} 张', {n: number(x.count)})}</em></label>`).join('')}</div>` : ''}
-    ${merges.length ? `<p class="muted-note">${t('下面的自建角色和图库里已有的角色像是同一个，合并后图和人工结论都会过去（可撤销）：')}</p>
+    ${merges.length ? `<p class="muted-note">${t('下面的自建角色和图库里已有的角色像是同一个，合并后图和人工结论都会过去：')}</p>
       <div class="link-list">${merges.map(x => `<div class="link-row"><span><b>${esc(x.name)}${x.guess ? ` <i class="guess">${t('可能是')}</i>` : ''}</b><small>${t('{n} 张', {n: number(x.count)})} → ${esc(x.target.name)} · ${esc(x.tag)}</small></span><button type="button" class="quiet" data-merge="${esc(x.id)}">${t('合并到「{name}」', {name: esc(x.target.name)})}</button></div>`).join('')}</div>` : ''}
 `;
   const d = openDialog({title: t('关联自建角色'), body, backdropClose: false,
@@ -331,7 +309,7 @@ export async function openLocalLinks() {
   count();
   for (const b of d.querySelectorAll('[data-merge]')) b.onclick = async () => {
     const x = merges.find(m => m.id === b.dataset.merge); b.disabled = true;
-    try { const r = await post('/api/merge', {source: x.id, target: x.target.id}); setLatest(r.undo); toast(tb(r.undo.label), true); b.closest('.link-row').remove(); await refreshMeta(); refreshLocalLinks(); }
+    try { const r = await post('/api/merge', {source: x.id, target: x.target.id}); written(r.undo); b.closest('.link-row').remove(); await refreshMeta(); refreshLocalLinks(); }
     catch (e) { b.disabled = false; toast(e.message); }
   };
   d.querySelector('form').onsubmit = async e => {
@@ -339,7 +317,7 @@ export async function openLocalLinks() {
     const chosen = links.filter(x => d.querySelector(`[data-link="${CSS.escape(x.id)}"]`)?.checked).map(x => ({id: x.id, tag: x.tag}));
     if (!chosen.length) return;
     $('llApply').disabled = true; $('llApply').textContent = t('正在关联…');
-    try { const r = await post('/api/local-links', {items: chosen}); close(); setLatest(r.undo); toast(tb(r.undo.label), true); await refreshMeta(); refreshLocalLinks(); }
+    try { const r = await post('/api/local-links', {items: chosen}); close(); written(r.undo); await refreshMeta(); refreshLocalLinks(); }
     catch (err) { count(); toast(err.message); }
   };
 }
@@ -349,21 +327,20 @@ export function toggleOc(c) {
 export function toggleMascot(c) {
   return editCharacterFlag('/api/character/mascot', {entity: c.id, mascot: !c.mascot});
 }
-async function editCharacterFlag(path, body) {
-  if (edits.busy) return;
-  edits.busy = true; setLatest(edits.latest);
-  try {
-    const {undo} = await post(path, body);
-    if (undo) { setLatest(undo); toast(tb(undo.label), true); }
-    await refreshMeta(); await reload();
-  } catch (err) { toast(err.message); }
-  finally { edits.busy = false; setLatest(edits.latest); }
+function editCharacterFlag(path, body) {
+  return exclusive(async () => {
+    try {
+      const {undo} = await post(path, body);
+      if (undo) written(undo);
+      await refreshMeta(); await reload();
+    } catch (err) { toast(err.message); }
+  });
 }
 // ---------- 选中图片之间的关系（relate，native/terms/src/research_compute/relations.rs） ----------
 export async function openRelate(ids) {
   const d = $('relateDialog');
   $('relateTitle').textContent = t('{n} 张图的关系', {n: number(ids.length)});
-  $('relateBody').innerHTML = `<p class="muted-note">${t('正在逐对比较…只在本机计算')}</p>`;
+  $('relateBody').innerHTML = `<p class="muted-note">${t('正在逐对比较…')}</p>`;
   openModal(d, {backdropClose: true, id: 'relate'});
   let r; try { r = await post('/api/relate', {ids}); } catch (e) { $('relateBody').innerHTML = `<p class="muted-note">${esc(readError(e))}</p>`; return; }
   const no = u => ids.indexOf(u) + 1;
@@ -376,7 +353,7 @@ export async function openRelate(ids) {
     ${shown.map(p => `<section class="rel-pair"><div class="rel-head"><span class="rel-kind k-${p.kind}">${esc(tb(p.label))}</span><span>${esc(tb(p.note || ''))}</span></div>
       <div class="rel-figs">${figure(p.a, p.boxes_a)}${figure(p.b, p.boxes_b)}</div></section>`).join('')}
     ${rest ? `<p class="muted-note">${shown.length ? t('另外 {n} 对是不同的图', {n: number(rest)}) : t('{n} 对是不同的图', {n: number(rest)})}</p>` : ''}
-    <p class="dialog-note">${t('红框：两张不一样的地方；蓝色虚线：小图在大图里的位置。逐像素比较得出，只在本机计算，结果不保存。')}</p>`;
+    <p class="dialog-note">${t('红框：两张不一样的地方；蓝色虚线：小图在大图里的位置。结果不保存。')}</p>`;
 }
 export function jumpToCharacter() { openPicker({title: t('跳到角色'), jump: true, sentence: e => t('打开 {name}', {name: e.name}), pick: e => go(charRoute(e.id))}); }
 
@@ -385,17 +362,12 @@ export function wirePalette() {
   // 0.2.0 及以前不分图库存的最近使用：不知道是哪个图库的，丢掉（#523）。
   prefs.drop('tagPicks'); prefs.drop('picks');
   $('pickerSearch').addEventListener('input', () => { if (palette) palette.touched = true; clearTimeout(pickerTimer); pickerTimer = setTimeout(paletteSearch, 140); });
-  $('pickerSearch').addEventListener('keydown', e => {
-    const p = palette; if (!p || composing(e)) return;
-    if (e.key === 'ArrowDown' || e.key === 'ArrowUp') p.touched = true;
-    if (e.key === 'ArrowDown') { e.preventDefault(); p.index = Math.min(p.list.length - 1, p.index + 1); highlight(); }
-    else if (e.key === 'ArrowUp') { e.preventDefault(); p.index = Math.max(0, p.index - 1); highlight(); }
-    else if (e.key === 'Enter') { e.preventDefault(); choose(p.index, e.shiftKey); }
-    else if (/^[1-9]$/.test(e.key) && !$('pickerSearch').value) { e.preventDefault(); choose(Number(e.key) - 1, false, true); }
-  });
-  $('pickerResults').addEventListener('click', e => { const b = e.target.closest('[data-i]'); if (b) choose(Number(b.dataset.i), e.shiftKey || !!e.target.closest('[data-add]'), true); });
+  // ↑ ↓ 循环、↵ 选（⇧↵ 加入多选）、点一项（⇧+点击或行上的 ＋ 加入多选），没输入时数字键直接选前 9 项；Esc 关对话框。
+  pickerNav = listNav($('pickerSearch'), $('pickerResults'), {shown: () => !!palette, hover: true, count: () => palette.list.length,
+    pick: (i, e) => e.type === 'click' ? choose(i, e.shiftKey || !!e.target.closest('[data-add]'), true) : choose(i, e.shiftKey),
+    moved: (i, how) => { if (!palette) return; if (how === 'key') palette.touched = true; highlight(); },
+    more: e => { if (/^[1-9]$/.test(e.key) && !$('pickerSearch').value) { e.preventDefault(); choose(Number(e.key) - 1, false, true); } }});
   $('pickerStaged').addEventListener('click', e => { const b = e.target.closest('[data-unstage]'); if (b && palette) stage(palette.staged[Number(b.dataset.unstage)]); });
-  $('pickerResults').addEventListener('mousemove', e => { const b = e.target.closest('[data-i]'); if (b && palette && palette.index !== Number(b.dataset.i)) { palette.index = Number(b.dataset.i); highlight(); } });
   $('picker').addEventListener('close', () => { palette = null; });
   $('ocSplitClose').onclick = () => $('ocSplitDialog').close();
   $('relateClose').onclick = () => $('relateDialog').close();

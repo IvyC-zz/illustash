@@ -765,6 +765,8 @@ fn run_inner(args: &[String]) -> Result<u8> {
     #[cfg(not(target_os = "macos"))]
     let _ = open;
     let mut next_recovery = Instant::now() + Duration::from_secs(1);
+    // 桌面外壳要知道有没有任务在跑（#451）：和恢复检查一样每秒看一次。
+    let mut activity = crate::app_activity::Watcher::new();
     while !http::stopping() && !desktop_closed.load(Ordering::SeqCst) {
         if desktop_parent.lost() {
             break;
@@ -782,6 +784,7 @@ fn run_inner(args: &[String]) -> Result<u8> {
         }
         if Instant::now() >= next_recovery {
             host.recover();
+            activity.tick(&host);
             next_recovery = Instant::now() + Duration::from_secs(1);
         }
         let mut i = 0;

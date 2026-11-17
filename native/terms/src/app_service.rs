@@ -153,6 +153,8 @@ pub(crate) struct Session {
     /// 与会话绑定的人工结论自动保护；关闭时取消，不等待整库哈希。
     pub(crate) human_backups: crate::app_human_conclusions::Backups,
     pub(crate) human_exports: crate::app_human_conclusions::Exports,
+    /// 选中的图导出到文件夹（#450）；换库或关闭时停下。
+    pub(crate) asset_exports: crate::app_asset_export::Exports,
     /// 打开这个图库时它为什么没能列入最近使用的图库（#176）。列入只是省得下次再选一遍，所以图库照样打开，页面提示一次。
     pub(crate) unlisted: Option<String>,
     /// 这个图库在打开时被升级过的话，升级前的备份（#193）：页面提示一次备份在哪里。
@@ -208,6 +210,7 @@ impl Session {
             onboarding,
             human_backups: Default::default(),
             human_exports: Default::default(),
+            asset_exports: Default::default(),
             unlisted: None,
             upgraded: None,
             checker: Default::default(),
@@ -376,6 +379,7 @@ impl Application {
             onboarding,
             human_backups: Default::default(),
             human_exports: Default::default(),
+            asset_exports: Default::default(),
             unlisted: None,
             upgraded: None,
             checker: Default::default(),
@@ -526,6 +530,7 @@ impl Session {
     fn halt(&mut self) {
         self.human_backups.stop();
         self.human_exports.stop();
+        self.asset_exports.stop();
         self.provenance.stop();
         self.index.stop();
         self.onboarding.stop();

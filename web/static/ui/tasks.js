@@ -2,7 +2,7 @@
 // core/jobs.js。
 import {diagnosticLine} from '../core/diagnostics.js';
 import {t, tb} from '../core/i18n.js';
-import {esc, number, stamp, localTime} from '../core/format.js';
+import {esc, home, megabytes, number, stamp, localTime} from '../core/format.js';
 import {state} from '../core/state.js';
 import {api, post, shared, readError} from '../core/session.js';
 import {SYNC_ACTIVE, INDEX_ACTIVE, NAMES_ACTIVE, SIMILAR_ACTIVE, PROV_ACTIVE, RUN_STATUS, onJob, syncLine, syncBar, syncDoneText, indexLine, indexEndText, resumeIndex, discardIndex,
@@ -14,7 +14,7 @@ import {confirmAction} from './dialog.js';
 import {createLayer} from './overlay.js';
 import {openIndexAdd} from './catalog.js';
 import {modelsLine, modelsBar, modelsActions} from './models.js';
-import {home} from '../core/human.js';
+import {cancelExport, exportActive, exportLine, loadFiles, onFiles, revealExport, revealLabel} from '../core/files.js';
 import {loadModels, onModels} from '../core/models.js';
 // 「开始」先显示有哪些内容会离开本机；授权只覆盖这一次运行。
 let provenanceArmed = false;
@@ -32,7 +32,7 @@ export function syncDamaged(d) {
     `<p class="muted-note">${t('这些文件读得到，但不是能打开的图片：已经加入图库，图上显示「无法打开」，不参与识别。修好或换成正常的图片后，下次同步会重新识别。')}</p>${rows}${more}`);
 }
 // 由 worker 的数字画的进度条（docs/BACKEND_TASKS.md）：这一步的条目数，以及相对本次运行上限的流量。
-export function provenanceBars(s) {
+function provenanceBars(s) {
   const p = s.progress; if (!p || !p.total) return '';
   const bar = (label, done, total, detail) => `<div class="prov-bar-row"><span class="prov-bar-label">${label}</span><span class="prov-bar" role="progressbar" aria-valuemin="0" aria-valuemax="${total}" aria-valuenow="${done}"><span style="width:${Math.min(100, done / total * 100).toFixed(1)}%"></span></span><span class="prov-bar-num">${detail}</span></div>`;
   // 这一步有两层时显示两层（本地比对：全部画师，然后是当前画师的作品），然后是流量。
@@ -73,7 +73,15 @@ export function taskList() {
   if (m?.on_demand && (m.status !== 'ready' || m.job?.status === 'running')) list.push({key: 'models', name: t('识别模型'), busy: m.job?.kind === 'import' ? t('导入识别模型中') : t('下载识别模型中'),
     active: m.job?.status === 'running', warn: m.job?.status === 'failed', line: modelsLine(m), body: modelsBar(m), action: modelsActions(m, true)});
   if (['running', 'done', 'error'].includes(ex.status)) list.push({key: 'export', name: t('导出图库'), busy: t('导出图库中'), active: ex.status === 'running', warn: ex.status === 'error',
-    line: ex.status === 'running' ? t('正在导出…') : ex.status === 'done' ? t('已导出 {mb} MB', {mb: (ex.bytes / 1048576).toFixed(0)}) : t('导出失败：{error}', {error: tb(ex.error || '')}), body: '', action: ''});
+    line: ex.status === 'running' ? t('正在导出…') : ex.status === 'done' ? t('已导出 {mb} MB', {mb: megabytes(ex.bytes)}) : t('导出失败：{error}', {error: tb(ex.error || '')}), body: '', action: ''});
+  // 选中的图导出到文件夹（#450）：运行中可以取消，结束后可以打开那个文件夹。
+  const fx = state.files?.export;
+  if (['running', 'done', 'error', 'cancelled'].includes(fx?.status)) {
+    const action = exportActive() ? `<button class="quiet small" data-task="export-cancel">${t('取消导出')}</button>`
+      : fx.status !== 'error' ? `<button class="quiet small" data-task="export-reveal">${revealLabel()}</button>` : '';
+    list.push({key: 'files', name: t('导出图片'), busy: t('导出图片中'), active: exportActive(), warn: fx.status === 'error',
+      line: exportLine(fx), body: exportActive() ? bar(fx.done, fx.total) : '', action});
+  }
   // 导入（图库归档、识别结果、人工结论共用一个槽；#386 的 2-37）：和导出一样，运行中、结束后都在这里有一行，运行时可以取消。
   const im = state.importTask;
   if (['running', 'stopping', 'done', 'error', 'cancelled'].includes(im?.status)) list.push({key: 'import',
@@ -94,7 +102,7 @@ function taskAsks() {
     <ul><li>${t('发给 Danbooru：图片的像素哈希和感知哈希（IQDB 签名，都是一串文本，不是图片）、画师名和账号')}</li>
     <li>${state.accounts?.pixiv?.bound ? t('用你绑定的 Pixiv 登录状态读取你的关注列表（只读）') : t('没有绑定 Pixiv：只看公开作品，不含 R18')}</li>
     <li>${t('本次最多 {mb} MB；遇到拒绝、限流或验证码就停，不绕过', {mb: number(p.budgets?.full || 1024)})}</li></ul>
-    <p class="muted-note">${t('授权只对这一次有效，下次开始会再问。图片本身不会上传。查过的图和画师不会重查，可以随时停止。')}</p>
+    <p class="muted-note">${t('授权只对这一次有效，下次开始会再问。查过的图和画师不会重查。')}</p>
     <div class="prov-confirm-btns"><button class="primary" data-prov="start" data-network="1">${t('授权并开始')}</button><button class="quiet" data-prov="start">${t('只跑本地（签名识别）')}</button><button class="quiet" data-prov="cancel">${t('取消')}</button></div></div>`);
   if (photosRefused(s)) asks.push(`<div class="task-ask"><span>${photosHelp()}</span><button class="primary small" data-task="photos-privacy">${t('打开系统设置')}</button></div>`);
   const ix = state.index?.state || {};
@@ -105,6 +113,7 @@ function taskAsks() {
 // 自动运行的开关在设置的哪几节（#386 的 2-37）：同步和相似图片在「图库」，检查新角色和角色名称在「角色资料」，
 // 找回画师在「画师」。
 const footLink = (section, label) => `<a class="link" href="#/settings/${section}">${label}</a>`;
+// renderTasks 和 taskPanel 也 导出给样式清单页调用（tools/styleguide/live.js，#352）：改名或改参数时，tools/check_styleguide.py 会报出来。
 export function renderTasks() {
   const list = taskList(), active = list.filter(t => t.active), warn = list.some(t => t.warn), asks = taskAsks();
   const button = $('taskButton'), badge = $('taskBadge');
@@ -139,6 +148,8 @@ export async function taskTick() {
   if (taskPanel.open && Date.now() - taskPanel.settingsAt > (SIMILAR_ACTIVE.includes(state.settings?.tasks?.similar?.status) ? 2500 : 15000)) { taskPanel.settingsAt = Date.now(); jobs.push(shared('/api/settings').then(s => { setSettings(s); }).catch(e => error(readError(e)))); }
   // 面板开着时发现在别的窗口里启动的导入；运行中的导入有自己的轮询。
   if (taskPanel.open && !importActive()) jobs.push(pollImports());
+  // 用图动作的状态（#450）：第一次读来知道能不能拖出；面板开着时发现在别的窗口里开始的导出，运行中的导出有自己的轮询。
+  if (!state.files || (taskPanel.open && !exportActive())) jobs.push(loadFiles());
   // 面板打开后读一次图库列表（同步任务的名字和导出的进度）。
   if (taskPanel.open && !state.libraries) jobs.push(loadLibraries());
   await Promise.allSettled(jobs);
@@ -159,6 +170,7 @@ export function toggleTasks(open = !taskPanel.open, reason) {
 export function wireTasks() {
   // 模型下载（#168）有自己的轮询：按钮和面板跟着每次读取变。
   onModels(() => renderTasks());
+  onFiles(() => renderTasks());
   onJob(async (job, change) => {
     if (job === 'sync' && change.ended && state.sync.status === 'done' && state.sync.imported) toast(syncDoneText(state.sync));
     if (job === 'index' && change.ended && indexEndText(state.index.state)) toast(indexEndText(state.index.state));
@@ -188,6 +200,8 @@ export function wireTasks() {
         else if (act === 'index-resume') { if (!await resumeIndex(confirmAction)) return false; pollIndex(); }
         else if (act === 'index-discard') return await discardIndex(confirmAction);
         else if (act === 'import-cancel') await cancelImport();
+        else if (act === 'export-cancel') await cancelExport();
+        else if (act === 'export-reveal') await revealExport();
         else if (act === 'names') { await refreshNames(); toast(t('已开始重新获取角色名称')); }
         else if (act === 'similar') { await post('/api/similar', {}); setSettings(await api('/api/settings')); }
       } catch (err) { toast(err.message); }
