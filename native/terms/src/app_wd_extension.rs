@@ -1,25 +1,39 @@
-//! 用冻结的角色扩展头检查已存的 WD 向量。
+//! 用冻结的角色扩展头检查已存的 WD 向量。包可以是内置的 `wd-extension-v1`，也可以是签名目录里列出的新版本（#602，
+//! `app_packs`）；同一图库从一个版本换到另一个，沿用同一个 `WD_EXT` 来源的替换流程，图库里记下用的是哪个包。
 use crate::app_library::Library;
+use crate::app_packs::{Base, Pack, WD_FORMAT_V1, WD_FORMAT_V2};
 use crate::{Error, Result};
 use illustash_core::wd_extension::{self, Hit};
 use rusqlite::{Connection, OpenFlags, OptionalExtension, TransactionBehavior};
 use serde::Deserialize;
 use serde_json::{json, Value};
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 const DIM: usize = 1024;
 
+/// 包文件第一行的清单。`illustash-wd-extension/1`：统一的 `threshold`，可以另带逐头的 `thresholds`（#551 的 257 头包），
+/// 全部是一级头。`/2`：必须带逐头的 `thresholds` 和 `tiers`（1 可以补主归属，2 只出候选）。
 #[derive(Deserialize)]
 struct Manifest {
     format: String,
     wd_model_sha256: String,
     wd_tags_sha256: String,
-    threshold: f64,
+    #[serde(default)]
+    threshold: Option<f64>,
     labels: Vec<String>,
+    #[serde(default)]
+    thresholds: Option<Vec<f64>>,
+    #[serde(default)]
+    tiers: Option<Vec<u8>>,
 }
 
 struct Package {
-    manifest: Manifest,
+    wd_model_sha256: String,
+    wd_tags_sha256: String,
+    labels: Vec<String>,
+    thresholds: Vec<f64>,
+    /// 每个头是不是二级（只出候选）。
+    candidate_only: Vec<bool>,
     weights: Vec<f32>,
     bias: Vec<f32>,
 }
@@ -29,24 +43,64 @@ fn float32(bytes: &[u8]) -> Vec<f32> {
 }
 
 impl Package {
-    fn load(path: &Path, spec: &crate::app_models::WdExtension) -> Result<Self> {
-        let input = crate::app_recognition::file(path, spec.file.size)?;
-        if input.len() as u64 != spec.file.size || crate::strict_json::sha256_hex(&input) != spec.file.sha256 {
-            return Err(Error::invalid("WD 扩展包与 #534 冻结版本不符"));
+    /// 读一个版本的包：大小和 SHA-256 先对上这个版本，再按格式解开。
+    fn load(path: &Path, pack: &Pack) -> Result<Self> {
+        let input = crate::app_recognition::file(path, pack.file.size)?;
+        if input.len() as u64 != pack.file.size || crate::strict_json::sha256_hex(&input) != pack.file.sha256 {
+            return Err(Error::invalid("WD 扩展包与这个版本的冻结文件不符"));
         }
+        Self::decode(&input, pack)
+    }
+
+    fn decode(input: &[u8], pack: &Pack) -> Result<Self> {
         let end = input.iter().position(|&byte| byte == b'\n').ok_or_else(|| Error::invalid("缺少 WD 扩展包清单"))?;
         let manifest: Manifest =
             serde_json::from_slice(&input[..end]).map_err(|e| Error::invalid(format!("WD 扩展包清单无效：{e}")))?;
         let coefficients = &input[end + 1..];
-        if manifest.format != spec.format
-            || manifest.wd_model_sha256 != spec.base_sha256
-            || manifest.labels.len() != spec.heads
-            || coefficients.len() != spec.heads * (DIM + 1) * 4
+        let heads = pack.heads;
+        // 目录里的包，模型和标签表都要是目录写的那两个。内置包只看模型（models.json 只写了它，和以前一样）；
+        // 标签表和每次交付对不对得上，扫描时逐批核对（`compatible`）。
+        let base_matches = matches!(&pack.base, Base::Wd { model, tags }
+            if *model == manifest.wd_model_sha256 && (pack.builtin || *tags == manifest.wd_tags_sha256));
+        if manifest.format != pack.format
+            || !base_matches
+            || manifest.labels.len() != heads
+            || coefficients.len() != heads * (DIM + 1) * 4
         {
             return Err(Error::invalid("WD 扩展包格式不符"));
         }
-        let (weights, bias) = coefficients.split_at(spec.heads * DIM * 4);
-        Ok(Self { manifest, weights: float32(weights), bias: float32(bias) })
+        let (thresholds, tiers) = match manifest.format.as_str() {
+            WD_FORMAT_V1 if manifest.tiers.is_none() => match (manifest.thresholds, manifest.threshold) {
+                (Some(values), Some(_)) => (values, vec![1; heads]),
+                (None, Some(value)) => (vec![value; heads], vec![1; heads]),
+                _ => return Err(Error::invalid("WD 扩展包缺少阈值")),
+            },
+            WD_FORMAT_V2 => match (manifest.thresholds, manifest.tiers) {
+                (Some(values), Some(tiers)) => (values, tiers),
+                _ => return Err(Error::invalid("WD 扩展包缺少逐头阈值或级别")),
+            },
+            _ => return Err(Error::invalid("WD 扩展包格式不符")),
+        };
+        if thresholds.len() != heads || tiers.len() != heads {
+            return Err(Error::invalid("WD 扩展包阈值或级别数目不符"));
+        }
+        if thresholds.iter().any(|value| !(0.0..=1.0).contains(value)) || tiers.iter().any(|t| !matches!(t, 1 | 2)) {
+            return Err(Error::invalid("WD 扩展包阈值或级别不合法"));
+        }
+        let candidate_only = tiers.iter().map(|&t| t == 2).collect::<Vec<_>>();
+        if candidate_only.iter().filter(|&&c| c).count() != pack.candidate_only {
+            return Err(Error::invalid("WD 扩展包的二级头数和目录不符"));
+        }
+        let (weights, bias) = coefficients.split_at(heads * DIM * 4);
+        Ok(Self {
+            wd_model_sha256: manifest.wd_model_sha256,
+            wd_tags_sha256: manifest.wd_tags_sha256,
+            labels: manifest.labels,
+            thresholds,
+            candidate_only,
+            weights: float32(weights),
+            bias: float32(bias),
+        })
     }
 
     fn compatible(&self, manifest: &str) -> Result<()> {
@@ -60,8 +114,8 @@ impl Package {
         };
         if wd["version"] != "swinv2_448"
             || wd["dimension"].as_u64() != Some(DIM as u64)
-            || wd["sha256"].as_str() != Some(&self.manifest.wd_model_sha256)
-            || wd["tags_sha256"].as_str() != Some(&self.manifest.wd_tags_sha256)
+            || wd["sha256"].as_str() != Some(&self.wd_model_sha256)
+            || wd["tags_sha256"].as_str() != Some(&self.wd_tags_sha256)
         {
             return Err(Error::Conflict("WD 扩展包与图库向量的底座模型或标签表版本不匹配".into()));
         }
@@ -76,12 +130,16 @@ impl Package {
         if vector.iter().any(|v| !v.is_finite()) {
             return Err(Error::invalid("WD 特征向量包含非有限值"));
         }
-        for ((tag, weights), bias) in self.manifest.labels.iter().zip(self.weights.chunks_exact(DIM)).zip(&self.bias) {
+        let heads = self.labels.iter().zip(self.weights.chunks_exact(DIM)).zip(&self.bias);
+        for ((((tag, weights), bias), &threshold), &candidate_only) in
+            heads.zip(&self.thresholds).zip(&self.candidate_only)
+        {
             // 累加与 sigmoid 用 f64，阈值与证据分数沿用冻结实验的 f32 概率精度。
             let sum: f64 = vector.iter().zip(weights).map(|(&x, &w)| f64::from(x) * f64::from(w)).sum();
             let probability = (1.0 / (1.0 + (-(sum + f64::from(*bias))).exp())) as f32;
-            if f64::from(probability) >= self.manifest.threshold {
-                out.push(Hit { uuid: uuid.to_owned(), tag: tag.clone(), probability: f64::from(probability) });
+            if f64::from(probability) >= threshold {
+                let probability = f64::from(probability);
+                out.push(Hit { uuid: uuid.to_owned(), tag: tag.clone(), probability, candidate_only });
             }
         }
         Ok(())
@@ -99,10 +157,37 @@ const IN_SCOPE: &str = "v.model='wd' AND a.in_scope=1 AND coalesce(a.trashed,0)=
 const VECTORS: &str = "FROM embeddings v JOIN assets a ON a.uuid=v.uuid";
 const SCOPE: &str = "AND (?1 IS NULL OR v.uuid IN (SELECT value FROM json_each(?1)))";
 const META_KEY: &str = "wd_extension";
+/// 角色资料包默认启用以后（#602），本图库明确不用：提示里选了不用，或撤回过。启用时清掉。
+const DECLINED_KEY: &str = "character_pack_declined";
+
+/// 本图库是不是明确不用角色资料包（`app_packs::default_state`）。
+pub(crate) fn declined(app: &Connection) -> Result<bool> {
+    Ok(app.query_row("SELECT EXISTS(SELECT 1 FROM meta WHERE key=?1)", [DECLINED_KEY], |r| r.get(0))?)
+}
+
+/// 记下或清掉「本图库不用角色资料包」。
+pub(crate) fn set_declined(library: &Library, declined: bool) -> Result<()> {
+    ensure_writable(library)?;
+    let mut app = writer(&library.db())?;
+    crate::schema::require_current(&app)?;
+    let tx = app.transaction_with_behavior(TransactionBehavior::Immediate)?;
+    crate::schema::begin_writing(&tx)?;
+    if declined {
+        tx.execute("INSERT OR REPLACE INTO meta(key,value) VALUES (?1,CURRENT_TIMESTAMP)", [DECLINED_KEY])?;
+    } else {
+        tx.execute("DELETE FROM meta WHERE key=?1", [DECLINED_KEY])?;
+    }
+    crate::schema::commit_writing(tx)
+}
 
 fn has_table(src: &Connection, name: &str) -> Result<bool> {
     Ok(src
         .query_row("SELECT EXISTS(SELECT 1 FROM sqlite_schema WHERE type='table' AND name=?)", [name], |r| r.get(0))?)
+}
+
+/// 本图库存着的 WD 向量张数（角色资料包启用时决定现在检查还是等识别结果，#602）。
+pub(crate) fn stored_vectors(library: &Library) -> Result<usize> {
+    vector_count(&crate::app_library::read_connection(&library.source())?, None)
 }
 
 fn vector_count(src: &Connection, scope: Option<&str>) -> Result<usize> {
@@ -175,10 +260,15 @@ fn enabled(c: &Connection) -> Result<Option<Enabled>> {
         .transpose()
 }
 
+/// 命令行（`wd-extension --package`）：按文件的 SHA-256 找它是哪个可用版本，用它检查整个图库。
 pub fn apply(library: &Library, path: &Path) -> Result<Value> {
     ensure_writable(library)?;
-    let spec = crate::app_models::wd_extension()?;
-    apply_loaded(library, &Package::load(path, spec)?, &spec.file.sha256, None, &Progress::silent())
+    let resources = crate::app_resources::default_root();
+    let bytes = crate::app_recognition::file(path, 512 << 20)?;
+    let sha = crate::strict_json::sha256_hex(&bytes);
+    let pack = crate::app_packs::component_by_sha(&resources, crate::app_packs::Kind::Wd, &sha)?
+        .ok_or_else(|| Error::invalid("WD 扩展包与可用的版本都不符"))?;
+    apply_loaded(library, &Package::load(path, &pack)?, &pack.file.sha256, None, &Progress::silent())
 }
 
 fn apply_loaded(
@@ -245,19 +335,23 @@ pub fn withdraw(library: &Library) -> Result<Value> {
     Ok(json!({"changed":changed}))
 }
 
-/// 角色检查使用图库的持久启用状态和本机已校验的包（#561）。包在本机缺席时仍按未覆盖处理。
+/// 本图库启用的、本机就位的包（自动检查和角色检查用）。启用的版本不在可用列表里、或包不在本机时为 None。
+pub(crate) fn enabled_pack(resources: &Path, app: &Connection) -> Result<Option<(Pack, PathBuf)>> {
+    let Some(active) = enabled(app)? else { return Ok(None) };
+    let Some(pack) = crate::app_packs::component_by_sha(resources, crate::app_packs::Kind::Wd, &active.package_sha256)?
+    else {
+        return Ok(None);
+    };
+    Ok(crate::app_models::extension_file(resources, &pack)?.map(|path| (pack, path)))
+}
+
+/// 角色检查使用图库的持久启用状态和本机已校验的包（#561）。包在本机缺席时仍按未覆盖处理。二级头（#602）只出候选，
+/// 不算已经认得的角色。
 pub(crate) fn covered_labels(app: &Connection, resources: &Path) -> Result<Vec<String>> {
-    let Some(active) = enabled(app)? else {
-        return Ok(Vec::new());
-    };
-    let spec = crate::app_models::wd_extension()?;
-    if active.package_sha256 != spec.file.sha256 {
-        return Ok(Vec::new());
-    }
-    let Some(path) = crate::app_models::extension_file(resources)? else {
-        return Ok(Vec::new());
-    };
-    Ok(Package::load(&path, spec).map(|p| p.manifest.labels).unwrap_or_default())
+    let Some((pack, path)) = enabled_pack(resources, app)? else { return Ok(Vec::new()) };
+    Ok(Package::load(&path, &pack)
+        .map(|p| p.labels.into_iter().zip(p.candidate_only).filter(|(_, c)| !c).map(|(label, _)| label).collect())
+        .unwrap_or_default())
 }
 
 fn ensure_writable(library: &Library) -> Result<()> {
@@ -359,12 +453,13 @@ impl Tasks {
             return Err(Error::Conflict("已有 WD 角色扩展任务正在进行".into()));
         }
         let (kind, phase) = match &operation {
-            Action::Enable(_) => ("enable", "scan"),
-            Action::Auto(_, _) => ("auto", "scan"),
-            Action::Withdraw => ("withdraw", "write"),
+            Action::Enable(..) | Action::Pack { .. } => ("enable", "scan"),
+            Action::Auto(..) => ("auto", "scan"),
+            Action::Withdraw | Action::PackWithdraw { .. } => ("withdraw", "write"),
         };
+        // `part` 是角色资料包正在处理的组成部分（`wd`、`ccip`），只给 WD 部分的旧任务也写 `wd`。
         let initial = json!({
-            "id":identity.task_id,"kind":kind,"phase":phase,"status":"running",
+            "id":identity.task_id,"kind":kind,"phase":phase,"status":"running","part":"wd",
             "done":0,"total":0,"message":null,"result":null,"diagnostic":null
         });
         let state = Arc::new(Mutex::new(initial.clone()));
@@ -372,12 +467,19 @@ impl Tasks {
         let library = library.clone();
         let task = Task::start(identity, None, move |ctx| {
             let progress = Progress(Some((&ctx, &shared)));
+            // 角色资料包分两步提交：WD 部分提交以后 CCIP 部分失败或取消时，结果里留着 WD 部分的（`result.wd`）。
+            let mut done = Value::Null;
             let result = match operation {
-                Action::Enable(path) => check_file(&library, &path, None, &progress),
-                Action::Auto(path, ids) => check_file(&library, &path, Some(&ids), &progress),
+                Action::Enable(pack, path) => check_file(&library, &pack, &path, None, &progress),
+                Action::Auto(pack, path, ids) => check_file(&library, &pack, &path, Some(&ids), &progress),
                 Action::Withdraw => withdraw(&library),
+                Action::Pack { root, wd, ccip } => pack_enable(&library, &root, wd, ccip, &progress, &mut done),
+                Action::PackWithdraw { wd, ccip } => pack_withdraw(&library, wd, ccip, &progress, &mut done),
             };
             let mut state = lock_ignoring_poison(&shared);
+            if !done.is_null() {
+                state["result"] = done;
+            }
             match result {
                 Ok(result) => {
                     state["status"] = "done".into();
@@ -408,21 +510,169 @@ impl Tasks {
 }
 
 pub(crate) enum Action {
-    Enable(std::path::PathBuf),
-    Auto(std::path::PathBuf, Vec<String>),
+    /// 用这个版本检查整个图库：启用、重新检查，或换成另一个版本（#602）。
+    Enable(Pack, PathBuf),
+    /// 同步后用本图库启用的版本检查新识别的图。
+    Auto(Pack, PathBuf, Vec<String>),
     Withdraw,
+    /// 角色资料包（#602）：先用 WD 部分、再用 CCIP 部分检查整个图库，各自提交。图库里还没有对应向量的组成部分
+    /// （`Part::scan` 为假）只记下启用了哪个文件，等识别结果交付时再检查。
+    Pack {
+        root: PathBuf,
+        wd: Option<Box<Part>>,
+        ccip: Option<Box<Part>>,
+    },
+    /// 撤回角色资料包：两个组成部分里启用了的都撤回。
+    PackWithdraw {
+        wd: bool,
+        ccip: bool,
+    },
 }
 
-fn check_file(library: &Library, path: &Path, scope: Option<&[String]>, progress: &Progress<'_>) -> Result<Value> {
-    let spec = crate::app_models::wd_extension()?;
+/// 角色资料包的一个组成部分：这个文件，和要不要现在检查（图库里有这一种向量时）。
+pub(crate) struct Part {
+    pub(crate) pack: Pack,
+    pub(crate) path: PathBuf,
+    pub(crate) scan: bool,
+}
+
+impl Progress<'_> {
+    /// 换到角色资料包的下一个组成部分：回到扫描阶段，计数清零。
+    fn part(&self, part: &str) -> Result<()> {
+        self.check()?;
+        if let Some((_, state)) = self.0 {
+            let mut state = lock_ignoring_poison(state);
+            state["part"] = part.into();
+            state["phase"] = "scan".into();
+            state["done"] = 0.into();
+            state["total"] = 0.into();
+        }
+        Ok(())
+    }
+}
+
+/// CCIP 长尾部分（`app_ccip_longtail::apply`）的进度报告到同一个任务上。
+impl crate::app_imports::Observer for Progress<'_> {
+    fn stage(&self, stage: &'static str) {
+        if stage == "committing" {
+            // 取消在这之前到达时，apply 提交前的检查会停下；这里只把阶段改成写入。
+            let _ = self.begin_write();
+        }
+    }
+    fn count(&self, done: u64, total: u64) {
+        let _ = Progress::count(self, done as usize, total as usize);
+    }
+}
+
+fn changed(result: &Value) -> u64 {
+    result["changed"].as_u64().unwrap_or(0)
+}
+
+fn pack_enable(
+    library: &Library,
+    root: &Path,
+    wd: Option<Box<Part>>,
+    ccip: Option<Box<Part>>,
+    progress: &Progress<'_>,
+    done: &mut Value,
+) -> Result<Value> {
+    let mut out = json!({"wd":null,"ccip":null,"changed":0,"hits":0});
+    if let Some(part) = wd {
+        progress.part("wd")?;
+        let result = if part.scan {
+            check_file(library, &part.pack, &part.path, None, progress)?
+        } else {
+            mark_enabled(library, &part.pack)?
+        };
+        out["changed"] = (changed(&out) + changed(&result)).into();
+        out["hits"] = (out["hits"].as_u64().unwrap_or(0) + result["hits"].as_u64().unwrap_or(0)).into();
+        out["wd"] = result;
+        *done = out.clone();
+    }
+    if let Some(part) = ccip {
+        progress.part("ccip")?;
+        let result = if part.scan {
+            crate::app_ccip_longtail::apply(library, root, &part.pack, &part.path, &|| progress.check(), progress)?
+        } else {
+            crate::app_ccip_longtail::mark_enabled(library, root, &part.pack)?
+        };
+        out["changed"] = (changed(&out) + changed(&result)).into();
+        out["hits"] = (out["hits"].as_u64().unwrap_or(0) + result["hits"].as_u64().unwrap_or(0)).into();
+        out["ccip"] = result;
+    }
+    set_declined(library, false)?;
+    Ok(out)
+}
+
+fn pack_withdraw(library: &Library, wd: bool, ccip: bool, progress: &Progress<'_>, done: &mut Value) -> Result<Value> {
+    let mut out = json!({"wd":null,"ccip":null,"changed":0});
+    if wd {
+        let result = withdraw(library)?;
+        out["changed"] = changed(&result).into();
+        out["wd"] = result;
+        *done = out.clone();
+    }
+    if ccip {
+        if let Some((_, state)) = progress.0 {
+            lock_ignoring_poison(state)["part"] = "ccip".into();
+        }
+        let result = crate::app_ccip_longtail::withdraw(library, progress)?;
+        out["changed"] = (changed(&out) + changed(&result)).into();
+        out["ccip"] = result;
+    }
+    // 撤回以后不再默认启用，也不再提示。
+    set_declined(library, true)?;
+    Ok(out)
+}
+
+/// 还没有 WD 向量的图库启用角色资料包（新图库默认启用，#602）：只记下用哪个文件，不检查，没有证据要写。之后识别结果
+/// 交付时按图检查；`scored` 为 0、`pending` 为真，表示这个文件还没在整库上检查过。
+pub(crate) fn mark_enabled(library: &Library, pack: &Pack) -> Result<Value> {
+    ensure_writable(library)?;
+    let mut app = writer(&library.db())?;
+    crate::schema::require_current(&app)?;
+    let tx = app.transaction_with_behavior(TransactionBehavior::Immediate)?;
+    crate::schema::begin_writing(&tx)?;
+    let current = enabled(&tx)?;
+    let now: String = tx.query_row("SELECT datetime('now')", [], |r| r.get(0))?;
+    let changed = if current.as_ref().is_some_and(|state| state.package_sha256 != pack.file.sha256) {
+        // 换了文件：旧文件给的候选不能留着冒充新文件的。
+        wd_extension::withdraw(&tx)?
+    } else {
+        0
+    };
+    let entry = Enabled {
+        package_sha256: pack.file.sha256.clone(),
+        enabled_at: current.map_or_else(|| now.clone(), |state| state.enabled_at),
+        checked_at: now,
+        scored: 0,
+    };
+    let value = serde_json::to_string(&entry).expect("WD 扩展状态可序列化");
+    tx.execute("INSERT OR REPLACE INTO meta(key,value) VALUES (?,?)", (META_KEY, value))?;
+    crate::schema::commit_writing(tx)?;
+    Ok(json!({"package_sha256":pack.file.sha256,"scored":0,"hits":0,"changed":changed}))
+}
+
+fn check_file(
+    library: &Library,
+    pack: &Pack,
+    path: &Path,
+    scope: Option<&[String]>,
+    progress: &Progress<'_>,
+) -> Result<Value> {
     progress.check()?;
-    apply_loaded(library, &Package::load(path, spec)?, &spec.file.sha256, scope, progress)
+    apply_loaded(library, &Package::load(path, pack)?, &pack.file.sha256, scope, progress)
+}
+
+/// 卡片上的角色资料包里的 WD 部分（`app_packs::library_pack`）。
+pub(crate) fn card_pack(resources: &Path, library: &Library) -> Result<Pack> {
+    Ok(crate::app_packs::for_library(resources, library)?.card.wd)
 }
 
 pub(crate) fn status(resources: &Path, library: &Library, tasks: &Tasks, busy: Option<&str>) -> Result<Value> {
     // 先看任务是否已经提交，再读应用库快照。看到终态时，库里的开关和计数必须已经生效。
     let task = tasks.snapshot();
-    let mut info = crate::app_models::extension_info(resources)?;
+    let mut info = crate::app_models::extension_info(resources, &card_pack(resources, library)?)?;
     let app = crate::app_library::read_connection(&library.db())?;
     let snapshot = app.unchecked_transaction()?;
     let source = crate::app_library::read_connection(&library.source())?;
@@ -455,10 +705,10 @@ pub(crate) fn status(resources: &Path, library: &Library, tasks: &Tasks, busy: O
     Ok(info)
 }
 
+/// 本图库启用了 WD 角色扩展（不论哪个版本）。用哪个包、包在不在本机，到真正检查时再看（`enabled_pack`）。
 pub(crate) fn auto_enabled(library: &Library) -> Result<bool> {
     let app = crate::app_library::read_connection(&library.db())?;
-    let spec = crate::app_models::wd_extension()?;
-    Ok(enabled(&app)?.is_some_and(|state| state.package_sha256 == spec.file.sha256))
+    Ok(enabled(&app)?.is_some())
 }
 
 /// 识别账本的水位和本次同步可恢复的交付。已经完成的旧批次不会被重新评分。
@@ -555,6 +805,217 @@ mod tests {
         crate::app_migrate_data::rows(c, sql).unwrap()
     }
 
+    /// 合成包：每个头只看向量的第 `axis` 维（权重 2），阈值和级别照给的。
+    fn synthetic(heads: &[(&str, usize, f64, bool)]) -> Package {
+        let mut weights = vec![0.; DIM * heads.len()];
+        for (i, (_, axis, _, _)) in heads.iter().enumerate() {
+            weights[i * DIM + axis] = 2.;
+        }
+        Package {
+            wd_model_sha256: "model".into(),
+            wd_tags_sha256: "tags".into(),
+            labels: heads.iter().map(|h| h.0.to_owned()).collect(),
+            thresholds: heads.iter().map(|h| h.2).collect(),
+            candidate_only: heads.iter().map(|h| h.3).collect(),
+            weights,
+            bias: vec![0.; heads.len()],
+        }
+    }
+
+    fn pack(format: &str, heads: usize, candidate_only: usize, bytes: &[u8]) -> Pack {
+        Pack {
+            kind: crate::app_packs::Kind::Wd,
+            revision: 2,
+            version: "wd-extension-v2".into(),
+            format: format.into(),
+            heads,
+            candidate_only,
+            file: crate::app_packs::File {
+                name: "synthetic.bin".into(),
+                size: bytes.len() as u64,
+                sha256: crate::strict_json::sha256_hex(bytes),
+                url: String::new(),
+            },
+            base: Base::Wd { model: "model".into(), tags: "tags".into() },
+            license: "Apache-2.0".into(),
+            builtin: false,
+        }
+    }
+
+    fn encode(manifest: Value, heads: usize) -> Vec<u8> {
+        let mut input = manifest.to_string().into_bytes();
+        input.push(b'\n');
+        input.resize(input.len() + heads * (DIM + 1) * 4, 0);
+        input
+    }
+
+    #[test]
+    fn package_formats_threshold_layouts_and_tiers() {
+        let legacy = 0.8008725047111511;
+        let high = f64::from(0.99_f32);
+        let labels = |n: usize| (0..n).map(|i| format!("test_{i}")).collect::<Vec<_>>();
+        let base = |format: &str, n: usize| json!({"format":format,"wd_model_sha256":"model","wd_tags_sha256":"tags","labels":labels(n)});
+        // 内置 v1：统一阈值，全部一级。
+        let mut v1 = base(WD_FORMAT_V1, 3);
+        v1["threshold"] = legacy.into();
+        let bytes = encode(v1.clone(), 3);
+        let decoded = Package::decode(&bytes, &pack(WD_FORMAT_V1, 3, 0, &bytes)).unwrap();
+        assert_eq!((decoded.thresholds, decoded.candidate_only), (vec![legacy; 3], vec![false; 3]));
+        // #551 的 257 头包：旧格式另带逐头阈值，仍然全部一级。
+        let mut v257 = v1.clone();
+        v257["thresholds"] = json!([legacy, legacy, high]);
+        let bytes = encode(v257.clone(), 3);
+        let decoded = Package::decode(&bytes, &pack(WD_FORMAT_V1, 3, 0, &bytes)).unwrap();
+        assert_eq!(decoded.thresholds, vec![legacy, legacy, high]);
+        assert_eq!(decoded.candidate_only, vec![false; 3]);
+        // 新格式：逐头阈值和级别都必须有，二级头数要和目录一致。
+        let mut v2 = base(WD_FORMAT_V2, 3);
+        v2["thresholds"] = json!([legacy, high, 0.5]);
+        v2["tiers"] = json!([1, 2, 2]);
+        let bytes = encode(v2.clone(), 3);
+        let decoded = Package::decode(&bytes, &pack(WD_FORMAT_V2, 3, 2, &bytes)).unwrap();
+        assert_eq!(decoded.candidate_only, vec![false, true, true]);
+        assert!(Package::decode(&bytes, &pack(WD_FORMAT_V2, 3, 1, &bytes)).is_err());
+        assert!(Package::decode(&bytes, &pack(WD_FORMAT_V1, 3, 2, &bytes)).is_err());
+
+        let rejected = |manifest: Value, format: &str, candidate_only: usize| {
+            let bytes = encode(manifest, 3);
+            Package::decode(&bytes, &pack(format, 3, candidate_only, &bytes)).is_err()
+        };
+        let mut tiered_v1 = v257.clone();
+        tiered_v1["tiers"] = json!([1, 1, 1]);
+        assert!(rejected(tiered_v1, WD_FORMAT_V1, 0), "旧格式不能带级别");
+        let mut untiered = v2.clone();
+        untiered.as_object_mut().unwrap().remove("tiers");
+        assert!(rejected(untiered, WD_FORMAT_V2, 2));
+        let mut bad_tier = v2.clone();
+        bad_tier["tiers"] = json!([1, 3, 2]);
+        assert!(rejected(bad_tier, WD_FORMAT_V2, 2));
+        let mut short = v2.clone();
+        short["thresholds"] = json!([legacy]);
+        assert!(rejected(short, WD_FORMAT_V2, 2));
+        let mut out_of_range = v257.clone();
+        out_of_range["thresholds"] = json!([legacy, 1.5, legacy]);
+        assert!(rejected(out_of_range, WD_FORMAT_V1, 0));
+        let mut other_base = v1.clone();
+        other_base["wd_tags_sha256"] = "other".into();
+        assert!(rejected(other_base, WD_FORMAT_V1, 0), "基础标签表不符");
+        let bytes = encode(v1, 3);
+        assert!(Package::decode(&bytes[..bytes.len() - 1], &pack(WD_FORMAT_V1, 3, 0, &bytes)).is_err());
+        assert!(Package::decode(&bytes, &pack(WD_FORMAT_V1, 2, 0, &bytes)).is_err(), "头数不符");
+
+        // 文件本身要和这个版本的大小、SHA-256 对上。
+        let f = Fixture::new();
+        let path = f.root.join("package.bin");
+        fs::write(&path, &bytes).unwrap();
+        let expected = pack(WD_FORMAT_V1, 3, 0, &bytes);
+        assert!(Package::load(&path, &expected).is_ok());
+        let mut tampered = bytes.clone();
+        *tampered.last_mut().unwrap() ^= 1;
+        fs::write(&path, &tampered).unwrap();
+        assert!(Package::load(&path, &expected).is_err());
+    }
+
+    /// v1 → 新版本 → v1 → 撤回：换包沿用同一个 WD_EXT 来源的替换，图库记下用的是哪个包；二级头只出候选。
+    #[test]
+    fn switching_versions_round_trips_and_candidate_only_heads_never_assign() {
+        let f = Fixture::new();
+        let assets = ["one", "two", "three"];
+        let source = writer(&f.library.source()).unwrap();
+        source
+            .execute_batch(
+                "CREATE TABLE IF NOT EXISTS embeddings(uuid TEXT,model TEXT,vec BLOB,PRIMARY KEY(uuid,model))",
+            )
+            .unwrap();
+        for (i, uuid) in assets.iter().enumerate() {
+            let mut wd = vec![0f32; DIM];
+            wd[i] = 1.;
+            let vector = wd.into_iter().flat_map(f32::to_le_bytes).collect::<Vec<_>>();
+            source
+                .execute(
+                    "INSERT INTO assets(uuid,filename,src_path,width,height,added_at,src_kind,in_scope,trashed)
+                     VALUES (?1,'synthetic.png','synthetic.png',8,8,'2026-11-17','folder',1,0)",
+                    [uuid],
+                )
+                .unwrap();
+            source.execute("INSERT INTO embeddings VALUES (?1,'wd',?2)", rusqlite::params![uuid, vector]).unwrap();
+        }
+        f.write(|tx| {
+            let rows = assets
+                .iter()
+                .map(|uuid| json!([uuid, "synthetic.png", "synthetic.png", 8, 8, "2026-11-17", "folder"]))
+                .collect::<Vec<_>>();
+            crate::character_commands::command(
+                tx,
+                &json!({"op":"refresh","assets":rows,"indexed":"2026-11-17","index":{},"labels":[],"decisions":[],
+                    "duplicates":[]}),
+            )
+            .map(|_| ())
+        })
+        .unwrap();
+        let app = writer(&f.library.db()).unwrap();
+        let members = "SELECT uuid,entity,sources FROM memberships ORDER BY uuid";
+        let candidates = "SELECT uuid,entity,source FROM candidates ORDER BY uuid,entity";
+        let active = "SELECT id,asset_id,term_id,version,score FROM term_current_evidence ORDER BY id";
+        let baseline = (snapshot(&app, members), snapshot(&app, candidates), snapshot(&app, active));
+        let state = || enabled(&app).unwrap().map(|e| e.package_sha256);
+        let key = |uuid: &str| -> String {
+            app.query_row("SELECT entity FROM candidates WHERE uuid=?1 AND source='WD_EXT'", [uuid], |r| r.get(0))
+                .unwrap()
+        };
+
+        // v1：一个头，只认第一张图。
+        let v1 = synthetic(&[("role_one", 0, 0.8, false)]);
+        assert_eq!(apply_loaded(&f.library, &v1, "v1", None, &Progress::silent()).unwrap()["changed"], 1);
+        assert_eq!(state().as_deref(), Some("v1"));
+        let after_v1 = (snapshot(&app, members), snapshot(&app, candidates), snapshot(&app, active));
+        let one = key("one");
+        assert_eq!(after_v1.0, vec![json!(["one", one, "WD_EXT"])]);
+
+        // 新版本：原来的头加一个一级头（第二张图）和一个二级头（第三张图）。二级头只进候选，不补归属。
+        let v2 = synthetic(&[("role_one", 0, 0.8, false), ("role_two", 1, 0.8, false), ("role_three", 2, 0.8, true)]);
+        assert_eq!(apply_loaded(&f.library, &v2, "v2", None, &Progress::silent()).unwrap()["changed"], 3);
+        assert_eq!(state().as_deref(), Some("v2"));
+        let (two, three) = (key("two"), key("three"));
+        assert_eq!(snapshot(&app, members), vec![json!(["one", one, "WD_EXT"]), json!(["two", two, "WD_EXT"])]);
+        assert_eq!(
+            snapshot(&app, candidates),
+            vec![json!(["one", one, "WD_EXT"]), json!(["three", three, "WD_EXT"]), json!(["two", two, "WD_EXT"])]
+        );
+        let tier: Vec<Value> = snapshot(
+            &app,
+            "SELECT json_extract(data,'$.tag'),json_extract(data,'$.tier') FROM term_current_evidence
+             WHERE source='wd_extension' ORDER BY 1",
+        );
+        assert_eq!(tier, vec![json!(["role_one", null]), json!(["role_three", 2]), json!(["role_two", null])]);
+        // 同一个一级头在两个版本里分数相同，但证据行按包分开记。
+        assert_eq!(
+            snapshot(&app, "SELECT DISTINCT version FROM term_current_evidence WHERE source='wd_extension'").len(),
+            3
+        );
+
+        // 之后别的操作按图或整库重算归属时，二级候选照样不补归属。
+        f.write(|tx| {
+            illustash_core::character_projection::memberships(tx, Some(&["three".to_owned()]))?;
+            illustash_core::character_projection::memberships(tx, None)
+        })
+        .unwrap();
+        assert_eq!(snapshot(&app, members).len(), 2);
+
+        // 换回 v1：恢复成 v1 那时的样子（证据行复用，没有新行）。
+        let rows = snapshot(&app, "SELECT count(*) FROM term_evidence").pop();
+        assert_eq!(apply_loaded(&f.library, &v1, "v1", None, &Progress::silent()).unwrap()["changed"], 3);
+        assert_eq!(state().as_deref(), Some("v1"));
+        assert_eq!((snapshot(&app, members), snapshot(&app, candidates), snapshot(&app, active)), after_v1);
+        assert_eq!(snapshot(&app, "SELECT count(*) FROM term_evidence").pop(), rows);
+
+        // 撤回：回到启用之前，历史证据保留。
+        assert_eq!(withdraw(&f.library).unwrap()["changed"], 1);
+        assert_eq!(state(), None);
+        assert_eq!((snapshot(&app, members), snapshot(&app, candidates), snapshot(&app, active)), baseline);
+        assert_eq!(snapshot(&app, "SELECT id FROM term_evidence WHERE source='wd_extension'").len(), 4);
+    }
+
     #[test]
     fn cancel_stops_scan_and_write_boundary_refuses_it() {
         let f = Fixture::new();
@@ -602,7 +1063,8 @@ mod tests {
                     "indexed":"2026-11-16","index":{},"labels":[],"decisions":[],"duplicates":[]}),
             )?;
             let a = [ccip_longtail::Hit { uuid: asset.clone(), tag: "longtail_role".into(), score: 0.85 }];
-            let b = [Hit { uuid: asset.clone(), tag: "extension_role".into(), probability: 0.99 }];
+            let b =
+                [Hit { uuid: asset.clone(), tag: "extension_role".into(), probability: 0.99, candidate_only: false }];
             let scope = std::slice::from_ref(&asset);
             let sources = || snapshot(tx, "SELECT sources FROM memberships WHERE uuid='overlap'");
             let candidates = || snapshot(tx, "SELECT source FROM candidates WHERE uuid='overlap' ORDER BY source");
@@ -637,19 +1099,7 @@ mod tests {
             .iter()
             .map(|uuid| json!([uuid, "synthetic.png", "synthetic.png", 8, 8, "2026-11-16", "folder"]))
             .collect::<Vec<_>>();
-        let mut weights = vec![0.; DIM];
-        weights[0] = 2.;
-        let package = Package {
-            manifest: Manifest {
-                format: "illustash-wd-extension/1".into(),
-                wd_model_sha256: "model".into(),
-                wd_tags_sha256: "tags".into(),
-                threshold: 0.8008725047111511,
-                labels: vec!["from_b".into()],
-            },
-            weights,
-            bias: vec![0.],
-        };
+        let package = synthetic(&[("from_b", 0, 0.8008725047111511, false)]);
         let source = writer(&f.library.source()).unwrap();
         source
             .execute_batch(

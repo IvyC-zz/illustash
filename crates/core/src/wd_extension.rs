@@ -16,6 +16,8 @@ pub struct Hit {
     pub tag: String,
     /// 线性头的 sigmoid 概率。
     pub probability: f64,
+    /// 二级头（#602）：只出候选（「也可能是」），永远不补主归属，也不影响已有的主归属。旧格式的包全部是一级。
+    pub candidate_only: bool,
 }
 
 /// 以给定冻结包的命中更新整个图库的 WD 扩展候选。调用方持有核心写事务。
@@ -34,7 +36,7 @@ fn publish(c: &Connection, package: &str, scope: Option<&[String]>, hits: &[Hit]
         Extension::Wd,
         package,
         scope,
-        hits.iter().map(|h| (h.uuid.as_str(), h.tag.as_str(), h.probability)),
+        hits.iter().map(|h| (h.uuid.as_str(), h.tag.as_str(), h.probability, h.candidate_only)),
     )
 }
 

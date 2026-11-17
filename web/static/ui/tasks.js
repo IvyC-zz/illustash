@@ -16,7 +16,7 @@ import {openIndexAdd} from './catalog.js';
 import {modelsLine, modelsBar, modelsActions} from './models.js';
 import {cancelExport, exportActive, exportLine, loadFiles, onFiles, revealExport, revealLabel} from '../core/files.js';
 import {loadModels, onModels} from '../core/models.js';
-import {PACK_KEYS, packTask} from './packs.js';
+import {packTask} from './packs.js';
 import {loadPack, onPack} from '../core/packs.js';
 // 「开始」先显示有哪些内容会离开本机；授权只覆盖这一次运行。
 let provenanceArmed = false;
@@ -75,7 +75,7 @@ export function taskList() {
   if (m?.on_demand && (m.status !== 'ready' || m.job?.status === 'running')) list.push({key: 'models', name: t('识别模型'), busy: m.job?.kind === 'import' ? t('导入识别模型中') : t('下载识别模型中'),
     active: m.job?.status === 'running', warn: m.job?.status === 'failed', line: modelsLine(m), body: modelsBar(m), action: modelsActions(m, true)});
   // 角色数据包（#550、#559）：每个包一项，下载或导入、启用、撤回共用，运行中和结束后都列出来。
-  const packs = PACK_KEYS.map(key => packTask(key)).filter(Boolean);
+  const packs = [packTask()].filter(Boolean);
   list.push(...packs);
   if (['running', 'done', 'error'].includes(ex.status)) list.push({key: 'export', name: t('导出图库'), busy: t('导出图库中'), active: ex.status === 'running', warn: ex.status === 'error',
     line: ex.status === 'running' ? t('正在导出…') : ex.status === 'done' ? t('已导出 {mb} MB', {mb: megabytes(ex.bytes)}) : t('导出失败：{error}', {error: tb(ex.error || '')}), body: '', action: ''});
@@ -149,8 +149,8 @@ export async function taskTick() {
   const jobs = [pollSync(), pollIndex(), pollNames(), loadProvenance()];
   // 模型下载时有自己的轮询；这里发现在另一个窗口里启动的下载。
   if (taskPanel.open || !state.models) jobs.push(loadModels());
-  // WD 角色扩展同样：运行中有自己的轮询，这里发现别处开始的下载或任务。
-  for (const key of PACK_KEYS) if (taskPanel.open || !state.packs[key]) jobs.push(loadPack(key));
+  // 角色资料包同样：运行中有自己的轮询，这里发现别处开始的下载或任务。
+  if (taskPanel.open || !state.pack) jobs.push(loadPack());
   // 相似任务的状态随 /api/settings 一起来，它还要测量缓存：只在有人看时才读。
   if (taskPanel.open && Date.now() - taskPanel.settingsAt > (SIMILAR_ACTIVE.includes(state.settings?.tasks?.similar?.status) ? 2500 : 15000)) { taskPanel.settingsAt = Date.now(); jobs.push(shared('/api/settings').then(s => { setSettings(s); }).catch(e => error(readError(e)))); }
   // 面板开着时发现在别的窗口里启动的导入；运行中的导入有自己的轮询。

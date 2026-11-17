@@ -91,7 +91,7 @@ pub fn run(args: &[String]) -> u8 {
         ["recognition-import", "--library", library, "--root", root, "--package", package] => crate::app_library::Library::open(Path::new(library)).and_then(|lib| crate::app_recognition::import_package(&lib,Path::new(package),Path::new(root),&std::sync::atomic::AtomicBool::new(false),&|_,_| Ok(()))),
         ["ccip-longtail", "--library", library, "--root", root, "--package", package] =>
             crate::app_library::Library::open(Path::new(library)).and_then(|lib|
-                crate::app_ccip_longtail::apply(&lib, Path::new(root), Path::new(package), &|| Ok(()), &crate::app_imports::Silent)),
+                crate::app_ccip_longtail::apply_file(&lib, Path::new(root), Path::new(package), &|| Ok(()), &crate::app_imports::Silent)),
         ["ccip-longtail", "--library", library, "--withdraw"] =>
             crate::app_library::Library::open(Path::new(library)).and_then(|lib| crate::app_ccip_longtail::withdraw(&lib, &crate::app_imports::Silent)),
         ["ccip-longtail", "--library", library, "--status"] =>

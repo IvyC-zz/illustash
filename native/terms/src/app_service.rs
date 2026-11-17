@@ -538,12 +538,12 @@ impl Application {
         if ids.is_empty() {
             return Ok(());
         }
-        let Some(path) = crate::app_models::extension_file(&self.root)? else { return Ok(()) };
-        if !crate::app_wd_extension::auto_enabled(&session.library)? {
-            return Ok(());
-        }
+        let app = crate::app_library::read_connection(&session.library.db())?;
+        let Some((pack, path)) = crate::app_wd_extension::enabled_pack(&self.root, &app)? else { return Ok(()) };
+        drop(app);
         let identity = crate::app_tasks::TaskIdentity::new(&session.library, session.generation, &session.token)?;
-        session.wd_extension.start_for(&session.library, identity, crate::app_wd_extension::Action::Auto(path, ids))?;
+        let action = crate::app_wd_extension::Action::Auto(pack, path, ids);
+        session.wd_extension.start_for(&session.library, identity, action)?;
         Ok(())
     }
 
