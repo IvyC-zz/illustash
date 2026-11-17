@@ -172,6 +172,11 @@ test('撤回中没有按钮；启用或撤回失败写明图库没有改动，�
   assert.equal(c.packDot('wd', failed), 'warn');
   assert.deepEqual(buttons(c.packActions('wd', failed)).map(b => [b.act, b.label]), [['enable-retry', '重试']]);
   assert.equal(c.packTask('wd', failed).warn, true);
+  // 已启用时失败的是重新检查：照样能撤回。
+  const refailed = ext({package: READY, library: ENABLED, task: {id: 't3', kind: 'enable', status: 'failed', message: '请先安装基础角色索引'}});
+  assert.equal(c.packLine('wd', refailed), '重新检查没有完成，图库没有改动：请先安装基础角色索引');
+  assert.deepEqual(buttons(c.packActions('wd', refailed)).map(b => b.act), ['enable-retry', 'withdraw']);
+  assert.deepEqual(buttons(c.packActions('wd', refailed, true)).map(b => b.act), ['enable-retry'], '任务面板只放重试');
   const wfailed = ext({package: READY, library: ENABLED, task: {id: 't4', kind: 'withdraw', status: 'failed', message: '磁盘已满'}});
   assert.equal(c.packLine('wd', wfailed), '撤回没有完成，图库没有改动：磁盘已满');
   assert.deepEqual(buttons(c.packActions('wd', wfailed)).map(b => b.act), ['withdraw-retry']);
@@ -194,8 +199,8 @@ test('卡片正文和说明：还没读到时只有省略号', () => {
 test('确认框写明做决定前要知道的事实', () => {
   assert.equal(c.enableMessage('wd', ext({package: READY})), '用扩展包检查本图库 120 张图。还没有归属、也没有人工确认的图会补上一个机器归属，已有的归属和人工结论不变。以后可以撤回。');
   assert.equal(c.enableMessage('wd', ext({package: READY, library: {vectors: undefined}})), '用扩展包检查本图库的图。还没有归属、也没有人工确认的图会补上一个机器归属，已有的归属和人工结论不变。以后可以撤回。');
-  assert.equal(c.withdrawMessage('wd', ext({library: ENABLED})), '去掉本图库的全部扩展候选，以及由它补上的 3 个机器归属。你确认过、否定过的保留。撤回不进撤销历史，要恢复就重新启用。');
-  assert.equal(c.withdrawMessage('wd', ext({library: {...ENABLED, assigned: 0}})), '去掉本图库的全部扩展候选。你确认过、否定过的保留。撤回不进撤销历史，要恢复就重新启用。');
+  assert.equal(c.withdrawMessage('wd', ext({library: ENABLED})), '去掉本图库里 WD 角色扩展给出的全部候选，以及它补上的 3 个机器归属。你确认过、否定过的保留。撤回不进撤销历史，要恢复就重新启用。');
+  assert.equal(c.withdrawMessage('wd', ext({library: {...ENABLED, assigned: 0}})), '去掉本图库里 WD 角色扩展给出的全部候选。你确认过、否定过的保留。撤回不进撤销历史，要恢复就重新启用。');
   assert.equal(c.PACK_UI.wd.removeNote(), '删除扩展包？已启用的图库保留现有的扩展候选，新识别的图不再检查；再用要重新下载。');
 });
 

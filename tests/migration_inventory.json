@@ -1,7 +1,7 @@
 {
 "baseline_commit":"621726f",
 "sources":{
- ".claude/launch.json":"76d4c88e0bca59fd6c3f0c7171350cd1c9c925dbfbaa7694c90309fcce5e9321",
+ ".claude/launch.json":"5860af7fb939c45731c40c0adb85837c235a2db2bc65e9a3b9ef029a1df15d50",
 
  "crates/core/src/backup.rs":"7d5f5abe63adb1620f2847609451fda7b588a927f742a676e16fc4acd2abeeb5",
 
@@ -223,7 +223,7 @@
 
  "native/terms/src/app_asset_files.rs":"a33b3eddb934d5547dac2966c1e4ccbc7c5910ab030bbd2979ad193dac9e6c77",
 
- "native/terms/src/app_ccip_longtail.rs":"515a3a30faea05ceb8f35ce4a57209c33aa429fcd5e22fdbe94bd6fdaca082ba",
+ "native/terms/src/app_ccip_longtail.rs":"ca6d1cc3696e07223a4faffb9759079d176674339f7bb3b25e6ca9be55738082",
 
  "native/terms/src/app_characters.rs":"6c9e9e080970dce30092747ebcf6bdcaee7d99a8463500888e5dab278f4a0cbd",
 
@@ -297,7 +297,7 @@
 
  "native/terms/src/app_migration_sql/provenance.sql":"a780f1f8837dd2c90a556539c114d56cdaa513b057fb667bf0c5c9d604f75934",
 
- "native/terms/src/app_models.rs":"ff36ac75628911fc8cff762c9ebf0aabdf21386e83bccf22ae46d5f82db0f3cb",
+ "native/terms/src/app_models.rs":"d1c9b3f03501424cbc47d2b6248caf65515fa7e7c15e402d356b5f2f86c70f64",
 
  "native/terms/src/app_name_sources.rs":"a9d895621405e92c2bdacd7f547f28feec7f294f307d628ea25d5e2bf27f9515",
 
@@ -651,7 +651,7 @@
  "native/terms/src/app_create.rs":{"database-write":{"ATTACH":1,"dynamic-or-wrapper":9,"INSERT INTO:main.":1,"CREATE INDEX:if":1,"COMMIT":3,"DETACH":1,"ALTER TABLE:assets":1,"INSERT OR IGNORE INTO:meta":1}},
  "native/terms/src/app_index.rs":{"database-write":[[0,7],34,[1,5],33,283,284,285,286,[208,2],12,[199,2],287,249,201,[3,2]],"entrypoint":[4]},
  "native/terms/src/http_browse.rs":{"http-branch":["/api/assets|/api/ids",[246,3],[77,2],[248,3],24,99,89,"/api/assets|/api/assets/count|/api/ids",[78,3],331],"database-write":[[7,3],[0,2]]},
- ".claude/launch.json":{"entrypoint":["python3"]},
+ ".claude/launch.json":{"entrypoint":[[332,2]]},
  "crates/core/src/character_sql/tag_memberships.sql":{"database-write":["INSERT INTO:tag_memberships"]},
  "crates/core/src/names_commands.rs":{"database-write":{"INSERT OR IGNORE INTO:term_key_names":1,"dynamic-or-wrapper":8,"DELETE FROM:term_names":4,"DELETE FROM:term_key_names":1,"DELETE FROM:term_key_aliases":1,"INSERT INTO:term_key_aliases":1}},
  "native/terms/src/app_profiles.rs":{"http-branch":[[23,8],[16,5],[17,7],[44,3],[83,3],[242,4],[98,3]],"database-write":[[3,3],0]},
@@ -1102,6 +1102,7 @@
  "INSERT INTO:term_names",
  "ccip-longtail",
  "/api/ccip-longtail",
- "/api/galleries"
+ "/api/galleries",
+ "python3"
 ]
 }

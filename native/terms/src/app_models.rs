@@ -905,8 +905,10 @@ pub(crate) fn info(resources: &Path) -> Result<Json> {
 static CCIP_LONGTAIL: Models = Models::new();
 
 fn longtail_place(resources: &Path) -> Result<Place> {
-    use crate::app_ccip_longtail::{self, PACKAGE_BYTES, PACKAGE_NAME, PACKAGE_SHA256, PACKAGE_VERSION};
+    use crate::app_ccip_longtail::{self, PACKAGE_NAME, PACKAGE_VERSION};
     static MANIFEST: OnceLock<Manifest> = OnceLock::new();
+    // 走查和测试可以换成本机合成包（ILLUSTASH_TEST_CCIP_LONGTAIL，见 app_ccip_longtail::release）。
+    let release = app_ccip_longtail::release()?;
     let manifest = MANIFEST.get_or_init(|| Manifest {
         format: 1,
         pack: PACKAGE_VERSION.into(),
@@ -915,12 +917,9 @@ fn longtail_place(resources: &Path) -> Result<Place> {
         modelscope: String::new(),
         files: vec![Entry {
             path: PACKAGE_NAME.into(),
-            size: PACKAGE_BYTES,
-            sha256: PACKAGE_SHA256.into(),
-            source: Source::Project {
-                url: "https://github.com/shio-vinyl/illustash/releases/download/ccip-longtail-v1/A-longtail-p75.zip"
-                    .into(),
-            },
+            size: release.bytes,
+            sha256: release.sha256.clone(),
+            source: Source::Project { url: release.url.clone() },
             optional: false,
         }],
         wd_coreml: None,

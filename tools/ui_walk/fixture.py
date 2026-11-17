@@ -29,6 +29,7 @@ import subprocess
 import time
 import urllib.error
 import urllib.request
+import zipfile
 import zlib
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -274,6 +275,50 @@ def wd_extension_walk(fixture: Fixture, directory: Path, origin: str) -> Path:
         heads.append((label, [10 * x for x in vector], -8))
     tags = (fixture.root / 'resources' / 'tags' / 'tags_v3.csv').read_bytes()
     return wd_extension_spec(directory, tags, heads, origin)
+
+
+def npy_rows(data: bytes) -> tuple[int, bytes]:
+    """.npy 的头长和数据段（只认本文件写出的小端 float32、C 顺序）。"""
+    start = struct.unpack_from('<H', data, 8)[0] + 10
+    return start, data[start:]
+
+
+def ccip_longtail_walk(fixture: Fixture, directory: Path, shared: Path, origin: str) -> Path:
+    """合成 CCIP 长尾参考包（#559）和它的下载清单；包的格式照 native/terms/src/app_ccip_longtail.rs 的 Package::load。
+
+    三个长尾角色的锚点取自三张图的 CCIP 向量，分别命中：没有角色的一组相近图（补上归属）、WD 认出的角色、人工确认的
+    角色（后两种只多出候选）。阈值 p75 = 0.2（余弦距离），组内的图都在阈值内，别的组远在阈值外。长尾包要叠在基础角色
+    索引上，走查图库没有，所以在共享目录写一个只有一个锚点的基础索引；它没有元数据，阈值为零，不认领任何图。"""
+    names = [('longone_(synthetic)', 'group-2-01'), ('longtwo_(synthetic)', 'dahlia-02'), ('longthree_(synthetic)', 'aster-02')]
+    _, data = npy_rows((fixture.root / 'recognition' / 'ccip.npy').read_bytes())
+    order = {name: i for i, name in enumerate(fixture.names.values())}
+    row = CCIP_DIM * 4
+    anchors = b''.join(data[order[photo] * row:(order[photo] + 1) * row] for _, photo in names)
+    metadata = json.dumps([{'id': tag, 'tag': tag, 'skin': False, 'post_count': 20, 'gender_conf': 0.5,
+                            'p50': 0.1, 'p75': 0.2, 'p90': 0.3} for tag, _ in names]).encode()
+    model = sha(b'synthetic CCIP')
+    provenance = json.dumps({'format': 'illustash-557-ccip-offline/1', 'ccip_sha256': model,
+                             'files': {'A-metadata.json': sha(metadata), 'A-anchors.f32': sha(anchors)}}).encode()
+    directory.mkdir(parents=True, exist_ok=True)
+    path = directory / 'A-longtail-p75.zip'
+    with zipfile.ZipFile(path, 'w', zipfile.ZIP_STORED) as z:
+        for member, body in (('A-provenance.json', provenance), ('A-metadata.json', metadata), ('A-anchors.f32', anchors)):
+            z.writestr(zipfile.ZipInfo(member, date_time=(2026, 11, 17, 0, 0, 0)), body)
+    contents = path.read_bytes()
+    rnd = random.Random('ccip-longtail-base')
+    base = [rnd.gauss(0, 1) for _ in range(CCIP_DIM)]
+    norm = math.sqrt(sum(x * x for x in base))
+    header = "{'descr': '<f4', 'fortran_order': False, 'shape': (1, %d), }" % CCIP_DIM
+    header += ' ' * (63 - (len(header) + 10) % 64) + '\n'
+    shared.mkdir(parents=True, exist_ok=True)
+    (shared / 'char-anchors.npy').write_bytes(b'\x93NUMPY\x01\x00' + struct.pack('<H', len(header)) + header.encode()
+                                              + struct.pack(f'<{CCIP_DIM}f', *(x / norm for x in base)))
+    (shared / 'char-anchors.txt').write_text('base_synthetic\n', encoding='utf-8')
+    spec = {'sha256': sha(contents), 'size': len(contents), 'ccip_sha256': model, 'roles': len(names),
+            'url': f'{origin}/{path.name}'}
+    manifest = directory / 'ccip-longtail.json'
+    manifest.write_text(json.dumps(spec), encoding='utf-8')
+    return manifest
 
 
 def fake_resources(dest: Path) -> Path:

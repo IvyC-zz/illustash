@@ -92,6 +92,8 @@ export function packLine(key, x = current(key)) {
   if (task?.status === 'failed') {
     const reason = tb(task.message || '');
     if (task.kind === 'auto') return t('检查新识别的图没有完成，图库没有改动：{reason}', {reason});
+    // 已经启用时这是一次重新检查，原来的扩展候选都还在。
+    if (task.kind === 'enable' && l.enabled) return t('重新检查没有完成，图库没有改动：{reason}', {reason});
     return task.kind === 'withdraw' ? t('撤回没有完成，图库没有改动：{reason}', {reason}) : t('启用没有完成，图库没有改动：{reason}', {reason});
   }
   if (task?.status === 'cancelled') return t('已取消，图库没有改动');
@@ -126,8 +128,12 @@ export function packActions(key, x = current(key), compact = false) {
   }
   if (packDownloading(x)) return b('package-cancel', t('取消'));
   const off = blocked ? ` disabled title="${esc(blocked)}"` : '';
-  if (task?.status === 'failed') return b(task.kind === 'withdraw' ? 'withdraw-retry' : 'enable-retry', t('重试'), 'primary', task.kind === 'withdraw' ? '' : off);
   const withdraw = l.enabled ? b('withdraw', t('撤回…')) : '';
+  // 重新检查失败时（比如基础角色索引不在了）照样能撤回，不只能重试。
+  if (task?.status === 'failed') {
+    return task.kind === 'withdraw' ? b('withdraw-retry', t('重试'), 'primary')
+      : b('enable-retry', t('重试'), 'primary', off) + (compact ? '' : withdraw);
+  }
   if (!ready(x)) {
     const main = l.enabled ? 'quiet' : 'primary';
     const failed = x.download?.kind === 'download' && x.download.status === 'failed';
@@ -223,9 +229,10 @@ export function enableMessage(key, x = current(key)) {
   const n = lib(x).vectors;
   return ui(key).scan(n != null ? number(n) : null) + t('还没有归属、也没有人工确认的图会补上一个机器归属，已有的归属和人工结论不变。以后可以撤回。');
 }
+// 两个包可以同时启用，撤回只去掉这一个包给的：写包名。
 export function withdrawMessage(key, x = current(key)) {
-  const n = lib(x).assigned || 0;
-  return (n ? t('去掉本图库的全部扩展候选，以及由它补上的 {n} 个机器归属。', {n: number(n)}) : t('去掉本图库的全部扩展候选。'))
+  const n = lib(x).assigned || 0, name = ui(key).name();
+  return (n ? t('去掉本图库里 {name}给出的全部候选，以及它补上的 {n} 个机器归属。', {name, n: number(n)}) : t('去掉本图库里 {name}给出的全部候选。', {name}))
     + t('你确认过、否定过的保留。撤回不进撤销历史，要恢复就重新启用。');
 }
 
