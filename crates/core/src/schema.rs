@@ -705,6 +705,16 @@ fn v10(conn: &Connection) -> Result<()> {
         conn.execute("DROP VIEW variant_memberships", [])?;
         conn.execute_batch(&sql)?;
     }
+    conn.execute_batch(
+        "CREATE TABLE galleries(
+           id INTEGER PRIMARY KEY,
+           name TEXT NOT NULL,
+           params TEXT NOT NULL,
+           cover TEXT,
+           position INTEGER NOT NULL,
+           created_at TEXT NOT NULL,
+           updated_at TEXT NOT NULL);",
+    )?;
     Ok(())
 }
 

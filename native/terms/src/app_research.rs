@@ -102,8 +102,16 @@ pub(crate) fn forget_content(tx: &Connection, src: &Connection, changed: &[Strin
 }
 /// 没有任何研究计算器、学习戳或结果检查会读的应用表（#29）：偏好设置、名称来源设置（模型密钥、流量计数）、
 /// 名称缓存、同步历史和研究队列本身。写这些表从不会让结果失效。其他所有表，包括以后新增的表，都仍是学习的输入。
-const UNREAD: &[&str] =
-    &["backend_effects", "name_cache", "name_settings", "prefs", "research_runs", "sync_added", "sync_runs"];
+const UNREAD: &[&str] = &[
+    "backend_effects",
+    "galleries",
+    "name_cache",
+    "name_settings",
+    "prefs",
+    "research_runs",
+    "sync_added",
+    "sync_runs",
+];
 /// 不算输入的 `meta` 行：names version 统计对名称表的写入次数（触发器）。
 const UNREAD_META: &str = "'names_version'";
 /// 某一种研究的结果由什么算出（#29，docs/ARCHITECTURE_DIRECTION.md）。
@@ -237,7 +245,13 @@ fn hash_table(c: &Connection, h: &mut Sha256, table: &str, check: &dyn Fn() -> R
     let quoted = table.replace('"', "\"\"");
     let n = c.prepare(&format!("SELECT * FROM \"{quoted}\""))?.column_count();
     let order = (1..=n).map(|i| i.to_string()).collect::<Vec<_>>().join(",");
-    let filter = if table == "meta" { format!(" WHERE key NOT IN ({UNREAD_META})") } else { String::new() };
+    let filter = match table {
+        "meta" => format!(" WHERE key NOT IN ({UNREAD_META})"),
+        "actions" => " WHERE CASE WHEN json_valid(before_json)
+                       THEN json_type(before_json,'$[0].gallery') IS NOT 'object' ELSE 1 END"
+            .into(),
+        _ => String::new(),
+    };
     let mut q = c.prepare(&format!("SELECT * FROM \"{quoted}\"{filter} ORDER BY {order}"))?;
     let mut rows = q.query([])?;
     while let Some(r) = rows.next()? {
@@ -1449,6 +1463,32 @@ mod tests {
     }
     fn conflict(r: &Result<()>) -> bool {
         matches!(r, Err(Error::Conflict(m)) if m == INPUT_CHANGED)
+    }
+
+    #[test]
+    fn gallery_table_and_history_are_ignored_by_learning_fingerprint() {
+        let c = Connection::open_in_memory().unwrap();
+        c.execute_batch(
+            "CREATE TABLE galleries(id INTEGER,name TEXT);
+             CREATE TABLE actions(id INTEGER,undone INTEGER,before_json TEXT);",
+        )
+        .unwrap();
+        let digest = || {
+            let mut h = Sha256::new();
+            hash_db(&c, &mut h, Scope::Learning.app(), UNREAD, &|| Ok(())).unwrap();
+            h.finalize()
+        };
+        let before = digest();
+        c.execute_batch(
+            "INSERT INTO galleries VALUES (1,'合成画廊');
+             INSERT INTO actions VALUES (1,0,'[{\"gallery\":{\"id\":1,\"row\":null}}]');",
+        )
+        .unwrap();
+        assert_eq!(digest(), before);
+        c.execute_batch("DELETE FROM galleries; UPDATE actions SET undone=1 WHERE id=1;").unwrap();
+        assert_eq!(digest(), before);
+        c.execute_batch("INSERT INTO actions VALUES (2,0,'[]');").unwrap();
+        assert_ne!(digest(), before);
     }
 
     #[test]

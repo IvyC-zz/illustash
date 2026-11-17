@@ -16,12 +16,14 @@ pub(crate) fn request_prepared(
     body: &Json,
     prepared: Option<&crate::app_profiles::Prepared>,
 ) -> Result<Json> {
-    let mut c = crate::sqlite::open_with_flags(&context.db, OpenFlags::SQLITE_OPEN_READ_WRITE)?;
+    let mut c =
+        crate::sqlite::open_with_flags(&context.db, OpenFlags::SQLITE_OPEN_READ_WRITE | OpenFlags::SQLITE_OPEN_URI)?;
     crate::configure(&c)?;
     http_read::register_names(&c)?;
     let result = match path {
         "/api/tag" => tag(&mut c, context, body),
         "/api/favorite" => favorite(&mut c, context, body),
+        "/api/galleries" => crate::app_galleries::write(&mut c, context, body),
         "/api/undo" => undo(&mut c, body),
         "/api/artist/verdict" => artist(&mut c, body),
         "/api/change" | "/api/audit/answer" | "/api/ask/answer" | "/api/reassign" | "/api/sweep" => {
@@ -363,8 +365,17 @@ fn restore_application(c: &Connection, bound: &SqlValue, before: &Value) -> Resu
         return Err(Error::Invalid(store::HISTORY_CHANGED.into()));
     }
     let id = last.expect("app_commands internal invariant");
-    c.execute("DELETE FROM asked WHERE action_id=?", [id])?;
     let items = before.as_array().ok_or_else(|| Error::Io(std::io::Error::other("未知历史")))?;
+    let gallery = match items.as_slice() {
+        [item] if item.as_object().is_some_and(|o| o.len() == 1) => item.get("gallery"),
+        _ => None,
+    };
+    if let Some(gallery) = gallery {
+        crate::app_galleries::restore(c, gallery)?;
+        c.execute("UPDATE actions SET undone=1 WHERE id=?", [id])?;
+        return Ok(());
+    }
+    c.execute("DELETE FROM asked WHERE action_id=?", [id])?;
     let mut touched = Vec::new();
     for item in items {
         if let Some(skip) = item.get("identity_skip") {
