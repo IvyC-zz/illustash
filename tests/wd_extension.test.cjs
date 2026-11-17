@@ -83,7 +83,11 @@ test('这个页面导入以后逐个列出所选文件的结果；别处的导�
   const page = web.fakePage();
   c.wireWdExtension();
   server([{body: {cancelled: true}}, {body: imported}]);
-  const click = async act => { for (const fn of page.el('settingsPage').listeners.click) await fn({target: {closest: () => ({dataset: {wdx: act}, disabled: false})}}); };
+  // 监听不返回 promise：点完等请求和回调都走完。
+  const click = async act => {
+    for (const fn of page.el('settingsPage').listeners.click) fn({target: {closest: () => ({dataset: {wdx: act}, disabled: false})}});
+    await new Promise(resolve => setTimeout(resolve, 10));
+  };
   await click('import');
   assert.equal(c.extImportSummary(imported), '', '关掉选择框不算导入');
   await click('import');
