@@ -10,6 +10,7 @@ import {implement, pageOf, viewOf} from '../core/pages.js';
 import {canGoBack, cleanup, defaultSort, go, hashFor, historyEntry, noteHistory, parseHash, replaceRoute, setRoute, sortKey, stepHistory} from '../core/route.js';
 import {api, readError} from '../core/session.js';
 import {state} from '../core/state.js';
+import {navFor} from '../core/favorites.js';
 import {cast, createWork, drawCast, drawShelf, openTagged, renderIndexBody, searchIndex, shelf} from './catalog.js';
 import {$, emptyLink, error, helpTip, searchIcon, showArea, wireHelpTip, workSmall} from './dom.js';
 import {renderSettings, settingsSection} from './settings.js';
@@ -17,7 +18,6 @@ import {closeInspector, closeViewer} from './detail.js';
 import {filters, markSelectButton, placeFor, rememberPlace, reload, resetForRoute, selectAll, setNsfw, short, sweep, toggleFit, toggleSelecting} from './grid.js';
 import {guideTick} from './guide.js';
 import {createLayer} from './overlay.js';
-import {navFor} from '../core/favorites.js';
 import {listNav} from './combo.js';
 import {editProfile, markOc, mergeCharacter, openLocalLinks, openRelate, splitOc, toggleMascot, toggleOc} from './palette.js';
 
