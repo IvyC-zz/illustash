@@ -28,6 +28,11 @@ export function conditions(r) {
   return {has, not, from: r.from || '', to: r.to || '', day: r.day || ''};
 }
 export const count = r => { const x = conditions(r); return x.has.length + x.not.length; };
+// 路由上的条件只有这一条（没有别的条件、日期、搜索词和角色）：侧栏「收藏」（#447）按 only(r, 'fav') 判断亮不亮。
+export function only(r, c) {
+  const x = conditions(r);
+  return x.has.length === 1 && x.has[0] === c && !x.not.length && !x.from && !x.to && !x.day && !r.q && !r.char;
+}
 // 换成这组条件以后的路由：旧的单值参数整体改写成 has。
 function rewrite(r, x) { return {...r, ...CLEARED, has: x.has, not: x.not, from: x.from, to: x.to, day: x.day}; }
 const without = (list, c) => list.filter(y => y !== c);
