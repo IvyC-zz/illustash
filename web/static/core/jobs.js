@@ -143,7 +143,7 @@ export async function resumeIndex(confirm) {
 // 放弃一次暂停的添加会删掉它下载的图片；它没有往图库里写任何东西。
 export async function discardIndex(confirm) {
   const token = session.token;
-  if (!await confirm(t('放弃这次添加？已下载的参考图会删掉，图库不受影响；以后可以重新选择要添加的角色。'), t('放弃添加'), t('放弃')) || token !== session.token) return false;
+  if (!await confirm(t('放弃这次添加？已下载的参考图会删掉，图库不受影响。'), t('放弃添加'), t('放弃')) || token !== session.token) return false;
   const result = await post('/api/index', {action: 'discard'});
   if (token !== session.token) return false;
   setIndex(result); return true;
