@@ -7,6 +7,8 @@ use serde::Deserialize;
 use serde_json::{json, Value};
 use std::path::Path;
 
+mod scoring;
+
 const DIM: usize = 1024;
 
 #[derive(Deserialize)]
@@ -68,23 +70,26 @@ impl Package {
         Ok(())
     }
 
-    fn hits(&self, uuid: &str, bytes: &[u8], out: &mut Vec<Hit>) -> Result<()> {
+    /// 校验一行 WD 向量并追加到这一块（#582）。
+    fn push_vector(bytes: &[u8], block: &mut Vec<f32>) -> Result<()> {
         if bytes.len() != DIM * 4 {
             return Err(Error::invalid("WD 特征向量维数不正确"));
         }
-        let vector = float32(bytes);
-        if vector.iter().any(|v| !v.is_finite()) {
+        let start = block.len();
+        block.extend(bytes.chunks_exact(4).map(|b| f32::from_le_bytes(b.try_into().expect("四字节分块"))));
+        if block[start..].iter().any(|v| !v.is_finite()) {
             return Err(Error::invalid("WD 特征向量包含非有限值"));
         }
-        for ((tag, weights), bias) in self.manifest.labels.iter().zip(self.weights.chunks_exact(DIM)).zip(&self.bias) {
-            // 累加与 sigmoid 用 f64，阈值与证据分数沿用冻结实验的 f32 概率精度。
-            let sum: f64 = vector.iter().zip(weights).map(|(&x, &w)| f64::from(x) * f64::from(w)).sum();
-            let probability = (1.0 / (1.0 + (-(sum + f64::from(*bias))).exp())) as f32;
-            if f64::from(probability) >= self.manifest.threshold {
-                out.push(Hit { uuid: uuid.to_owned(), tag: tag.clone(), probability: f64::from(probability) });
-            }
-        }
         Ok(())
+    }
+
+    /// 给攒好的一块图片打分（`scoring`），命中按图片、再按头的顺序追加，然后清空这一块。
+    fn hits(&self, heads: &scoring::Heads<'_>, uuids: &mut Vec<String>, block: &mut Vec<f32>, out: &mut Vec<Hit>) {
+        heads.score(block, |image, head, probability| {
+            out.push(Hit { uuid: uuids[image].clone(), tag: self.manifest.labels[head].clone(), probability });
+        });
+        uuids.clear();
+        block.clear();
     }
 }
 
@@ -139,6 +144,10 @@ fn scan(
     let mut seen = std::collections::HashSet::new();
     let mut hits = Vec::new();
     let mut checked = 0;
+    let thresholds = vec![package.manifest.threshold; package.bias.len()];
+    let heads = scoring::Heads::new(DIM, &package.weights, &package.bias, &thresholds);
+    let rows_per_block = heads.block_rows();
+    let (mut uuids, mut block) = (Vec::with_capacity(rows_per_block), Vec::with_capacity(rows_per_block * DIM));
     let mut stmt = src.prepare(&sql)?;
     let mut rows = stmt.query([scope])?;
     while let Some(row) = rows.next()? {
@@ -152,11 +161,20 @@ fn scan(
             }
         }
         // 旧图库无逐图交付账本时，使用已经存储的 WD 向量。
-        package.hits(&row.get::<_, String>(0)?, &row.get::<_, Vec<u8>>(1)?, &mut hits)?;
-        checked += 1;
-        if checked % 32 == 0 || checked == total {
+        Package::push_vector(&row.get::<_, Vec<u8>>(1)?, &mut block)?;
+        uuids.push(row.get::<_, String>(0)?);
+        if uuids.len() == rows_per_block {
+            progress.check()?;
+            checked += uuids.len();
+            package.hits(&heads, &mut uuids, &mut block, &mut hits);
             progress.count(checked, total)?;
         }
+    }
+    if !uuids.is_empty() {
+        progress.check()?;
+        checked += uuids.len();
+        package.hits(&heads, &mut uuids, &mut block, &mut hits);
+        progress.count(checked, total)?;
     }
     Ok((checked, hits))
 }
