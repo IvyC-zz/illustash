@@ -108,7 +108,7 @@ function drawGalleryHeading(h, r) {
   const edited = changed(g, r);
   const item = (id, label, title = '') => `<button class="menu-item" id="${id}"${title ? ` title="${title}"` : ''}>${label}</button>`;
   const title = renaming === String(g.id)
-    ? `<input id="galleryName" maxlength="60" value="${esc(g.name)}" aria-label="${t('画廊名称')}">`
+    ? `<input id="galleryName" maxlength="60" size="${Math.min(40, Math.max(12, [...g.name].length + 2))}" value="${esc(g.name)}" aria-label="${t('画廊名称')}">`
     : `<button class="link-button" id="galleryName" title="${t('点一下改名')}">${esc(g.name)}</button>`;
   h.innerHTML = `<div class="heading-main"><h1>${title}</h1><p>${sub}</p></div><div class="heading-actions">` +
     (edited ? `<button class="quiet" id="galleryUpdate" title="${t('用现在的条件替换这个画廊保存的条件')}">${t('更新画廊')}</button><button class="quiet" id="gallerySaveAs">${t('另存为新画廊')}</button>` : '') +
@@ -175,10 +175,11 @@ async function remove(g) {
   go({page: 'galleries'});
   reloadList();
 }
+const indexHeading = () => [t('画廊'), t('{n} 个', {context: 'gallery', n: number(state.galleries?.length || 0)})];
 // 页头：画廊页由 drawGalleryHeading 画；全部画廊用通用标题。
 function drawHeading() {
   if (onPage(state.route, 'gallery')) drawGalleryHeading($('heading'), state.route);
-  else if (onPage(state.route, 'galleries')) $('heading').innerHTML = `<div class="heading-main"><h1>${t('画廊')}</h1><p>${t('{n} 个', {context: 'gallery', n: number(state.galleries?.length || 0)})}</p></div>`;
+  else if (onPage(state.route, 'galleries')) { const [title, sub] = indexHeading(); $('heading').innerHTML = `<div class="heading-main"><h1>${title}</h1><p>${sub}</p></div>`; }
 }
 
 // 写入、撤销或切换 R18 之后：列表重读，卡片和页头重画。网格本身由 reload() 管。
@@ -192,7 +193,7 @@ async function refresh(why) {
   drawHeading();
 }
 implement({
-  galleries: {render: () => renderIndex(), heading: () => [t('画廊'), t('{n} 个', {context: 'gallery', n: number(state.galleries?.length || 0)})], refresh},
+  galleries: {render: () => renderIndex(), heading: indexHeading, refresh},
   gallery: {prepare, drawHeading: drawGalleryHeading, refresh, onMeta: () => {},
     emptyNext: () => state.nsfw === 'only' ? `<button class="quiet" data-empty="nsfw">${t('显示全部')}</button>` : ''},
 });
