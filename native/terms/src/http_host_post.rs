@@ -725,6 +725,7 @@ fn route(
         "/api/tag"
         | "/api/favorite"
         | "/api/galleries"
+        | "/api/similar/seen"
         | "/api/undo"
         | "/api/artist/verdict"
         | "/api/curate"

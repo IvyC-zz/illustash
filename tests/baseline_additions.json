@@ -10,6 +10,15 @@
       ]
     },
     {
+      "name": "similar_seen",
+      "introduced_in": 10,
+      "checks": [
+        "native/terms/src/app_commands.rs::similar_seen_hides_until_new_member_and_undo_skips_learning",
+        "native/terms/src/app_research.rs::similar_seen_and_its_history_are_ignored_by_learning_fingerprint",
+        "native/terms/src/app_archives.rs::gallery_roundtrips_in_exported_library"
+      ]
+    },
+    {
       "name": "human_state_marks",
       "introduced_in": 9,
       "checks": [

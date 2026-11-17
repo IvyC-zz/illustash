@@ -10,7 +10,7 @@ import {parseList} from './filters.js';
 export function parseHash() {
   const [path, query = ''] = location.hash.replace(/^#/, '').split('?');
   const parts = path.split('/').filter(Boolean), q = new URLSearchParams(query);
-  const route = {page: 'library', q: q.get('q') || '', tag: q.get('tag') || '', utag: q.get('utag') || '', dup: q.get('dup') || '', reason: q.get('reason') || '', kind: q.get('kind') || '', maybe: q.get('maybe') || '', sort: q.get('sort') || '',
+  const route = {page: 'library', q: q.get('q') || '', tag: q.get('tag') || '', utag: q.get('utag') || '', dup: q.get('dup') || '', reason: q.get('reason') || '', kind: q.get('kind') || '', seen: q.get('seen') || '', maybe: q.get('maybe') || '', sort: q.get('sort') || '',
     work: q.get('work') || '', day: q.get('day') || '', artist: q.get('artist') || '', char: q.get('char') || '', variant: q.get('variant') || '', check: q.get('check') || '', doubt: q.get('doubt') || '',
     // 组合条件（#445）：has、not 是条件的 JSON 数组，from、to 是加入日期。
     has: parseList(q.get('has')), not: parseList(q.get('not')), from: q.get('from') || '', to: q.get('to') || ''};
@@ -30,7 +30,7 @@ export function hashFor(r) {
   if (r.like) { q.set('like', r.like); if (r.by) q.set('by', r.by); }
   if (r.work) q.set('work', r.work); if (r.day) q.set('day', r.day); if (r.artist) q.set('artist', r.artist);
   if (r.char) q.set('char', r.char); if (r.variant) q.set('variant', r.variant); if (r.check) q.set('check', r.check); if (r.doubt) q.set('doubt', r.doubt);
-  if (r.q) q.set('q', r.q); if (r.dup) q.set('dup', r.dup); if (r.reason) q.set('reason', r.reason); if (r.kind) q.set('kind', r.kind); if (r.maybe) q.set('maybe', r.maybe); if (r.tag) q.set('tag', r.tag); if (r.utag) q.set('utag', r.utag); if (r.sort && r.sort !== defaultSort(r)) q.set('sort', r.sort);
+  if (r.q) q.set('q', r.q); if (r.dup) q.set('dup', r.dup); if (r.reason) q.set('reason', r.reason); if (r.kind) q.set('kind', r.kind); if (r.seen) q.set('seen', r.seen); if (r.maybe) q.set('maybe', r.maybe); if (r.tag) q.set('tag', r.tag); if (r.utag) q.set('utag', r.utag); if (r.sort && r.sort !== defaultSort(r)) q.set('sort', r.sort);
   // 画廊页总是写上 has（可以是 []）：不带查询的 #/gallery/<id> 表示按保存的条件打开（ui/galleries.js）。
   if (r.has?.length || pageOf(r).gallery) q.set('has', JSON.stringify(r.has || []));
   if (r.not?.length) q.set('not', JSON.stringify(r.not)); if (r.from) q.set('from', r.from); if (r.to) q.set('to', r.to);

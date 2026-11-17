@@ -65,30 +65,31 @@ test('square mode and zoom keep predictable geometry; toggling fit anchors the s
 // 首页在 ui/home.js；它的状态是 home，包括 observer；页面是假的。
 function homeHarness(api){
   const {home, moreHome} = homeModule, {state} = web.core(), page = web.fakePage(), el = page.document.getElementById;
-  Object.assign(home, {days: [{day: '2026-10-02', items: [{uuid: 'old'}]}], next: '2026-10-02', gen: 1, loading: false, width: 1000});
-  const sentinel = {html: '', textContent: '', insertAdjacentHTML(where, html) { assert.equal(where, 'beforebegin'); this.html += html; }};
+  Object.assign(home, {days: [{day: '2026-10-02', items: [{uuid: 'old', width: 100, height: 100, memberships: []}], characters: [], count: 1}], next: '2026-10-02', gen: 1, loading: false, width: 1000});
+  // 读到更早的几天以后，首页按天比对（#452）：已有的块留着，新的几天接在后面，哨兵在最后。
+  const sentinel = {textContent: ''};
   home.observer = {observes: 0, disconnects: 0, unobserve() {}, observe() { this.observes++; }, disconnect() { this.disconnects++; }};
   Object.assign(state, {route: {page: 'home'}, nsfw: '', items: [{uuid: 'old'}], total: 1});
   page.document.getElementById = id => id === 'homeSentinel' ? sentinel : el(id);
   globalThis.fetch = path => Promise.resolve().then(() => api(path)).then(body => ({status: 200, ok: true, json: async () => body}));
-  return {c: {moreHome, state}, home, sentinel, observer: home.observer};
+  return {c: {moreHome, state}, home, sentinel, observer: home.observer, blocks: () => el('homePage').children};
 }
-const sections = html => [...html.matchAll(/data-day="([^"]+)"/g)].map(m => m[1]);
+const keys = h => h.blocks().map(b => b._sectionKey);
 test('home appends only new dates and items; repeated concurrent clicks share the request',async()=>{
   let resolve,calls=0; const h=homeHarness(()=>{calls++;return new Promise(r=>resolve=r);});
   const pending=h.c.moreHome(); await h.c.moreHome(); await new Promise(r => setImmediate(r)); assert.equal(calls,1);
   resolve({days:[{day:'2026-10-02',items:[],characters:[]},{day:'2026-10-01',items:[{uuid:'new', width: 100, height: 100, memberships: []}],characters:[],count:1},{day:'2026-10-01',items:[],characters:[]}],next:'2026-10-01'});await pending;
-  assert.deepEqual(sections(h.sentinel.html),['2026-10-01']);assert.equal(h.home.days.length,2);assert.equal(h.c.state.items.length,2);assert.equal(h.observer.observes,1);
+  assert.deepEqual(keys(h),['2026-10-02','2026-10-01','more']);assert.match(h.blocks()[1].html,/data-day="2026-10-01"/);assert.equal(h.home.days.length,2);assert.equal(h.c.state.items.length,2);assert.equal(h.observer.observes,1);
 });
 test('home errors release loading without resubscribing and permit an explicit retry',async()=>{
   let calls=0;const h=homeHarness(async()=>{calls++;if(calls===1)throw Error('failed');return {days:[],next:''};});
   await h.c.moreHome();assert.equal(h.home.loading,false);assert.equal(h.observer.observes,0);
-  await h.c.moreHome();assert.equal(calls,2);assert.equal(h.sentinel.textContent,'已经到底了');
+  await h.c.moreHome();assert.equal(calls,2);assert.match(h.blocks().at(-1).html,/已经到底了/);
 });
 test('home responses after page changes are discarded',async()=>{
   let resolve;const h=homeHarness(()=>new Promise(r=>resolve=r));const pending=h.c.moreHome(); await new Promise(r => setImmediate(r));
   h.c.state.route.page='library';resolve({days:[{day:'2026-10-01',items:[]}],next:''});await pending;
-  assert.equal(h.home.days.length,1);assert.equal(h.sentinel.html,'');assert.equal(h.observer.observes,0);
+  assert.equal(h.home.days.length,1);assert.deepEqual(keys(h),[]);assert.equal(h.observer.observes,0);
 });
 test('an older home request cannot unlock or append into a new home generation',async()=>{
   let resolve;const h=homeHarness(()=>new Promise(r=>resolve=r));const pending=h.c.moreHome(); await new Promise(r => setImmediate(r));

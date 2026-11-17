@@ -1492,8 +1492,8 @@ fn assets(c: &Connection, context: &LibraryContext, path: &str, q: &HashMap<Stri
     Ok(Json::object([("items", Json::Array(items)), ("total", total), ("offset", offset.into())]))
 }
 
-// 没有研究 worker 时也能读到缓存的分组。
-pub(crate) fn similar_groups(c: &Connection, kind: &str, nsfw: &str) -> Result<Json> {
+// 没有研究 worker 时也能读到缓存的分组。`seen` 时每组多一个 `seen`：看得到的成员是否都在某一次「看过了」里（#427）。
+pub(crate) fn similar_groups(c: &Connection, kind: &str, nsfw: &str, seen: bool) -> Result<Json> {
     const KINDS: &[&str] = &["identical", "duplicate", "subtle", "crop", "variant", "edit"];
     if !kind.is_empty() && !KINDS.contains(&kind) {
         return Err(Error::Invalid("未知关系".into()));
@@ -1534,6 +1534,7 @@ pub(crate) fn similar_groups(c: &Connection, kind: &str, nsfw: &str) -> Result<J
             group.set(get(&r, "kind").text(), get(&r, "n"));
         }
     }
+    let marks = if seen { Some(crate::app_similar_seen::Seen::load(c)?) } else { None };
     Ok(Json::Array(
         members
             .into_iter()
@@ -1542,12 +1543,20 @@ pub(crate) fn similar_groups(c: &Connection, kind: &str, nsfw: &str) -> Result<J
                 if uuids.len() <= 1 || (!kind.is_empty() && k.get(kind).is_none()) {
                     return None;
                 }
-                Some(Json::object([
+                let seen = marks.as_ref().map(|marks| {
+                    let texts: Vec<&str> = uuids.iter().map(Json::text).collect();
+                    !marks.covering(&texts).is_empty()
+                });
+                let mut group = Json::object([
                     ("gid", gid),
                     ("size", (uuids.len() as i64).into()),
                     ("covers", Json::Array(uuids.into_iter().take(4).collect())),
                     ("kinds", k),
-                ]))
+                ]);
+                if let Some(seen) = seen {
+                    group.set("seen", seen.into());
+                }
+                Some(group)
             })
             .collect(),
     ))
@@ -1758,7 +1767,7 @@ mod tests {
         for nsfw in ["", "hide", "only"] {
             actual.push(clusters(&tx, nsfw).unwrap());
             for kind in ["", "identical", "subtle", "edit"] {
-                actual.push(similar_groups(&tx, kind, nsfw).unwrap());
+                actual.push(similar_groups(&tx, kind, nsfw, false).unwrap());
             }
         }
         assert_eq!(Json::Array(actual).dump().as_bytes(), expected.as_slice());
