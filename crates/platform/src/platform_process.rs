@@ -181,6 +181,26 @@ impl DesktopJob {
         Ok(Self)
     }
 }
+/// 等外壳的 stdin 管道关闭（读到 EOF 或出错）再返回，期间读到的字节都丢掉。
+///
+/// Windows 上不挂着阻塞读（#659）：同步打开的管道上，I/O 按句柄串行，挂着的 `ReadFile` 会让别的线程对同一
+/// 句柄的 `PeekNamedPipe` 一直等到外壳关掉管道。宿主第一次加载 openblas.dll 时，它的运行库就在初始化里这样
+/// 查标准输入；那时持有加载器锁，整个进程随之停住。
+pub fn wait_stdin_closed() {
+    #[cfg(windows)]
+    {
+        use std::os::windows::io::AsRawHandle;
+        windows_desktop::wait_closed(std::io::stdin().as_raw_handle(), std::time::Duration::from_millis(100));
+    }
+    #[cfg(not(windows))]
+    {
+        use std::io::Read;
+        let mut buffer = [0u8; 64];
+        let mut input = std::io::stdin().lock();
+        while input.read(&mut buffer).is_ok_and(|n| n > 0) {}
+    }
+}
+
 pub fn prepare_desktop(command: &mut Command) {
     #[cfg(unix)]
     std::os::unix::process::CommandExt::process_group(command, 0);
