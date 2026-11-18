@@ -907,7 +907,16 @@
     "other": "Last check: {time} · {n} characters to add"
   },
   "尚未检查": "Not checked yet",
-  "定期在 Danbooru 上查关注的作品有没有本地还不认识的角色，只发送作品名。": "Regularly checks Danbooru for characters of followed series that are not known locally, sending only series names.",
+  "在 Danbooru 上查关注的作品有没有角色资料包和本地都还没有的角色，只发送作品名。": "Checks Danbooru for characters of followed series that neither the character pack nor this computer has yet, sending only series names.",
+  "上次检查（{time}）关注的作品都不缺角色。角色资料包发布以后才出现的角色，在这里检查。": "At the last check ({time}), no characters were missing from followed series. Check here for characters that appeared after the character pack was released.",
+  "检查设置与记录": "Check settings and history",
+  "关注的作品还缺 {n} 个角色": {
+    "one": "Followed series are missing {n} character",
+    "other": "Followed series are missing {n} characters"
+  },
+  "上次检查新角色时，角色资料包和本地都还没有": "At the last character check, neither the character pack nor this computer had them",
+  "查看并添加": "Review and add",
+  "检查新角色…": "Check for new characters…",
   "添加角色时每个角色下载约 20 张公开参考图（约 {mb} MB），在本机算好特征后重新扫描图库。": "Adding a character downloads about 20 public reference pictures (about {mb} MB), computes features on this computer and rescans the library.",
   "了解详情": "Details",
   "关注的作品": "Followed series",
@@ -3280,7 +3289,7 @@
   "还没有归属、也没有人工确认的图会补上一个机器归属，已有的归属和人工结论不变。": "Images with no assignment and no human confirmation get a machine assignment; existing assignments and your conclusions stay as they are.",
   "删除角色资料包？已启用的图库保留现有的扩展候选，新识别的图不再检查；再用要重新下载或导入。": "Delete the character pack? Libraries that use it keep their extension suggestions, but newly recognized images are no longer checked; to use it again, download or import it again.",
   "角色资料包已删除": "Character pack deleted",
-  "新角色检查、角色资料包、角色名称与翻译": "New character check, character pack, character names and translations",
+  "角色资料包、新角色检查、角色名称与翻译": "Character pack, new character check, character names and translations",
   "这个版本的角色资料包不在可用的列表里": "This version of the character pack isn’t in the available list",
   "角色资料包正在下载或导入，请等它结束": "The character pack is downloading or importing; wait for it to finish",
   "角色资料包已经就位": "The character pack is already in place",
