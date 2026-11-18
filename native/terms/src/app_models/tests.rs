@@ -21,6 +21,8 @@ enum Mode {
     Slow,
     /// 302 到另一个路径（像 hf-mirror 跳转到 CDN 那样）；Range 头必须跟着过去。
     Redirect(String),
+    /// 前 n 次读完请求就关掉连接，什么也不回（像握手时被对端断开那样，#642）；之后照常。
+    CloseFirst(usize),
 }
 struct Route {
     body: Vec<u8>,
@@ -72,9 +74,11 @@ fn serve(routes: Vec<(&str, Vec<u8>, Mode)>) -> Server {
                         stream.write_all(b"HTTP/1.1 404 Not Found\r\nContent-Length: 0\r\nConnection: close\r\n\r\n");
                     return;
                 };
-                let first_time = route.served.fetch_add(1, Ordering::SeqCst) == 0;
+                let served = route.served.fetch_add(1, Ordering::SeqCst);
+                let first_time = served == 0;
                 let mut body = route.body.clone();
                 match &route.mode {
+                    Mode::CloseFirst(n) if served < *n => return,
                     Mode::Missing => {
                         let _ = stream
                             .write_all(b"HTTP/1.1 404 Not Found\r\nContent-Length: 0\r\nConnection: close\r\n\r\n");
@@ -430,6 +434,59 @@ fn a_failed_source_hands_over_and_a_dropped_connection_resumes() {
     assert!(!hits.iter().any(|(p, _)| p.starts_with("/ms/") && !p.ends_with("big.onnx")));
     let info = post(models, &place, json!({"action": "download"})).unwrap_err();
     assert!(info.to_string().contains("已经就位"));
+}
+
+/// 只有一个来源的文件（像角色资料包那样直接从项目 Release 下载），测同一来源上的重试（#642）。
+fn project_place(fixture: &Fixture, server: &Server, data: &[u8]) -> Place {
+    let manifest = Box::leak(Box::new(Manifest {
+        format: 1,
+        pack: "project.1".into(),
+        manual: "https://example.invalid/packs".into(),
+        mirror: String::new(),
+        modelscope: String::new(),
+        files: vec![Entry {
+            path: "pack.bin".into(),
+            size: data.len() as u64,
+            sha256: sha(data),
+            source: Source::Project { url: format!("{}/release/pack.bin", server.base) },
+            optional: false,
+        }],
+        wd_coreml: None,
+        character_index: None,
+    }));
+    Place { root: fixture.dir.join("shared/extensions/project.1"), manifest, ..fixture.place(server) }
+}
+
+#[test]
+fn a_connection_closed_before_the_reply_is_tried_again_on_the_same_source() {
+    let fixture = Fixture::new();
+    let data = bytes(50_000, 3);
+    let server = serve(vec![("/release/pack.bin", data.clone(), Mode::CloseFirst(2))]);
+    let place = project_place(&fixture, &server, &data);
+    let models = models();
+    post(models, &place, json!({"action": "download"})).unwrap();
+    let job = finished(models);
+    assert_eq!(job["status"], "done", "{job}");
+    assert_eq!(fs::read(place.root.join("pack.bin")).unwrap(), data);
+    let hits = server.hits.lock().unwrap().clone();
+    assert_eq!(hits, vec![("/release/pack.bin".to_owned(), None); 3], "断开两次，第三次下完；都从头请求");
+}
+
+#[test]
+fn a_source_that_keeps_closing_the_connection_fails_after_a_few_tries() {
+    let fixture = Fixture::new();
+    let data = bytes(50_000, 5);
+    let server = serve(vec![("/release/pack.bin", data.clone(), Mode::CloseFirst(usize::MAX))]);
+    let place = project_place(&fixture, &server, &data);
+    let models = models();
+    post(models, &place, json!({"action": "download"})).unwrap();
+    let job = finished(models);
+    assert_eq!(job["status"], "failed", "{job}");
+    assert_eq!(server.hits.lock().unwrap().len(), 4, "第一次加三次重试");
+    assert_eq!(job["failed_file"], "pack.bin");
+    let host = server.base.trim_start_matches("http://");
+    assert_eq!(job["failures"], json!([{"source": host, "why": "网络连接中断或超时"}]));
+    assert!(!place.root.join("pack.bin").exists());
 }
 
 #[test]

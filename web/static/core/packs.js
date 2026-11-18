@@ -1,10 +1,12 @@
 // 角色资料包（#602；原来分开的 #550 WD 角色扩展和 #559 CCIP 长尾包合成一个包）：包的下载、导入和删除，本图库的启用、
 // 换包、撤回，以及签名目录里的新版本。不碰 DOM。状态是 GET /api/packs 的回复（形状见 native/terms/src/http_host_get.rs
-// 的 `packs`），存在 state.pack，只由这里写入；下载、导入或启用、撤回进行期间，以及等着默认启用时每秒读一次。onPack(fn) 在每次读到或改动后
-// 调用 fn(before)，before 是改动前的状态。两个组成部分各自的旧路由（/api/wd-extension、/api/ccip-longtail）页面不再读。
+// 的 `packs`），存在 state.pack，只由这里写入；下载、导入或启用、撤回进行期间，以及等着默认启用时每秒读一次，读取失败时退避
+// 着接着读。onPack(fn) 在每次读到或改动后调用 fn(before)，before 是改动前的状态。两个组成部分各自的旧路由
+// （/api/wd-extension、/api/ccip-longtail）页面不再读。
 import {session, api} from './session.js';
 import {state} from './state.js';
 import {listeners} from './events.js';
+import {poller} from './poll.js';
 const changed = listeners();
 export const onPack = changed.on;
 
@@ -15,14 +17,28 @@ export const packRunning = x => x?.task?.status === 'running';
 // 宿主这次打开不再自动重试，也就不用读。
 export const packAwaitingDefault = x => x?.library?.prompt === 'pending' && x?.current?.status === 'ready'
   && (!x.task || x.task.status === 'running');
+// 下载、导入、启用或撤回进行中，或者等着默认启用：每秒读一次。
+const watched = x => packDownloading(x) || packRunning(x) || packAwaitingDefault(x);
+// 自己排下一次的读取（core/poll.js，#648）。读取失败时只要状态还要看着就照样排下一次，1、2、4、8 秒退避，最多 10 秒：
+// 宿主短暂忙或者一次网络抖动，进度不会停在那里等用户切页。换了会话就停。
+let failures = 0;
+const tick = poller(async fresh => {
+  const token = session.token;
+  try { await loadPack(); } catch {
+    if (!fresh() || token !== session.token) return 0;
+    failures += 1;
+    return watched(state.pack) ? Math.min(10000, 1000 * 2 ** (failures - 1)) : 0;
+  }
+  failures = 0;
+  return fresh() && token === session.token && watched(state.pack) ? 1000 : 0;
+}, {retry: 0});
 // 几次读取会重叠（设置页渲染、任务面板、轮询）：只采用最后发出的那次；换了会话的回应丢掉（#34）。
-let timer = 0, poll = 0;
+let poll = 0;
 async function adopt(value, mine, token) {
   if (mine !== poll || token !== session.token) return state.pack;
   const before = state.pack;
   state.pack = value;
-  clearTimeout(timer);
-  if (packDownloading(value) || packRunning(value) || packAwaitingDefault(value)) timer = setTimeout(() => loadPack().catch(() => {}), 1000);
+  tick.later(watched(value) ? 1000 : 0);
   await changed.emit(before);
   return value;
 }

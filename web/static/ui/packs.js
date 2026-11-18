@@ -146,15 +146,17 @@ export function packFailures(x = current()) {
   return list.length ? `<ul class="models-results">${list.map(f => `<li class="mismatch">${esc(t('{source}：{why}', {source: f.source, why: tb(f.why)}))}</li>`).join('')}</ul>` : '';
 }
 // 导入对所选的每个文件做了什么（两个组成部分的结果已经在后端按文件名合并）。只在这个页面发起的导入结束后列出：包文件
-// 整个 App 一份，导入结果也是，换了图库（页面重新载入）或别的窗口导入的不列。
-let importedHere = false;
+// 整个 App 一份，导入结果也是，换了图库（页面重新载入）或别的窗口导入的不列。只留在发起导入的那一页（state.route 每次换页
+// 都是新的），切走再回来就不列了（#643）。离线包里随附的许可和说明（extra）不是要导入的文件，不列。
+let importedHere = null;
 const RESULT = {accepted: () => t('已接收'), mismatch: () => t('SHA-256 不符，已拒绝'), already: () => t('已经有了'),
   unknown: () => t('不是角色资料包'),
   // 离线包里的包目录和签名（#602）。
   catalog: () => t('包目录，已读取'), catalog_old: () => t('包目录比本机的旧，没有采用'), catalog_invalid: () => t('包目录签名不对，已拒绝')};
 export function packImportSummary(x = current()) {
-  const d = x?.download; if (!importedHere || d?.kind !== 'import' || !d.results?.length || packDownloading(x)) return '';
-  return `<ul class="models-results">${d.results.map(r => `<li class="${esc(r.result)}"><bdi>${esc(r.name)}</bdi> · ${RESULT[r.result]?.() || esc(r.result)}</li>`).join('')}</ul>`;
+  const d = x?.download, list = (d?.results || []).filter(r => r.result !== 'extra');
+  if (importedHere !== state.route || d?.kind !== 'import' || !list.length || packDownloading(x)) return '';
+  return `<ul class="models-results">${list.map(r => `<li class="${esc(r.result)}"><bdi>${esc(r.name)}</bdi> · ${RESULT[r.result]?.() || esc(r.result)}</li>`).join('')}</ul>`;
 }
 // 折叠区：存放位置（所有图库共用）、两个组成部分的文件、版本和许可；已就位时可以删除。
 export function packInfo(x = current()) {
@@ -262,7 +264,7 @@ export function switchMessage(offer = packOffer(), x = current()) {
 
 async function act(what) {
   // 导入的结果只留到下一个动作：启用、重新检查、撤回、删除以后不再列出（#559 走查）。
-  if (what !== 'import') importedHere = false;
+  if (what !== 'import') importedHere = null;
   try {
     if (what === 'download') await packAction('download');
     else if (what === 'offer-download') await packAction('download', packOffer()?.version);
@@ -270,7 +272,7 @@ async function act(what) {
       const offer = packOffer(); if (!offer) return;
       if (!await confirmAction(switchMessage(offer), t('换成新版本'), t('换成新版本'))) return;
       await enablePack(offer.version);
-    } else if (what === 'import') { const r = await packAction('import'); if (!r?.cancelled) importedHere = true; }
+    } else if (what === 'import') { const route = state.route, r = await packAction('import'); if (!r?.cancelled) importedHere = route; }
     else if (what === 'package-cancel') await packAction('cancel');
     else if (what === 'discard') {
       if (!await confirmAction(t('删除已经下载但还没完成的部分？下次要从头下载。'), t('删除未完成的部分'), t('删除'))) return;

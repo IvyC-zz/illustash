@@ -22,7 +22,7 @@ const lib = (fields = {}) => ({enabled: false, version: null, wd: false, ccip: f
 const pack = ({current: p = {}, library: l = {}, download = null, task = null, offer = null, ccip = {}} = {}) => ({
   catalog: {configured: true, serial: null, checked_at: null, error: null}, current: cur(p), offer, download, library: lib(l), task,
   location: '/Users/synthetic/Library/Application Support/Illustash/Shared/extensions',
-  wd: {package: {manual: 'https://github.com/shio-vinyl/illustash/blob/main/docs/INSTALL.md#可选的-wd-角色扩展包',
+  wd: {package: {manual: 'https://github.com/shio-vinyl/illustash/blob/main/docs/INSTALL.md#角色资料包',
     location: '/Users/synthetic/Library/Application Support/Illustash/Shared/extensions/wd-extension-v1'}},
   ccip: {library: {needs_scan: false, error: null, ...ccip}}});
 const READY = {status: 'ready', have: 2214393};
@@ -305,6 +305,18 @@ test('等着默认启用（#630）：包就位后接着读，宿主启动的启�
   assert.equal(c.state.pack, done);
 });
 
+test('下载中读取失败一次：退避以后接着读，读到结束（#648）', async () => {
+  const running = pack({download: {kind: 'download', status: 'running', done: 1, total: 10}});
+  const done = pack({current: READY, download: {kind: 'download', status: 'done', done: 10, total: 10}});
+  const calls = server([{body: running}, {status: 503, body: {error: '宿主忙'}}, {body: done}, {body: done}]);
+  await c.loadPack();
+  const until = Date.now() + 10000;
+  while (c.state.pack !== done && Date.now() < until) await new Promise(resolve => setTimeout(resolve, 50));
+  assert.equal(c.state.pack, done, '失败以后没有停住');
+  await new Promise(resolve => setTimeout(resolve, 1200));
+  assert.equal(calls.length, 3, '结束以后不再读');
+});
+
 test('取消晚了一步（写入阶段回 409）：提示事实，不带错误编号，再读一次状态；409 原样抛出后端的原文', async () => {
   const page = web.fakePage();
   c.wirePacks();
@@ -357,9 +369,11 @@ test('这个页面导入以后逐个列出所选文件的结果，包括离线�
   const download = {kind: 'import', status: 'done', results: [{name: 'character-pack-0.2-offline.zip/packs.json', result: 'catalog'},
     {name: 'old-offline.zip/packs.json', result: 'catalog_old'}, {name: 'bad-offline.zip/packs.json', result: 'catalog_invalid'},
     {name: 'character-pack-0.2-offline.zip/wd-extension-v2.bin', result: 'accepted'}, {name: 'edited.bin', result: 'mismatch'},
-    {name: 'notes.txt', result: 'unknown'}, {name: 'again.bin', result: 'already'}]};
+    {name: 'notes.txt', result: 'unknown'}, {name: 'again.bin', result: 'already'},
+    {name: 'character-pack-0.2-offline.zip/NOTICE.txt', result: 'extra'}]};
   const imported = pack({current: READY, download});
   const page = web.fakePage();
+  c.state.route = {page: 'settings', section: 'characters'};
   c.wirePacks();
   server([{body: imported}, {body: {cancelled: true}}, {body: imported}]);
   const click = async act => {
@@ -379,7 +393,14 @@ test('这个页面导入以后逐个列出所选文件的结果，包括离线�
   assert.match(html, /edited.bin<\/bdi> · SHA-256 不符，已拒绝/);
   assert.match(html, /notes.txt<\/bdi> · 不是角色资料包/);
   assert.match(html, /again.bin<\/bdi> · 已经有了/);
+  assert.doesNotMatch(html, /NOTICE/, '离线包随附的许可和说明不列（#643）');
+  assert.equal(c.packImportSummary(pack({current: READY, download: {...download, results: download.results.filter(r => r.result === 'extra')}})), '');
   assert.equal(c.packImportSummary(pack({download: {kind: 'download', status: 'done', results: []}})), '');
+  // 切到别的页面再回来（每次换页都是新的 route）：不再列（#643）。
+  c.state.route = {page: 'settings', section: 'about'};
+  assert.equal(c.packImportSummary(imported), '');
+  c.state.route = {page: 'settings', section: 'characters'};
+  assert.equal(c.packImportSummary(imported), '');
 });
 
 test('任务面板的一项：有下载或任务时才列出，失败时打警告', () => {

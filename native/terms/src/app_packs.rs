@@ -384,6 +384,15 @@ impl Catalog {
     /// 本版本能用的角色资料包：种类认识，两个组成部分的格式都支持、基础模型都和这个构建的对得上，满足最低应用版本。
     /// 组成部分的文件和内置的相同时，换成内置的那个（同一个文件夹、同一个下载地址）。和内置包同版本名或同修订号的条目
     /// 不提供。
+    /// 目录里各个版本两个组成部分的文件名（不管这个版本能不能用）。导入离线包时，不在这里面的成员就是附带的文件。
+    fn file_names(&self) -> Vec<&str> {
+        self.entries
+            .iter()
+            .filter_map(|e| e.pack.as_ref())
+            .flat_map(|p| [p.wd.file.name.as_str(), p.ccip.file.name.as_str()])
+            .collect()
+    }
+
     pub(crate) fn packs(&self, context: &Context) -> Vec<CharacterPack> {
         let builtin = &context.builtin;
         self.entries
@@ -606,11 +615,22 @@ fn adopt_at(path: &Path, bytes: &[u8], signature: &[u8], key: &str) -> Result<Ad
 
 // ---------- 联网读取 ----------
 
+/// 读一个目录文件。连接或握手时被断开这类暂时性的错误再试两次（#642，和下载包文件同一个原因）：首次准备时读不到目录
+/// 就只能下内置的 0.1。
 fn get(agent: &ureq::Agent, address: &str, limit: u64) -> std::result::Result<Vec<u8>, String> {
-    let reply = agent.get(address).set("User-Agent", "Illustash-pack-catalog").call().map_err(|e| match e {
-        ureq::Error::Status(code, _) => format!("包目录的地址返回了错误（HTTP {code}）"),
-        ureq::Error::Transport(_) => "连不上 GitHub，没能读取包目录".into(),
-    })?;
+    let mut retries = 0;
+    let reply = loop {
+        match agent.get(address).set("User-Agent", "Illustash-pack-catalog").call() {
+            Ok(reply) => break reply,
+            Err(ureq::Error::Transport(t)) if retries < 2 && crate::app_models::transient(&t) => {
+                retries += 1;
+                eprintln!("pack catalog: {t}; retrying");
+                std::thread::sleep(crate::app_models::backoff(retries));
+            }
+            Err(ureq::Error::Status(code, _)) => return Err(format!("包目录的地址返回了错误（HTTP {code}）")),
+            Err(ureq::Error::Transport(_)) => return Err("连不上 GitHub，没能读取包目录".into()),
+        }
+    };
     let mut bytes = Vec::new();
     reply.into_reader().take(limit + 1).read_to_end(&mut bytes).map_err(|_| "读取包目录失败".to_string())?;
     if bytes.len() as u64 > limit {
@@ -635,7 +655,7 @@ pub(crate) fn refresh(resources: &Path) -> Option<std::result::Result<Adopted, S
 // ---------- 离线导入 ----------
 
 /// 所选文件里的离线包（ZIP，根上有 `packs.json` 和 `packs.json.sig`）：先采用其中的目录，再按它认包文件。
-/// 返回每个目录成员的导入结果（「名字 → 结果」，名字的写法和导入结果列表一致：`包.zip/packs.json`）。
+/// 返回目录成员和附带文件的导入结果（「名字 → 结果」，名字的写法和导入结果列表一致：`包.zip/packs.json`）。
 pub(crate) fn adopt_archives(resources: &Path, paths: &[PathBuf]) -> Vec<(String, &'static str)> {
     let mut results = Vec::new();
     for path in paths {
@@ -666,6 +686,23 @@ pub(crate) fn adopt_archives(resources: &Path, paths: &[PathBuf]) -> Vec<(String
         let zip = path.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
         results.push((format!("{zip}/{CATALOG_NAME}"), result));
         results.push((format!("{zip}/{SIGNATURE_NAME}"), result));
+        // 验过签的目录没有列出的成员（许可、模型卡这些随包附带的说明，`tools/pack_catalog.py offline --extra`）是 `extra`：
+        // 不是要导入的文件，也不算问题（#643）。目录签名不对时一个都不算，照旧逐个报认不出。
+        if result == "catalog_invalid" {
+            continue;
+        }
+        let Ok(catalog) = Catalog::parse(&bytes) else { continue };
+        let listed = catalog.file_names();
+        for i in 0..archive.len() {
+            let Ok(item) = archive.by_index(i) else { continue };
+            let Some(name) = item.is_file().then(|| item.name().ok().map(|n| n.into_owned())).flatten() else {
+                continue;
+            };
+            let base = name.rsplit('/').next().unwrap_or(&name);
+            if name != CATALOG_NAME && name != SIGNATURE_NAME && !listed.contains(&base) {
+                results.push((format!("{zip}/{name}"), "extra"));
+            }
+        }
     }
     results
 }
