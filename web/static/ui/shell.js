@@ -4,6 +4,7 @@ import {workKey} from '../core/catalog.js';
 import {dayLabel, esc, isMac, localDate, number, shortcut} from '../core/format.js';
 import {t} from '../core/i18n.js';
 import {REASONS, nameTip} from '../core/labels.js';
+import {onTyped} from '../core/keys.js';
 import {fetchChar, onMeta, setChar} from '../core/meta.js';
 import {prefs} from '../core/prefs.js';
 import {implement, pageOf, viewOf} from '../core/pages.js';
@@ -36,8 +37,6 @@ function artistName(id) {
   }
   return artistNames[id];
 }
-// 搜索框的防抖。
-let searchTimer = 0;
 export const navCount = (id, n, title = '') => { $(id).textContent = n ? number(n) : ''; $(id).title = title; };
 // 一次元数据读取在屏幕上改动什么：侧栏的计数，以及显示它们的标题或页面。
 function metaShown({error: e, directory, queue}) {
@@ -138,11 +137,11 @@ export function renderChrome() {
     bar.innerHTML = views + `<div class="search-wrap wide">${searchIcon()}<input type="search" id="charSearch" spellcheck="false" autocorrect="off" autocapitalize="off" value="${esc(works ? shelf.q : '')}" placeholder="${works ? t('搜索作品') : t('搜索角色或作品')}" aria-label="${works ? t('搜索作品') : t('搜索角色')}"></div><div class="spacer"></div>` +
       (works ? `<button class="quiet" id="newWork">${t('新建作品')}</button>` : `<button class="quiet" id="taggedButton" title="${t('不算角色、只当标签的吉祥物和玩家化身')}">${t('只当标签')}${state.tagged?.length ? ` <small>${number(state.tagged.length)}</small>` : ''}</button><div class="segmented" id="charMode">${[['shelf', t('书架')], ['list', t('列表')]].map(([v, label]) => `<button data-mode="${v}" class="${cast.mode === v ? 'on' : ''}">${label}</button>`).join('')}</div>`);
     if (works) {
-      $('charSearch').oninput = e => { shelf.q = e.target.value; drawShelf(); };
+      onTyped($('charSearch'), e => { shelf.q = e.target.value; drawShelf(); });
       $('newWork').onclick = createWork;
       return;
     }
-    $('charSearch').oninput = () => { clearTimeout(searchTimer); searchTimer = setTimeout(searchIndex, 200); };
+    onTyped($('charSearch'), searchIndex, 200);
     $('taggedButton').onclick = openTagged;
     for (const b of $('charMode').children) b.onclick = () => { cast.mode = b.dataset.mode; prefs.set('castMode', cast.mode); for (const x of $('charMode').children) x.classList.toggle('on', x === b); drawCast(); };
     return;
@@ -172,7 +171,7 @@ export function renderChrome() {
   $('maybeChip')?.addEventListener('click', () => go({...r, maybe: r.maybe ? '' : '1', variant: '', check: '', doubt: ''}));
   $('doubtChip')?.addEventListener('click', () => go({...r, doubt: r.doubt ? '' : '1', variant: '', check: '', maybe: ''}));
   if (view.toolbar === 'library') {
-    $('search').oninput = e => { clearTimeout(searchTimer); searchTimer = setTimeout(() => { replaceRoute({q: e.target.value.trim()}); reload(true); }, 250); };
+    onTyped($('search'), e => { replaceRoute({q: e.target.value.trim()}); reload(true); }, 250);
     wireFilterBar(r); wireSaveButton(r);
     $('charPill')?.addEventListener('click', () => go({...r, char: '', variant: '', maybe: '', check: '', doubt: '', sort: ''}));
   }

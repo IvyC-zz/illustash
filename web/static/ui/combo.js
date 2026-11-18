@@ -3,7 +3,7 @@
 // 浮层管理器 ui/overlay.js 里的 popover，由它处理 Esc；命令面板是对话框，Esc 关对话框）。结果项是菜单里带 data-i 的元素，
 // 高亮用 .on。
 import {esc} from '../core/format.js';
-import {composing} from '../core/keys.js';
+import {composing, onTyped} from '../core/keys.js';
 import {namesAllowButton} from './dom.js';
 import {createLayer} from './overlay.js';
 
@@ -84,7 +84,7 @@ export function combo(input, menu, search, pick, opts = {}) {
     show(!!menu.innerHTML);
   };
   const run = () => { const g = ++gen; fresh = true; clearTimeout(timer); timer = setTimeout(() => search(input.value.trim(), sections => { if (g === gen) render(sections); }), delay); };
-  input.addEventListener('input', () => { typed(input.value); run(); });
+  onTyped(input, () => { typed(input.value); run(); });
   input.addEventListener('focus', run);
   input.addEventListener('blur', () => setTimeout(() => show(false, 'outside'), 150));
 }

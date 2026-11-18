@@ -2,7 +2,7 @@
 // 的内容在 core/catalog.js。
 import {t} from '../core/i18n.js';
 import {esc, number} from '../core/format.js';
-import {composing} from '../core/keys.js';
+import {composing, onTyped} from '../core/keys.js';
 import {implement, onPage} from '../core/pages.js';
 import {prefs} from '../core/prefs.js';
 import {api, session, readError} from '../core/session.js';
@@ -535,7 +535,7 @@ export function wireCatalog() {
     if (hit.closest('#castMore')) { cast.limit = (cast.limit || 300) + 300; drawCast(); return; }
     const row = hit.closest('tr[data-char]'); if (row) go(charRoute(row.dataset.char));
   });
-  $('charIndex').addEventListener('input', e => { if (e.target.id === 'castPopQ') { cast.popQ = e.target.value; const pos = e.target.selectionStart; drawCast(); const i = $('castPopQ'); i?.setSelectionRange(pos, pos); } });
+  onTyped($('charIndex'), e => { if (e.target.id === 'castPopQ') { cast.popQ = e.target.value; const pos = e.target.selectionStart; drawCast(); const i = $('castPopQ'); i?.setSelectionRange(pos, pos); } });
   $('charIndex').addEventListener('click', async e => {
     if (!onPage(state.route, 'characters')) return;
     const hit = e.target, works = state.index?.works || [];
