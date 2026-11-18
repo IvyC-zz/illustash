@@ -574,14 +574,7 @@ fn run_inner(args: &[String]) -> Result<u8> {
         }
         let closed = desktop_closed.clone();
         thread::spawn(move || {
-            let mut buffer = [0u8; 64];
-            let mut input = std::io::stdin().lock();
-            loop {
-                match input.read(&mut buffer) {
-                    Ok(0) | Err(_) => break,
-                    Ok(_) => {}
-                }
-            }
+            crate::platform_process::wait_stdin_closed();
             closed.store(true, Ordering::SeqCst);
         });
     }

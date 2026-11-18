@@ -153,9 +153,9 @@
 
  "crates/platform/src/platform_photos.rs":"b1a3dbe00bc59e5e0acd7e70f44939beaee825f4f18b8fb10ddfd6f433fd758f",
 
- "crates/platform/src/platform_process.rs":"841419607ad021b11aff58be3bb279f1cfeba5d5709263f88b9654d4a355b340",
+ "crates/platform/src/platform_process.rs":"2d8f957c3b584c5d421a3731097068e322c72c4d8ac7fb18cc8a032140867a52",
 
- "crates/platform/src/platform_process/windows_desktop.rs":"fb60ef14077bad0456d6c9e7bcad2c85857197ed41db11a800bd17dd6ec089fe",
+ "crates/platform/src/platform_process/windows_desktop.rs":"8f6b2c7b9347ac937dfd25496b19735a495a31df059935ecd47bdd2ab2ab6356",
 
  "crates/platform/src/platform_process/windows_worker.rs":"719e41559853468e77b642ea15fb3c4985a88c76ec65a8af90b14ae0ecc10ecc",
 
@@ -249,7 +249,7 @@
 
  "native/terms/src/app_galleries.rs":"4fbf4093715ede0c1670b860de1925c5360bb028b44c7b581c322cbfdaae028e",
 
- "native/terms/src/app_http.rs":"abeb95d0db6f4ba5be201c7c75fe63ac3aa79222925835ab3ebd29c27b030b80",
+ "native/terms/src/app_http.rs":"fafcd0c487432c66a9df41c2a70674c2ccbafc80f9a04e25c59da96af059bc61",
 
  "native/terms/src/app_human_conclusions.rs":"37bd5770a1bce2e3686a3a478b0925ddcfa11eaa81bf1f85023c57ed6cc8126b",
 
