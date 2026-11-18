@@ -98,7 +98,7 @@ Hugging Face 的地址固定在上游的某个提交上，上游以后改动也�
 - **新版本**：新版本不随应用发布，列在本项目一份签过名的包目录里。应用只在检查更新时（打开了自动检查，或手动点「检查更新」）顺带读这份目录；关掉检查更新、也没有手动检查，就不读。目录里有更新的版本时，卡片上多一行「有新版本：N 个角色」。点「下载新版本」才下载；下好以后，已经启用的图库点「换成新版本…」才用新版本重新检查，换掉旧版本给出的候选和由它补上的归属，人工结论不变。换了以后照样可以撤回；没有启用的图库，卡片上直接是本机已有的最新版本。
 - **只给候选的角色**：分级的新版本里有只给候选的角色，它们只出现在「也可能是」里，不补主归属，也不改已有的归属。
 - **签名**：签名对不上的目录整份不用；应用只认内置的 0.1 和最近一份验过签的目录里列出、这个版本能用的版本。
-- **离线**：从 [Releases](https://github.com/shio-vinyl/illustash/releases) 里最新的 `character-pack-<版本>`（如 `character-pack-0.4`）下载 `character-pack-<版本>-offline.zip`，在卡片上「从文件导入…」选它，不用解压。离线包里有两个组成部分的文件、签过名的包目录，以及许可和模型说明；应用先核对目录的签名，再按目录认包文件，许可和说明不导入，也不列在导入结果里。只有包文件、没有目录时，只能导入内置的 0.1：它的两个文件在 [`wd-extension-v1`](https://github.com/shio-vinyl/illustash/releases/tag/wd-extension-v1) 和 [`ccip-longtail-v1`](https://github.com/shio-vinyl/illustash/releases/tag/ccip-longtail-v1) 这两个 Release 里，大小和 SHA-256 见[第三方组件与许可](THIRD_PARTY.md#模型与数据)。
+- **离线**：从 [Releases](https://github.com/shio-vinyl/illustash/releases) 里最新的 `character-pack-<版本>`（如 `character-pack-0.5`）下载 `character-pack-<版本>-offline.zip`，在卡片上「从文件导入…」选它，不用解压。离线包里有两个组成部分的文件、签过名的包目录，以及许可和模型说明；应用先核对目录的签名，再按目录认包文件，许可和说明不导入，也不列在导入结果里。只有包文件、没有目录时，只能导入内置的 0.1：它的两个文件在 [`wd-extension-v1`](https://github.com/shio-vinyl/illustash/releases/tag/wd-extension-v1) 和 [`ccip-longtail-v1`](https://github.com/shio-vinyl/illustash/releases/tag/ccip-longtail-v1) 这两个 Release 里，大小和 SHA-256 见[第三方组件与许可](THIRD_PARTY.md#模型与数据)。
 
 也可以离线使用命令行启用 WD 部分。先在桌面应用里完成图库升级并退出，再从 ZIP 中解出模型文件。
 
