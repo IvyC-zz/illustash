@@ -1,6 +1,6 @@
 // 角色资料包（#602；原来分开的 #550 WD 角色扩展和 #559 CCIP 长尾包合成一个包）：包的下载、导入和删除，本图库的启用、
 // 换包、撤回，以及签名目录里的新版本。不碰 DOM。状态是 GET /api/packs 的回复（形状见 native/terms/src/http_host_get.rs
-// 的 `packs`），存在 state.pack，只由这里写入；下载、导入或启用、撤回进行期间每秒读一次。onPack(fn) 在每次读到或改动后
+// 的 `packs`），存在 state.pack，只由这里写入；下载、导入或启用、撤回进行期间，以及等着默认启用时每秒读一次。onPack(fn) 在每次读到或改动后
 // 调用 fn(before)，before 是改动前的状态。两个组成部分各自的旧路由（/api/wd-extension、/api/ccip-longtail）页面不再读。
 import {session, api} from './session.js';
 import {state} from './state.js';
@@ -11,6 +11,10 @@ export const onPack = changed.on;
 export const PACK_ROUTE = '/api/packs';
 export const packDownloading = x => x?.download?.status === 'running';
 export const packRunning = x => x?.task?.status === 'running';
+// 等着默认启用（#630）：包已就位，宿主等后台任务结束就会开始启用，页面接着读，直到看到启用任务。上次的启用失败或取消了时
+// 宿主这次打开不再自动重试，也就不用读。
+export const packAwaitingDefault = x => x?.library?.prompt === 'pending' && x?.current?.status === 'ready'
+  && (!x.task || x.task.status === 'running');
 // 几次读取会重叠（设置页渲染、任务面板、轮询）：只采用最后发出的那次；换了会话的回应丢掉（#34）。
 let timer = 0, poll = 0;
 async function adopt(value, mine, token) {
@@ -18,7 +22,7 @@ async function adopt(value, mine, token) {
   const before = state.pack;
   state.pack = value;
   clearTimeout(timer);
-  if (packDownloading(value) || packRunning(value)) timer = setTimeout(() => loadPack().catch(() => {}), 1000);
+  if (packDownloading(value) || packRunning(value) || packAwaitingDefault(value)) timer = setTimeout(() => loadPack().catch(() => {}), 1000);
   await changed.emit(before);
   return value;
 }

@@ -175,6 +175,10 @@ fn ready_at(root: &Path, manifest: &Manifest) -> bool {
 pub(crate) fn on_demand() -> bool {
     std::env::var_os("ILLUSTASH_MODELS_ON_DEMAND").is_some_and(|v| v == "1")
 }
+/// 识别模型（含基础角色索引）正在下载或导入。
+pub(crate) fn downloading() -> bool {
+    APP.running.load(Ordering::SeqCst)
+}
 /// 识别必须等模型下载或导入完成。
 pub(crate) fn waiting(resources: &Path) -> bool {
     on_demand() && !ready_at(&root(resources), manifest())

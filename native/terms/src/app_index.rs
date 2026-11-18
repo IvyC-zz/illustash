@@ -655,6 +655,31 @@ impl Updater {
             eprintln!("基础角色索引未能自动{}：{error}", if enable { "启用" } else { "撤回" });
         }
     }
+    /// 这个图库的基础角色索引还会启用（#630）：包已在本机、正随识别模型下载，或者识别模型还没到齐（不带模型的安装包首次
+    /// 准备时，基础索引等识别模型就位后才启用），没有撤回过，图库还没启用当前版本，而且没有刚试过失败（`sync_base` 失败后
+    /// 十分钟内不再试）。角色资料包的默认启用等它启用完，CCIP 部分记下的就是启用以后的
+    /// 索引代数，不会一启用就提示重新检查。
+    pub fn base_outstanding(&self, lib: &Library) -> bool {
+        if std::env::var_os("ILLUSTASH_INDEX_WORKER").is_none() {
+            return false;
+        }
+        let Some((_, file)) = crate::character_index::release() else { return false };
+        if read(&self.shared.join(BASE_MARK), Value::Null)["enabled"] == false {
+            return false;
+        }
+        if base_meta(lib).ok().flatten().is_some_and(|m| m["sha256"] == file.sha256.as_str()) {
+            return false;
+        }
+        if self.task.as_ref().is_some_and(Task::running) {
+            return true;
+        }
+        if Instant::now() < self.base_retry {
+            return false;
+        }
+        crate::character_index::present(&self.resources)
+            || crate::app_models::downloading()
+            || crate::app_models::waiting(&self.resources)
+    }
     fn base_wanted(&self, lib: &Library) -> Option<bool> {
         std::env::var_os("ILLUSTASH_INDEX_WORKER")?;
         let (_, file) = crate::character_index::release()?;

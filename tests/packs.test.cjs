@@ -277,6 +277,28 @@ test('启用：POST 后轮询到结束，只报一次', async () => {
   off();
 });
 
+test('等着默认启用（#630）：包就位后接着读，宿主启动的启用任务结束时报一次；上次失败或取消了就不读', async () => {
+  const awaiting = pack({current: READY, library: {prompt: 'pending', vectors: 3}});
+  assert.equal(c.packAwaitingDefault(awaiting), true);
+  assert.equal(c.packAwaitingDefault(pack({library: {prompt: 'pending'}})), false, '包还没就位');
+  assert.equal(c.packAwaitingDefault(pack({current: READY, library: {prompt: 'ask'}})), false);
+  for (const status of ['failed', 'cancelled']) {
+    assert.equal(c.packAwaitingDefault(pack({current: READY, library: {prompt: 'pending'}, task: {id: 't0', kind: 'enable', status}})), false, status);
+  }
+  const running = pack({current: READY, library: {prompt: 'pending', vectors: 3}, task: {id: 't2', kind: 'enable', status: 'running', phase: 'scan', done: 0, total: 3}});
+  const done = pack({current: READY, library: ENABLED, task: {id: 't2', kind: 'enable', status: 'done', result: {changed: 1}}});
+  const calls = server([{body: awaiting}, {body: running}, {body: done}, {body: done}]);
+  const seen = [];
+  const off = c.onPack(before => { const t = c.packFinished(before, c.state.pack); if (t) seen.push(t); });
+  await c.loadPack();
+  const until = Date.now() + 10000;
+  while (!seen.length && Date.now() < until) await new Promise(resolve => setTimeout(resolve, 50));
+  off();
+  assert.deepEqual(seen, [done.task]);
+  assert.equal(calls.length, 3, '启用结束以后不再读');
+  assert.equal(c.state.pack, done);
+});
+
 test('取消晚了一步（写入阶段回 409）：提示事实，不带错误编号，再读一次状态；409 原样抛出后端的原文', async () => {
   const page = web.fakePage();
   c.wirePacks();

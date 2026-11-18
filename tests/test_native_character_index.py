@@ -233,6 +233,51 @@ class CharacterIndexTest(unittest.TestCase):
         self.assertEqual(self.tables(), before)
         self.assertEqual(self.base()[1]['available'], False)
 
+    def test_pack_waiting_for_default_is_enabled_after_the_base_index(self):
+        """#630：新图库第一次同步时角色资料包没到，补下载完成时基础角色索引还没启用：等它启用完再启用资料包，
+        CCIP 部分记下的是启用以后的索引代数，不提示重新检查。"""
+        from tests.test_native_pack_catalog import builtin_v1, github
+        f = self.fixture
+        files = {}
+        with github(files) as (origin, _):
+            wd, ccip, wd_bytes, ccip_bytes = builtin_v1(f.root / 'builtin', origin)
+            files.update({'/builtin/wd-extension-v1.bin': wd_bytes, '/builtin/A-longtail-p75.zip': ccip_bytes})
+            # 不带模型的安装包首次准备：识别模型还没到齐时，基础索引等着不启用（ILLUSTASH_MODELS_ON_DEMAND）。
+            f.env.update(ILLUSTASH_TEST_WD_EXTENSION=str(wd), ILLUSTASH_TEST_CCIP_LONGTAIL=str(ccip),
+                         ILLUSTASH_MODELS_ON_DEMAND='1')
+            # 第一次同步开始时包不在本机，宿主记下的同一行。
+            with closing(sqlite3.connect(f.lib.db)) as c, c:
+                c.execute("INSERT INTO meta(key,value) VALUES ('character_pack_default_pending',CURRENT_TIMESTAMP)")
+            self.install(); f.restart()
+            packs = lambda: json.loads(f.request('/api/packs')['body'])
+            self.assertEqual(packs()['library']['prompt'], 'pending')
+            self.assertEqual(f.request('/api/packs', {'action': 'download'})['status'], 200)
+            deadline = time.monotonic() + WAIT
+            while packs()['current']['status'] != 'ready' and time.monotonic() < deadline:
+                time.sleep(.05)
+            # 资料包先到：识别模型没到齐、基础索引还没启用时不启用。
+            time.sleep(2)  # 宿主每秒检查一次要不要默认启用。
+            waiting = packs()
+            self.assertEqual((waiting['current']['status'], waiting['library']['enabled'], waiting['task']), ('ready', False, None), waiting)
+            self.assertEqual(self.base()[1]['enabled'], False)
+            # 识别模型到齐（只看文件在不在）：基础索引启用，之后资料包才启用。
+            for name in ('wd_swinv2_v3_emb.onnx', 'ccip/model_feat.onnx', 'ccip/model_metrics.onnx', 'ccip/metrics.json'):
+                (self.models / name).parent.mkdir(parents=True, exist_ok=True)
+                (self.models / name).write_bytes(b'synthetic')
+            self.wait_enabled(True)
+            deadline = time.monotonic() + WAIT
+            while time.monotonic() < deadline:
+                observed = packs()
+                task = observed['task']
+                if observed['library']['enabled'] and task and task['status'] != 'running':
+                    break
+                time.sleep(.05)
+            else:
+                self.fail(f'角色资料包没有默认启用：{observed}')
+            self.assertEqual((task['kind'], task['status']), ('enable', 'done'), observed)
+            self.assertEqual(observed['library']['prompt'], None)
+            self.assertIs(observed['ccip']['library']['needs_scan'], False, observed['ccip']['library'])
+
     def test_offline_import_installs_the_package_and_enables_it(self):
         f = self.fixture
         # 原始模型已在（只看大小），基础角色索引从用户选的文件导入。

@@ -572,13 +572,15 @@ impl Application {
     }
 
     /// 新图库第一次同步时角色资料包还不在本机（#630）：包就位后照默认启用，和用户点「启用」走同一个任务，检查已有的识别
-    /// 结果。等同步、导入导出、角色索引和别的 WD 扩展任务都结束后才开始；用户选过不用或撤回过的图库不在此列
+    /// 结果。等同步、导入导出、角色索引和别的 WD 扩展任务都结束，基础角色索引也启用了（`Updater::base_outstanding`）
+    /// 才开始；用户选过不用或撤回过的图库不在此列
     /// （`app_packs::default_state`）。
     fn start_pack_default(&self, session: &mut Session) -> Result<()> {
         if session.pack_default_started
             || session.library.frozen()
             || session.wd_extension.running()
             || self.wd_busy(session).is_some()
+            || session.index.base_outstanding(&session.library)
         {
             return Ok(());
         }
