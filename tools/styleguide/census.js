@@ -1,8 +1,8 @@
 // 由 tools/styleguide/census.py 从 web/static/app.css 生成，不要手改。
 window.CENSUS = {
  "source": "web/static/app.css",
- "sha256": "82e2b8dad7d7aab348fe55599782ae1ae5dc9a6bbf8dfe7e266ef38b94228670",
- "lines": 1418,
+ "sha256": "ca9ba5041b71f22ca69499294386de017b06bd0d84b7c9307b3797c92b0748c3",
+ "lines": 1419,
  "rules": 1249,
  "themeVars": {
   "light": {
@@ -811,7 +811,7 @@ window.CENSUS = {
     "value": "#ffffff1a",
     "uses": 2,
     "examples": [
-     ".viewer-bar .icon:hover",
+     ".viewer-bar .icon:hover,.viewer-bar .alt:hover",
      ".ask-bar.on-dark .ask-b"
     ]
    },
