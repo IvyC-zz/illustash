@@ -115,7 +115,7 @@
 
  "crates/core/src/schema.rs":"c209b0bcb6f7d6b97d8557565042f5e2c3c8c71c78a54b94896e132def1620d3",
 
- "crates/core/src/store.rs":"96741c48b704acb8d7aef81a13136f06b41216f8486fa1cddf8ecd771a57f4b5",
+ "crates/core/src/store.rs":"359adce05ae8dd383981c4c8c23edee6615e2d395e7b8b97731021529a08798c",
 
  "crates/core/src/strict_json.rs":"dc1bf3fd4e0ceb6316af6a95ab00915c52ffdd8fd759544326f371df39e67da6",
 
@@ -197,7 +197,7 @@
 
  "desktop/src/pixiv.rs":"511b8003b2068c801f336d96a6c130a6796ed1866d1102e64678760d3a906c65",
 
- "desktop/src/server.rs":"e33cdd579a819f3a01fd7e1db7d0924915f6935b679f85e7274afc182cfdcb2c",
+ "desktop/src/server.rs":"e47bf5e33f38258356c777382bd7cc8e61188bc5ca1edcbc36b8d361282ee8cf",
 
  "desktop/src/updater.rs":"eb5c53f5025e9db4e1179988de11d276d9395da2841d79da2c6278fd77929fb9",
 
@@ -301,7 +301,7 @@
 
  "native/terms/src/app_name_sources.rs":"a9d895621405e92c2bdacd7f547f28feec7f294f307d628ea25d5e2bf27f9515",
 
- "native/terms/src/app_names.rs":"f1e9ee13d2fc826d1c0071b5de7e4a38700efe9445001d472d70b07c3d60795f",
+ "native/terms/src/app_names.rs":"3eb50e2cb8b87aaf9be0a7a4d5d7674d326980bbab48c5352fda37836ef44fa8",
 
  "native/terms/src/app_onboarding.rs":"5e0d950d43ad03ffeb44e19a9090795c479a9e4a6199fcbafe93e107fe9a62a9",
 
@@ -315,9 +315,9 @@
 
  "native/terms/src/app_profiles.rs":"34b2f5ab3486b4d88b01aebad9cf82f45a3fbfd286123b479733a3434f04abae",
 
- "native/terms/src/app_provenance.rs":"af3104f3ac2255ebb325ee2719eaf9a70258eb95d73f076a9b94941c6fdc3239",
+ "native/terms/src/app_provenance.rs":"b9c35c0a08b62db14e4706509a6db854059cfde6a39c10918eb97d30c52b5b1d",
 
- "native/terms/src/app_provenance_cache.rs":"440757a5a3d3fd37e79ac5a4400befe0503e3d792dd213b4cd2ff6f5af1655f4",
+ "native/terms/src/app_provenance_cache.rs":"d5b6a51a203c8697f56bc98a9c5c2cb652f2794218756966619d92c21f42448f",
 
  "native/terms/src/app_provenance_net.rs":"237b7f45478031c5fa79ea3eca96d85417e6c6d4c8e6461ed1463bddea14610c",
 
@@ -327,7 +327,7 @@
 
  "native/terms/src/app_rescue.rs":"08915aa36490c06b4d43fb0ff6337d4a548b451bc15c090928b0d37e6af4456d",
 
- "native/terms/src/app_research.rs":"323b2627210249c7e23576aa8ca285d426b12d8b0bf517cad228feb92dcc98d2",
+ "native/terms/src/app_research.rs":"d03a0d63c700cae4dd12585efec16028ef67e13e86f2b2519156aace6c02644a",
 
  "native/terms/src/app_resources.rs":"d691ec21499b906972a02d49a21790f2a301c34eb4dea0bd9c301675dd9e2c0a",
 
@@ -343,7 +343,7 @@
 
  "native/terms/src/app_sources.rs":"8ee039dc596b1253783ab4256fd7befa1ce4087eee3f93b69208e7ede676c819",
 
- "native/terms/src/app_sync.rs":"66d9c1aa0fe33f702065de1dc09c8bafbc2f9c9e71e2a509ff332cb40d99e25c",
+ "native/terms/src/app_sync.rs":"4cc2a4621550e6184551ca6e63a8a1e4dca91955d865f1b3add13f6a38655851",
 
  "native/terms/src/app_tasks.rs":"3a2653f069763b5c2d5f50580679a064e21b1f048a530a886829d483871ba400",
 
@@ -588,11 +588,11 @@
 ],
 "boundaries":{
  "native/terms/src/app_curation.rs":{"database-write":[[0,6],178,"INSERT OR REPLACE INTO:curation",18,1,60,69,181,195,34,57,61]},
- "native/terms/src/app_research.rs":{"database-write":{"DELETE FROM:image_sigs":1,"dynamic-or-wrapper":6,"DELETE FROM:relations":1,"DELETE FROM:similar_paired":1,"DELETE FROM:similar_retry":1,"BEGIN":1,"ROLLBACK":1,"CREATE TABLE IF NOT EXISTS:research_runs":1,"INSERT INTO:research_runs|UPDATE:set":1,"INSERT OR IGNORE INTO:research_runs":1,"INSERT INTO:research_runs":1,"UPDATE:backend_effects":2,"UPDATE:research_runs":3,"DELETE FROM:name_settings":1,"CREATE TABLE IF NOT EXISTS:similar_paired|CREATE TABLE IF NOT EXISTS:similar_retry":1},"entrypoint":{"process-start":1}},
+ "native/terms/src/app_research.rs":{"database-write":{"DELETE FROM:image_sigs":1,"dynamic-or-wrapper":10,"DELETE FROM:relations":1,"DELETE FROM:similar_paired":1,"DELETE FROM:similar_retry":1,"BEGIN":1,"ROLLBACK":1,"CREATE TABLE:assets":1,"COMMIT":1,"CREATE TABLE IF NOT EXISTS:research_runs":1,"INSERT INTO:research_runs|UPDATE:set":1,"INSERT OR IGNORE INTO:research_runs":1,"INSERT INTO:research_runs":1,"UPDATE:backend_effects":2,"UPDATE:research_runs":3,"CREATE TABLE IF NOT EXISTS:similar_paired|CREATE TABLE IF NOT EXISTS:similar_retry":1},"entrypoint":{"process-start":1}},
  "crates/core/src/character_names.rs":{"database-write":{"UPDATE:term_names":1,"dynamic-or-wrapper":2,"INSERT INTO:term_names":1,"UPDATE:set":1}},
  "native/terms/src/app_migration_sql/effects.sql":{"database-write":[126]},
  "native/terms/src/app_provenance_sources.rs":{"database-write":{"INSERT OR IGNORE INTO:artists":1,"@0":10,"@243":1,"UPDATE:leads":2,"INSERT OR IGNORE INTO:seeds":2,"@1":4,"@244":1,"INSERT INTO:artist_names|UPDATE:set":1,"INSERT OR REPLACE INTO:ext_cache":1,"@236":3,"INSERT OR REPLACE INTO:image_sources":2,"INSERT OR REPLACE INTO:image_artists":1,"INSERT OR IGNORE INTO:image_artists":1}},
- "native/terms/src/app_provenance_cache.rs":{"database-write":{"ALTER TABLE:native_delivery":1,"ALTER TABLE:ref_sigs":1,"COMMIT":1,"CREATE TABLE IF NOT EXISTS:content_versions":1,"CREATE TABLE IF NOT EXISTS:native_delivery":1,"CREATE TABLE IF NOT EXISTS:native_meta":1,"DELETE FROM:image_artists":1,"DELETE FROM:image_sources":1,"DELETE FROM:lookups":1,"DELETE FROM:marks":1,"INSERT INTO:content_versions|UPDATE:set":1,"INSERT INTO:native_delivery":1,"PRAGMA:c.execute_batch(\"pragma foreign_keys":1,"UPDATE:native_delivery":2,"dynamic-or-wrapper":3}},
+ "native/terms/src/app_provenance_cache.rs":{"database-write":{"PRAGMA:c.execute_batch(\"pragma foreign_keys":1,"dynamic-or-wrapper":5,"ALTER TABLE:ref_sigs":1,"CREATE TABLE IF NOT EXISTS:native_delivery":1,"ALTER TABLE:native_delivery":2,"CREATE TABLE IF NOT EXISTS:native_meta":1,"CREATE TABLE IF NOT EXISTS:content_versions":1,"DELETE FROM:lookups":1,"DELETE FROM:image_sources":1,"DELETE FROM:image_artists":1,"DELETE FROM:marks":1,"INSERT INTO:content_versions|UPDATE:set":1,"COMMIT":2,"INSERT INTO:native_delivery":1,"UPDATE:native_delivery":2}},
  "crates/core/src/character_sql/memberships.sql":{"database-write":["INSERT INTO:memberships"]},
  "crates/core/src/character_sql/single_assets.sql":{"database-write":["INSERT INTO:single_assets"]},
  "native/terms/src/app_commands.rs":{"http-branch":[247,231,74,259,260,88,24,261,"/api/favorite",331,"/api/similar/seen"],"database-write":[[0,6],[1,3],[3,2],175,262,34,178,263,190,[35,3]]},

@@ -10,7 +10,7 @@ import {session, shared, readError} from '../core/session.js';
 import {state} from '../core/state.js';
 import {REASONS, FOLD_OPTIONS} from '../core/labels.js';
 import {SYNC_ACTIVE, INDEX_ACTIVE, NAMES_ACTIVE, PROV_ACTIVE, syncLine, indexLine, namesLine, importLine, importActive, pollSync, pollIndex,
-  pollNamesSoon, loadProvenance, importStarted, pollImports, cancelImport, indexAction, setIndex, setNames} from '../core/jobs.js';
+  pollNamesSoon, loadProvenance, importStarted, pollImports, cancelImport, indexAction, checkIndex, setIndex, setNames} from '../core/jobs.js';
 import {onSettings, allowNames, loadSettingsData, saveStartup, saveFold, backupNow, clearCache, saveLanguage, saveAfterTasks, loadAbout, saveModelApi, testModelApi,
   loadLibraries, libraryRequest, pollExport, chooseFolders, openLibraryRequest, libraryOpened, loadAccounts, accountRequest,
   waitPixivLogin, stopPixivLogin, checkUpdates, updatesPost, updatesTick} from '../core/settings.js';
@@ -45,6 +45,9 @@ export async function setNamesNetwork(allow) {
 }
 
 // ---------- 外部索引的新角色（native/terms/src/app_index.rs） ----------
+// 补角色以角色资料包为主，检查新角色只补两次发包之间新出现的角色（#606）：卡片排在资料包后面；上次检查时所有关注作品
+// 都不缺角色的，正文收进折叠区，只留一行说明。不知道缺不缺（还没检查过、检查早于 #561、没有关注作品）和还缺的时候照常展开，
+// 还缺几个另外写在资料包卡片底部（packCoverageLine）。
 let indexArmed = null;
 export async function renderIndexCard(fresh = true) {
   const route = state.route, token = session.token;
@@ -57,12 +60,18 @@ export async function renderIndexCard(fresh = true) {
     } catch (e) { if (route === state.route && token === session.token) readFailure($('indexCard'), e); return; }
   }
   const card = $('indexCard'), x = state.index; if (!x || !card) return;
-  loadCoverage(x, fresh).then(changed => { if (changed && route === state.route && token === session.token) renderIndexCard(false); });
+  loadCoverage(x, fresh).then(changed => {
+    if (!changed || route !== state.route || token !== session.token) return;
+    renderIndexCard(false);
+    if (state.pack) renderPackCard();   // 资料包卡片底部的「还缺几个」跟着变；还没读到资料包时由它自己读完再画
+  });
   const s = x.state, active = INDEX_ACTIVE.includes(s.status), watched = x.watch.works.length;
+  const folded = indexFolded(x, coverage);
+  const more = `<span class="hint-more" title="${t('添加角色时每个角色下载约 20 张公开参考图（约 {mb} MB），在本机算好特征后重新扫描图库。', {mb: x.mb_per_character})}">${t('了解详情')}</span>`;
+  const note = folded ? t('上次检查（{time}）关注的作品都不缺角色。角色资料包发布以后才出现的角色，在这里检查。', {time: esc(stamp(coverage.checked_at))})
+    : t('在 Danbooru 上查关注的作品有没有角色资料包和本地都还没有的角色，只发送作品名。');
   // 关注哪些作品在「资料库 · 作品」里逐个作品决定；这里只管检查怎么运行。
-  if (!setSettingsHTML(card, cardHead(t('检查新角色'), `${t('定期在 Danbooru 上查关注的作品有没有本地还不认识的角色，只发送作品名。')}`
-    + `<span class="hint-more" title="${t('添加角色时每个角色下载约 20 张公开参考图（约 {mb} MB），在本机算好特征后重新扫描图库。', {mb: x.mb_per_character})}">${t('了解详情')}</span>`, 'library') + `
-    ${taskLink(indexLine(s, x.check), active ? 'busy' : s.status === 'error' ? 'warn' : s.status === 'off' ? 'off' : '')}
+  const body = `${taskLink(indexLine(s, x.check), active ? 'busy' : s.status === 'error' ? 'warn' : s.status === 'off' ? 'off' : '')}
     <a class="setting-line set-link" href="#/characters/works"><span>${t('关注的作品')}<small class="line-hint">${t('在资料库的「作品」里逐部开关')}</small></span>`
       + `<span>${watched ? t('{n} 部', {n: number(watched)}) : t('还没有')} ›</span></a>
     <div class="setting-line"><span>${t('只提示图片较多的角色')}<small class="line-hint">${t('Danbooru 上图片少于这个数的角色不提示')}</small></span>`
@@ -75,7 +84,8 @@ export async function renderIndexCard(fresh = true) {
       <td>${c.status === 'added' ? t('匹配 {n} 张', {n: number(c.entity?.count ?? c.claims)}) : c.status === 'dropped' ? t('已移除') : t('未添加：{reason}', {reason: esc(tb(c.reason || ''))})}</td>
       <td>${c.status === 'added' && c.entity ? `<button class="quiet small${indexArmed === c.short_tag ? ' armed' : ''}" data-drop="${esc(c.short_tag)}" ${active ? 'disabled' : ''} `
         + `title="${t('从索引中移除这个角色：重新扫描后它匹配的图恢复原状，以后检查不再提示')}">`
-        + `${indexArmed === c.short_tag ? t('再点一次确认移除') : t('移除')}</button>` : ''}</td></tr>`)).join('')}</table>`) : ''}`, x.works)) return;
+        + `${indexArmed === c.short_tag ? t('再点一次确认移除') : t('移除')}</button>` : ''}</td></tr>`)).join('')}</table>`) : ''}`;
+  if (!setSettingsHTML(card, cardHead(t('检查新角色'), note + more, 'library') + (folded ? fold('indexMore', t('检查设置与记录'), body) : body), x.works)) return;
   wireFolds(card);
   const act = async body => { try { await indexAction(body); renderIndexCard(false); pollIndex(); } catch (e) { toast(e.message); } };
   $('watchMin').onchange = () => act({action: 'watch', works: x.watch.works, min_posts: Number($('watchMin').value)});
@@ -90,11 +100,15 @@ export async function renderIndexCard(fresh = true) {
 }
 
 // ---------- 角色资料包（#602，合并了 #550 WD 角色扩展、#559 CCIP 长尾包）：按图库启用，一张卡片。内容在 ui/packs.js ----------
+// 「设置 › 角色资料」的第一张卡片，补角色的主要入口（#606）。上次检查新角色时还缺角色的，底部多一行写明还缺几个，带检查入口。
 export async function renderPackCard(fresh = false) {
   const route = state.route, token = session.token, card = $(PACK_CARD), x = state.pack;
   if (!card || !onPage(state.route, 'settings')) return;
   // 先画手上的状态（还没读到时只有标题），再读新的；读到后 onPack 会再调这里。
-  if (setSettingsHTML(card, cardHead(packName(), x ? packNote(x) : '', 'library') + packCardBody(x))) wireFolds(card);
+  const tail = x ? packCoverageLine(state.index, coverage) : '';
+  if (setSettingsHTML(card, cardHead(packName(), x ? packNote(x) : '', 'library') + packCardBody(x) + tail)) wireFolds(card);
+  const go = card.querySelector('[data-index-go]');
+  if (go) go.onclick = () => busy(go, async () => { try { if (await checkIndex(confirmAction)) pollIndex(); } catch (e) { toast(e.message); } });
   if (!fresh && x) return;
   try { await loadPack(); } catch (e) { if (route === state.route && token === session.token) readFailure($(PACK_CARD), e); }
 }
@@ -108,6 +122,25 @@ async function loadCoverage(x, fresh) {
   coverageKey = key;
   try { coverage = await shared('/api/index/coverage'); } catch { coverage = null; }
   return true;
+}
+// 上次检查时有结果的关注作品合计还缺几个角色；不知道时（还没检查过、检查早于这一版、Danbooru 不认识全部作品）为 null。
+export function coverageMissing(c) {
+  const rows = Object.values(c?.coverage || {}).filter(Boolean);
+  return rows.length ? rows.reduce((n, v) => n + (v.missing || 0), 0) : null;
+}
+// 检查新角色收进折叠区：有关注的作品、上次检查都不缺，并且没有在跑、没有暂停或出错要处理。
+export function indexFolded(x, c) {
+  const s = x?.state?.status;
+  return !!x?.watch?.works.length && coverageMissing(c) === 0 && !INDEX_ACTIVE.includes(s) && !['error', 'paused'].includes(s);
+}
+// 资料包卡片底部的一行（#606）：上次检查时还缺几个角色。上次检查找到的还没添加时，整行链到资料库的「作品」，在那里逐个
+// 作品查看并添加；否则带一个再检查一次的按钮（联网前照常确认）。不缺或不知道时为空。
+export function packCoverageLine(x, c) {
+  const n = coverageMissing(c); if (!n || !x?.watch) return '';
+  const what = `${t('关注的作品还缺 {n} 个角色', {n: number(n)})}<small class="line-hint">${t('上次检查新角色时，角色资料包和本地都还没有')}</small>`;
+  if ((x.check?.missing || []).length) return `<a class="setting-line set-link" href="#/characters/works"><span>${what}</span><span>${t('查看并添加')} ›</span></a>`;
+  const s = x.state?.status, blocked = INDEX_ACTIVE.includes(s) || s === 'off' || s === 'paused' || !x.watch.works.length;
+  return `<div class="setting-line"><span>${what}</span><button class="quiet small" data-index-go${blocked ? ' disabled' : ''}>${t('检查新角色…')}</button></div>`;
 }
 // 合计写在折叠区标题，每个作品一行。还没检查过、或检查早于这一版（没有 coverage.json）时不显示。
 export function coverageFold(x, c) {
@@ -204,7 +237,7 @@ function patchSettingsPage(html, section) {
 const SETTINGS_SECTIONS = [
   ['general', t('通用'), t('语言、外观、图片网格与默认排序'), ['setDisplay', 'setLanguage', 'setWindow']],
   ['library', t('图库'), t('当前图库、来源、同步与排除'), ['setLibraries', 'setSync', 'setExclude', 'setFold']],
-  ['characters', t('角色资料'), t('新角色检查、角色资料包、角色名称与翻译'), ['indexCard', 'packCard', 'namesCard', 'modelCard']],
+  ['characters', t('角色资料'), t('角色资料包、新角色检查、角色名称与翻译'), ['packCard', 'indexCard', 'namesCard', 'modelCard']],
   ['artists', t('画师'), t('找回画师与绑定的账号'), ['setProvenance', 'setAccounts']],
   ['network', t('网络与隐私'), t('所有会访问网络的功能，以及它们发送什么'), ['setNetwork']],
   ['data', t('数据'), t('备份、缓存、识别模型与存储位置'), ['setData', 'setModels']],

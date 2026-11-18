@@ -264,6 +264,31 @@ class NativeProvenanceTest(unittest.TestCase):
         count=self.sql('SELECT count(*) FROM term_evidence');self.restart()
         self.assertEqual(count,self.sql('SELECT count(*) FROM term_evidence'))
         self.assertFalse(self.sql("SELECT task_id FROM native_delivery WHERE status='pending'",cache=True))
+    def large_library_delivery(self):
+        """用 unittest 显式点名执行。真实宿主与导入事务，合成 worker 和回环服务。"""
+        for path, extra_columns, extra_values in ((self.lib.db, '', ''), (self.lib.source, ',in_scope,trashed', ',1,0')):
+            with closing(sqlite3.connect(path)) as c, c:
+                c.execute(f"""WITH RECURSIVE n(i) AS (VALUES(1) UNION ALL SELECT i+1 FROM n WHERE i<100000)
+                    INSERT INTO assets(uuid,filename,width,height,added_at,src_kind{extra_columns})
+                    SELECT printf('0-%06d',i),'synthetic.png',120,150,'2026-01-01','orig'{extra_values} FROM n""")
+        [(total,)] = self.sql('SELECT count(*) FROM assets')
+        self.post({'action': 'lookup', 'ids': ['a']})
+        result = self.finish('done')
+        self.assertEqual(result['delivery']['status'], 'done', result)
+        self.assertGreater(result['delivery']['added'], 0)
+        [(parts, path)] = self.sql("SELECT parts,package FROM native_delivery WHERE status='done'", cache=True)
+        self.assertEqual(parts, 2)
+        sizes = []
+        for part in range(1, parts + 1):
+            manifest = self.lib.path / path / f'part-{part}' / 'manifest.json'
+            sizes.append(len(json.loads(manifest.read_text(encoding='utf-8'))['assets']))
+        self.assertEqual(sizes, [100000, total - 100000])
+        covered = self.sql("""SELECT count(*) FROM term_active_evidence x JOIN term_assets a ON a.id=x.asset_id
+            JOIN assets live ON live.uuid=a.key WHERE a.namespace='library' AND x.source='provenance' AND x.method='*'""")
+        self.assertEqual(covered, [(total,)])
+        self.assertTrue(self.sql("""SELECT 1 FROM term_current_evidence e JOIN term_assets a ON a.id=e.asset_id
+            WHERE a.key='a' AND e.source='provenance'"""))
+
     def test_refused_pending_package_is_resealed_and_later_deliveries_proceed(self):
         # #28：因暂时性失败而留在待处理的包，涉及一张在重试前被移除的图片。
         with closing(sqlite3.connect(self.lib.db)) as hold:

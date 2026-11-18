@@ -33,8 +33,8 @@ test('一张卡片在「角色资料」里，范围标「本图库」，状态�
   assert.match(html, /<p class="settings-note">多认 282 个 WD 词表和角色索引里没有的角色。<\/p>/);
   assert.match(html, /本图库未启用/);
   assert.match(html, /data-pack="enable-confirm">启用…/);
-  assert.equal(settings.settingsSection()[2], '新角色检查、角色资料包、角色名称与翻译');
-  assert.deepEqual(settings.settingsSection()[3], ['indexCard', 'packCard', 'namesCard', 'modelCard']);
+  assert.equal(settings.settingsSection()[2], '角色资料包、新角色检查、角色名称与翻译');
+  assert.deepEqual(settings.settingsSection()[3], ['packCard', 'indexCard', 'namesCard', 'modelCard']);
 });
 
 test('还没读到时读一次；读取失败写在卡片里', async () => {

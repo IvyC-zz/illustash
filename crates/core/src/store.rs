@@ -737,11 +737,24 @@ pub fn import_package_with(
     library_id: &str,
     new_assets: bool,
 ) -> Result<Imported> {
+    let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
+    let out = import_package_in_transaction(&tx, pkg, library_id, new_assets)?;
+    tx.commit()?;
+    Ok(out)
+}
+
+/// 在调用方的写事务里导入已校验的包。分包快照须全部导入后一起提交；任一包出错就回滚整个事务。
+/// `new_assets` 的含义同 [`import_package_with`]。
+pub fn import_package_in_transaction(
+    tx: &rusqlite::Transaction<'_>,
+    pkg: &Package,
+    library_id: &str,
+    new_assets: bool,
+) -> Result<Imported> {
     let m = &pkg.manifest;
     if m.library_id != library_id {
         return invalid(format!("证据包属于图库 {owner}，不是 {library_id}", owner = m.library_id));
     }
-    let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
     if let Some(id) = tx
         .query_row("SELECT id FROM term_packages WHERE fingerprint=?1", [&pkg.fingerprint], |r| r.get(0))
         .optional()?
@@ -751,14 +764,13 @@ pub fn import_package_with(
             for (e, _) in &stale {
                 tx.execute("DELETE FROM meta WHERE key=?", [format!("folder_stale_wd:{e}")])?;
             }
-            project(&tx, &stale.iter().map(|(_, a)| *a).collect::<Vec<_>>())?;
-            tx.commit()?;
+            project(tx, &stale.iter().map(|(_, a)| *a).collect::<Vec<_>>())?;
         }
         return Ok(Imported { package: id, added: 0, duplicate: 0, skipped: 0, created_terms: 0, already: true });
     }
     let mut assets: HashMap<&AssetRef, AssetId> = HashMap::new();
     for outcome in &m.assets {
-        let Some(id) = live_asset(&tx, &outcome.asset, new_assets)? else {
+        let Some(id) = live_asset(tx, &outcome.asset, new_assets)? else {
             return invalid(format!(
                 "图 {namespace}:{id} 不在这个图库里或已移除",
                 namespace = outcome.asset.namespace,
@@ -786,9 +798,9 @@ pub fn import_package_with(
             e => e,
         };
         let (term, _) =
-            resolve(&tx, &info.term, &m.producer, &origin, &mut terms, &mut out.created_terms).map_err(at)?;
+            resolve(tx, &info.term, &m.producer, &origin, &mut terms, &mut out.created_terms).map_err(at)?;
         for (system, key, url) in &info.links {
-            declare_link(&tx, term, system, key, url, &m.producer).map_err(at)?;
+            declare_link(tx, term, system, key, url, &m.producer).map_err(at)?;
         }
         for (lang, value, source) in &info.names {
             let source = if source.is_empty() { m.producer.as_str() } else { source.as_str() };
@@ -796,7 +808,7 @@ pub fn import_package_with(
                 "DELETE FROM term_names WHERE term_id=?1 AND role='display' AND lang=?2 AND source=?3 AND value<>?4",
                 params![term, lang, source, value],
             )?;
-            add_name(&tx, term, lang, value, "display", source)?;
+            add_name(tx, term, lang, value, "display", source)?;
         }
     }
     for row in &pkg.rows {
@@ -815,7 +827,7 @@ pub fn import_package_with(
                     }
                 }
                 let (term, key) =
-                    resolve(&tx, term, &m.producer, &origin, &mut terms, &mut out.created_terms).map_err(at)?;
+                    resolve(tx, term, &m.producer, &origin, &mut terms, &mut out.created_terms).map_err(at)?;
                 Claim::Image {
                     asset: assets[asset],
                     term,
@@ -823,9 +835,9 @@ pub fn import_package_with(
                 }
             }
             Target::Relation { kind, a, b } => {
-                let (a, ka) = resolve(&tx, a, &m.producer, &origin, &mut terms, &mut out.created_terms).map_err(at)?;
-                let (b, kb) = resolve(&tx, b, &m.producer, &origin, &mut terms, &mut out.created_terms).map_err(at)?;
-                let rel = relation(&tx, a, b, *kind).map_err(at)?;
+                let (a, ka) = resolve(tx, a, &m.producer, &origin, &mut terms, &mut out.created_terms).map_err(at)?;
+                let (b, kb) = resolve(tx, b, &m.producer, &origin, &mut terms, &mut out.created_terms).map_err(at)?;
+                let rel = relation(tx, a, b, *kind).map_err(at)?;
                 let (ka, kb) = if kind.symmetric() && kb < ka { (kb, ka) } else { (ka, kb) };
                 Claim::Relation { relation: rel, target: json!({"relation": [kind.as_str(), ka, kb]}) }
             }
@@ -840,7 +852,7 @@ pub fn import_package_with(
             observed_at: Some(&row.observed_at),
             package: Some(package),
         };
-        if add_evidence(&tx, &evidence).map_err(at)? {
+        if add_evidence(tx, &evidence).map_err(at)? {
             out.added += 1;
             if let Claim::Image { asset, .. } = claim {
                 touched.insert(asset);
@@ -871,15 +883,14 @@ pub fn import_package_with(
             .filter(|o| o.status == crate::package::Status::Completed)
             .map(|o| assets[&o.asset])
             .collect();
-        publish_snapshot(&tx, &m.producer, &covered, &snapshot_rows, Some(package))?;
+        publish_snapshot(tx, &m.producer, &covered, &snapshot_rows, Some(package))?;
         touched.extend(covered);
     }
     tx.execute(
         "UPDATE term_packages SET evidence_count=?1,skipped_count=?2 WHERE id=?3",
         params![out.added as i64, out.skipped as i64, package],
     )?;
-    project(&tx, &touched.into_iter().collect::<Vec<_>>())?;
-    tx.commit()?;
+    project(tx, &touched.into_iter().collect::<Vec<_>>())?;
     Ok(out)
 }
 

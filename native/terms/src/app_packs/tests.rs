@@ -61,8 +61,12 @@ fn signature_must_match_the_pack_key_and_the_exact_bytes() {
 }
 
 #[test]
-fn placeholder_key_file_disables_the_catalog() {
-    assert_eq!(configured(include_str!("../../pack-key.pub")), None);
+fn key_file_holds_one_valid_pack_key() {
+    // 2026-11-18 起 pack-key.pub 是正式公钥（#602）：说明行之外正好一行，能解成 minisign 公钥。
+    let key = configured(include_str!("../../pack-key.pub")).expect("pack-key.pub 里有公钥");
+    let text = String::from_utf8(STANDARD.decode(&key).expect("公钥是 base64")).expect("公钥是 UTF-8");
+    assert!(minisign_verify::PublicKey::decode(&text).is_ok());
+    assert!(verify(b"{}", &fixture("packs.json.sig"), &key).is_err());
     assert_eq!(configured("# 说明\n\n  RWQabc  \n# 末尾\n").as_deref(), Some("RWQabc"));
 }
 

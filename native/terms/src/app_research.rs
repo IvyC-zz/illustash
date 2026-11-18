@@ -24,6 +24,21 @@ use std::{
     time::Duration,
 };
 
+/// 显式开启时向宿主 stderr 写固定阶段名和耗时。阶段内出错或取消也记录已用时间。
+struct Phase(&'static str, Option<std::time::Instant>);
+impl Phase {
+    fn start(name: &'static str) -> Self {
+        Self(name, std::env::var_os("ILLUSTASH_RESEARCH_TIMING").is_some().then(std::time::Instant::now))
+    }
+}
+impl Drop for Phase {
+    fn drop(&mut self) {
+        if let Some(start) = self.1 {
+            eprintln!("research-timing {} {:.3} ms", self.0, start.elapsed().as_secs_f64() * 1000.0);
+        }
+    }
+}
+
 pub fn configured() -> bool {
     std::env::var_os("ILLUSTASH_RESEARCH_WORKER").is_some_and(|p| !p.is_empty())
 }
@@ -101,10 +116,12 @@ pub(crate) fn forget_content(tx: &Connection, src: &Connection, changed: &[Strin
     crate::character_projection::fold(tx)
 }
 /// 没有任何研究计算器、学习戳或结果检查会读的应用表（#29）：偏好设置、名称来源设置（模型密钥、流量计数）、
-/// 名称缓存、同步历史和研究队列本身，以及画廊和相似组的「看过了」。写这些表从不会让结果失效。其他所有表，包括以后新增的表，都仍是学习的输入。
+/// 名称缓存、同步历史、人工结论备份的状态与图片摘要、研究队列，以及画廊和相似组的「看过了」。写这些表从不会让结果失效。其他所有表，包括以后新增的表，都仍是学习的输入。
 const UNREAD: &[&str] = &[
     "backend_effects",
     "galleries",
+    "human_asset_hashes",
+    "human_backup_state",
     "name_cache",
     "name_settings",
     "prefs",
@@ -113,8 +130,8 @@ const UNREAD: &[&str] = &[
     "sync_added",
     "sync_runs",
 ];
-/// 不算输入的 `meta` 行：names version 统计对名称表的写入次数（触发器）。
-const UNREAD_META: &str = "'names_version'";
+/// 名称写入计数和人工结论备份修订号。学习分别核验其实际读取的名称、裁决等行。
+const UNREAD_META: &str = "'names_version','human_revision'";
 /// 某一种研究的结果由什么算出（#29，docs/ARCHITECTURE_DIRECTION.md）。
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum Scope {
@@ -153,12 +170,12 @@ impl Scope {
             Self::Relate => Some(&[]),
         }
     }
-    /// 计算器读取的源库表；`None` 表示所有表。CCIP 向量是 `embeddings` 叠加层。
-    fn source(self) -> Option<&'static [&'static str]> {
+    /// CCIP 向量来自叠加层，学习还使用源库的角色元数据。
+    fn source(self) -> &'static [&'static str] {
         match self {
-            Self::Learning => None,
-            Self::Similar | Self::Oc => Some(&["embeddings"]),
-            Self::Relate => Some(&[]),
+            Self::Learning => &["characters", "embeddings"],
+            Self::Similar | Self::Oc => &["embeddings"],
+            Self::Relate => &[],
         }
     }
     /// 发布缓存或学习结果的种类；其他种类只回答查询。
@@ -235,10 +252,13 @@ fn file_metadata(h: &mut Sha256, path: &Path) {
     }
 }
 /// 一张表的有序、带类型的行（或表不存在的标记）。
-fn hash_table(c: &Connection, h: &mut Sha256, table: &str, check: &dyn Fn() -> Result<()>) -> Result<()> {
+fn hash_table(c: &Connection, h: &mut Sha256, table: &str, source: bool, check: &dyn Fn() -> Result<()>) -> Result<()> {
     feed(h, table.as_bytes());
-    let exists: bool =
-        c.query_row("SELECT EXISTS(SELECT 1 FROM sqlite_master WHERE type='table' AND name=?)", [table], |r| r.get(0))?;
+    let exists: bool = c.query_row(
+        "SELECT EXISTS(SELECT 1 FROM sqlite_master WHERE type IN ('table','view') AND name=?)",
+        [table],
+        |r| r.get(0),
+    )?;
     if !exists {
         feed(h, b"absent");
         return Ok(());
@@ -247,6 +267,7 @@ fn hash_table(c: &Connection, h: &mut Sha256, table: &str, check: &dyn Fn() -> R
     let n = c.prepare(&format!("SELECT * FROM \"{quoted}\""))?.column_count();
     let order = (1..=n).map(|i| i.to_string()).collect::<Vec<_>>().join(",");
     let filter = match table {
+        "embeddings" if source => CCIP_ROWS.into(),
         "meta" => format!(" WHERE key NOT IN ({UNREAD_META})"),
         "actions" => " WHERE CASE WHEN json_valid(before_json)
                        THEN json_type(before_json,'$[0].gallery') IS NOT 'object'
@@ -305,15 +326,18 @@ fn hash_db(
     };
     for table in tables {
         check()?;
-        hash_table(c, h, &table, check)?;
+        hash_table(c, h, &table, false, check)?;
     }
     Ok(())
 }
 /// 一次运行的输入指纹：应用部分（`app_digest`）和源库部分（`source_digest`）。两部分分开读，这样研究持有
 /// source.sqlite 的读锁时，绝不会在不留意其写入方的情况下处理应用数据库（#275）。
+#[cfg(test)]
 fn fingerprint(app: &Connection, src: &Connection, inputs: &Inputs<'_>, ctx: &TaskContext) -> Result<String> {
     let check = || ctx.check();
-    Ok(combine(&app_digest(app, inputs, &check)?, &source_digest(src, inputs, &check)?))
+    let (_, app) = app_digest(app, inputs, None, &check)?;
+    let source = source_digest(src, inputs, None, &check)?;
+    Ok(combine(&app, &source.digest.clone().finalize()))
 }
 fn combine(app: &[u8], source: &[u8]) -> String {
     let mut h = Sha256::new();
@@ -321,24 +345,71 @@ fn combine(app: &[u8], source: &[u8]) -> String {
     feed(&mut h, source);
     format!("{:x}", h.finalize())
 }
-fn source_digest(src: &Connection, inputs: &Inputs<'_>, check: &dyn Fn() -> Result<()>) -> Result<Vec<u8>> {
-    let mut h = Sha256::new();
-    hash_db(src, &mut h, inputs.scope.source(), &["backend_effects", "research_runs"], check)?;
-    Ok(h.finalize().to_vec())
+const CCIP_ROWS: &str = " WHERE model='ccip'";
+
+/// 只在一次运行的原连接上复用。版本号在读事务内取得，与该次读到的行属于同一快照。
+#[derive(Clone)]
+struct DbHash {
+    version: i64,
+    digest: Sha256,
 }
-/// 应用表、共享文件和原图。共享锚点文件在一次完整的索引发布（index_generation）之内读取。`check` 在行与文件块之间
-/// 运行：检查停止，调用方持有源库读锁时还检查源库写入方。
-fn app_digest(app: &Connection, inputs: &Inputs<'_>, check: &dyn Fn() -> Result<()>) -> Result<Vec<u8>> {
-    if inputs.scope == Scope::Learning {
-        crate::index_generation::stable(inputs.anchors, || app_digest_once(app, inputs, check))
-    } else {
-        app_digest_once(app, inputs, check)
+impl DbHash {
+    fn read(c: &Connection, previous: Option<&Self>, hash: impl FnOnce(&mut Sha256) -> Result<()>) -> Result<Self> {
+        let version = data_version(c)?;
+        if let Some(hit) = previous.filter(|p| p.version == version) {
+            return Ok(hit.clone());
+        }
+        let mut digest = Sha256::new();
+        hash(&mut digest)?;
+        Ok(Self { version, digest })
     }
 }
-fn app_digest_once(app: &Connection, inputs: &Inputs<'_>, check: &dyn Fn() -> Result<()>) -> Result<Vec<u8>> {
-    let mut h = Sha256::new();
-    feed(&mut h, format!("{:?}", inputs.scope).as_bytes());
-    hash_db(app, &mut h, inputs.scope.app(), UNREAD, check)?;
+struct InputHashes {
+    app: DbHash,
+    source: DbHash,
+}
+
+fn source_digest(
+    src: &Connection,
+    inputs: &Inputs<'_>,
+    previous: Option<&DbHash>,
+    check: &dyn Fn() -> Result<()>,
+) -> Result<DbHash> {
+    let _phase = Phase::start("hash_source");
+    DbHash::read(src, previous, |h| {
+        for table in inputs.scope.source() {
+            check()?;
+            hash_table(src, h, table, true, check)?;
+        }
+        Ok(())
+    })
+}
+/// 数据库版本只能证明 SQL 输入没变。共享文件仍按内容、原图仍按路径与文件元数据逐项校验。
+fn app_digest(
+    app: &Connection,
+    inputs: &Inputs<'_>,
+    previous: Option<&DbHash>,
+    check: &dyn Fn() -> Result<()>,
+) -> Result<(DbHash, Vec<u8>)> {
+    let _phase = Phase::start("hash_app");
+    let db = DbHash::read(app, previous, |h| {
+        feed(h, format!("{:?}", inputs.scope).as_bytes());
+        hash_db(app, h, inputs.scope.app(), UNREAD, check)
+    })?;
+    let files = || file_digest(db.digest.clone(), app, inputs, check);
+    let digest = if inputs.scope == Scope::Learning {
+        crate::index_generation::stable(inputs.anchors, files)?
+    } else {
+        files()?
+    };
+    Ok((db, digest))
+}
+fn file_digest(
+    mut h: Sha256,
+    app: &Connection,
+    inputs: &Inputs<'_>,
+    check: &dyn Fn() -> Result<()>,
+) -> Result<Vec<u8>> {
     // 基础特征和锚点文件也是输入。向量变了会让进行中的结果失效。
     for p in inputs.files()? {
         check()?;
@@ -407,8 +478,8 @@ fn read_snapshot<T>(dbs: &[&Connection], read: impl FnOnce() -> Result<T>) -> Re
     value
 }
 /// source.sqlite 用回滚日志，所以在它上面的读事务会持有一把锁，让它的写入方（同步、识别导入）在 busy timeout 之后
-/// 放弃（#226，`app_library::TASK_WRITE_WAIT`）。研究读源库的时长等于对整个文件计算哈希并复制的时间，在大图库上要
-/// 长得多。因此它对源库的读取会留意写入方提交前创建的日志文件，一出现就立刻让路，和后台完整性检查一样（#212）。
+/// 放弃（#226，`app_library::TASK_WRITE_WAIT`）。研究读取并复制 CCIP 向量时，在大图库上可能持锁
+/// 很久。因此它对源库的读取会留意写入方提交前创建的日志文件，出现就让路，和后台完整性检查一样（#212）。
 struct Writers {
     journal: PathBuf,
     seen: Arc<AtomicBool>,
@@ -424,7 +495,7 @@ impl Writers {
     fn writing(&self) -> bool {
         self.journal.exists()
     }
-    /// 用在不是 SQL 语句的步骤之间（backup 的各步）。
+    /// 在 SQL 进度回调以外的步骤检查源库写入方。
     fn check(&self) -> Result<()> {
         if self.seen.load(Ordering::SeqCst) || self.writing() {
             self.seen.store(true, Ordering::SeqCst);
@@ -469,6 +540,20 @@ impl Writers {
         Ok(())
     }
 }
+/// SQL 进度回调以外的行、文件块和副本写入也要让路；避免每一行都查询文件系统。
+fn poll<'a>(ctx: &'a TaskContext, writers: Option<&'a Writers>) -> impl Fn() -> Result<()> + 'a {
+    let last = std::cell::Cell::new(std::time::Instant::now());
+    move || {
+        ctx.check()?;
+        if let Some(writers) = writers {
+            if last.get().elapsed() >= Writers::POLL {
+                last.set(std::time::Instant::now());
+                writers.check()?;
+            }
+        }
+        Ok(())
+    }
+}
 fn data_version(c: &Connection) -> Result<i64> {
     Ok(c.query_row("PRAGMA data_version", [], |r| r.get(0))?)
 }
@@ -486,16 +571,20 @@ fn confirm<T>(
     version: &str,
     ctx: &TaskContext,
     writers: Option<&Writers>,
+    previous: Option<&InputHashes>,
     mut between: impl FnMut(),
     publish: impl FnOnce(rusqlite::Transaction<'_>) -> Result<T>,
 ) -> Result<T> {
     // 在行与文件块之间检查，不只是在 SQL 步骤之间：对共享文件计算哈希时不执行任何语句。
-    let check = || ctx.check().and_then(|_| writers.map_or(Ok(()), Writers::check));
-    let source = source_digest(src, inputs, &check)?;
+    let check = poll(ctx, writers);
+    let source = source_digest(src, inputs, previous.map(|p| &p.source), &check)?.digest.finalize();
     for _ in 0..OUTSIDE_ROUNDS {
         let files = inputs.stamp()?;
         let read = |app: &mut Connection| {
-            read_snapshot(&[app], || Ok((combine(&app_digest(app, inputs, &check)?, &source), data_version(app)?)))
+            read_snapshot(&[app], || {
+                let (db, digest) = app_digest(app, inputs, previous.map(|p| &p.app), &check)?;
+                Ok((combine(&digest, &source), db.version))
+            })
         };
         let (fresh, seen) = match writers {
             Some(writers) => writers.read(app, read)?,
@@ -575,22 +664,152 @@ impl Drop for Scratch {
         let _ = fs::remove_dir_all(&self.0);
     }
 }
-fn backup(c: &Connection, path: &Path, ctx: &TaskContext, writers: Option<&Writers>) -> Result<()> {
-    let mut out = crate::sqlite::open(path)?;
-    let copy = rusqlite::backup::Backup::new(c, &mut out)?;
-    loop {
-        ctx.check()?;
-        if let Some(writers) = writers {
-            writers.check()?;
+/// 在已固定的读事务上逐行复制。保留主键和 rowid，避免相似缓存的变更列表、学习戳和分组顺序发生变化。
+fn copy_rows(
+    from: &Connection,
+    to: &Connection,
+    table: &str,
+    columns: &str,
+    filter: &str,
+    args: &[&dyn rusqlite::ToSql],
+    check: &dyn Fn() -> Result<()>,
+) -> Result<()> {
+    use crate::app_create::quote_id;
+    let name = quote_id(table);
+    let mut read = from.prepare(&format!("SELECT {columns} FROM {name}{filter}"))?;
+    let fields = read.column_names().map(quote_id).collect::<Vec<_>>();
+    let marks = vec!["?"; fields.len()].join(",");
+    let mut insert = to.prepare(&format!("INSERT INTO {name} ({}) VALUES ({marks})", fields.join(",")))?;
+    let mut rows = read.query(args)?;
+    while let Some(row) = rows.next()? {
+        check()?;
+        for i in 0..fields.len() {
+            insert.raw_bind_parameter(i + 1, rusqlite::types::ToSqlOutput::Borrowed(row.get_ref(i)?))?;
         }
-        #[cfg(test)]
-        tests::backup_step(path);
-        match copy.step(256)? {
-            rusqlite::backup::StepResult::Done => break,
-            rusqlite::backup::StepResult::More => {}
-            _ => std::thread::sleep(Duration::from_millis(10)),
+        insert.raw_execute()?;
+    }
+    Ok(())
+}
+
+#[derive(Clone, Copy)]
+enum SnapshotDb {
+    App { regroup: bool },
+    Source,
+}
+impl SnapshotDb {
+    /// 核心学习发布在副本中按需重建角色投影。只有随后还要分组时才从 general_hits 读取原有的主题投影。
+    fn copies_rows(self, scope: Scope, name: &str) -> bool {
+        let Self::App { regroup } = self else { return true };
+        if scope != Scope::Learning {
+            return true;
+        }
+        if name == "term_projection" {
+            return regroup;
+        }
+        // 学习戳、核心发布与分组共享术语和身份数据。用户扩展、导入报告、备份及任务历史无需交给 worker。
+        name.starts_with("term_")
+            || name.starts_with("identity_")
+            || matches!(
+                name,
+                "terms"
+                    | "meta"
+                    | "actions"
+                    | "human_object_contributions"
+                    | "assets"
+                    | "assertions"
+                    | "candidates"
+                    | "memberships"
+                    | "tag_memberships"
+                    | "single_assets"
+                    | "lead_assets"
+                    | "duplicates"
+                    | "excluded"
+                    | "deferred"
+                    | "general_hits"
+                    | "family_evidence"
+                    | "learn_state"
+                    | "prototypes"
+                    | "proto_claims"
+                    | "weak_claims"
+                    | "relations"
+                    | "image_sigs"
+                    | "similar_paired"
+                    | "similar_retry"
+                    | "clusters"
+                    | "cluster_info"
+            )
+    }
+}
+/// 应用学习副本还要在本地运行核心发布、重算投影，因而保留其视图、约束和触发器。其他计算只读自己的表；
+/// OC 单独物化 general_hits 视图，relate 只取点名图片的路径。源库始终只复制 worker 会读取的输入。
+fn copy_inputs(
+    c: &Connection,
+    path: &Path,
+    inputs: &Inputs<'_>,
+    part: SnapshotDb,
+    check: &dyn Fn() -> Result<()>,
+) -> Result<()> {
+    use crate::app_create::quote_id;
+    check()?;
+    #[cfg(test)]
+    tests::backup_step(path);
+    let source = matches!(part, SnapshotDb::Source);
+    let mut out = crate::sqlite::open(path)?;
+    // 任务私有文件在副本事务完成后才交给 worker，进程中断后整份丢弃。
+    out.pragma_update(None, "synchronous", "OFF")?;
+    out.pragma_update(None, "foreign_keys", false)?;
+    let tx = out.transaction()?;
+    if !source && inputs.scope == Scope::Relate {
+        tx.execute("CREATE TABLE assets(uuid TEXT PRIMARY KEY,src_path TEXT)", [])?;
+        let ids = serde_json::to_string(&inputs.ids).map_err(|_| bad())?;
+        copy_rows(
+            c,
+            &tx,
+            "assets",
+            "uuid,src_path",
+            " WHERE uuid IN (SELECT value FROM json_each(?))",
+            &[&ids],
+            check,
+        )?;
+    } else {
+        let only = if source { Some(inputs.scope.source()) } else { inputs.scope.app() };
+        let mut schema = c.prepare(
+            "SELECT s.type,s.name,s.tbl_name,s.sql,coalesce(t.wr,0)
+             FROM sqlite_schema s LEFT JOIN pragma_table_list t ON t.schema='main' AND t.name=s.tbl_name
+             WHERE t.type IN ('table','view') AND s.name NOT GLOB 'sqlite_*' AND s.sql IS NOT NULL
+             ORDER BY CASE s.type WHEN 'table' THEN 0 WHEN 'index' THEN 1 WHEN 'view' THEN 2 ELSE 3 END,s.rowid",
+        )?;
+        let mut objects = schema.query([])?;
+        while let Some(row) = objects.next()? {
+            check()?;
+            let kind: String = row.get(0)?;
+            let name: String = row.get(1)?;
+            let owner: String = row.get(2)?;
+            if only.is_some_and(|list| !list.contains(&owner.as_str())) {
+                continue;
+            }
+            if kind == "view" && only.is_some() {
+                // 只复制这个视图的可见值，不把它所连接的术语库交给只读 worker。
+                let query = c.prepare(&format!("SELECT * FROM {}", quote_id(&name)))?;
+                let cols = query.column_names().map(quote_id).collect::<Vec<_>>();
+                tx.execute(&format!("CREATE TABLE {} ({})", quote_id(&name), cols.join(",")), [])?;
+                copy_rows(c, &tx, &name, "*", "", &[], check)?;
+                continue;
+            }
+            if (source && kind == "index") || (only.is_some() && kind == "trigger") {
+                continue;
+            }
+            let sql: String = row.get(3)?;
+            tx.execute(&sql, [])?;
+            if kind == "table" && part.copies_rows(inputs.scope, &name) {
+                let without_rowid: bool = row.get(4)?;
+                let cols = if without_rowid { "*" } else { "rowid AS rowid,*" };
+                let filter = if source && name == "embeddings" { CCIP_ROWS } else { "" };
+                copy_rows(c, &tx, &name, cols, filter, &[], check)?;
+            }
         }
     }
+    tx.commit()?;
     Ok(())
 }
 fn queue_schema(c: &Connection) -> Result<()> {
@@ -895,6 +1114,7 @@ impl Research {
 /// 一次运行据以计算的内容：输入版本和 `dir` 里的副本，以及它们覆盖的待处理工作。
 struct Snapshot {
     version: String,
+    hashes: InputHashes,
     events: Vec<i64>,
     intents: Vec<String>,
     regroup: bool,
@@ -913,8 +1133,7 @@ fn snapshot(
 ) -> Result<Snapshot> {
     writers.read(src, |src| {
         read_snapshot(&[c, src], || {
-            let app = app_digest(c, inputs, &|| ctx.check())?;
-            backup(c, &dir.join("library.sqlite"), ctx, None)?;
+            let (app_hash, app) = app_digest(c, inputs, None, &|| ctx.check())?;
             let events: Vec<i64> = c
                 .prepare(
                     "SELECT id FROM backend_effects WHERE status='pending' AND kind IN ('verdict','imported','index_changed') ORDER BY id",
@@ -938,10 +1157,17 @@ fn snapshot(
                         [],
                         |r| r.get::<_, bool>(0),
                     )? || !intents.is_empty());
+            {
+                let _phase = Phase::start("copy_app");
+                copy_inputs(c, &dir.join("library.sqlite"), inputs, SnapshotDb::App { regroup }, &|| ctx.check())?;
+            }
             // 源库放最后：从第一次读起，研究就持有它的读锁。
-            let source = source_digest(src, inputs, &|| ctx.check())?;
-            backup(src, &dir.join("source.sqlite"), ctx, Some(writers))?;
-            Ok(Snapshot { version: combine(&app, &source), events, intents, regroup })
+            let check = poll(ctx, Some(writers));
+            let source = source_digest(src, inputs, None, &check)?;
+            let _phase = Phase::start("copy_source");
+            copy_inputs(src, &dir.join("source.sqlite"), inputs, SnapshotDb::Source, &check)?;
+            let version = combine(&app, &source.digest.clone().finalize());
+            Ok(Snapshot { version, hashes: InputHashes { app: app_hash, source }, events, intents, regroup })
         })
     })
 }
@@ -956,17 +1182,21 @@ fn run(
 ) -> Result<Json> {
     let scratch = Scratch(std::env::temp_dir().join(format!("illustash-research-{}", ctx.identity().task_id)));
     fs::create_dir(&scratch.0)?;
-    let c = crate::app_library::read_connection(&library.db())?;
-    let mut src = crate::app_library::read_connection(&library.source())?;
     let inputs = Inputs::new(library, anchors, kind, &args);
+    let mut c = if inputs.scope.publishes() {
+        let c = crate::sqlite::open_with_flags(library.db(), rusqlite::OpenFlags::SQLITE_OPEN_READ_WRITE)?;
+        crate::configure(&c)?;
+        c
+    } else {
+        crate::app_library::read_connection(&library.db())?
+    };
+    let mut src = crate::app_library::read_connection(&library.source())?;
     let writers = Writers::of(&library.source());
-    let Snapshot { version, events, intents, regroup } =
+    let Snapshot { version, hashes, events, intents, regroup } =
         snapshot(&c, &mut src, &writers, &inputs, kind, &scratch.0, ctx)?;
-    // 在副本上、读事务之外进行：这里没有任何东西读图库。
-    crate::sqlite::open(scratch.0.join("library.sqlite"))?
-        .execute("DELETE FROM name_settings WHERE key IN ('model_key','deepseek_key')", [])?;
     // 只有学习类的种类发布学习批次；其他种类跳过它完整的输入戳。
     let learning = if inputs.scope == Scope::Learning {
+        let _phase = Phase::start("learning_token");
         crate::character_learning::snapshot(&mut crate::sqlite::open(scratch.0.join("library.sqlite"))?)?["token"]
             .clone()
     } else {
@@ -997,6 +1227,7 @@ fn run(
         .arg(&output)
         .env("ILLUSTASH_RESEARCH_PROGRESS", &progress);
     let mut last = std::time::Instant::now();
+    let worker_phase = Phase::start("worker");
     let status = ctx.process_observed(&mut cmd, || {
         if last.elapsed() < Duration::from_millis(100) {
             return Ok(());
@@ -1018,6 +1249,7 @@ fn run(
         }
         Ok(())
     })?;
+    drop(worker_phase);
     ctx.check()?;
     if !status.success() {
         return Err(Error::Invalid("研究 worker 崩溃或依赖不可用".into()));
@@ -1041,24 +1273,25 @@ fn run(
     importing();
     // 图库忙得没法检查结果时，结果先保留（#275）：暂停后再检查，最多 `CONFLICT_RETRIES` 次，然后运行以 `BUSY` 结束，
     // 之后由恢复重新启动。
-    let publish = || {
+    let mut publish = || {
         ctx.receive(&response.identity, || {
-            let mut src = crate::app_library::read_connection(&library.source())?;
             writers.read(&mut src, |src| {
                 let src = src.transaction()?;
                 if !inputs.scope.publishes() {
                     // 查询什么都不发布：一个读事务同时检查它的输入和答案。
-                    let c = crate::app_library::read_connection(&library.db())?;
-                    return read_snapshot(&[&c], || {
-                        if fingerprint(&c, &src, &inputs, ctx)? != version {
-                            return Err(Error::Conflict(INPUT_CHANGED.into()));
-                        }
-                        validate_query(&c, kind, &Value::Object(response.result.clone()), &args)?;
-                        ordered.get("result").cloned().ok_or_else(bad)
+                    let check = poll(ctx, Some(&writers));
+                    return writers.read(&mut c, |c| {
+                        read_snapshot(&[c], || {
+                            let (_, app) = app_digest(c, &inputs, Some(&hashes.app), &check)?;
+                            let source = source_digest(&src, &inputs, Some(&hashes.source), &check)?;
+                            if combine(&app, &source.digest.finalize()) != version {
+                                return Err(Error::Conflict(INPUT_CHANGED.into()));
+                            }
+                            validate_query(c, kind, &Value::Object(response.result.clone()), &args)?;
+                            ordered.get("result").cloned().ok_or_else(bad)
+                        })
                     });
                 }
-                let mut c = crate::sqlite::open(library.db())?;
-                crate::configure(&c)?;
                 confirm(
                     &mut c,
                     &src,
@@ -1066,8 +1299,10 @@ fn run(
                     &version,
                     ctx,
                     Some(&writers),
+                    Some(&hashes),
                     || {},
                     |tx| {
+                        let _phase = Phase::start("publish");
                         crate::schema::begin_writing(&tx)?;
                         if kind != "similar" {
                             if let Some(batch) = response.learning.as_ref().filter(|v| !v.is_null()) {
@@ -1456,6 +1691,7 @@ mod tests {
                 version,
                 &self.ctx,
                 None,
+                None,
                 || {
                     rounds += 1;
                     between(rounds)
@@ -1529,6 +1765,152 @@ mod tests {
     }
 
     #[test]
+    fn snapshot_copies_only_the_worker_inputs() {
+        let f = Fixture::new();
+        f.app()
+            .execute_batch(
+                "INSERT INTO name_settings VALUES ('model_key','synthetic-key');
+             INSERT INTO memberships VALUES ('a','e1');
+             CREATE TABLE local_archive(v,display AS (v+1)); INSERT INTO local_archive(v) VALUES (5);
+             CREATE TABLE term_projection(id INTEGER PRIMARY KEY); INSERT INTO term_projection VALUES (1);
+             DROP TABLE general_hits;
+             CREATE TABLE tag_input(uuid TEXT,value TEXT);
+             INSERT INTO tag_input VALUES ('a','blue_hair');
+             CREATE VIEW general_hits AS SELECT * FROM tag_input;",
+            )
+            .unwrap();
+        f.source()
+            .execute_batch(
+                "INSERT INTO embeddings VALUES ('a','ccip',X'01'),('a','wd',X'02');
+             INSERT INTO characters VALUES ('c',4);
+             CREATE TABLE labels(uuid TEXT); INSERT INTO labels VALUES ('a');",
+            )
+            .unwrap();
+        for (scope, kind) in
+            [(Scope::Learning, "events"), (Scope::Similar, "similar"), (Scope::Oc, "oc"), (Scope::Relate, "relate")]
+        {
+            let dir = f.root.join(kind);
+            fs::create_dir(&dir).unwrap();
+            let taken = snapshot(
+                &f.app(),
+                &mut f.source(),
+                &Writers::of(&f.root.join("source.sqlite")),
+                &f.inputs(scope),
+                kind,
+                &dir,
+                &f.ctx,
+            )
+            .unwrap();
+            assert_eq!(taken.version, f.version(scope));
+            let app = crate::sqlite::open(dir.join("library.sqlite")).unwrap();
+            let source = crate::sqlite::open(dir.join("source.sqlite")).unwrap();
+            let tables = |c: &Connection, table: &str| {
+                c.query_row("SELECT COUNT(*) FROM sqlite_schema WHERE name=?", [table], |row| row.get::<_, i64>(0))
+                    .unwrap()
+            };
+            assert_eq!(tables(&source, "labels"), 0);
+            if scope == Scope::Learning {
+                for table in ["local_archive", "term_projection"] {
+                    assert_eq!(
+                        app.query_row(&format!("SELECT count(*) FROM {table}"), [], |r| r.get::<_, i64>(0)).unwrap(),
+                        0
+                    );
+                }
+                assert_eq!(app.query_row("SELECT count(*) FROM name_settings", [], |r| r.get::<_, i64>(0)).unwrap(), 0);
+            }
+            assert_eq!(tables(&source, "characters"), i64::from(scope == Scope::Learning));
+            if scope == Scope::Relate {
+                assert_eq!(tables(&source, "embeddings"), 0);
+                assert_eq!(
+                    app.query_row(
+                        "SELECT group_concat(uuid,',') FROM (SELECT uuid FROM assets ORDER BY uuid)",
+                        [],
+                        |r| r.get::<_, String>(0)
+                    )
+                    .unwrap(),
+                    "a,b"
+                );
+            } else {
+                assert_eq!(
+                    source
+                        .query_row("SELECT group_concat(model) FROM embeddings", [], |r| r.get::<_, String>(0))
+                        .unwrap(),
+                    "ccip"
+                );
+            }
+            if scope == Scope::Oc {
+                assert_eq!(
+                    app.query_row("SELECT value FROM general_hits WHERE uuid='a'", [], |r| r.get::<_, String>(0))
+                        .unwrap(),
+                    "blue_hair"
+                );
+                assert_eq!(tables(&app, "tag_input"), 0);
+            }
+        }
+    }
+    #[test]
+    fn cached_database_hashes_still_guard_source_commits_and_external_files() {
+        let f = Fixture::new();
+        let inputs = f.inputs(Scope::Learning);
+        let mut app = f.app();
+        let mut src = f.source();
+        let dir = f.root.join("snapshot");
+        fs::create_dir(&dir).unwrap();
+        let taken =
+            snapshot(&app, &mut src, &Writers::of(&f.root.join("source.sqlite")), &inputs, "events", &dir, &f.ctx)
+                .unwrap();
+        let mut accept = || {
+            let pinned = src.transaction().unwrap();
+            confirm(
+                &mut app,
+                &pinned,
+                &inputs,
+                &taken.version,
+                &f.ctx,
+                None,
+                Some(&taken.hashes),
+                || {},
+                |tx| {
+                    let writer = f.source();
+                    writer.busy_timeout(Duration::ZERO)?;
+                    let error = writer.execute("INSERT INTO characters VALUES ('late',1)", []).unwrap_err();
+                    assert_eq!(error.sqlite_error_code(), Some(rusqlite::ErrorCode::DatabaseBusy));
+                    Ok(tx.commit()?)
+                },
+            )
+        };
+        // 同连接命中缓存仍持有源库读锁，直到应用事务提交。
+        assert!(accept().is_ok());
+        f.source().execute("INSERT INTO embeddings VALUES ('a','wd',X'00')", []).unwrap();
+        assert!(accept().is_ok());
+        fs::write(f.root.join("a.png"), "new external content").unwrap();
+        assert!(conflict(&accept()));
+        // 独立核对源库的版本失效分支。
+        let old =
+            read_snapshot(&[&src], || source_digest(&src, &inputs, Some(&taken.hashes.source), &|| Ok(()))).unwrap();
+        f.source().execute("INSERT INTO embeddings VALUES ('a','ccip',X'01')", []).unwrap();
+        let fresh = read_snapshot(&[&src], || source_digest(&src, &inputs, Some(&old), &|| Ok(()))).unwrap();
+        assert_ne!(fresh.digest.finalize(), old.digest.finalize());
+    }
+
+    #[test]
+    fn oc_rechecks_the_visible_tags_and_only_ccip_vectors() {
+        let f = Fixture::new();
+        f.app()
+            .execute_batch(
+                "DROP TABLE general_hits;
+             CREATE TABLE tag_input(uuid TEXT,value TEXT);
+             CREATE VIEW general_hits AS SELECT * FROM tag_input;",
+            )
+            .unwrap();
+        let before = f.version(Scope::Oc);
+        f.source().execute("INSERT INTO embeddings VALUES ('a','wd',X'01')", []).unwrap();
+        assert_eq!(f.version(Scope::Oc), before);
+        f.app().execute("INSERT INTO tag_input VALUES ('a','blue_hair')", []).unwrap();
+        assert_ne!(f.version(Scope::Oc), before);
+    }
+
+    #[test]
     fn each_kind_fingerprints_only_its_inputs() {
         let f = Fixture::new();
         let app = |sql: &str| f.app().execute_batch(sql).unwrap();
@@ -1550,6 +1932,17 @@ mod tests {
             ),
             ("sync history", Box::new(|| app("INSERT INTO sync_runs(status) VALUES ('done')")), &[]),
             ("pending event", Box::new(|| app("INSERT INTO backend_effects(kind) VALUES ('verdict')")), &[]),
+            (
+                "backup digest, state and revision",
+                Box::new(|| {
+                    app("CREATE TABLE human_asset_hashes(asset_key TEXT,digest TEXT);
+                    CREATE TABLE human_backup_state(id INTEGER,state_json TEXT);
+                    INSERT INTO human_asset_hashes VALUES ('a','synthetic');
+                    INSERT INTO human_backup_state VALUES (1,'{}');
+                    INSERT INTO meta VALUES ('human_revision','1');")
+                }),
+                &[],
+            ),
             ("human verdict", Box::new(|| app("INSERT INTO assertions VALUES ('a','e1','confirmed')")), &[Learning]),
             (
                 "identity policy",
@@ -2087,9 +2480,8 @@ mod tests {
         let f = Fixture::new();
         f.source()
             .execute_batch(
-                "CREATE TABLE synthetic_bulk(id INTEGER PRIMARY KEY,value BLOB);
-                 WITH RECURSIVE n(i) AS (SELECT 1 UNION ALL SELECT i+1 FROM n WHERE i<2000)
-                 INSERT INTO synthetic_bulk SELECT i,randomblob(64) FROM n;",
+                "WITH RECURSIVE n(i) AS (SELECT 1 UNION ALL SELECT i+1 FROM n WHERE i<2000)
+                 INSERT INTO embeddings SELECT i,'ccip',randomblob(64) FROM n;",
             )
             .unwrap();
         let path = f.root.join("source.sqlite");
@@ -2115,7 +2507,13 @@ mod tests {
         let read = writers.read(&mut src, |src| {
             read_snapshot(&[&app, src], || {
                 fingerprint(&app, src, &f.inputs(Scope::Learning), &f.ctx)?;
-                backup(src, &f.root.join("snapshot.sqlite"), &f.ctx, Some(&writers))
+                copy_inputs(
+                    src,
+                    &f.root.join("snapshot.sqlite"),
+                    &f.inputs(Scope::Learning),
+                    SnapshotDb::Source,
+                    &poll(&f.ctx, Some(&writers)),
+                )
             })
         });
         assert_eq!(handle.join().unwrap().map_err(|e| e.to_string()), Ok(()));
@@ -2138,6 +2536,7 @@ mod tests {
                 &version,
                 &f.ctx,
                 Some(&writers),
+                None,
                 || {},
                 |tx| Ok(tx.commit()?),
             )
@@ -2520,6 +2919,7 @@ mod tests {
                         &f.inputs(scope),
                         &version,
                         &f.ctx,
+                        None,
                         None,
                         || locked.set(Instant::now()),
                         |tx| {
