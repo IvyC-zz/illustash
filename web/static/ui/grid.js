@@ -104,8 +104,8 @@ export async function reload(reset = false, place = null) {
     if (state.route.char) refreshMaybe(gen);
   } catch (e) {
     if (e.name === 'AbortError' || gen !== state.generation || route !== state.route) return;
-    const text = viewOf(route).readFailed?.(e);   // 这一页认得的失败当作没有结果（core/pages.js 的 readFailed）
-    if (text) { showNone(text); return; }
+    const view = viewOf(route), text = view.readFailed?.(e);   // 这一页认得的失败当作没有结果（core/pages.js 的 readFailed）
+    if (text) { showNone(text, view.failedNext?.(route)); return; }
     error(e.message); $('resultCount').textContent = t('读取失败');
   }
 }
@@ -116,10 +116,11 @@ function reuseSame(items) {
   for (const x of items) if (x) shown.set(x.uuid, x);
   return item => { const was = shown.get(item.uuid); return was && JSON.stringify(was) === JSON.stringify(item) ? was : item; };
 }
-function showNone(text) {
+function showNone(text, next = '') {
   state.total = 0; state.totalReady = true; state.countDirty = false; state.items = []; state.pages = new Set(); state.dataVersion++; state.gridKey = '';
   renderGrid(); updateCount(); renderSelection();
-  $('empty').hidden = false; $('empty').textContent = text;
+  $('empty').hidden = false;
+  if (next) $('empty').innerHTML = `<div>${esc(text)}<div>${next}</div></div>`; else $('empty').textContent = text;
   renderHeading();
 }
 // 首页借用网格的列表放它自己的图（详情栏翻页、大图都按这个列表走）。
