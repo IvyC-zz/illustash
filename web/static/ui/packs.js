@@ -73,6 +73,8 @@ export function packLine(x = current()) {
     : t('角色资料包还没下载（约 {size}）', {size: bytes(left(x))});
   if (l.prompt === 'ask') return t('角色资料包现在默认启用，本图库还没启用');
   if (l.prompt === 'auto') return t('第一次同步时启用');
+  // 新图库第一次同步时包还没到（#630）：包到了以后，等同步等后台任务结束就启用。
+  if (l.prompt === 'pending') return t('等后台任务结束后启用');
   return t('本图库未启用');
 }
 // 状态行左边的圆点：进行中、出错、没有启用。
@@ -131,6 +133,7 @@ export function packHint(x = current()) {
   if (on(x) && ccip.error) parts.push(esc(t('上次自动检查没有完成：{reason}', {reason: tb(ccip.error)})));
   if (on(x) && l.checked_at) parts.push(esc(t('上次检查 {time}', {time: localTime(l.checked_at)})));
   if (!on(x) && l.prompt === 'ask' && ready(x)) parts.push(esc(t('启用会给还没有归属的图补上机器归属')));
+  if (!on(x) && l.prompt === 'pending' && !ready(x)) parts.push(esc(t('下载完成后启用')));
   const manual = x.wd?.package?.manual;
   if (!ready(x) && manual) parts.push(`<a class="link" href="${esc(manual)}" target="_blank" rel="noreferrer noopener">${t('手动下载说明')}</a>`);
   return parts.join(' · ');

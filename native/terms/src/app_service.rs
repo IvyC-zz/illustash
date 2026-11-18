@@ -169,6 +169,9 @@ pub(crate) struct Session {
     pub(crate) rescued: Option<Json>,
     /// 发现了损坏，会话的任务已停止。
     pub(crate) halted: bool,
+    /// 这次打开以后已经替等着默认启用的图库启动过角色资料包的启用（#630）。每次打开只自动启动一次：失败或取消后
+    /// 卡片上照常有「重试」「启用…」，不在后台反复重试。
+    pack_default_started: bool,
 }
 impl Session {
     pub(crate) fn token() -> Result<String> {
@@ -221,6 +224,7 @@ impl Session {
             rescue: Default::default(),
             rescued: None,
             halted: false,
+            pack_default_started: false,
         })
     }
     /// 同步要等的后台任务正在进行（#607）：角色索引在写入，或 WD 扩展检查在跑。这时的同步请求先排着
@@ -399,6 +403,7 @@ impl Application {
             rescue: Default::default(),
             rescued: None,
             halted: false,
+            pack_default_started: false,
         };
         session.syncer.resource_root = root.clone();
         session.syncer.per_run = per_run;
@@ -522,6 +527,9 @@ impl Application {
                 eprintln!("排着的同步未能开始：{error}");
             }
         }
+        if let Err(error) = self.start_pack_default(&mut session) {
+            eprintln!("角色资料包未能默认启用：{error}");
+        }
         session.names.recover(&library);
         if let Err(error) = session.research.recover(&library, busy) {
             eprintln!("研究事件恢复失败：{error}");
@@ -560,6 +568,32 @@ impl Application {
         let identity = crate::app_tasks::TaskIdentity::new(&session.library, session.generation, &session.token)?;
         let action = crate::app_wd_extension::Action::Auto(pack, path, ids);
         session.wd_extension.start_for(&session.library, identity, action)?;
+        Ok(())
+    }
+
+    /// 新图库第一次同步时角色资料包还不在本机（#630）：包就位后照默认启用，和用户点「启用」走同一个任务，检查已有的识别
+    /// 结果。等同步、导入导出、角色索引和别的 WD 扩展任务都结束后才开始；用户选过不用或撤回过的图库不在此列
+    /// （`app_packs::default_state`）。
+    fn start_pack_default(&self, session: &mut Session) -> Result<()> {
+        if session.pack_default_started
+            || session.library.frozen()
+            || session.wd_extension.running()
+            || self.wd_busy(session).is_some()
+        {
+            return Ok(());
+        }
+        // 每秒都会走到这里：先只读一个标记，大多数图库到这里就结束。
+        let app = crate::app_library::read_connection(&session.library.db())?;
+        if !crate::app_wd_extension::default_pending(&app)? {
+            return Ok(());
+        }
+        drop(app);
+        let Some(pack) = crate::app_packs::pending_enable(&self.root, &session.library)? else { return Ok(()) };
+        session.pack_default_started = true;
+        let action = crate::app_packs::enable_action(&self.root, &session.library, &pack)?;
+        let identity = crate::app_tasks::TaskIdentity::new(&session.library, session.generation, &session.token)?;
+        session.wd_extension.start_for(&session.library, identity, action)?;
+        crate::app_ccip_longtail::clear_auto_task(&session.library);
         Ok(())
     }
 

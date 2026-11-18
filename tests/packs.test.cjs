@@ -79,6 +79,15 @@ test('已下载、本图库没启用：已有识别结果的图库提示一次�
   const auto = pack({current: READY, library: {prompt: 'auto', vectors: 0}});
   assert.equal(c.packLine(auto), '第一次同步时启用');
   assert.deepEqual(labels(c.packActions(auto)), ['启用…']);
+  // 新图库第一次同步时包还没到（#630）：下载完成后由宿主启用，卡片不提示「不用」。
+  const pending = pack({current: READY, library: {prompt: 'pending', vectors: 3}});
+  assert.equal(c.packLine(pending), '等后台任务结束后启用');
+  assert.deepEqual(labels(c.packActions(pending)), ['启用…']);
+  assert.doesNotMatch(c.packHint(pending), /补上机器归属/);
+  const waiting = pack({library: {prompt: 'pending', vectors: 3}, download: {kind: 'download', status: 'failed', message: '连接失败'}});
+  assert.equal(c.packLine(waiting), '角色资料包没能下载：连接失败');
+  assert.match(c.packHint(waiting), /下载完成后启用/);
+  assert.equal(labels(c.packActions(waiting))[0], '重试');
   const declined = pack({current: READY, library: {prompt: 'declined'}});
   assert.equal(c.packLine(declined), '本图库未启用');
   assert.doesNotMatch(c.packHint(declined), /补上机器归属/);

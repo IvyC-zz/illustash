@@ -14,6 +14,7 @@ import struct
 import subprocess
 import tempfile
 from threading import Thread
+import time
 import unittest
 import zipfile
 
@@ -362,6 +363,93 @@ class NativePackCatalogTest(unittest.TestCase):
             # 只记下启用了哪个文件：没有证据，也没有归属。
             with sqlite3.connect(self.lib.db) as app:
                 self.assertEqual(app.execute("SELECT count(*) FROM candidates WHERE source IN ('WD_EXT','CCIP_LONGTAIL')").fetchone(), (0,))
+
+    def fresh_library_missing_the_pack(self, files):
+        """新图库，第一次准备时角色资料包的 CCIP 文件没下载下来，第一次同步就过去了（#630）。返回那个文件的字节。"""
+        ccip = files.pop('/builtin/A-longtail-p75.zip')
+        folder = self.root / 'fresh-images'
+        folder.mkdir()
+        for name, color in (('x.png', 'red'), ('y.png', 'purple')):
+            image(folder / name, color)
+        fresh = self.root / 'fresh.pilib'
+        self.cli('library-create', '--dest', str(fresh), '--folder', str(folder))
+        self.lib = Library(fresh)
+        self.restart()
+        self.assertEqual(self.packs()['library']['prompt'], 'auto')
+        self.packs({'action': 'download'})
+        failed = self.settle('download')
+        self.assertEqual(failed['download']['status'], 'failed', failed)
+        self.assertNotEqual(failed['current']['status'], 'ready')
+        self.assertEqual(self.request('/api/sync', {})['status'], 200)
+        wait_until(lambda: json.loads(self.request('/api/sync')['body'])['state']['status'] not in ('scanning', 'running'))
+        # 第一次同步交付的识别结果（合成向量：第一张图只有第 0 维是 1，内置包的 WD 头认它）。
+        with sqlite3.connect(self.lib.source) as source:
+            source.execute('CREATE TABLE IF NOT EXISTS embeddings(uuid TEXT,model TEXT,vec BLOB,PRIMARY KEY(uuid,model))')
+            self.ids = [u for u, in source.execute('SELECT uuid FROM assets WHERE in_scope=1 ORDER BY uuid')]
+            for i, uuid in enumerate(self.ids):
+                vector = [0.] * 1024
+                vector[i] = 1.
+                source.execute("INSERT INTO embeddings VALUES (?,'wd',?)", (uuid, struct.pack('<1024f', *vector)))
+        self.assertEqual(len(self.ids), 2)
+        # 已有识别结果，但没当成升级上来的图库去问：还是等包就位后默认启用。
+        packs = self.packs()
+        self.assertLessEqual({'enabled': False, 'prompt': 'pending'}.items(), packs['library'].items())
+        return ccip
+
+    def test_new_library_enables_the_pack_once_a_late_download_arrives(self):
+        files = {}
+        with github(files) as (origin, seen):
+            files.update(self.serve(origin))
+            ccip = self.fresh_library_missing_the_pack(files)
+            # 重启以后照样记得。
+            self.restart()
+            self.assertEqual(self.packs()['library']['prompt'], 'pending')
+
+            # 点「重试」补下载：下完以后宿主自己启用，像用户点了启用一样检查已有的识别结果。
+            files['/builtin/A-longtail-p75.zip'] = ccip
+            self.packs({'action': 'download'})
+            self.assertEqual(self.settle('download')['current']['status'], 'ready')
+            observed = None
+
+            def enabled():
+                nonlocal observed
+                observed = self.packs()
+                task = observed['task']
+                return task and task['kind'] == 'enable' and task['status'] != 'running'
+
+            wait_until(enabled)
+            self.assertEqual(observed['task']['status'], 'done', observed)
+            self.assertLessEqual({'enabled': True, 'version': '0.1', 'wd': True, 'ccip': True, 'prompt': None,
+                                  'images': 1, 'assigned': 1}.items(), observed['library'].items())
+            self.assertEqual(self.members(), (self.ids[:1], self.ids[:1]))
+
+            # 用户撤回以后不再默认启用：重启后也不会。
+            self.packs({'action': 'withdraw'})
+            withdrawn = self.settle('task')
+            self.assertEqual(withdrawn['task']['status'], 'done', withdrawn)
+            self.assertEqual(withdrawn['library']['prompt'], 'declined')
+            self.restart()
+            time.sleep(3)  # 宿主每秒检查一次要不要默认启用。
+            packs = self.packs()
+            self.assertIsNone(packs['task'])
+            self.assertLessEqual({'enabled': False, 'prompt': 'declined'}.items(), packs['library'].items())
+            self.assertEqual(self.members(), ([], []))
+
+    def test_declining_before_a_late_download_keeps_the_pack_off(self):
+        files = {}
+        with github(files) as (origin, seen):
+            files.update(self.serve(origin))
+            ccip = self.fresh_library_missing_the_pack(files)
+            # 包还没到时用户选了不用：下完以后也不启用。
+            self.assertEqual(self.packs({'action': 'decline'})['library']['prompt'], 'declined')
+            files['/builtin/A-longtail-p75.zip'] = ccip
+            self.packs({'action': 'download'})
+            self.assertEqual(self.settle('download')['current']['status'], 'ready')
+            time.sleep(3)  # 宿主每秒检查一次要不要默认启用。
+            packs = self.packs()
+            self.assertIsNone(packs['task'])
+            self.assertLessEqual({'enabled': False, 'prompt': 'declined'}.items(), packs['library'].items())
+            self.assertEqual(self.members(), ([], []))
 
 
 if __name__ == '__main__':

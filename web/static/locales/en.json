@@ -3256,6 +3256,8 @@
   "角色资料包还没下载（约 {size}）": "Character pack not downloaded (about {size})",
   "角色资料包现在默认启用，本图库还没启用": "Character packs are now on by default; not on for this library yet",
   "第一次同步时启用": "Turns on at the first sync",
+  "等后台任务结束后启用": "Turns on when the background task finishes",
+  "下载完成后启用": "Turns on once downloaded",
   "下载角色资料包（约 {size}）": "Download character pack (about {size})",
   "角色资料包不在这台电脑上，新识别的图不检查": "The character pack isn’t on this computer; newly recognized images aren’t checked",
   "启用会给还没有归属的图补上机器归属": "Turning it on fills in machine assignments for images that have none",

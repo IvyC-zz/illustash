@@ -758,6 +758,8 @@ pub(crate) fn for_library(resources: &Path, library: &crate::app_library::Librar
 /// 角色资料包默认启用（2026-11-17 用户定，#602）时本图库的情况，给卡片用：
 /// - `null`：已经启用了（至少一个组成部分），或图库只读；
 /// - `"auto"`：还没有任何识别向量，等于新图库：第一次同步之前记成启用（`default_enable`），之后的识别结果照常检查；
+/// - `"pending"`：新图库第一次同步时包还不在本机（#630）：包就位后宿主照默认启用，像用户点了启用一样检查已有的识别
+///   结果（`pending_enable`）；
 /// - `"ask"`：已有识别向量、还没决定过的图库（升级上来的）：卡片上提示一次，用户点了才启用，因为启用会给还没有归属的图
 ///   补上机器归属；
 /// - `"declined"`：用户在提示里选了不用，或撤回过：不再提示，也不自动启用。
@@ -773,21 +775,62 @@ pub(crate) fn default_state(
     if crate::app_wd_extension::declined(&app)? {
         return Ok("declined".into());
     }
+    if crate::app_wd_extension::default_pending(&app)? {
+        return Ok("pending".into());
+    }
     let vectors =
         crate::app_wd_extension::stored_vectors(library)? > 0 || crate::app_ccip_longtail::stored_vectors(library)? > 0;
     Ok(if vectors { "ask" } else { "auto" }.into())
 }
 
 /// 新图库默认启用（#602）：同步开始前，图库还没有任何识别向量、也没决定过时，把卡片上的版本记成启用（不检查，没有
-/// 证据要写），这次同步交付的识别结果就照常检查。包还不在本机时不记：等用户在卡片上点。
+/// 证据要写），这次同步交付的识别结果就照常检查。包还不在本机时记下「等包就位后默认启用」（#630），由宿主在包到了以后
+/// 启用（`pending_enable`）：这次同步交付的识别结果到那时一起检查。
 pub(crate) fn default_enable(resources: &Path, library: &crate::app_library::Library) -> Result<bool> {
     let lib = for_library(resources, library)?;
-    if default_state(resources, library, &lib)? != "auto" || !present(resources, &lib.card) {
+    if default_state(resources, library, &lib)? != "auto" {
+        return Ok(false);
+    }
+    if !present(resources, &lib.card) {
+        crate::app_wd_extension::set_default_pending(library)?;
         return Ok(false);
     }
     crate::app_wd_extension::mark_enabled(library, &lib.card.wd)?;
     crate::app_ccip_longtail::mark_enabled(library, resources, &lib.card.ccip)?;
     Ok(true)
+}
+
+/// 等着默认启用的图库（`"pending"`）在包就位后要启用的版本：卡片上的版本，两个文件都在本机时。不是这种情况时为 `None`。
+pub(crate) fn pending_enable(resources: &Path, library: &crate::app_library::Library) -> Result<Option<CharacterPack>> {
+    let lib = for_library(resources, library)?;
+    if default_state(resources, library, &lib)? != "pending" || !present(resources, &lib.card) {
+        return Ok(None);
+    }
+    Ok(Some(lib.card))
+}
+
+/// 用这个版本启用（或换包）的任务：两个组成部分依次处理，已有识别向量的那部分检查整库，没有的只记下启用了哪个文件。
+/// 用户点「启用」和等着默认启用的图库在包就位后（`pending_enable`）都走这里。
+pub(crate) fn enable_action(
+    resources: &Path,
+    library: &crate::app_library::Library,
+    pack: &CharacterPack,
+) -> Result<crate::app_wd_extension::Action> {
+    use crate::app_wd_extension::{Action, Part};
+    let missing = || Error::Conflict("角色资料包还没就位".into());
+    let wd_path = crate::app_models::extension_file(resources, &pack.wd)?.ok_or_else(missing)?;
+    let shared = crate::app_resources::shared_path(resources)?;
+    let ccip_path = crate::app_ccip_longtail::package_path(&shared, &pack.ccip);
+    if !ccip_path.try_exists()? {
+        return Err(missing());
+    }
+    let wd_scan = crate::app_wd_extension::stored_vectors(library)? > 0;
+    let ccip_scan = crate::app_ccip_longtail::stored_vectors(library)? > 0;
+    Ok(Action::Pack {
+        root: resources.to_path_buf(),
+        wd: Some(Box::new(Part { pack: pack.wd.clone(), path: wd_path, scan: wd_scan })),
+        ccip: Some(Box::new(Part { pack: pack.ccip.clone(), path: ccip_path, scan: ccip_scan })),
+    })
 }
 
 /// 已有图库在提示里选了不用（`POST /api/packs {"action":"decline"}`）。
