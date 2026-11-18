@@ -730,6 +730,7 @@
   "点一下：改回「是」": "Click: back to “yes”",
   "点一下：不是 TA": "Click: not them",
   "{n} 张不是 TA": "{n} are not them",
+  "{n} 张都记成不是 TA": "Mark all {n} as not them",
   "点掉不是 TA 的": "Click the ones that are not them",
   "以后再说": "Later",
   "其余 {n} 张是": "The other {n} are",
