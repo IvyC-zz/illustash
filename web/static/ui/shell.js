@@ -11,7 +11,7 @@ import {implement, pageOf, viewOf} from '../core/pages.js';
 import {canGoBack, cleanup, defaultSort, go, hashFor, historyEntry, noteHistory, parseHash, replaceRoute, setRoute, sortKey, stepHistory} from '../core/route.js';
 import {api, readError} from '../core/session.js';
 import {state} from '../core/state.js';
-import {navFor} from '../core/favorites.js';
+import {favoritesOnly, navFor} from '../core/favorites.js';
 import {cast, createWork, drawCast, drawShelf, openTagged, renderIndexBody, searchIndex, shelf} from './catalog.js';
 import {dirDrawn, dirHeading, dirToolbar, onDir, wireDirToolbar} from './artist_dir.js';
 import {$, emptyLink, error, helpTip, searchIcon, showArea, wireHelpTip, workSmall} from './dom.js';
@@ -251,7 +251,7 @@ export function wireShell() {
 implement({
   character: {drawHeading: drawCharHeading},
   home: {heading: (r, {n}) => [t('首页'), state.recentCount ? t('最近一次同步新加入 {n} 张', {n: number(state.recentCount)}) : '']},
-  library: {heading: (r, {n}) => [r.artist ? t('画师 · {name}', {name: esc(artistName(r.artist))}) : r.day ? t('{day} 加入', {day: esc(dayLabel(r.day))}) : r.work ? esc((state.workTree || []).find(w => w.id === r.work)?.name || t('作品筛选')) : r.utag ? '# ' + esc(r.utag) : t('图库'), t('{n} 张', {n})]},
+  library: {heading: (r, {n}) => [r.artist ? t('画师 · {name}', {name: esc(artistName(r.artist))}) : r.day ? t('{day} 加入', {day: esc(dayLabel(r.day))}) : r.work ? esc((state.workTree || []).find(w => w.id === r.work)?.name || t('作品筛选')) : r.utag ? '# ' + esc(r.utag) : favoritesOnly(r) ? t('收藏') : t('图库'), t('{n} 张', {n})]},
   characters: {heading: (r, {n}) => [t('资料库'), r.section === 'artists' ? dirHeading() : r.section === 'works' ? t('{n} 部作品', {n: number(state.index?.works?.length || 0)}) + (state.index?.watch?.works.length ? ' · ' + t('关注 {n} 部', {n: number(state.index.watch.works.length)}) : '') : t('{n} 位角色 · {works} 部作品', {n: number(state.chars.length), works: number(new Set(state.chars.map(workKey).filter(k => k !== 'oc' && k !== 'other')).size)}), !r.section && state.localLinks?.length ? `<span class="heading-links"><button class="quiet" id="localLinksButton" title="${t('补上中文名、别名和作品，和已有角色重复的可以合并')}">${t('{n} 个自建角色能对上 Danbooru', {n: number(state.localLinks.length)})}</button></span>` : '']},
   audit: {heading: (r, {n}) => [t('随机抽查'), t('还剩 {left} / {n} 张', {left: number(state.pools.audit || 0), n}) + (state.nsfw ? ` · <b>${t('R18 筛选开着：抽查要看全部才准，按 H 切换')}</b>` : '')]},
   unmatched: {heading: (r, {n}) => [t('未识别'), '']},
@@ -272,7 +272,7 @@ implement({
 // 本来就是这一节的内容清单，留在原处；资料库、角色页的副标题都是数量和状态，没有「?」。
 implement({
   home: {help: () => [t('按加入日期分组。')]},
-  library: {help: r => r.work ? [t('包含所有子作品的图。')] : r.artist ? [t('画师是按画作比对找到的。')] : [], helpHint: true},
+  library: {help: r => r.work ? [t('包含所有子作品的图。')] : r.artist ? [t('画师是按画作比对找到的。')] : favoritesOnly(r) ? [t('在详情面板或大图里点心形，或者按 F 收藏。')] : [], helpHint: true},
   audit: {help: () => [t('鼠标移到角色 tag 上，点 ✓ 或 ✗ 回答。'), t('选中多张后按 Y（是）或 N（不是）。'), t('打开大图也可以回答。'), t('看不清的可以跳过，换一张。')]},
   unmatched: {helpHint: true},
   skipped: {help: () => [t('选中的图可以恢复到未识别。')], helpHint: true},
@@ -295,8 +295,10 @@ implement({
 // 网格空了时的去处（#386 的 2-12、2-16）：待确认、已跳过清空了回到同一入口的主页签；「只看 R18」时图库空了给「显示全部」。
 // 一组整理完了的去处由 ui/review.js 登记。按钮由 wireShell 里 #empty 的点击处理。
 const showAll = r => state.nsfw === 'only' ? `<button class="quiet" data-empty="nsfw">${t('显示全部')}</button>` : '';
+// 侧栏的「收藏」（只按收藏筛选的图库，#679）空着时说怎么收藏。隐藏或只看 R18 时空着不等于没有收藏，照图库的说法。
+const libraryEmpty = pageOf({page: 'library'}).empty;
 implement({
-  library: {emptyNext: showAll},
+  library: {emptyNext: showAll, empty: (r, ctx = {}) => favoritesOnly(r) && !ctx.nsfw ? t('还没有收藏。在详情面板或大图里点心形，或者按 F 收藏。') : libraryEmpty(r, ctx)},
   character: {emptyNext: showAll},
   like: {emptyNext: showAll},
   skipped: {emptyNext: () => emptyLink('#/groups', t('回到按组整理'))},

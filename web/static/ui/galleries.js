@@ -80,8 +80,7 @@ async function renderIndex() {
 
 // ---------- 一个画廊 ----------
 // 打开 #/gallery/<id>：不带查询时按保存的条件打开，并把条件写进地址；带查询时按地址（条件可能已经改过）。
-// 每次进入都先数一次：保存的条件失效时（引用的作品、标签没了）后端回 400，页头写明原因。
-const problems = new Map();
+// 条件失效时（引用的作品、标签没了）网格读取回 400，原因只写在空状态里（readFailed），不弹错误条（#647）。
 let renaming = '';
 async function prepare(route) {
   if (!state.galleries) await reloadList();
@@ -89,19 +88,13 @@ async function prepare(route) {
   if (!g) { toast(t('画廊不存在')); go({page: 'galleries'}); return false; }
   if (!location.hash.includes('?')) { Object.assign(route, routeFields(g.params)); replaceRoute({}); }
   showNav();
-  problems.delete(String(g.id));
-  countOf(savedParams(route)).then(({error: problem}) => {
-    if (!problem || state.route !== route) return;
-    problems.set(String(g.id), problem); drawHeading();
-  }).catch(() => {});
   return true;
 }
 const changed = (g, r) => !sameParams(g.params, savedParams(r));
 function drawGalleryHeading(h, r) {
   const g = galleryOf(r.id);
   if (!g) { h.innerHTML = `<div class="heading-main"><h1>${t('画廊')}</h1><p></p></div>`; return; }
-  const problem = problems.get(String(g.id));
-  const sub = problem ? `<b>${esc(t('条件失效：{reason}', {reason: problem}))}</b>` : t('{n} 张', {n: state.totalReady ? number(state.total) : '…'});
+  const sub = t('{n} 张', {n: state.totalReady ? number(state.total) : '…'});
   // 正在改名：输入框还在就只换副标题，不打断输入。
   if (renaming === String(g.id) && $('galleryName')?.tagName === 'INPUT') { h.querySelector('.heading-main p').innerHTML = sub; return; }
   const list = state.galleries, at = list.indexOf(g), movable = list.every(x => Number.isInteger(x.position));
@@ -155,8 +148,6 @@ async function update(g, patch) {
   if (!result) return;
   setGallery(g.id, result.gallery);
   await reloadList();
-  // 换了条件：地址上的就是存下的，副标题重新数。
-  if (patch.params) problems.delete(String(g.id));
   drawHeading();
 }
 const rename = (g, name) => update(g, {name});
@@ -195,7 +186,11 @@ async function refresh(why) {
 implement({
   galleries: {render: () => renderIndex(), heading: indexHeading, refresh},
   gallery: {prepare, drawHeading: drawGalleryHeading, refresh, onMeta: () => {},
-    emptyNext: () => state.nsfw === 'only' ? `<button class="quiet" data-empty="nsfw">${t('显示全部')}</button>` : ''},
+    emptyNext: () => state.nsfw === 'only' ? `<button class="quiet" data-empty="nsfw">${t('显示全部')}</button>` : '',
+    // 条件失效：后端对条件引用的角色、作品、标签不存在回 400。在筛选条上改掉失效的条件后可以「更新画廊」，或者删掉它。
+    readFailed: e => e.status === 400 ? t('条件失效：{reason}', {reason: e.message}) : '',
+    failedNext: () => `<button class="quiet" data-empty="delete-gallery">${t('删除画廊')}</button>`,
+    emptyAct: act => { const g = act === 'delete-gallery' && galleryOf(state.route.id); if (g) remove(g); }},
 });
 // 页面启动时调用一次：每次读元数据（启动、写入、撤销、同步之后）顺带重读画廊列表，侧栏入口跟着显示或隐藏。
 export function wireGalleries() {

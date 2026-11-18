@@ -100,8 +100,9 @@ main{flex:1;display:flex;flex-direction:column;min-width:0}
 .content{display:flex;flex-direction:column;flex:1;min-width:0;--gutter:26px}
 .page-heading{display:flex;justify-content:space-between}
 .heading-main{min-width:0;position:relative}
-/* 页面说明「?」（#527，ui/dom.js helpTip）：标题后面的小按钮，说明浮层从标题下面展开 */
-.heading-main h1 .icon.small{margin-left:var(--space-4);vertical-align:middle;border-radius:var(--radius-pill);background:var(--soft);color:var(--muted);font-weight:600}
+/* 页面说明「?」（#527，ui/dom.js helpTip）：标题后面的小按钮，说明浮层从标题下面展开。按钮的基线是「?」的基线，抬高 2px
+   后圆心和中英文标题字面的中心对齐（middle 按西文 x-height 算，会偏低，#672） */
+.heading-main h1 .icon.small{margin-left:var(--space-4);vertical-align:2px;border-radius:var(--radius-pill);background:var(--soft);color:var(--muted);font-weight:600}
 .heading-main h1 .icon.small.on{background:var(--accent-soft);color:var(--accent-ink)}
 .heading-main>.menu-drop{top:100%;margin-top:var(--space-4)}
 .heading-main>.menu-drop p{margin:0;padding:var(--space-4) var(--space-6);font-size:var(--fs-12);line-height:1.6;color:var(--ink2)}

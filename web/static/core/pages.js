@@ -127,7 +127,9 @@ export const poolIs = (route, ...pools) => pools.includes(pageOf(route).pool);
 //   onMeta(info)         计数等元数据到达后重画什么；没有的页面重画工具栏
 //   emptyNext(r)         网格空了时空状态下面的去处（链接或 data-empty 按钮的 HTML，#386 的 2-12）；没有的页面只有一句话
 //   emptyAct(act)        点了 emptyNext 里的 data-empty 按钮（「显示全部」由 shell 自己处理）
-//   readFailed(e)        网格读取失败时：返回一句话就当作没有结果、把它写进空状态，不弹错误条（相似结果的例图没有特征）
+//   readFailed(e)        网格读取失败时：返回一句话就当作没有结果、把它写进空状态，不弹错误条（相似结果的例图没有特征、
+//                        画廊的条件失效）
+//   failedNext(r)        readFailed 认下的失败在空状态下面给的去处，写法同 emptyNext（画廊的「删除画廊」）
 //   reveal(uuid)         主区不是网格的页面把这张图滚进视野：详情栏、大图翻页时，和面板页借列表看的大图关掉时（#424）
 //   refresh(why)         数据变了之后重画面板页：'edit' 改动之后、'undo' 撤销之后、'learned' 确认角色或同步结束后后台学习
 //                        收尾之后（#400、#404）、'sync' 同步到新图之后、'nsfw' 切换 R18 之后、'view' 视图选项之后、
