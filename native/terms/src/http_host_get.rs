@@ -405,6 +405,12 @@ fn read(request: &Request, host: &Host, session: &Session, path: &str) -> Result
 }
 fn libraries(host: &Host, session: &Session) -> Result<Json> {
     let mut p = crate::app_libraries::info(&session.library)?;
+    if session.damage().is_none() {
+        let changes = crate::app_relocation::reports_if_free(&session.library);
+        if !changes.is_empty() {
+            p.set("folder_changes", serde_json::Value::Array(changes).into());
+        }
+    }
     p.set("export", host.exports.state(&session.library, session.generation));
     // 只在把它登记进图库列表失败时（#176）：页面提示一次；平常的应答不变。
     if let Some(why) = &session.unlisted {

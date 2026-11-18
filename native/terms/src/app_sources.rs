@@ -133,6 +133,9 @@ pub(crate) fn remove(library: &mut Library, source_id: &str, confirm: bool) -> R
     if !confirm {
         return Ok(Json::object([("confirm", true.into()), ("count", count.into())]));
     }
+    if crate::app_relocation::reports(library)?.iter().any(|r| r["source"] == source_id && r["state"] == "pending") {
+        return crate::error::invalid("请先完成或撤销上一次搬家");
+    }
     // 先处理图片：如果之后写 library.json 失败，来源仍在列表里，下次扫描会发现所有文件都还在，并把它们恢复。
     let tx = conn.transaction()?;
     tx.execute("UPDATE assets SET trashed=1 WHERE source_id=? AND coalesce(trashed,0)=0", [source_id])?;
@@ -144,6 +147,83 @@ pub(crate) fn remove(library: &mut Library, source_id: &str, confirm: bool) -> R
     write_config(library.instance_path(), &config)?;
     library.reload_config()?;
     Ok(Json::object([("removed", count.into())]))
+}
+
+/// 搬家和撤销只修改来源的位置。来源的其他字段保持原来的顺序和值。
+pub(super) fn relocation(library: &mut Library, action: &str, sid: &str, argument: &str) -> Result<Json> {
+    writable(library)?;
+    let mut config = read(library)?;
+    let active = entries(&config, "sources");
+    let index = active
+        .iter()
+        .position(|s| s["id"].as_str() == Some(sid) && s["kind"] == "folder")
+        .ok_or_else(|| Error::invalid("没有这个文件夹来源"))?;
+    let source = &active[index];
+    let root = source["path"].as_str().ok_or_else(|| Error::invalid("来源缺少路径"))?;
+    let entry = &mut list(&mut config, "sources")[index];
+    let others: Vec<_> = active
+        .iter()
+        .filter(|s| s["kind"] == "folder" && s["id"] != sid)
+        .filter_map(|s| s["path"].as_str().map(PathBuf::from))
+        .collect();
+    if action != "undo"
+        && crate::app_relocation::reports(library)?.iter().any(|r| r["source"] == sid && r["state"] == "pending")
+    {
+        return crate::error::invalid("请先完成或撤销上一次搬家");
+    }
+    match action {
+        "recognize" => {
+            return Ok(
+                crate::app_relocation::recognize(library, source, (!argument.is_empty()).then_some(argument))?.into()
+            );
+        }
+        "move" => {
+            if argument.is_empty() {
+                return crate::error::invalid("请选择文件夹");
+            }
+            let (to, _) = crate::app_create::folder_source(
+                sid,
+                Path::new(argument),
+                source["preset"].as_str().unwrap_or("other"),
+                &others,
+            )?;
+            if same_folder(&to, Path::new(root)) {
+                return crate::error::invalid("已经是这个来源的位置");
+            }
+            let to = to.to_str().ok_or_else(|| Error::invalid("来源路径不是 UTF-8"))?;
+            let c = crate::app_relocation::writer(library)?;
+            let token = crate::app_relocation::prepare(&c, sid, root, to)?;
+            entry.set("folder_move".into(), SettingValue::Scalar(token.into()));
+            entry.set("folder_undo".into(), SettingValue::Scalar(Value::Null));
+            entry.set("path".into(), SettingValue::Scalar(to.into()));
+            write_config(library.instance_path(), &config)?;
+        }
+        "undo" => {
+            let report = crate::app_relocation::reports(library)?
+                .into_iter()
+                .find(|r| r["source"] == sid && r["token"] == argument)
+                .ok_or_else(|| Error::Conflict("文件位置记录已变化，请重新查看来源".into()))?;
+            if report["from"]
+                .as_str()
+                .is_some_and(|p| others.iter().any(|o| crate::app_paths::overlaps(o, Path::new(p))))
+            {
+                return crate::error::invalid("原位置与另一个来源重叠");
+            }
+            let mut c = crate::app_relocation::writer(library)?;
+            let tx = c.transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)?;
+            if let Some(old) = crate::app_relocation::undo(&tx, sid, argument, root)? {
+                entry.set("path".into(), SettingValue::Scalar(old.into()));
+                entry.set("folder_move".into(), SettingValue::Scalar(Value::Null));
+                entry.set("folder_undo".into(), SettingValue::Scalar(argument.into()));
+                write_config(library.instance_path(), &config)?;
+                library.reload_config()?;
+            }
+            tx.commit()?;
+        }
+        _ => return crate::error::invalid("未知的来源操作"),
+    }
+    library.reload_config()?;
+    Ok(json!({"ok":true}).into())
 }
 
 #[cfg(test)]

@@ -5,14 +5,14 @@
 //!
 //! 1. 把 SQLite 还能读出的每一行复制到一个新文件里，新文件用损坏文件自己的 schema，保留 ID 和 rowid，跳过读不出的
 //!    页（索引、触发器和视图在写完行之后再建）；
-//! 2. 把各文件夹来源扫描进新文件，让没能读回的图片拿回原来的 ID：先按完整路径，再按内容，依据是读出的行和
+//! 2. 把各文件夹来源扫描进新文件，让没能读回的图片拿回原来的 ID：先按路径和内容，再按唯一内容，依据是读出的行和
 //!    library.sqlite（`assets.src_path` 以及 `folder_hash:<uuid>` 记录，library.sqlite 的每份备份里也都有）。
 //!    Photos 的 ID 是 Photos 自己的，下一次同步会自己重新找到；
 //! 3. 结果没能读回的图片留给识别。
 //!
 //! 新文件完整建好并检查通过之前，图库包里什么都不变：新文件建在损坏文件旁边；等两个文件都没有被打开时，损坏文件
 //! 移到 backups/（保留，这里从不删除），新文件接替它的名字。
-use crate::app_folder::Earlier;
+use crate::app_folder_identity::Earlier;
 use crate::app_integrity::Health;
 use crate::app_library::Library;
 use crate::http_json::Json;
@@ -189,18 +189,51 @@ fn build(library: &Library, reference: Option<&Path>, stop: &AtomicBool, step: S
     }
     crate::app_sync::check(stop)?;
     step(SCANNING, 0.6);
-    let mut earlier = earlier(&target, library, &folders)?;
-    for (i, source) in folders.iter().enumerate() {
+    let earlier = earlier(&target, library, &folders)?;
+    // 在所有来源里一起排除重复内容。把已经读过的文件交给扫描，避免重新读取原图。
+    let mut batches = Vec::new();
+    let mut fingerprints = Vec::new();
+    for source in &folders {
+        let root = Path::new(source["path"].as_str().ok_or_else(|| Error::invalid("来源缺少路径"))?);
+        let (mut files, mut unreadable) = (Vec::new(), Vec::new());
+        let check = || crate::app_sync::check(stop);
+        crate::platform_folder::walk(root, root, &mut files, &mut unreadable, &check)?;
+        let mut checked = Vec::new();
+        for mut file in files {
+            match crate::platform_folder::hash(&file.path, &check) {
+                Ok(hash) => file.hash = hash,
+                Err(Error::Io(_)) => {
+                    unreadable.push(file.rel);
+                    continue;
+                }
+                Err(e) => return Err(e),
+            }
+            fingerprints.push((file.path.to_string_lossy().into_owned(), file.hash.clone()));
+            checked.push(file);
+        }
+        batches.push((checked, unreadable));
+    }
+    let complete = batches.iter().all(|(_, unreadable)| unreadable.is_empty());
+    let mut matches = rescue_matches(&target, &folders, &fingerprints, &earlier, complete)?;
+    for (i, (source, (files, unreadable))) in folders.iter().zip(batches).enumerate() {
         let share = 0.35 / folders.len() as f64;
         let from = 0.6 + share * i as f64;
         let progress = |done: usize, total: usize| step(SCANNING, from + share * done as f64 / total.max(1) as f64);
+        let ids = files
+            .iter()
+            .filter_map(|f| {
+                let path = f.path.to_string_lossy().into_owned();
+                Some((path.clone(), matches.remove(&path)?))
+            })
+            .collect();
         let scan = crate::app_folder::scan_with(
             source,
             &target,
             &|| crate::app_sync::check(stop),
             &progress,
-            Some(&mut earlier),
+            Some(crate::app_folder::RescueInput { files, ids, unreadable }),
         )?;
+        crate::app_relocation::rescued(&target, source)?;
         report.kept += scan.counts["kept"].as_i64().unwrap_or(0);
         report.new += scan.counts["new"].as_i64().unwrap_or(0);
     }
@@ -490,15 +523,13 @@ fn refill(target: &Path, reference: &Path, tables: &[String]) -> Result<()> {
 /// 对应的图片经扫描以同一个 ID 回来。
 fn earlier(target: &Path, library: &Library, folders: &[Value]) -> Result<Earlier> {
     let mut earlier = Earlier::default();
-    let add = |earlier: &mut Earlier, uuid: String, path: Option<String>, hash: Option<String>| {
-        if let Some(path) = path.filter(|p| !p.is_empty()) {
-            earlier.by_path.entry(path).or_insert_with(|| uuid.clone());
-        }
-        if let Some(hash) = hash.filter(|h| !h.is_empty()) {
-            earlier.hash_of.entry(uuid.clone()).or_insert_with(|| hash.clone());
-            earlier.by_hash.entry(hash).or_default().push(uuid);
-        }
-    };
+    let roots: HashMap<_, _> = folders
+        .iter()
+        .filter_map(|s| Some((s["id"].as_str()?.to_owned(), PathBuf::from(s["path"].as_str()?))))
+        .collect();
+    let has_photos = ["sources", "removed_sources"]
+        .iter()
+        .any(|key| library.config()[*key].as_array().into_iter().flatten().any(|s| s["kind"] == "photos"));
     // 先读 library.sqlite：它的人工记录指向这些 ID。
     let lib = crate::app_library::read_connection(&library.db())?;
     let hashes = lib
@@ -509,43 +540,89 @@ fn earlier(target: &Path, library: &Library, folders: &[Value]) -> Result<Earlie
         .prepare("SELECT uuid,src_path FROM assets WHERE uuid IS NOT NULL ORDER BY uuid")?
         .query_map([], |r| Ok((r.get::<_, String>(0)?, r.get::<_, Option<String>>(1)?)))?
         .collect::<rusqlite::Result<Vec<_>>>()?;
-    let mut hashed = hashes.into_iter().collect::<Vec<_>>();
-    hashed.sort();
+    let mut folder_ids = HashSet::new();
     for (uuid, path) in paths {
-        add(&mut earlier, uuid, path, None);
+        if !has_photos || path.as_deref().is_some_and(|p| roots.values().any(|root| Path::new(p).starts_with(root))) {
+            earlier.record(&uuid, path.as_deref(), None);
+            folder_ids.insert(uuid);
+        }
     }
-    for (uuid, hash) in hashed {
-        add(&mut earlier, uuid, None, Some(hash));
+    for (uuid, hash) in hashes {
+        if !has_photos || folder_ids.contains(&uuid) {
+            earlier.record(&uuid, None, Some(&hash));
+        }
     }
     let c = crate::sqlite::open_with_flags(target, OpenFlags::SQLITE_OPEN_READ_WRITE)?;
     let rows = c
-        .prepare("SELECT uuid,src_path,stable_hash FROM assets WHERE uuid IS NOT NULL ORDER BY rowid")?
+        .prepare("SELECT uuid,src_path,stable_hash,source_id FROM assets WHERE uuid IS NOT NULL ORDER BY rowid")?
         .query_map([], |r| {
-            Ok((r.get::<_, String>(0)?, r.get::<_, Option<String>>(1)?, r.get::<_, Option<String>>(2)?))
+            Ok((
+                r.get::<_, String>(0)?,
+                r.get::<_, Option<String>>(1)?,
+                r.get::<_, Option<String>>(2)?,
+                r.get::<_, Option<String>>(3)?,
+            ))
         })?
         .collect::<rusqlite::Result<Vec<_>>>()?;
-    for (uuid, path, hash) in rows {
-        add(&mut earlier, uuid, path, hash);
+    for (uuid, path, hash, sid) in rows {
+        if sid.as_ref().is_some_and(|id| roots.contains_key(id)) {
+            earlier.record(&uuid, path.as_deref(), hash.as_deref());
+        }
     }
-    let roots = folders
-        .iter()
-        .filter_map(|s| Some((s["id"].as_str()?.to_owned(), PathBuf::from(s["path"].as_str()?))))
-        .collect::<HashMap<_, _>>();
-    let orphans = c
-        .prepare("SELECT source_id,path,md5,asset FROM files f WHERE NOT EXISTS(SELECT 1 FROM assets a WHERE a.uuid=f.asset)")?
-        .query_map([], |r| Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?, r.get::<_, String>(2)?, r.get::<_, String>(3)?)))?
+    let records = c
+        .prepare("SELECT source_id,path,md5,asset FROM files")?
+        .query_map([], |r| {
+            Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?, r.get::<_, String>(2)?, r.get::<_, String>(3)?))
+        })?
         .collect::<rusqlite::Result<Vec<_>>>()?;
-    for (sid, path, hash, uuid) in &orphans {
-        let full = roots.get(sid).map(|root| root.join(path).to_string_lossy().into_owned());
-        add(&mut earlier, uuid.clone(), full, Some(hash.clone()));
-        c.execute("DELETE FROM files WHERE source_id=? AND path=?", [sid, path])?;
-        c.execute("DELETE FROM asset_links WHERE system='file' AND key=? AND source_id=?", [path, sid])?;
-    }
-    for ids in earlier.by_hash.values_mut() {
-        let mut seen = HashSet::new();
-        ids.retain(|u| seen.insert(u.clone()));
+    for (sid, path, hash, uuid) in &records {
+        let Some(root) = roots.get(sid) else { continue };
+        let full = root.join(Path::new(path).components().collect::<PathBuf>());
+        earlier.record(uuid, full.to_str(), Some(hash));
     }
     Ok(earlier)
+}
+
+/// 让本次读到的文件按全批匹配重新绑定。保住确已消失、且这次没有认回的旧文件账目，方便以后接回。
+fn rescue_matches(
+    target: &Path,
+    folders: &[Value],
+    files: &[(String, String)],
+    earlier: &Earlier,
+    complete: bool,
+) -> Result<HashMap<String, String>> {
+    let roots: HashMap<_, _> =
+        folders.iter().filter_map(|s| Some((s["id"].as_str()?, Path::new(s["path"].as_str()?)))).collect();
+    let mut c = crate::sqlite::open(target)?;
+    let tx = c.transaction()?;
+    let records = tx
+        .prepare("SELECT f.source_id,f.path,f.asset,a.uuid IS NULL FROM files f LEFT JOIN assets a ON a.uuid=f.asset")?
+        .query_map([], |r| {
+            Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?, r.get::<_, String>(2)?, r.get::<_, bool>(3)?))
+        })?
+        .collect::<rusqlite::Result<Vec<_>>>()?;
+    let mut reserved: HashSet<_> =
+        records.iter().filter(|(s, _, _, _)| !roots.contains_key(s.as_str())).map(|(_, _, id, _)| id.clone()).collect();
+    reserved.extend(
+        tx.prepare("SELECT asset FROM asset_links WHERE system='photos'")?
+            .query_map([], |r| r.get(0))?
+            .collect::<rusqlite::Result<Vec<String>>>()?,
+    );
+    let matches = earlier.matches(files, &reserved, complete);
+    let assigned: HashSet<_> = matches.values().collect();
+    let present: HashSet<_> = files.iter().map(|(path, _)| Path::new(path)).collect();
+    for (sid, path, id, orphan) in records {
+        let Some(root) = roots.get(sid.as_str()) else { continue };
+        if orphan || assigned.contains(&id) || present.contains(root.join(&path).as_path()) {
+            tx.execute("DELETE FROM files WHERE source_id=? AND path=?", rusqlite::params![sid, path])?;
+            tx.execute(
+                "DELETE FROM asset_links WHERE asset=? AND source_id=? AND system IN ('file','md5')",
+                rusqlite::params![id, sid],
+            )?;
+        }
+    }
+    tx.commit()?;
+    Ok(matches)
 }
 
 /// 扫描之后：没有被任何扫描找到的文件夹图片按扫描的做法标为已消失；没有任何记录认识的图片的结果丢弃；

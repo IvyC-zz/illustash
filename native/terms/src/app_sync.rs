@@ -356,6 +356,7 @@ fn run_with(
                 done_in_source.set(done);
                 update(json!({"scanned":scanned+done,"scan_total":scanned+total}))
             };
+            crate::app_relocation::resume_undo(source, library)?;
             if source["kind"] == "folder"
                 && source["path"].as_str().is_some_and(|path| std::fs::metadata(path).is_err())
             {
