@@ -51,6 +51,8 @@ export function packLine(x = current()) {
     return t('正在检查 {done} / {total} 张', {done: number(task.done || 0), total: number(task.total || 0)});
   }
   if (packDownloading(x)) {
+    // 首次准备时先读一次包目录（#630），读完再按它下载。
+    if (d.kind === 'catalog') return t('正在读取角色资料包目录');
     if (d.kind === 'import') return t('正在核对所选文件 {done} / {total}', {done: bytes(d.done), total: bytes(d.total)});
     return t('正在下载 {done} / {total}', {done: bytes(d.done), total: bytes(d.total)}) + (d.speed ? ' · ' + t('{speed}/秒', {speed: bytes(d.speed)}) : '')
       + (d.source ? ' · ' + t('来自 {source}', {source: d.source}) : '') + (d.proxy ? ' · ' + t('经代理 {proxy}', {proxy: d.proxy}) : '');
@@ -101,7 +103,7 @@ export function packActions(x = current(), compact = false) {
     if (task.kind === 'withdraw') return '';
     return task.phase === 'write' ? button('cancel', t('取消'), 'quiet', ` disabled title="${t('正在写入，不能取消')}"`) : button('cancel', t('取消'));
   }
-  if (packDownloading(x)) return button('package-cancel', t('取消'));
+  if (packDownloading(x)) return x.download.kind === 'catalog' ? '' : button('package-cancel', t('取消'));
   const off = blocked ? ` disabled title="${esc(blocked)}"` : '';
   const withdraw = on(x) ? button('withdraw', t('撤回…')) : '';
   // 重新检查失败时照样能撤回，不只能重试。

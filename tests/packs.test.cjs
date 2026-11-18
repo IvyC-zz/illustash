@@ -62,6 +62,12 @@ test('下载中：进度、速度、来源、代理和取消；失败时写原�
   assert.equal(c.packDot(x), 'busy');
   assert.match(c.packBar(x), /width:45\.2%/);
   assert.deepEqual(buttons(c.packActions(x)).map(b => b.act), ['package-cancel']);
+  // 首次准备时先读包目录（#630）：没有进度和取消按钮，照常算下载中（页面接着读）。
+  const catalog = pack({download: {kind: 'catalog', status: 'running', done: 0, total: 0}});
+  assert.equal(c.packLine(catalog), '正在读取角色资料包目录');
+  assert.equal(c.packDot(catalog), 'busy');
+  assert.equal(c.packBar(catalog), '');
+  assert.equal(c.packActions(catalog), '');
   const failed = pack({download: {kind: 'download', status: 'failed', message: '连接被重置', failures: [{source: 'github.com', why: '超时'}]}});
   assert.equal(c.packLine(failed), '角色资料包没能下载：连接被重置');
   assert.equal(c.packDot(failed), 'warn');

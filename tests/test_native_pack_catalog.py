@@ -16,6 +16,7 @@ import tempfile
 from threading import Thread
 import time
 import unittest
+from urllib.parse import urlsplit
 import zipfile
 
 from tests.folder_fixture import image
@@ -39,18 +40,30 @@ def sha(data):
 
 @contextmanager
 def github(files):
-    """`files` 是「路径 → 字节」，随时可以改；`seen` 记下每个请求的路径。"""
+    """`files` 是「路径 → 字节」，随时可以改；`seen` 记下每个请求的路径。
+
+    它也能当 `HTTPS_PROXY` 用：经代理发来的本机请求（请求行是完整地址）照常答复，去别处的 HTTPS（`CONNECT`）一律拒绝，
+    测试不会连到外网。"""
     seen = []
 
     class Handler(BaseHTTPRequestHandler):
         def do_GET(self):
-            seen.append(self.path)
-            body = b'[]' if self.path == RELEASES else files.get(self.path)
+            path = self.path
+            if path.startswith('http://'):
+                parts = urlsplit(path)
+                path = parts.path + (f'?{parts.query}' if parts.query else '')
+            seen.append(path)
+            body = b'[]' if path == RELEASES else files.get(path)
             self.send_response(200 if body is not None else 404)
             body = body if body is not None else b'{"message": "Not Found"}'
             self.send_header('Content-Length', str(len(body)))
             self.end_headers()
             self.wfile.write(body)
+
+        def do_CONNECT(self):
+            self.send_response(403)
+            self.send_header('Content-Length', '0')
+            self.end_headers()
 
         def log_message(self, *_):
             pass
@@ -450,6 +463,51 @@ class NativePackCatalogTest(unittest.TestCase):
             self.assertIsNone(packs['task'])
             self.assertLessEqual({'enabled': False, 'prompt': 'declined'}.items(), packs['library'].items())
             self.assertEqual(self.members(), ([], []))
+
+    def first_prepare(self, origin):
+        """首次准备：识别模型还没就位时点「下载识别模型」。模型的来源都在外网，经测试代理全部失败，不影响资料包。"""
+        self.env.update(ILLUSTASH_MODELS=str(self.root / 'models'), HTTPS_PROXY=origin)
+        self.restart()
+        self.assertEqual(self.packs()['current']['version'], '0.1')
+        self.post('/api/models', {'action': 'download'})
+        observed = None
+
+        def ended():
+            nonlocal observed
+            observed = self.packs()
+            job = observed['download']
+            return job and job['kind'] != 'catalog' and job['status'] != 'running'
+
+        wait_until(ended)
+        return observed
+
+    def test_first_prepare_reads_the_catalog_and_downloads_the_newest_pack(self):
+        files = {}
+        with github(files) as (origin, seen):
+            files.update(self.serve(origin))
+            packs = self.first_prepare(origin)
+            # 先读目录（不读版本列表），再按目录下载最新的、这个版本能用的包。
+            self.assertIn(DOWNLOAD + 'packs/packs.json.sig', seen)
+            self.assertNotIn(RELEASES, seen)
+            self.assertLess(seen.index(DOWNLOAD + 'packs/packs.json'), seen.index(DOWNLOAD + 'character-pack-1.0/wd-extension-v3.bin'))
+            self.assertEqual((packs['catalog']['serial'], packs['catalog']['error']), (1, None))
+            self.assertIsNotNone(packs['catalog']['checked_at'])
+            self.assertEqual(packs['download']['status'], 'done', packs['download'])
+            self.assertEqual((packs['current']['version'], packs['current']['status'], packs['offer']), ('1.0', 'ready', None))
+            self.assertNotIn('/builtin/wd-extension-v1.bin', seen)
+
+    def test_first_prepare_falls_back_to_the_builtin_pack_without_a_catalog(self):
+        files = {}
+        with github(files) as (origin, seen):
+            files.update(self.serve(origin))
+            files.pop(DOWNLOAD + 'packs/packs.json.sig')
+            packs = self.first_prepare(origin)
+            # 读不到目录：记下原因，照常下载内置的 0.1。
+            self.assertIn('HTTP 404', packs['catalog']['error'])
+            self.assertIsNone(packs['catalog']['serial'])
+            self.assertEqual(packs['download']['status'], 'done', packs['download'])
+            self.assertEqual((packs['current']['version'], packs['current']['status']), ('0.1', 'ready'))
+            self.assertNotIn(DOWNLOAD + 'character-pack-1.0/wd-extension-v3.bin', seen)
 
 
 if __name__ == '__main__':
