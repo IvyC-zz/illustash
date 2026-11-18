@@ -16,6 +16,7 @@ import {onSettings, allowNames, loadSettingsData, saveStartup, saveFold, backupN
   waitPixivLogin, stopPixivLogin, checkUpdates, updatesPost, updatesTick} from '../core/settings.js';
 import {$, toast, error, readFailure, fold, wireFolds, redraw, setDrawn, busy, showArea} from './dom.js';
 import {confirmAction} from './dialog.js';
+import {changeFolder, folderActions} from './folder-move.js';
 import {openTasks, taskList} from './tasks.js';
 import {charHash} from '../core/route.js';
 import {refreshMeta} from '../core/meta.js';
@@ -519,7 +520,8 @@ export function renderLibrariesCard() {
   const folders = !cur ? [] : cur.sources.filter(s => s.kind === 'folder').sort((a, b) => list.findIndex(o => o[0] === originOf(a)) - list.findIndex(o => o[0] === originOf(b)));
   const folderRow = s => `<div class="setting-line lib-folder"><span class="lib-path" title="${esc(s.path)}"><bdi>${esc(home(s.path))}</bdi></span>
       <span class="lib-src">${editable ? segmented(list, s.preset, {item: `data-lib-preset="${esc(s.id)}" data-preset`})
-          : `<span class="muted-note">${esc(list.find(o => o[0] === originOf(s))[1])}</span>`}${remove(s)}</span></div>`;
+          : `<span class="muted-note">${esc(list.find(o => o[0] === originOf(s))[1])}</span>`}${remove(s)}</span></div>
+      ${editable ? folderActions(s, data.folder_changes?.find(c => c.source === s.id)) : ''}`;
   const photos = cur?.sources.find(s => s.kind === 'photos');
   const sources = !cur ? '' : `<h3 class="set-sub">${t('来源')}</h3>
     ${folders.map(folderRow).join('')}${photos ?
@@ -581,8 +583,8 @@ function importBlock(job) {
 // #41：可分享的导出不包含个人输入；照实说明，而不要暗示这是一次完整的搬家。
 const EXPORT_LEAVES_OUT = t('不含图片、画师出处缓存和导入过的 X 关注列表；在新电脑上要回查画师，需要重新导入 X 归档。');
 // 系统的文件夹选择框（可一次选多个）。没有选择框的地方，用输入的路径代替。
-async function pickFolders() {
-  try { return await chooseFolders(); }
+async function pickFolders(multiple = true) {
+  try { return await chooseFolders(multiple); }
   catch (err) {
     if (!/Unsupported/.test(err.message)) { toast(err.message); return []; }
     const typed = prompt(t('这台电脑上没有文件夹选择窗口，请输入文件夹路径：'));
@@ -837,6 +839,7 @@ export async function onLibrariesClick(e) {
     if (lib?.listed === false) { libForm.created = lib; renderLibrariesCard(); }
     else if (lib) { libForm.open = false; openLibrary(lib.path, lib.name); }
   }
+  else if (d.folderMove || d.folderRecognize || d.folderUndo) await changeFolder(d, pickFolders, libraryAction);
   else if (d.libAddSource) {
     const paths = await pickFolders(); if (!paths.length) return;
     const r = await libraryAction('sources/add', {kind: 'folder', preset: d.libAddSource, paths});
