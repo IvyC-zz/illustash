@@ -11,6 +11,9 @@ import zipfile
 from tools import pack_catalog
 
 FIXTURES = Path(__file__).resolve().parent / 'fixtures' / 'pack_catalog'
+PLACEHOLDER = ('# 专签数据包目录的公钥（#602），Tauri 格式：`cargo tauri signer generate` 打印的那一行。\n'
+               '# 占位：还没有配置。用户用 `python3 tools/pack_catalog.py keygen` 生成密钥对后，把公钥写在下面一行（不带 `#`）。\n'
+               '# 只有说明行时，应用不读包目录，只用内置的两个包。私钥只在用户自己的电脑上，不进仓库。\n')
 
 
 class PackCatalogToolTest(unittest.TestCase):
@@ -103,7 +106,8 @@ class PackCatalogToolTest(unittest.TestCase):
     def test_pubkey_file_placeholder_and_write(self):
         with tempfile.TemporaryDirectory() as temp:
             path = Path(temp) / 'pack-key.pub'
-            path.write_text((Path(pack_catalog.PUBKEY_FILE)).read_text(encoding='utf-8'), encoding='utf-8')
+            # 仓库里的 pack-key.pub 2026-11-18 起是正式公钥，这里用当初的占位写法。
+            path.write_text(PLACEHOLDER, encoding='utf-8')
             self.assertIsNone(pack_catalog.configured_pubkey(path))
             key = (FIXTURES / 'key-a.pub').read_text().strip()
             pack_catalog.write_pubkey(key, path)
