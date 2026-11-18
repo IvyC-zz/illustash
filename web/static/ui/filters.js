@@ -6,6 +6,7 @@ import {I18N, t} from '../core/i18n.js';
 import {addCondition, conditions, count, datesLabel, dropCondition, flipCondition, kindOf, LIMIT, setDates, SOURCES, validDates, valueOf, yearDates} from '../core/filters.js';
 import {go, hashFor} from '../core/route.js';
 import {api} from '../core/session.js';
+import {onTyped} from '../core/keys.js';
 import {state} from '../core/state.js';
 import {listNav} from './combo.js';
 import {openDialog} from './dialog.js';
@@ -67,7 +68,7 @@ export function wireFilterBar(r) {
   for (const b of bar.querySelectorAll('[data-drop]')) b.onclick = () => go(dropCondition(r, b.dataset.drop));
   bar.querySelector('[data-drop-dates]')?.addEventListener('click', () => go(setDates(r)));
   $('condButton').onclick = () => { setMenu($('condPopover').hidden); if (!$('condPopover').hidden) { userTags = null; $('condSearch').focus(); loadOptions(); } };
-  $('condSearch').oninput = () => { clearTimeout(timer); timer = setTimeout(loadOptions, 120); };
+  onTyped($('condSearch'), loadOptions, 120);
   // 焦点留在搜索框里：↑ ↓ 在选项之间循环，↵ 或点击加上这个条件，Esc 关菜单、焦点回到按钮（同标签菜单，#432）。
   nav = listNav($('condSearch'), $('condOptions'), {shown: () => !$('condPopover').hidden, count: () => options.length, pick: i => choose(options[i])});
 }
@@ -77,7 +78,7 @@ function setMenu(open, reason) {
   const el = $('condPopover'); if (el) el.hidden = !open;
   if (open) layer.open(); else layer.close(reason);
 }
-let timer = 0, nav = null, options = [], userTags = null;
+let nav = null, options = [], userTags = null;
 
 // ---------- 选择器 ----------
 // 选项：{label, detail, section, cond} 或 {label, section, dates: true}（开起止日期对话框）、{label, year}。

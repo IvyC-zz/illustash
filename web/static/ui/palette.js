@@ -4,7 +4,7 @@ import {forgetLocalLinks, workName} from '../core/catalog.js';
 import {exclusive} from '../core/edits.js';
 import {esc, number} from '../core/format.js';
 import {t, tb} from '../core/i18n.js';
-import {composing} from '../core/keys.js';
+import {composing, onTyped} from '../core/keys.js';
 import {workLabel} from '../core/labels.js';
 import {refreshMeta} from '../core/meta.js';
 import {poolIs} from '../core/pages.js';
@@ -361,7 +361,7 @@ export function jumpToCharacter() { openPicker({title: t('跳到角色'), jump: 
 export function wirePalette() {
   // 0.2.0 及以前不分图库存的最近使用：不知道是哪个图库的，丢掉（#523）。
   prefs.drop('tagPicks'); prefs.drop('picks');
-  $('pickerSearch').addEventListener('input', () => { if (palette) palette.touched = true; clearTimeout(pickerTimer); pickerTimer = setTimeout(paletteSearch, 140); });
+  onTyped($('pickerSearch'), () => { if (palette) palette.touched = true; clearTimeout(pickerTimer); pickerTimer = setTimeout(paletteSearch, 140); });
   // ↑ ↓ 循环、↵ 选（⇧↵ 加入多选）、点一项（⇧+点击或行上的 ＋ 加入多选），没输入时数字键直接选前 9 项；Esc 关对话框。
   pickerNav = listNav($('pickerSearch'), $('pickerResults'), {shown: () => !!palette, hover: true, count: () => palette.list.length,
     pick: (i, e) => e.type === 'click' ? choose(i, e.shiftKey || !!e.target.closest('[data-add]'), true) : choose(i, e.shiftKey),

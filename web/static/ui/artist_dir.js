@@ -7,7 +7,7 @@
 import {listeners} from '../core/events.js';
 import {dayLabel, esc, number} from '../core/format.js';
 import {t} from '../core/i18n.js';
-import {composing} from '../core/keys.js';
+import {onTyped} from '../core/keys.js';
 import {onPage} from '../core/pages.js';
 import {prefs} from '../core/prefs.js';
 import {hashFor} from '../core/route.js';
@@ -71,13 +71,9 @@ export function refreshArtistDir(why) {
 export const dirToolbar = () => `<div class="search-wrap wide">${searchIcon()}<input type="search" id="artistSearch" spellcheck="false" autocorrect="off" autocapitalize="off"` +
   ` value="${esc(dir.q)}" placeholder="${t('搜索画师')}" aria-label="${t('搜索画师')}"></div><div class="spacer"></div>` +
   `<select id="artistOrder" aria-label="${t('排序')}">${ORDERS.map(([v, label]) => `<option value="${v}"${dir.order === v ? ' selected' : ''}>${label}</option>`).join('')}</select>`;
-let searchTimer = 0;
 export function wireDirToolbar() {
   const search = $('artistSearch');
-  // 输入法组字时的 input 不算数，组完字（compositionend）再搜。
-  const typed = e => { if (composing(e)) return; clearTimeout(searchTimer); searchTimer = setTimeout(() => setQuery(search.value), 200); };
-  search.addEventListener('input', typed);
-  search.addEventListener('compositionend', typed);
+  onTyped(search, () => setQuery(search.value), 200);
   $('artistOrder').onchange = e => setOrder(e.target.value);
 }
 export function setQuery(q) {
