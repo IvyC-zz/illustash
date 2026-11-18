@@ -54,18 +54,19 @@ def note(text): log.write(text if text.endswith('\\n') else text+'\\n');log.flus
 def logged(kind,value,trace): note(''.join(traceback.format_exception(kind,value,trace)));sys.__excepthook__(kind,value,trace)
 sys.excepthook=logged
 r=json.loads(Path(sys.argv[1]).read_text(encoding='utf-8'))
-# Written whole, then renamed: a test that sees the file reads the full pid (#132).
+# 父进程看到 pid 或启动记录后就可能改写模式，先固定本次运行的模式。
+mode=Path({str(self.mode)!r}).read_text()
+# 先关闭临时文件再发布，读到的一定是完整 pid（#132）。
 Path({str(self.pid)!r}+'.tmp').write_text(str(os.getpid()));os.replace({str(self.pid)!r}+'.tmp',{str(self.pid)!r})
 with open({str(self.runs)!r},'a') as f: f.write(r['version']+'\\n')
 with open({str(self.kinds)!r},'a') as f: f.write(r['kind']+'\\n')
-mode=Path({str(self.mode)!r}).read_text()
 note('--- 第 '+str(len(Path({str(self.runs)!r}).read_text().split()))+' 次 worker kind='+r['kind']+' mode='+mode+' pid='+str(os.getpid()))
 if mode=='hang':
     subprocess.Popen([sys.executable,'-c','import time;time.sleep(60)'])
     time.sleep(60)
 if mode=='crash': note('按模式退出，退出码 7');sys.exit(7)
 if mode=='held':
-    # Waits for the test's release, taken once per run: what the test does meanwhile is in flight (#263).
+    # 每次运行取走一次放行文件，测试在放行前改动输入（#263）。
     while True:
         try: os.remove({str(self.gate)!r}); break
         except FileNotFoundError: time.sleep(.02)
@@ -120,7 +121,11 @@ note('正常结束')
     def run_kinds(self): return self.kinds.read_text().split() if self.kinds.exists() else []
     def clustered(self):
         with sqlite3.connect(self.lib.db) as c: return {u for (u,) in c.execute('SELECT uuid FROM clusters')}
-    def release(self): self.gate.write_text('')
+    def release(self):
+        # Windows 上 worker 一看到最终文件名就会删除它，此时写句柄必须已经关闭。
+        staged = self.gate.with_suffix('.tmp')
+        staged.write_bytes(b'')
+        staged.replace(self.gate)
     def retry_visibly(self):
         # 重试只在退避期间显示 `waiting`；退避拉长一些，机器繁忙时轮询也能看到它（#263）。
         self.stop(self.process);self.env.update(ILLUSTASH_RESEARCH_RETRY_MS='3000',ILLUSTASH_RESEARCH_TIMEOUT_MS='60000')
@@ -173,6 +178,7 @@ note('正常结束')
 
     def test_inflight_human_change_cancel_switch_exit_no_process_group(self):
         self.mode.write_text('held')
+        self.pid.unlink(missing_ok=True)
         self.request('/api/regroup',{})
         self.wait(lambda:self.pid.exists() and self.state()['status']=='learning')
         self.request('/api/tag',{'ids':['a'],'tag':'合成'})

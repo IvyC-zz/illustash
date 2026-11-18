@@ -18,9 +18,12 @@ pub(crate) fn connect(path: &Path) -> Result<Connection> {
     if !has_column(&c, "ref_sigs", "colour")? {
         c.execute_batch("ALTER TABLE ref_sigs ADD COLUMN colour BLOB")?;
     }
-    c.execute_batch("PRAGMA user_version=5; CREATE TABLE IF NOT EXISTS native_delivery(task_id TEXT PRIMARY KEY, package TEXT NOT NULL, status TEXT NOT NULL DEFAULT 'pending', error TEXT NOT NULL DEFAULT '');")?;
+    c.execute_batch("PRAGMA user_version=5; CREATE TABLE IF NOT EXISTS native_delivery(task_id TEXT PRIMARY KEY, package TEXT NOT NULL, status TEXT NOT NULL DEFAULT 'pending', error TEXT NOT NULL DEFAULT '', parts INTEGER NOT NULL DEFAULT 1 CHECK(parts>=1));")?;
     if !has_column(&c, "native_delivery", "error")? {
         c.execute_batch("ALTER TABLE native_delivery ADD COLUMN error TEXT NOT NULL DEFAULT ''")?;
+    }
+    if !has_column(&c, "native_delivery", "parts")? {
+        c.execute_batch("ALTER TABLE native_delivery ADD COLUMN parts INTEGER NOT NULL DEFAULT 1 CHECK(parts>=1)")?;
     }
     c.execute_batch("CREATE TABLE IF NOT EXISTS native_meta(key TEXT PRIMARY KEY,value TEXT NOT NULL)")?;
     Ok(c)
@@ -83,20 +86,64 @@ fn timestamp(value: &str) -> String {
         .map(|v| v.format("%Y-%m-%dT%H:%M:%SZ").to_string())
         .unwrap_or_else(|_| chrono::Utc::now().format("%Y-%m-%dT%H:%M:%SZ").to_string())
 }
-pub(super) fn package(library: &Library, cache: &Path, output: &Path) -> Result<crate::package::Package> {
+/// 清单覆盖完整快照，查无结果的图也要让上次的证据失效。每份清单都遵守公共证据格式的限额。
+pub(super) fn package(library: &Library, cache: &Path, output: &Path, task: &str) -> Result<usize> {
+    seal_parts(library, cache, output, task, crate::package::MAX_ASSETS)
+}
+
+fn part_path(output: &Path, parts: usize, index: usize) -> std::path::PathBuf {
+    if parts == 1 {
+        output.to_owned()
+    } else {
+        output.join(format!("part-{}", index + 1))
+    }
+}
+
+fn part_id(task: &str, parts: usize, index: usize) -> String {
+    format!("{task}/{}/{parts}", index + 1)
+}
+
+fn seal_parts(library: &Library, cache: &Path, output: &Path, task: &str, limit: usize) -> Result<usize> {
     let app = crate::app_library::read_connection(&library.db())?;
-    let present: BTreeSet<String> = app
+    let present = app
         .prepare("SELECT uuid FROM assets ORDER BY uuid")?
         .query_map([], |r| r.get(0))?
-        .collect::<rusqlite::Result<_>>()?;
+        .collect::<rusqlite::Result<Vec<String>>>()?;
     let c = crate::app_library::read_connection(cache)?;
+    let parts = present.len().div_ceil(limit).max(1);
+    // 大库缩回单包时也可能再次遇到拆包前的旧指纹；同一份已封包的重试仍按指纹去重。
+    let needs_task_id = parts > 1
+        || c.query_row("SELECT EXISTS(SELECT 1 FROM native_delivery WHERE parts>1)", [], |r| r.get::<_, bool>(0))?;
+    for index in 0..parts {
+        let assets = &present[index * limit..present.len().min((index + 1) * limit)];
+        let mut evidence = image_evidence(&c, assets)?;
+        let terms = if index == 0 { artist_evidence(&c, &mut evidence)? } else { String::new() };
+        // 同一次交付的所有分包一并重放。新快照即使某一分包恰好回到更早的内容，也要重新发布该范围。
+        let id = needs_task_id.then(|| part_id(task, parts, index));
+        write_part(library.id(), &part_path(output, parts, index), assets, id.as_deref(), evidence, terms)?;
+    }
+    Ok(parts)
+}
+
+fn image_evidence(c: &Connection, assets: &[String]) -> Result<String> {
     let mut evidence = String::new();
-    type Row = (String, String, String, Option<f64>, String, String, String);
-    let rows = c.prepare("SELECT asset,artist_id,method,score,evidence,status,updated_at FROM image_artists ORDER BY asset,artist_id")?.query_map([],|r|Ok((r.get(0)?,r.get(1)?,r.get(2)?,r.get(3)?,r.get(4)?,r.get(5)?,r.get(6)?)))?.collect::<rusqlite::Result<Vec<Row>>>()?;
-    for (asset, artist, method, score, raw, status, updated) in rows {
-        if !present.contains(&asset) {
+    let (Some(first), Some(last)) = (assets.first(), assets.last()) else { return Ok(evidence) };
+    let mut q = c.prepare(
+        "SELECT asset,artist_id,method,score,evidence,status,updated_at FROM image_artists
+        WHERE asset BETWEEN ? AND ? ORDER BY asset,artist_id",
+    )?;
+    let mut rows = q.query([first, last])?;
+    while let Some(row) = rows.next()? {
+        let asset: String = row.get(0)?;
+        if assets.binary_search(&asset).is_err() {
             continue;
         }
+        let artist: String = row.get(1)?;
+        let method: String = row.get(2)?;
+        let score: Option<f64> = row.get(3)?;
+        let raw: String = row.get(4)?;
+        let status: String = row.get(5)?;
+        let updated: String = row.get(6)?;
         if !["auto", "candidate"].contains(&status.as_str()) {
             return Err(Error::Invalid("溯源结果不能表达人工裁决".into()));
         }
@@ -120,12 +167,16 @@ pub(super) fn package(library: &Library, cache: &Path, output: &Path) -> Result<
         evidence += &crate::strict_json::canonical(&row);
         evidence.push('\n');
     }
+    Ok(evidence)
+}
+
+fn artist_evidence(c: &Connection, evidence: &mut String) -> Result<String> {
     for row in c
         .prepare("SELECT id,merged_into FROM artists WHERE merged_into IS NOT NULL ORDER BY id")?
         .query_map([], |r| Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?)))?
     {
         let (a, b) = row?;
-        evidence += &crate::strict_json::canonical(
+        *evidence += &crate::strict_json::canonical(
             &json!({"id":format!("merge:{a}"),"relation":{"kind":"same_as","a":own(&a),"b":own(&b)},"source":"provenance","method":"merge","version":"v4","score":null,"observed_at":timestamp(""),"data":{}}),
         );
         evidence.push('\n');
@@ -154,46 +205,67 @@ pub(super) fn package(library: &Library, cache: &Path, output: &Path) -> Result<
         terms += &crate::strict_json::canonical(&json!({"term":own(&id),"links":links,"names":names}));
         terms.push('\n');
     }
-    let manifest = json!({"format":"illustash-evidence/1","library_id":library.id(),"producer":{"name":"provenance","version":"db-v5"},"created_at":timestamp(""),"assets":present.iter().map(|u|json!({"asset":{"namespace":"library","id":u},"status":"completed","error":null})).collect::<Vec<_>>(),"files":{"evidence.jsonl":{"bytes":evidence.len(),"sha256":crate::strict_json::sha256_hex(evidence.as_bytes())},"terms.jsonl":{"bytes":terms.len(),"sha256":crate::strict_json::sha256_hex(terms.as_bytes())}}});
+    Ok(terms)
+}
+
+fn write_part(
+    library_id: &str,
+    output: &Path,
+    assets: &[String],
+    task: Option<&str>,
+    evidence: String,
+    terms: String,
+) -> Result<()> {
+    let mut outcomes: Vec<_> = assets
+        .iter()
+        .map(|id| json!({"asset":{"namespace":"library","id":id},"status":"completed","error":null}))
+        .collect();
+    // 首行带这次交付的分包标识，重放时可以发现目录互换或同一个分包放了两次。
+    if let (Some(first), Some(id)) = (outcomes.first_mut(), task) {
+        first["task_id"] = id.into();
+    }
+    let manifest = json!({"format":"illustash-evidence/1","library_id":library_id,"producer":{"name":"provenance","version":"db-v5"},"created_at":timestamp(""),"assets":outcomes,"files":{"evidence.jsonl":{"bytes":evidence.len(),"sha256":crate::strict_json::sha256_hex(evidence.as_bytes())},"terms.jsonl":{"bytes":terms.len(),"sha256":crate::strict_json::sha256_hex(terms.as_bytes())}}});
     let text = crate::strict_json::canonical(&manifest);
-    let pkg = crate::package::Package::from_texts(&text, &evidence, Some(&terms))?;
+    crate::package::Package::from_texts(&text, &evidence, Some(&terms))?;
     std::fs::create_dir_all(output)?;
     std::fs::write(output.join("evidence.jsonl"), evidence)?;
     std::fs::write(output.join("terms.jsonl"), terms)?;
     std::fs::write(output.join("manifest.json"), format!("{text}\n"))?;
-    Ok(pkg)
+    Ok(())
 }
-/// 按顺序导入待处理的包。核心因内容拒绝的包，或已经不存在的包，永远导入不了：把它连同原因标为 stale，
-/// 而不是挡住之后的所有交付。每个包都是整个缓存的快照，导入一个就替换前一个快照，所以最新结果为 stale 时，
-/// 把缓存当前的样子重新封包；新包只列出仍在图库里的图片。其他失败（数据库忙或读不出）保持队列原样，等下次重试。
+/// 按顺序交付完整快照。核心拒绝内容或分包缺失时把该次交付及原因标为 stale，继续处理后面的快照。
+/// 最新结果为 stale 时按当前缓存重封，只列出仍在图库里的图片。数据库忙等暂时失败保持队列原样，等下次重试。
 pub(super) fn deliver(library: &Library, cache: &Path) -> Result<Json> {
     if library.frozen() {
         return Ok(Json::Scalar(Value::Null));
     }
     let c = connect(cache)?;
     let rows = c
-        .prepare("SELECT task_id,package FROM native_delivery WHERE status='pending' ORDER BY rowid")?
-        .query_map([], |r| Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?)))?
+        .prepare("SELECT task_id,package,parts FROM native_delivery WHERE status='pending' ORDER BY rowid")?
+        .query_map([], |r| Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?, r.get::<_, usize>(2)?)))?
         .collect::<rusqlite::Result<Vec<_>>>()?;
     let mut last = Json::Scalar(Value::Null);
     let mut stale = false;
-    for (task, path) in rows {
-        (last, stale) = settle(library, &c, &task, &path)?;
+    for (task, path, parts) in rows {
+        (last, stale) = settle(library, &c, &task, &path, parts)?;
     }
     if stale {
         let task = format!("resealed-{}", crate::store::new_key()?);
         let path = format!(".provenance/{task}/evidence");
-        package(library, cache, &library.instance_path().join(&path))?;
-        c.execute("INSERT INTO native_delivery(task_id,package) VALUES (?,?)", [&task, &path])?;
+        let parts = package(library, cache, &library.instance_path().join(&path), &task)?;
+        c.execute(
+            "INSERT INTO native_delivery(task_id,package,parts) VALUES (?,?,?)",
+            rusqlite::params![task, path, parts],
+        )?;
         // 重新封好的包再次被拒仍为 stale；下一次研究运行会封一个新包。
-        (last, _) = settle(library, &c, &task, &path)?;
+        (last, _) = settle(library, &c, &task, &path, parts)?;
     }
     // 目录只做回收；删除失败从不改变交付结果。
     let _ = collect(library.instance_path(), &c, false);
     Ok(last)
 }
-/// 运行目录 `.provenance/<task>` 的保留规则（#31）。待处理的包保留：交付和恢复会导入它。已交付的包只保留最新的
-/// 一个，即核心现在持有的快照（每个包都替换前一个），供检查。stale 的包永远不会导入，原因留在
+/// 运行目录 `.provenance/<task>` 的保留规则（#31）。保留待交付的快照及其全部分包，另保留最近一次成功交付的
+/// 快照供检查。stale 的快照永远不会导入，原因留在
 /// `native_delivery.error`，所以删掉。带 `orphans` 时，没有交付记录的目录也删：这些是失败、被停止或在接收门
 /// 之前退出的运行，恢复从不导入它们。调用方持有溯源租约，所以这期间本包没有运行在写目录。返回删了多少个。
 pub(super) fn collect(instance: &Path, c: &Connection, orphans: bool) -> Result<usize> {
@@ -250,8 +322,8 @@ fn run_directory(instance: &Path, package: &str) -> Option<String> {
     }
 }
 /// 交付一个待处理的包：结果是完成、带原因的 stale，或者出错并保持待处理。
-fn settle(library: &Library, c: &Connection, task: &str, path: &str) -> Result<(Json, bool)> {
-    match import(library, path) {
+fn settle(library: &Library, c: &Connection, task: &str, path: &str, parts: usize) -> Result<(Json, bool)> {
+    match import(library, task, path, parts) {
         Ok(report) => {
             c.execute("UPDATE native_delivery SET status='done',error='' WHERE task_id=?", [task])?;
             Ok((report, false))
@@ -264,16 +336,38 @@ fn settle(library: &Library, c: &Connection, task: &str, path: &str) -> Result<(
         Err(e) => Err(e),
     }
 }
-fn import(library: &Library, path: &str) -> Result<Json> {
+fn import(library: &Library, task: &str, path: &str, parts: usize) -> Result<Json> {
     let saved = Path::new(path);
     let path = if saved.is_absolute() { saved.to_owned() } else { library.instance_path().join(saved) };
-    let pkg = crate::package::Package::open(&path)?;
-    if pkg.manifest.producer != "provenance" {
-        return Err(Error::Invalid("不是溯源证据包".into()));
-    }
+    let open = |index| -> Result<crate::package::Package> {
+        let pkg = crate::package::Package::open(&part_path(&path, parts, index))?;
+        if pkg.manifest.producer != "provenance" {
+            return crate::error::invalid("不是溯源证据包");
+        }
+        if parts > 1
+            && pkg.manifest.assets.first().and_then(|outcome| outcome.task_id.as_ref())
+                != Some(&part_id(task, parts, index))
+        {
+            return crate::error::invalid("溯源分包与本次交付记录不符");
+        }
+        Ok(pkg)
+    };
+    let first = open(0)?;
     let mut app = crate::sqlite::open_with_flags(library.db(), rusqlite::OpenFlags::SQLITE_OPEN_READ_WRITE)?;
     app.busy_timeout(Duration::from_secs(2))?;
-    let report = crate::store::import_package(&mut app, &pkg, library.id())?;
+    let tx = app.transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)?;
+    let mut report = crate::store::import_package_in_transaction(&tx, &first, library.id(), false)?;
+    drop(first);
+    for index in 1..parts {
+        let pkg = open(index)?;
+        let part = crate::store::import_package_in_transaction(&tx, &pkg, library.id(), false)?;
+        report.added += part.added;
+        report.duplicate += part.duplicate;
+        report.skipped += part.skipped;
+        report.created_terms += part.created_terms;
+        report.already &= part.already;
+    }
+    tx.commit()?;
     Ok(Json::object([
         ("status", "done".into()),
         ("package", report.package.into()),
@@ -362,6 +456,77 @@ mod tests {
     use super::*;
 
     #[test]
+    fn split_delivery_publishes_and_recovers_as_one_snapshot() {
+        let root = std::env::temp_dir().join(format!("illustash-split-{}.pilib", crate::store::new_key().unwrap()));
+        std::fs::create_dir(&root).unwrap();
+        std::fs::write(root.join("library.json"), r#"{"format":1,"id":"synthetic","name":"合成","sources":[]}"#)
+            .unwrap();
+        let library = Library::locate(&root).unwrap();
+        let mut app = crate::open(&library.db()).unwrap();
+        crate::migrate(&mut app).unwrap();
+        app.execute_batch("CREATE TABLE assets(uuid TEXT PRIMARY KEY); INSERT INTO assets VALUES ('a'),('b'),('c')")
+            .unwrap();
+        let cache = root.join("provenance.sqlite");
+        let c = connect(&cache).unwrap();
+        c.execute_batch("INSERT INTO artists(id) VALUES ('synthetic');
+            INSERT INTO image_artists(asset,artist_id,method,status) VALUES ('a','synthetic','ocr','auto'),('c','synthetic','ocr','auto');").unwrap();
+        let path = ".provenance/first/evidence";
+        let output = root.join(path);
+        let parts = seal_parts(&library, &cache, &output, "first", 2).unwrap();
+        assert_eq!(parts, 2);
+        let last = part_path(&output, parts, 1).join("manifest.json");
+        let bytes = std::fs::read(&last).unwrap();
+        std::fs::remove_file(&last).unwrap();
+        assert!(import(&library, "first", path, parts).is_err());
+        let count = |table: &str| {
+            app.query_row(&format!("SELECT count(*) FROM {table}"), [], |r| r.get::<_, usize>(0)).unwrap()
+        };
+        assert_eq!(count("term_packages"), 0);
+        assert_eq!(count("term_evidence"), 0);
+        std::fs::write(last, bytes).unwrap();
+        // 把完整、可单独导入的后一包换到首包的位置。每个包的文件校验都会通过。
+        let first = part_path(&output, parts, 0);
+        let second = part_path(&output, parts, 1);
+        let saved = output.join("saved");
+        std::fs::rename(&first, &saved).unwrap();
+        std::fs::rename(&second, &first).unwrap();
+        assert!(
+            matches!(import(&library, "first", path, parts), Err(Error::Invalid(reason)) if reason.contains("交付记录"))
+        );
+        std::fs::rename(&first, second).unwrap();
+        std::fs::rename(saved, first).unwrap();
+        c.execute(
+            "INSERT INTO native_delivery(task_id,package,parts) VALUES ('first',?,?)",
+            rusqlite::params![path, parts],
+        )
+        .unwrap();
+        let report = deliver(&library, &cache).unwrap();
+        assert_eq!(report.get("added").unwrap().dump(), "2");
+        assert_eq!(count("term_current_evidence"), 2);
+        c.execute("UPDATE native_delivery SET status='pending'", []).unwrap();
+        assert_eq!(deliver(&library, &cache).unwrap().get("already").unwrap().dump(), "true");
+        assert_eq!(count("term_packages"), 2);
+        c.execute("DELETE FROM image_artists WHERE asset='a'", []).unwrap();
+        let path = ".provenance/second/evidence";
+        let parts = seal_parts(&library, &cache, &root.join(path), "second", 2).unwrap();
+        c.execute(
+            "INSERT INTO native_delivery(task_id,package,parts) VALUES ('second',?,?)",
+            rusqlite::params![path, parts],
+        )
+        .unwrap();
+        deliver(&library, &cache).unwrap();
+        let remaining: String = app
+            .query_row("SELECT a.key FROM term_current_evidence e JOIN term_assets a ON a.id=e.asset_id", [], |r| {
+                r.get(0)
+            })
+            .unwrap();
+        assert_eq!(remaining, "c");
+        assert_eq!(count("term_evidence"), 2);
+        drop((c, app));
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
     fn compact_machine_evidence_keeps_v4_core_evidence_and_undo() {
         let root = std::env::temp_dir()
             .join(format!("illustash-evidence-encoding-{}.pilib", crate::store::new_key().unwrap()));
@@ -397,7 +562,8 @@ mod tests {
         for (asset, method, score, old, _) in &proofs {
             c.execute("INSERT INTO image_artists(asset,artist_id,method,score,evidence,status,updated_at) VALUES (?,'synthetic-artist',?,?,?,'candidate','2026-01-01 00:00:00')", rusqlite::params![asset,method,score,old]).unwrap();
         }
-        let old_package = package(&library, &cache, &root.join("old")).unwrap();
+        package(&library, &cache, &root.join("old"), "old").unwrap();
+        let old_package = crate::package::Package::open(&root.join("old")).unwrap();
         crate::store::import_package(&mut app, &old_package, library.id()).unwrap();
         let evidence = |app: &Connection| -> Vec<Vec<rusqlite::types::Value>> {
             let mut query = app.prepare("SELECT * FROM term_evidence ORDER BY id").unwrap();
@@ -429,7 +595,8 @@ mod tests {
             assert_eq!(serde_json::from_str::<Value>(old).unwrap(), serde_json::from_str::<Value>(new).unwrap());
             c.execute("UPDATE image_artists SET evidence=? WHERE asset=?", [new.as_str(), asset]).unwrap();
         }
-        let new_package = package(&library, &cache, &root.join("new")).unwrap();
+        package(&library, &cache, &root.join("new"), "new").unwrap();
+        let new_package = crate::package::Package::open(&root.join("new")).unwrap();
         assert_eq!(
             std::fs::read(root.join("old/evidence.jsonl")).unwrap(),
             std::fs::read(root.join("new/evidence.jsonl")).unwrap()
@@ -484,7 +651,7 @@ mod tests {
         std::fs::remove_dir_all(&root).unwrap();
     }
     #[test]
-    fn earlier_delivery_queue_gains_the_error_column_and_keeps_its_rows() {
+    fn earlier_delivery_queue_keeps_its_single_packages() {
         let root = std::env::temp_dir().join(format!(
             "illustash-provenance-delivery-{}-{}",
             std::process::id(),
@@ -501,12 +668,12 @@ mod tests {
             )
             .unwrap();
         let c = connect(&path).unwrap();
-        let row: (String, String, String) = c
-            .query_row("SELECT package,status,error FROM native_delivery", [], |r| {
-                Ok((r.get(0)?, r.get(1)?, r.get(2)?))
+        let row: (String, String, String, usize) = c
+            .query_row("SELECT package,status,error,parts FROM native_delivery", [], |r| {
+                Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?))
             })
             .unwrap();
-        assert_eq!(row, ("p".into(), "pending".into(), String::new()));
+        assert_eq!(row, ("p".into(), "pending".into(), String::new(), 1));
         drop(c);
         std::fs::remove_dir_all(&root).unwrap();
     }
@@ -653,7 +820,7 @@ mod tests {
             let cache_bytes = std::fs::metadata(&base).unwrap().len();
             let started = Instant::now();
             let sealed = dir.join("evidence");
-            package(&library, &base, &sealed).unwrap();
+            package(&library, &base, &sealed, "bench").unwrap();
             let seal_ms = started.elapsed().as_secs_f64() * 1000.0;
             let package_bytes: u64 =
                 std::fs::read_dir(&sealed).unwrap().map(|e| e.unwrap().metadata().unwrap().len()).sum();
