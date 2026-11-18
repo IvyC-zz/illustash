@@ -8,6 +8,7 @@ import {loadModels, modelsPost, modelsWaiting, modelsFinished, modelsArrived, on
   loadCharacterBase, characterBasePost, characterBasePath, optionalGaps} from '../core/models.js';
 import {$, toast, redraw, busy} from './dom.js';
 import {confirmAction} from './dialog.js';
+import {loadPack} from '../core/packs.js';
 
 const running = m => m?.job?.status === 'running';
 const left = m => Math.max(0, (m?.total || 0) - (m?.have || 0));
@@ -158,7 +159,11 @@ export function renderModelsCard() {
 
 async function act(what) {
   try {
-    if (what === 'download') await modelsPost({action: 'download'});
+    if (what === 'download') {
+      await modelsPost({action: 'download'});
+      // 宿主随后在后台读资料包目录、下载角色资料包（#630）：马上读一次它的状态，卡片接着轮询，不停在旧的版本上（#648）。
+      loadPack().catch(() => {});
+    }
     else if (what === 'cancel') await modelsPost({action: 'cancel'});
     else if (what === 'import') { const r = await modelsPost({action: 'import'}); if (r.cancelled) return; }
     else if (what === 'base-enable') { await characterBasePost(true); pollIndex(); }

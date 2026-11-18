@@ -8,6 +8,7 @@ from contextlib import contextmanager
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 import hashlib
 import json
+import shutil
 from pathlib import Path
 import sqlite3
 import struct
@@ -320,23 +321,38 @@ class NativePackCatalogTest(unittest.TestCase):
                 archive.writestr('packs.json.sig', (FIXTURES / 'packs.json.sig-b').read_bytes())
                 for name in ('wd-extension-v3.bin', 'ccip-longtail-v2.zip'):
                     archive.writestr(name, (FIXTURES / name).read_bytes())
+                archive.writestr('NOTICE.txt', b'synthetic notice\n')
             self.packs({'action': 'import', 'paths': [str(bad)]})
             results = self.settle('download')['download']['results']
             self.assertEqual({r['name']: r['result'] for r in results}, {
                 'character-pack-1.0-offline.zip/packs.json': 'catalog_invalid',
                 'character-pack-1.0-offline.zip/packs.json.sig': 'catalog_invalid',
                 'character-pack-1.0-offline.zip/wd-extension-v3.bin': 'unknown',
-                'character-pack-1.0-offline.zip/ccip-longtail-v2.zip': 'unknown'})
+                'character-pack-1.0-offline.zip/ccip-longtail-v2.zip': 'unknown',
+                'character-pack-1.0-offline.zip/NOTICE.txt': 'unknown'})
             self.assertIsNone(self.packs()['catalog']['serial'])
 
-            good = FIXTURES / 'character-pack-1.0-offline.zip'
-            self.packs({'action': 'import', 'paths': [str(good)]})
+            # 官方离线包附带许可和说明（#643）：验过签的目录没列出的成员是 extra，不算问题；单独选的别的文件照旧认不出。
+            good = self.root / 'offline' / 'character-pack-1.0-offline.zip'
+            good.parent.mkdir()
+            with zipfile.ZipFile(FIXTURES / 'character-pack-1.0-offline.zip') as source, \
+                    zipfile.ZipFile(good, 'w') as archive:
+                for item in source.infolist():
+                    archive.writestr(item, source.read(item))
+                archive.writestr('NOTICE.txt', b'synthetic notice\n')
+                archive.writestr('licenses/LICENSE-2.0.txt', b'synthetic license\n')
+            stray = self.root / 'offline' / 'notes.txt'
+            stray.write_bytes(b'not a pack\n')
+            self.packs({'action': 'import', 'paths': [str(good), str(stray)]})
             packs = self.settle('download')
             self.assertEqual({r['name']: r['result'] for r in packs['download']['results']}, {
                 'character-pack-1.0-offline.zip/packs.json': 'catalog',
                 'character-pack-1.0-offline.zip/packs.json.sig': 'catalog',
                 'character-pack-1.0-offline.zip/wd-extension-v3.bin': 'accepted',
-                'character-pack-1.0-offline.zip/ccip-longtail-v2.zip': 'accepted'})
+                'character-pack-1.0-offline.zip/ccip-longtail-v2.zip': 'accepted',
+                'character-pack-1.0-offline.zip/NOTICE.txt': 'extra',
+                'character-pack-1.0-offline.zip/licenses/LICENSE-2.0.txt': 'extra',
+                'notes.txt': 'unknown'})
             self.assertEqual(packs['catalog']['serial'], 1)
             # 没启用：卡片上是本机已有的 v3；已有识别向量，提示一次。
             self.assertEqual((packs['current']['version'], packs['current']['status'], packs['offer']),
@@ -352,6 +368,17 @@ class NativePackCatalogTest(unittest.TestCase):
                 (FIXTURES / 'ccip-longtail-v2.zip').read_bytes())[:12]) / 'ccip-longtail-v2.zip').is_file())
             # 整个过程不联网。
             self.assertEqual(seen, [])
+
+            # 只缺一个组成部分时再下载（#643）：进度只算这次要下的文件，不把上次导入的总量合进来，种类是下载。
+            wd = (FIXTURES / 'wd-extension-v3.bin').read_bytes()
+            shutil.rmtree(self.root / 'shared/extensions' / ('wd-extension-' + sha(wd)[:12]))
+            self.assertEqual(self.packs()['current']['status'], 'missing')
+            self.packs({'action': 'download'})
+            again = self.settle('download')
+            self.assertEqual((again['download']['kind'], again['download']['status']), ('download', 'done'), again)
+            self.assertEqual((again['download']['done'], again['download']['total']), (len(wd), len(wd)))
+            self.assertEqual(again['download']['results'], [])
+            self.assertEqual(seen, [DOWNLOAD + 'character-pack-1.0/wd-extension-v3.bin'])
 
     def test_new_library_is_enabled_before_its_first_sync(self):
         files = {}

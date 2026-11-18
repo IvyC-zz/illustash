@@ -580,6 +580,11 @@ fn fetch(
                 return Err(Failure::Retry("续传位置无效，从头下载".into()));
             }
             Err(ureq::Error::Status(code, _)) => return Err(Failure::Next(format!("HTTP {code}"))),
+            // 建连、握手时被断开这类暂时性的错误在同一个来源上再试（#642）；完整的错误写进日志，页面上照旧是一句话。
+            Err(ureq::Error::Transport(t)) if transient(&t) => {
+                eprintln!("models: {t}");
+                return Err(Failure::Retry(transport(&t)));
+            }
             Err(ureq::Error::Transport(t)) => return Err(Failure::Next(transport(&t))),
         };
         match reply.status() {
@@ -647,6 +652,19 @@ fn fetch(
     fs::rename(&path, partial.join(&entry.path))?;
     Ok(())
 }
+/// 拿到回应之前出的、换个时间再连多半就好的传输错误（#642）：连接或 TLS 握手被断开、被拒（`ConnectionFailed`，ureq 把
+/// 握手时对端关掉连接也归在这里），读写出错或超时（`Io`）。走代理、透明代理的网络里偶尔就会这样，同一时刻别的程序照常
+/// 下得到。找不到服务器、代理拒绝、跳转过多不算，再试也一样。
+pub(crate) fn transient(t: &ureq::Transport) -> bool {
+    matches!(t.kind(), ureq::ErrorKind::ConnectionFailed | ureq::ErrorKind::Io)
+}
+
+/// 第 `attempt` 次（从 1 起）重试前等多久：1、2、4 秒；单元测试里缩成几十毫秒。
+pub(crate) fn backoff(attempt: u32) -> Duration {
+    let unit = if cfg!(test) { Duration::from_millis(20) } else { Duration::from_secs(1) };
+    unit * 2u32.pow(attempt.saturating_sub(1).min(4))
+}
+
 fn transport(t: &ureq::Transport) -> String {
     match t.kind() {
         ureq::ErrorKind::Dns => "找不到服务器（DNS）".into(),
@@ -738,7 +756,7 @@ fn download(models: &Models, place: &Place) -> std::result::Result<Value, Stop> 
                 job["file"] = entry.path.clone().into();
                 job["proxy"] = via.into();
             });
-            // 中途断开的连接从停下的地方接着下，在同一个来源上重试几次。
+            // 中途断开的连接从停下的地方接着下，没连上的重新连，在同一个来源上重试几次，每次多等一会儿（#642）。
             let mut drops = 0;
             loop {
                 match fetch(if local { &direct } else { &proxied }, &address, &partial, entry, &mut meter) {
@@ -750,6 +768,13 @@ fn download(models: &Models, place: &Place) -> std::result::Result<Value, Stop> 
                     Err(Failure::Retry(why)) if drops < 3 => {
                         drops += 1;
                         eprintln!("models: {label} {}: {why}; retrying", entry.path);
+                        let until = Instant::now() + backoff(drops);
+                        while let Some(left) = until.checked_duration_since(Instant::now()).filter(|d| !d.is_zero()) {
+                            if models.stopped() {
+                                return Err(Stop::Cancelled);
+                            }
+                            std::thread::sleep(left.min(Duration::from_millis(50)));
+                        }
                     }
                     Err(Failure::Retry(why) | Failure::Next(why)) => {
                         tried.push((label.clone(), why));
@@ -854,8 +879,8 @@ fn import(models: &Models, place: &Place, paths: &[PathBuf]) -> std::result::Res
 }
 
 /// 同一种数据包的几个版本一起认（#602）：每个所选文件或 ZIP 成员按大小、SHA-256 归到它所属的版本，各自核对、改名就位。
-/// `notes` 是事先处理过的成员（离线包里的目录和签名）的结果，原样列进结果。参考包（`raw_archive`）本身是 ZIP：
-/// 整个文件对得上某个版本时整份接收，否则当作离线包读里面的成员。
+/// `notes` 是事先处理过的成员（离线包里的目录和签名，以及目录没列出的附带文件 `extra`）的结果，原样列进结果。
+/// 参考包（`raw_archive`）本身是 ZIP：整个文件对得上某个版本时整份接收，否则当作离线包读里面的成员。
 fn import_into(
     models: &Models,
     places: &[Place],
@@ -1139,8 +1164,10 @@ fn download_pack_after_catalog(resources: &Path) {
 fn download_newest_pack(resources: &Path) -> Result<()> {
     let Some(pack) = crate::app_packs::known(resources)?.pop() else { return Ok(()) };
     for kind in [PackKind::Wd, PackKind::Ccip] {
-        if !models_of(kind).running.load(Ordering::SeqCst) {
-            start_download(resources, pack.component(kind), &pack.version)?;
+        if !models_of(kind).running.load(Ordering::SeqCst)
+            && !start_download(resources, pack.component(kind), &pack.version)?
+        {
+            forget_finished(kind);
         }
     }
     Ok(())
@@ -1302,8 +1329,7 @@ pub(crate) fn wd_extension() -> Result<&'static WdExtension> {
         .map_err(|message| Error::invalid(message.clone()))
 }
 
-const WD_EXTENSION_MANUAL: &str =
-    "https://github.com/shio-vinyl/illustash/blob/main/docs/INSTALL.md#可选的-wd-角色扩展包";
+const WD_EXTENSION_MANUAL: &str = "https://github.com/shio-vinyl/illustash/blob/main/docs/INSTALL.md#角色资料包";
 static WD_EXTENSION: Models = Models::new();
 /// 两种数据包各自正在下载或导入的是哪个版本（#602）；下载状态（`download`）是整个种类共用的一个。
 static PACK_JOBS: Mutex<[Option<String>; 2]> = Mutex::new([None, None]);
@@ -1586,6 +1612,17 @@ fn start_download(resources: &Path, component: &Pack, version: &str) -> Result<b
     Ok(true)
 }
 
+/// 这一批下载没有启动这个组成部分（它已经在本机）：清掉它上一次下载或导入留下的结果。不然 `pack_download` 会把它合进这一批，
+/// 进度的分母多出上次的字节（#643：本机已有 0.3 时下载 0.4，按钮写约 7.8 MB，进度却是 … / 10.0 MB），种类也可能取成
+/// 上次的导入。
+fn forget_finished(kind: PackKind) {
+    let models = models_of(kind);
+    if !models.running.load(Ordering::SeqCst) {
+        *models.job.lock().expect("models job mutex poisoned") = None;
+        note_pack_job(kind, None);
+    }
+}
+
 fn busy_message(kind: PackKind) -> (&'static str, &'static str) {
     match kind {
         PackKind::Wd => ("扩展包正在下载或导入，请等它结束", "扩展包已经就位"),
@@ -1614,7 +1651,11 @@ pub(crate) fn character_pack_post(resources: &Path, body: &Json, current: &Chara
             };
             let mut started = false;
             for kind in kinds {
-                started |= start_download(resources, pack.component(kind), &pack.version)?;
+                if start_download(resources, pack.component(kind), &pack.version)? {
+                    started = true;
+                } else {
+                    forget_finished(kind);
+                }
             }
             if !started {
                 return Err(Error::Conflict("角色资料包已经就位".into()));
