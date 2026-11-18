@@ -194,8 +194,22 @@ fn has_history(c: &Connection) -> Result<bool> {
 
 /// 每个启用来源的最近一次认回。写配置之前中止的请求没有生效。
 pub(super) fn reports(library: &Library) -> Result<Vec<Value>> {
-    let c = crate::app_library::read_connection(&library.source())?;
-    if !has_history(&c)? {
+    latest(&crate::app_library::read_connection(&library.source())?, library)
+}
+
+/// `/api/libraries` 附带的认回提示。这只是附加信息：源库正忙、被锁住（如导出进行中）或读不到时返回空，
+/// 不等锁，也不让整份图库信息跟着失败。
+pub(super) fn reports_if_free(library: &Library) -> Vec<Value> {
+    let read = || -> Result<Vec<Value>> {
+        let c = crate::app_library::read_connection(&library.source())?;
+        c.busy_timeout(std::time::Duration::ZERO)?;
+        latest(&c, library)
+    };
+    read().unwrap_or_default()
+}
+
+fn latest(c: &Connection, library: &Library) -> Result<Vec<Value>> {
+    if !has_history(c)? {
         return Ok(Vec::new());
     }
     let mut result = Vec::new();

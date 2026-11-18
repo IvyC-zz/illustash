@@ -342,7 +342,7 @@ fn read(request: &Request, host: &Host, session: &Session, path: &str) -> Result
 fn libraries(host: &Host, session: &Session) -> Result<Json> {
     let mut p = crate::app_libraries::info(&session.library)?;
     if session.damage().is_none() {
-        let changes = crate::app_relocation::reports(&session.library)?;
+        let changes = crate::app_relocation::reports_if_free(&session.library);
         if !changes.is_empty() {
             p.set("folder_changes", serde_json::Value::Array(changes).into());
         }
