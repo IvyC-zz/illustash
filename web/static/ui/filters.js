@@ -136,7 +136,8 @@ async function candidates(q) {
     // 中文页面上画面标签显示中文名（#446），后面小字是原来的标签。
     const zh = x => I18N.language === 'zh-CN' && x.zh;
     out.push(...tags.slice(0, 12).map(x => ({section: 'tag', label: zh(x) || tagText(x.tag), detail: zh(x) ? tagText(x.tag) : '', cond: `tag:${x.tag}`})));
-    out.push(...state.chars.filter(c => hit(c.name) || (c.tag && hit(c.tag))).slice(0, 8).map(c => ({section: 'char', label: c.name, html: charOption(c), detail: number(c.count), cond: `char:${c.id}`})));
+    const chars = state.chars.filter(c => hit(c.name) || (c.tag && hit(c.tag))).slice(0, 8);
+    out.push(...chars.map(c => ({section: 'char', label: c.name, html: charOption(c), detail: number(c.count), cond: `char:${c.id}`})));
     if (!state.workTree) await loadWorkTree().catch(() => {});
     out.push(...(state.workTree || []).filter(w => hit(w.name)).slice(0, 6).map(w => ({section: 'work', label: w.name, detail: w.qualifier || '', cond: `work:${w.id}`})));
     out.push(...artists.map(a => ({section: 'artist', label: a.name, detail: number(a.count), cond: `artist:${a.id}`})));

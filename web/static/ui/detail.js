@@ -122,7 +122,9 @@ export async function inspect(ident, quiet = false) {
     };
     $('inspector').querySelector('[data-artist-find]')?.addEventListener('click', () => findArtists([ident], () => inspect(ident, true)));
     for (const b of $('inspector').querySelectorAll('[data-artist-more]')) b.onclick = () => findArtistWorks(b.dataset.artistMore, b.dataset.name, () => inspect(ident, true));
-    for (const b of $('inspector').querySelectorAll('[data-untag]')) b.onclick = () => mutate('/api/tag', {ids: [ident], tag: b.dataset.untag, add: false}, leaves(state.route, `utag:${b.dataset.untag}`, false));
+    for (const b of $('inspector').querySelectorAll('[data-untag]')) {
+      b.onclick = () => mutate('/api/tag', {ids: [ident], tag: b.dataset.untag, add: false}, leaves(state.route, `utag:${b.dataset.untag}`, false));
+    }
     $('resumeOne')?.addEventListener('click', () => mutate('/api/change', {ids: [ident], action: 'resume'}, poolIs(state.route, 'skipped')));
     bindIdentity($('inspector'), d, ident); bindAsk($('inspector'), d, ident);
     bindFileActions($('inspector'), ident);
