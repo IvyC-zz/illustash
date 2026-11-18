@@ -62,6 +62,12 @@ test('下载中：进度、速度、来源、代理和取消；失败时写原�
   assert.equal(c.packDot(x), 'busy');
   assert.match(c.packBar(x), /width:45\.2%/);
   assert.deepEqual(buttons(c.packActions(x)).map(b => b.act), ['package-cancel']);
+  // 首次准备时先读包目录（#630）：没有进度和取消按钮，照常算下载中（页面接着读）。
+  const catalog = pack({download: {kind: 'catalog', status: 'running', done: 0, total: 0}});
+  assert.equal(c.packLine(catalog), '正在读取角色资料包目录');
+  assert.equal(c.packDot(catalog), 'busy');
+  assert.equal(c.packBar(catalog), '');
+  assert.equal(c.packActions(catalog), '');
   const failed = pack({download: {kind: 'download', status: 'failed', message: '连接被重置', failures: [{source: 'github.com', why: '超时'}]}});
   assert.equal(c.packLine(failed), '角色资料包没能下载：连接被重置');
   assert.equal(c.packDot(failed), 'warn');
@@ -79,6 +85,15 @@ test('已下载、本图库没启用：已有识别结果的图库提示一次�
   const auto = pack({current: READY, library: {prompt: 'auto', vectors: 0}});
   assert.equal(c.packLine(auto), '第一次同步时启用');
   assert.deepEqual(labels(c.packActions(auto)), ['启用…']);
+  // 新图库第一次同步时包还没到（#630）：下载完成后由宿主启用，卡片不提示「不用」。
+  const pending = pack({current: READY, library: {prompt: 'pending', vectors: 3}});
+  assert.equal(c.packLine(pending), '等后台任务结束后启用');
+  assert.deepEqual(labels(c.packActions(pending)), ['启用…']);
+  assert.doesNotMatch(c.packHint(pending), /补上机器归属/);
+  const waiting = pack({library: {prompt: 'pending', vectors: 3}, download: {kind: 'download', status: 'failed', message: '连接失败'}});
+  assert.equal(c.packLine(waiting), '角色资料包没能下载：连接失败');
+  assert.match(c.packHint(waiting), /下载完成后启用/);
+  assert.equal(labels(c.packActions(waiting))[0], '重试');
   const declined = pack({current: READY, library: {prompt: 'declined'}});
   assert.equal(c.packLine(declined), '本图库未启用');
   assert.doesNotMatch(c.packHint(declined), /补上机器归属/);
@@ -266,6 +281,28 @@ test('启用：POST 后轮询到结束，只报一次', async () => {
   await c.loadPack();
   assert.equal(seen.length, 3); assert.equal(seen[2], null);
   off();
+});
+
+test('等着默认启用（#630）：包就位后接着读，宿主启动的启用任务结束时报一次；上次失败或取消了就不读', async () => {
+  const awaiting = pack({current: READY, library: {prompt: 'pending', vectors: 3}});
+  assert.equal(c.packAwaitingDefault(awaiting), true);
+  assert.equal(c.packAwaitingDefault(pack({library: {prompt: 'pending'}})), false, '包还没就位');
+  assert.equal(c.packAwaitingDefault(pack({current: READY, library: {prompt: 'ask'}})), false);
+  for (const status of ['failed', 'cancelled']) {
+    assert.equal(c.packAwaitingDefault(pack({current: READY, library: {prompt: 'pending'}, task: {id: 't0', kind: 'enable', status}})), false, status);
+  }
+  const running = pack({current: READY, library: {prompt: 'pending', vectors: 3}, task: {id: 't2', kind: 'enable', status: 'running', phase: 'scan', done: 0, total: 3}});
+  const done = pack({current: READY, library: ENABLED, task: {id: 't2', kind: 'enable', status: 'done', result: {changed: 1}}});
+  const calls = server([{body: awaiting}, {body: running}, {body: done}, {body: done}]);
+  const seen = [];
+  const off = c.onPack(before => { const t = c.packFinished(before, c.state.pack); if (t) seen.push(t); });
+  await c.loadPack();
+  const until = Date.now() + 10000;
+  while (!seen.length && Date.now() < until) await new Promise(resolve => setTimeout(resolve, 50));
+  off();
+  assert.deepEqual(seen, [done.task]);
+  assert.equal(calls.length, 3, '启用结束以后不再读');
+  assert.equal(c.state.pack, done);
 });
 
 test('取消晚了一步（写入阶段回 409）：提示事实，不带错误编号，再读一次状态；409 原样抛出后端的原文', async () => {

@@ -388,7 +388,7 @@ fn packs_post(request: Request, host: &Host, received: u64, mut body: Json, tran
 }
 
 fn pack_action(host: &Host, session: &mut Session, action: &str, body: &Json) -> Result<()> {
-    use crate::app_wd_extension::{Action, Part};
+    use crate::app_wd_extension::Action;
     let Json::Object(fields) = body else { return Err(Error::invalid("未知操作")) };
     let only = |allowed: &[&str]| fields.iter().all(|(k, _)| allowed.contains(&k.as_str()));
     let lib = crate::app_packs::for_library(&host.root, &session.library)?;
@@ -437,20 +437,7 @@ fn pack_action(host: &Host, session: &mut Session, action: &str, body: &Json) ->
             }
             Some(_) => return Err(Error::invalid("角色资料包请求字段不正确")),
         };
-        let missing = || Error::Conflict("角色资料包还没就位".into());
-        let wd_path = crate::app_models::extension_file(&host.root, &pack.wd)?.ok_or_else(missing)?;
-        let shared = crate::app_resources::shared_path(&host.root)?;
-        let ccip_path = crate::app_ccip_longtail::package_path(&shared, &pack.ccip);
-        if !ccip_path.try_exists()? {
-            return Err(missing());
-        }
-        let wd_scan = crate::app_wd_extension::stored_vectors(&session.library)? > 0;
-        let ccip_scan = crate::app_ccip_longtail::stored_vectors(&session.library)? > 0;
-        Action::Pack {
-            root: host.root.clone(),
-            wd: Some(Box::new(Part { pack: pack.wd.clone(), path: wd_path, scan: wd_scan })),
-            ccip: Some(Box::new(Part { pack: pack.ccip.clone(), path: ccip_path, scan: ccip_scan })),
-        }
+        crate::app_packs::enable_action(&host.root, &session.library, &pack)?
     };
     let identity = crate::app_tasks::TaskIdentity::new(&session.library, session.generation, &session.token)?;
     session.wd_extension.start_for(&session.library, identity, action)?;

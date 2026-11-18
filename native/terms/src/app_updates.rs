@@ -450,6 +450,15 @@ pub(crate) fn post(resources: &Path, body: &Json) -> Result<Json> {
     Ok(reply)
 }
 
+/// 首次准备时顺带读一次包目录（2026-11-18 用户定，#630，`app_models::post`）：和检查更新同一套读取、签名校验、缓存，
+/// 结果同样记在 updates.json。没有公钥时什么都不做；失败只记下原因。
+pub(crate) fn refresh_packs(resources: &Path) {
+    let Some(result) = crate::app_packs::refresh(resources) else { return };
+    if let Err(error) = Place::app().and_then(|place| record_packs(&place, result.map(|_| ()))) {
+        eprintln!("没能记下读取角色资料包目录的结果：{error}");
+    }
+}
+
 fn record_packs(place: &Place, result: std::result::Result<(), String>) -> Result<()> {
     let at = place.now.to_rfc3339_opts(chrono::SecondsFormat::Secs, false);
     update(&place.state, |fields| {

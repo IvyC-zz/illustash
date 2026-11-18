@@ -175,6 +175,10 @@ fn ready_at(root: &Path, manifest: &Manifest) -> bool {
 pub(crate) fn on_demand() -> bool {
     std::env::var_os("ILLUSTASH_MODELS_ON_DEMAND").is_some_and(|v| v == "1")
 }
+/// 识别模型（含基础角色索引）正在下载或导入。
+pub(crate) fn downloading() -> bool {
+    APP.running.load(Ordering::SeqCst)
+}
 /// 识别必须等模型下载或导入完成。
 pub(crate) fn waiting(resources: &Path) -> bool {
     on_demand() && !ready_at(&root(resources), manifest())
@@ -1092,15 +1096,44 @@ pub(crate) fn post(resources: &Path, body: &Json, in_use: bool) -> Result<Json> 
     let mut place = Place::app(resources)?;
     place.proxy = proxy();
     place.in_use = in_use;
+    let first = !ready_at(&place.root, place.manifest);
     let value = post_at(&APP, place.clone(), body).map(|value| with_acceleration(resources, &place, value))?;
     // 首次准备时角色资料包和识别模型一起下载（2026-11-17 用户定，#602）：用户点了下载识别模型，就把最新的角色资料包里
     // 还没就位的文件一起下。它失败不影响模型下载，卡片上照样能重试。
     if body.get("action").map(Json::text) == Some("download") {
-        if let Err(error) = download_newest_pack(resources) {
+        if first {
+            download_pack_after_catalog(resources);
+        } else if let Err(error) = download_newest_pack(resources) {
             eprintln!("角色资料包没能和识别模型一起开始下载：{error}");
         }
     }
     Ok(value)
+}
+
+/// 首次准备时正在读包目录（`download_pack_after_catalog`），资料包的下载还没开始。
+static READING_CATALOG: AtomicBool = AtomicBool::new(false);
+
+/// 首次准备（识别模型还没就位时点了下载）先读一次包目录，再下载目录里最新的、这个版本能用的资料包（2026-11-18 用户定，
+/// #630）：读法、签名校验、缓存和记录都和检查更新时一样（`app_updates::refresh_packs`）。读不到（断网、签名不对、没有能用
+/// 的条目）时照常下载本机已知的最新版本，没有缓存的目录就是内置的 0.1。在后台线程里做，不耽误模型下载开始；读目录期间
+/// `GET /api/packs` 的 `download` 报 `catalog`，页面照常轮询。
+fn download_pack_after_catalog(resources: &Path) {
+    if READING_CATALOG.swap(true, Ordering::SeqCst) {
+        return;
+    }
+    let resources = resources.to_path_buf();
+    let spawned = std::thread::Builder::new().name("pack-catalog".into()).spawn(move || {
+        crate::app_updates::refresh_packs(&resources);
+        if let Err(error) = download_newest_pack(&resources) {
+            eprintln!("角色资料包没能和识别模型一起开始下载：{error}");
+        }
+        // 下载开始以后才放下：页面读到的状态从「读目录」直接接上「下载中」。
+        READING_CATALOG.store(false, Ordering::SeqCst);
+    });
+    if let Err(error) = spawned {
+        READING_CATALOG.store(false, Ordering::SeqCst);
+        eprintln!("没能开始读取角色资料包目录：{error}");
+    }
 }
 
 fn download_newest_pack(resources: &Path) -> Result<()> {
@@ -1461,6 +1494,10 @@ pub(crate) fn pack_progress(resources: &Path, pack: &CharacterPack) -> Result<Va
 pub(crate) fn pack_download() -> Value {
     let jobs = [WD_EXTENSION.snapshot(), CCIP_LONGTAIL.snapshot()];
     let live = jobs.iter().filter(|j| !j.is_null()).collect::<Vec<_>>();
+    if READING_CATALOG.load(Ordering::SeqCst) && !live.iter().any(|j| j["status"] == "running") {
+        return json!({"kind":"catalog","status":"running","done":0,"total":0,"speed":0,"source":null,"proxy":null,
+            "message":null,"failures":[],"results":[],"diagnostic":null,"version":null});
+    }
     let Some(first) = live.first() else { return Value::Null };
     let status = |s: &str| live.iter().any(|j| j["status"] == s);
     let sum = |key: &str| live.iter().map(|j| j[key].as_u64().unwrap_or(0)).sum::<u64>();

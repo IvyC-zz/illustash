@@ -357,7 +357,9 @@ function networkCard() {
       ${row('artists', t('查找画师、找 TA 的其他图'), t('Danbooru、画师主页'), t('所选图片的哈希文本；下载画师公开作品的小图，只在本机比对'), t('只在你点按钮时'))}
       ${row('characters', t('在 Danbooru 上搜角色和作品'), 'Danbooru', t('你输入的文字；自建角色的名字（核对能否对上 Danbooru）；「设为…」里 Danbooru 候选的 tag（取一张全年龄小图）'), net && !net.authorized ? names : t('只在你搜索或打开资料库时'))}
       ${acct?.saucenao?.bound ? row('artists', t('以图搜图'), 'SauceNAO', '—', t('已保存 key，还没有功能使用它')) : ''}
-      ${row('characters', t('下载角色资料包'), 'GitHub', t('一次普通的 HTTPS 下载，取回角色资料包；不发送图库里的任何信息'),
+      ${row('characters', t('下载角色资料包'), 'GitHub', state.models?.on_demand
+        ? t('一次普通的 HTTPS 下载，取回角色资料包，首次准备时先读一次公开的角色资料包目录；不发送图库里的任何信息')
+        : t('一次普通的 HTTPS 下载，取回角色资料包；不发送图库里的任何信息'),
         state.models?.on_demand ? t('只在你点「下载」时，或首次准备时和识别模型一起') : t('只在你点「下载」时'))}
       ${state.models?.on_demand ? row('data', t('下载识别模型'), esc(state.models.sources.join(t('、'))), t('一次普通的 HTTPS 下载，取回模型文件；不发送图库里的任何信息'), t('只在你点「下载」时')) : ''}
       ${row('about', t('检查更新'), 'GitHub', t('一次普通的 HTTPS 请求，读取公开的版本列表和角色资料包目录；不发送图库里的任何信息'), state.updates?.auto ? t('启动时和之后每天自动') : t('只在你点「检查更新」时'))}

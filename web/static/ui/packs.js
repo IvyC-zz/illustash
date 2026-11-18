@@ -51,6 +51,8 @@ export function packLine(x = current()) {
     return t('正在检查 {done} / {total} 张', {done: number(task.done || 0), total: number(task.total || 0)});
   }
   if (packDownloading(x)) {
+    // 首次准备时先读一次包目录（#630），读完再按它下载。
+    if (d.kind === 'catalog') return t('正在读取角色资料包目录');
     if (d.kind === 'import') return t('正在核对所选文件 {done} / {total}', {done: bytes(d.done), total: bytes(d.total)});
     return t('正在下载 {done} / {total}', {done: bytes(d.done), total: bytes(d.total)}) + (d.speed ? ' · ' + t('{speed}/秒', {speed: bytes(d.speed)}) : '')
       + (d.source ? ' · ' + t('来自 {source}', {source: d.source}) : '') + (d.proxy ? ' · ' + t('经代理 {proxy}', {proxy: d.proxy}) : '');
@@ -73,6 +75,8 @@ export function packLine(x = current()) {
     : t('角色资料包还没下载（约 {size}）', {size: bytes(left(x))});
   if (l.prompt === 'ask') return t('角色资料包现在默认启用，本图库还没启用');
   if (l.prompt === 'auto') return t('第一次同步时启用');
+  // 新图库第一次同步时包还没到（#630）：包到了以后，等同步等后台任务结束就启用。
+  if (l.prompt === 'pending') return t('等后台任务结束后启用');
   return t('本图库未启用');
 }
 // 状态行左边的圆点：进行中、出错、没有启用。
@@ -99,7 +103,7 @@ export function packActions(x = current(), compact = false) {
     if (task.kind === 'withdraw') return '';
     return task.phase === 'write' ? button('cancel', t('取消'), 'quiet', ` disabled title="${t('正在写入，不能取消')}"`) : button('cancel', t('取消'));
   }
-  if (packDownloading(x)) return button('package-cancel', t('取消'));
+  if (packDownloading(x)) return x.download.kind === 'catalog' ? '' : button('package-cancel', t('取消'));
   const off = blocked ? ` disabled title="${esc(blocked)}"` : '';
   const withdraw = on(x) ? button('withdraw', t('撤回…')) : '';
   // 重新检查失败时照样能撤回，不只能重试。
@@ -131,6 +135,7 @@ export function packHint(x = current()) {
   if (on(x) && ccip.error) parts.push(esc(t('上次自动检查没有完成：{reason}', {reason: tb(ccip.error)})));
   if (on(x) && l.checked_at) parts.push(esc(t('上次检查 {time}', {time: localTime(l.checked_at)})));
   if (!on(x) && l.prompt === 'ask' && ready(x)) parts.push(esc(t('启用会给还没有归属的图补上机器归属')));
+  if (!on(x) && l.prompt === 'pending' && !ready(x)) parts.push(esc(t('下载完成后启用')));
   const manual = x.wd?.package?.manual;
   if (!ready(x) && manual) parts.push(`<a class="link" href="${esc(manual)}" target="_blank" rel="noreferrer noopener">${t('手动下载说明')}</a>`);
   return parts.join(' · ');

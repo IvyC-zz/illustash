@@ -14,7 +14,9 @@ import struct
 import subprocess
 import tempfile
 from threading import Thread
+import time
 import unittest
+from urllib.parse import urlsplit
 import zipfile
 
 from tests.folder_fixture import image
@@ -38,18 +40,30 @@ def sha(data):
 
 @contextmanager
 def github(files):
-    """`files` 是「路径 → 字节」，随时可以改；`seen` 记下每个请求的路径。"""
+    """`files` 是「路径 → 字节」，随时可以改；`seen` 记下每个请求的路径。
+
+    它也能当 `HTTPS_PROXY` 用：经代理发来的本机请求（请求行是完整地址）照常答复，去别处的 HTTPS（`CONNECT`）一律拒绝，
+    测试不会连到外网。"""
     seen = []
 
     class Handler(BaseHTTPRequestHandler):
         def do_GET(self):
-            seen.append(self.path)
-            body = b'[]' if self.path == RELEASES else files.get(self.path)
+            path = self.path
+            if path.startswith('http://'):
+                parts = urlsplit(path)
+                path = parts.path + (f'?{parts.query}' if parts.query else '')
+            seen.append(path)
+            body = b'[]' if path == RELEASES else files.get(path)
             self.send_response(200 if body is not None else 404)
             body = body if body is not None else b'{"message": "Not Found"}'
             self.send_header('Content-Length', str(len(body)))
             self.end_headers()
             self.wfile.write(body)
+
+        def do_CONNECT(self):
+            self.send_response(403)
+            self.send_header('Content-Length', '0')
+            self.end_headers()
 
         def log_message(self, *_):
             pass
@@ -362,6 +376,138 @@ class NativePackCatalogTest(unittest.TestCase):
             # 只记下启用了哪个文件：没有证据，也没有归属。
             with sqlite3.connect(self.lib.db) as app:
                 self.assertEqual(app.execute("SELECT count(*) FROM candidates WHERE source IN ('WD_EXT','CCIP_LONGTAIL')").fetchone(), (0,))
+
+    def fresh_library_missing_the_pack(self, files):
+        """新图库，第一次准备时角色资料包的 CCIP 文件没下载下来，第一次同步就过去了（#630）。返回那个文件的字节。"""
+        ccip = files.pop('/builtin/A-longtail-p75.zip')
+        folder = self.root / 'fresh-images'
+        folder.mkdir()
+        for name, color in (('x.png', 'red'), ('y.png', 'purple')):
+            image(folder / name, color)
+        fresh = self.root / 'fresh.pilib'
+        self.cli('library-create', '--dest', str(fresh), '--folder', str(folder))
+        self.lib = Library(fresh)
+        self.restart()
+        self.assertEqual(self.packs()['library']['prompt'], 'auto')
+        self.packs({'action': 'download'})
+        failed = self.settle('download')
+        self.assertEqual(failed['download']['status'], 'failed', failed)
+        self.assertNotEqual(failed['current']['status'], 'ready')
+        self.assertEqual(self.request('/api/sync', {})['status'], 200)
+        wait_until(lambda: json.loads(self.request('/api/sync')['body'])['state']['status'] not in ('scanning', 'running'))
+        # 第一次同步交付的识别结果（合成向量：第一张图只有第 0 维是 1，内置包的 WD 头认它）。
+        with sqlite3.connect(self.lib.source) as source:
+            source.execute('CREATE TABLE IF NOT EXISTS embeddings(uuid TEXT,model TEXT,vec BLOB,PRIMARY KEY(uuid,model))')
+            self.ids = [u for u, in source.execute('SELECT uuid FROM assets WHERE in_scope=1 ORDER BY uuid')]
+            for i, uuid in enumerate(self.ids):
+                vector = [0.] * 1024
+                vector[i] = 1.
+                source.execute("INSERT INTO embeddings VALUES (?,'wd',?)", (uuid, struct.pack('<1024f', *vector)))
+        self.assertEqual(len(self.ids), 2)
+        # 已有识别结果，但没当成升级上来的图库去问：还是等包就位后默认启用。
+        packs = self.packs()
+        self.assertLessEqual({'enabled': False, 'prompt': 'pending'}.items(), packs['library'].items())
+        return ccip
+
+    def test_new_library_enables_the_pack_once_a_late_download_arrives(self):
+        files = {}
+        with github(files) as (origin, seen):
+            files.update(self.serve(origin))
+            ccip = self.fresh_library_missing_the_pack(files)
+            # 重启以后照样记得。
+            self.restart()
+            self.assertEqual(self.packs()['library']['prompt'], 'pending')
+
+            # 点「重试」补下载：下完以后宿主自己启用，像用户点了启用一样检查已有的识别结果。
+            files['/builtin/A-longtail-p75.zip'] = ccip
+            self.packs({'action': 'download'})
+            self.assertEqual(self.settle('download')['current']['status'], 'ready')
+            observed = None
+
+            def enabled():
+                nonlocal observed
+                observed = self.packs()
+                task = observed['task']
+                return task and task['kind'] == 'enable' and task['status'] != 'running'
+
+            wait_until(enabled)
+            self.assertEqual(observed['task']['status'], 'done', observed)
+            self.assertLessEqual({'enabled': True, 'version': '0.1', 'wd': True, 'ccip': True, 'prompt': None,
+                                  'images': 1, 'assigned': 1}.items(), observed['library'].items())
+            self.assertEqual(self.members(), (self.ids[:1], self.ids[:1]))
+
+            # 用户撤回以后不再默认启用：重启后也不会。
+            self.packs({'action': 'withdraw'})
+            withdrawn = self.settle('task')
+            self.assertEqual(withdrawn['task']['status'], 'done', withdrawn)
+            self.assertEqual(withdrawn['library']['prompt'], 'declined')
+            self.restart()
+            time.sleep(3)  # 宿主每秒检查一次要不要默认启用。
+            packs = self.packs()
+            self.assertIsNone(packs['task'])
+            self.assertLessEqual({'enabled': False, 'prompt': 'declined'}.items(), packs['library'].items())
+            self.assertEqual(self.members(), ([], []))
+
+    def test_declining_before_a_late_download_keeps_the_pack_off(self):
+        files = {}
+        with github(files) as (origin, seen):
+            files.update(self.serve(origin))
+            ccip = self.fresh_library_missing_the_pack(files)
+            # 包还没到时用户选了不用：下完以后也不启用。
+            self.assertEqual(self.packs({'action': 'decline'})['library']['prompt'], 'declined')
+            files['/builtin/A-longtail-p75.zip'] = ccip
+            self.packs({'action': 'download'})
+            self.assertEqual(self.settle('download')['current']['status'], 'ready')
+            time.sleep(3)  # 宿主每秒检查一次要不要默认启用。
+            packs = self.packs()
+            self.assertIsNone(packs['task'])
+            self.assertLessEqual({'enabled': False, 'prompt': 'declined'}.items(), packs['library'].items())
+            self.assertEqual(self.members(), ([], []))
+
+    def first_prepare(self, origin):
+        """首次准备：识别模型还没就位时点「下载识别模型」。模型的来源都在外网，经测试代理全部失败，不影响资料包。"""
+        self.env.update(ILLUSTASH_MODELS=str(self.root / 'models'), HTTPS_PROXY=origin)
+        self.restart()
+        self.assertEqual(self.packs()['current']['version'], '0.1')
+        self.post('/api/models', {'action': 'download'})
+        observed = None
+
+        def ended():
+            nonlocal observed
+            observed = self.packs()
+            job = observed['download']
+            return job and job['kind'] != 'catalog' and job['status'] != 'running'
+
+        wait_until(ended)
+        return observed
+
+    def test_first_prepare_reads_the_catalog_and_downloads_the_newest_pack(self):
+        files = {}
+        with github(files) as (origin, seen):
+            files.update(self.serve(origin))
+            packs = self.first_prepare(origin)
+            # 先读目录（不读版本列表），再按目录下载最新的、这个版本能用的包。
+            self.assertIn(DOWNLOAD + 'packs/packs.json.sig', seen)
+            self.assertNotIn(RELEASES, seen)
+            self.assertLess(seen.index(DOWNLOAD + 'packs/packs.json'), seen.index(DOWNLOAD + 'character-pack-1.0/wd-extension-v3.bin'))
+            self.assertEqual((packs['catalog']['serial'], packs['catalog']['error']), (1, None))
+            self.assertIsNotNone(packs['catalog']['checked_at'])
+            self.assertEqual(packs['download']['status'], 'done', packs['download'])
+            self.assertEqual((packs['current']['version'], packs['current']['status'], packs['offer']), ('1.0', 'ready', None))
+            self.assertNotIn('/builtin/wd-extension-v1.bin', seen)
+
+    def test_first_prepare_falls_back_to_the_builtin_pack_without_a_catalog(self):
+        files = {}
+        with github(files) as (origin, seen):
+            files.update(self.serve(origin))
+            files.pop(DOWNLOAD + 'packs/packs.json.sig')
+            packs = self.first_prepare(origin)
+            # 读不到目录：记下原因，照常下载内置的 0.1。
+            self.assertIn('HTTP 404', packs['catalog']['error'])
+            self.assertIsNone(packs['catalog']['serial'])
+            self.assertEqual(packs['download']['status'], 'done', packs['download'])
+            self.assertEqual((packs['current']['version'], packs['current']['status']), ('0.1', 'ready'))
+            self.assertNotIn(DOWNLOAD + 'character-pack-1.0/wd-extension-v3.bin', seen)
 
 
 if __name__ == '__main__':

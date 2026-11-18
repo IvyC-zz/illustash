@@ -163,22 +163,47 @@ const META_KEY: &str = "wd_extension";
 /// 角色资料包默认启用以后（#602），本图库明确不用：提示里选了不用，或撤回过。启用时清掉。
 const DECLINED_KEY: &str = "character_pack_declined";
 
-/// 本图库是不是明确不用角色资料包（`app_packs::default_state`）。
-pub(crate) fn declined(app: &Connection) -> Result<bool> {
-    Ok(app.query_row("SELECT EXISTS(SELECT 1 FROM meta WHERE key=?1)", [DECLINED_KEY], |r| r.get(0))?)
+/// 新图库第一次同步时角色资料包还不在本机（#630）：本该默认启用，等包就位后由宿主补上（`app_packs::pending_enable`）。
+/// 启用、撤回或选了不用时清掉。
+const PENDING_KEY: &str = "character_pack_default_pending";
+
+fn flag(app: &Connection, key: &str) -> Result<bool> {
+    Ok(app.query_row("SELECT EXISTS(SELECT 1 FROM meta WHERE key=?1)", [key], |r| r.get(0))?)
 }
 
-/// 记下或清掉「本图库不用角色资料包」。
+/// 本图库是不是明确不用角色资料包（`app_packs::default_state`）。
+pub(crate) fn declined(app: &Connection) -> Result<bool> {
+    flag(app, DECLINED_KEY)
+}
+
+/// 本图库是不是等着角色资料包就位后默认启用（#630）。
+pub(crate) fn default_pending(app: &Connection) -> Result<bool> {
+    flag(app, PENDING_KEY)
+}
+
+/// 记下或清掉「本图库不用角色资料包」。两种情况都清掉「等包就位后默认启用」：用户已经选过了。
 pub(crate) fn set_declined(library: &Library, declined: bool) -> Result<()> {
+    set_flags(library, &[(DECLINED_KEY, declined), (PENDING_KEY, false)])
+}
+
+/// 记下「等角色资料包就位后默认启用」（#630）。调用方先确认本图库没选过不用（`app_packs::default_enable`）。
+pub(crate) fn set_default_pending(library: &Library) -> Result<()> {
+    set_flags(library, &[(PENDING_KEY, true)])
+}
+
+/// 在一个事务里记下（`true`）或清掉（`false`）几个只看有没有的 `meta` 标记。
+fn set_flags(library: &Library, flags: &[(&str, bool)]) -> Result<()> {
     ensure_writable(library)?;
     let mut app = writer(&library.db())?;
     crate::schema::require_current(&app)?;
     let tx = app.transaction_with_behavior(TransactionBehavior::Immediate)?;
     crate::schema::begin_writing(&tx)?;
-    if declined {
-        tx.execute("INSERT OR REPLACE INTO meta(key,value) VALUES (?1,CURRENT_TIMESTAMP)", [DECLINED_KEY])?;
-    } else {
-        tx.execute("DELETE FROM meta WHERE key=?1", [DECLINED_KEY])?;
+    for &(key, on) in flags {
+        if on {
+            tx.execute("INSERT OR REPLACE INTO meta(key,value) VALUES (?1,CURRENT_TIMESTAMP)", [key])?;
+        } else {
+            tx.execute("DELETE FROM meta WHERE key=?1", [key])?;
+        }
     }
     crate::schema::commit_writing(tx)
 }

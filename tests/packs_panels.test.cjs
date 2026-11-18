@@ -37,6 +37,33 @@ test('一张卡片在「角色资料」里，范围标「本图库」，状态�
   assert.deepEqual(settings.settingsSection()[3], ['packCard', 'indexCard', 'namesCard', 'modelCard']);
 });
 
+test('等着默认启用（#630）的卡片底部照样写还缺几个角色（#606）', async () => {
+  state.route = {page: 'settings', section: 'characters'};
+  state.pack = null;
+  const index = {state: {status: 'idle'}, works: [], watch: {works: ['work_a'], min_posts: 50}, check: {checked_at: 't', missing: []},
+    history: [], mb_per_character: 2};
+  const coverage = {checked_at: 't', coverage: {work_a: {packs: 3, own: 0, missing: 2}}};
+  globalThis.fetch = async path => ({status: 200, ok: true, headers: {get: () => null},
+    json: async () => path === '/api/index/coverage' ? coverage : index});
+  await settings.renderIndexCard();
+  await new Promise(resolve => setImmediate(resolve));
+  state.pack = {...READY, current: {...READY.current, status: 'missing', have: 0},
+    download: {kind: 'download', status: 'failed', message: '连接失败'},
+    library: {...READY.library, prompt: 'pending', vectors: 12}};
+  await settings.renderPackCard();
+  const html = page.el('packCard').innerHTML;
+  assert.match(html, /角色资料包没能下载：连接失败/);
+  assert.match(html, /下载完成后启用/);
+  assert.match(html, /data-pack="download">重试/);
+  assert.doesNotMatch(html, /data-pack="decline"/);
+  assert.match(html, /关注的作品还缺 2 个角色/);
+  assert.match(html, /data-index-go/);
+  // 包到了、等后台任务结束时同样。
+  state.pack = {...READY, library: {...READY.library, prompt: 'pending', vectors: 12}};
+  await settings.renderPackCard();
+  assert.match(page.el('packCard').innerHTML, /等后台任务结束后启用[\s\S]*关注的作品还缺 2 个角色/);
+});
+
 test('还没读到时读一次；读取失败写在卡片里', async () => {
   state.route = {page: 'settings', section: 'characters'};
   state.pack = null;

@@ -3281,6 +3281,9 @@
   "角色资料包还没下载（约 {size}）": "Character pack not downloaded (about {size})",
   "角色资料包现在默认启用，本图库还没启用": "Character packs are now on by default; not on for this library yet",
   "第一次同步时启用": "Turns on at the first sync",
+  "等后台任务结束后启用": "Turns on when the background task finishes",
+  "下载完成后启用": "Turns on once downloaded",
+  "正在读取角色资料包目录": "Reading the character pack catalog",
   "下载角色资料包（约 {size}）": "Download character pack (about {size})",
   "角色资料包不在这台电脑上，新识别的图不检查": "The character pack isn’t on this computer; newly recognized images aren’t checked",
   "启用会给还没有归属的图补上机器归属": "Turning it on fills in machine assignments for images that have none",
@@ -3316,6 +3319,7 @@
   "角色资料包请求字段不正确": "Invalid character pack request fields",
   "下载角色资料包": "Download character pack",
   "一次普通的 HTTPS 下载，取回角色资料包；不发送图库里的任何信息": "One ordinary HTTPS download of the character pack; nothing from your library is sent",
+  "一次普通的 HTTPS 下载，取回角色资料包，首次准备时先读一次公开的角色资料包目录；不发送图库里的任何信息": "One ordinary HTTPS download of the character pack; during first-time setup it reads the public character pack catalog first; nothing from your library is sent",
   "只在你点「下载」时，或首次准备时和识别模型一起": "Only when you click Download, or with the recognition models during first setup",
   "一次普通的 HTTPS 请求，读取公开的版本列表和角色资料包目录；不发送图库里的任何信息": "One ordinary HTTPS request that reads the public list of releases and the character pack catalog; nothing from your library is sent",
   "去掉本图库里角色资料包给出的全部候选，以及它补上的 {n} 个机器归属。": {
