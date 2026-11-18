@@ -4,6 +4,7 @@ import {edits, exclusive, undoLatest, undoneText} from '../core/edits.js';
 import {esc, isMac, number, platformText, screenScale, shortcut, thumbSize} from '../core/format.js';
 import {t} from '../core/i18n.js';
 import {composing} from '../core/keys.js';
+import {leaves} from '../core/filters.js';
 import {REASONS, nameWithWork} from '../core/labels.js';
 import {undoRefusal} from '../core/human.js';
 import {afterSyncLearning, learningNow, learningSettled, learningShown, metaSoon, refreshMeta} from '../core/meta.js';
@@ -661,13 +662,14 @@ function runBarAction(act) {
   }
 }
 // 人工标签复用命令面板：已有的标签、采用一个 WD tag，或新建一个。所有选中图片上都已有的条目提供移除。
-// leaving(tag)：去掉这个标签以后图是不是离开本页。默认只有去掉的正是筛选用的那个标签时才算（#386 的 2-39）。
-export function openTagPicker(payload, n, loaded, leaving = tag => !!state.route.utag && tag === state.route.utag) {
+// leaving(tag, add)：加上或去掉这个标签以后图是不是离开本页。默认只有去掉的正是「含」的标签、加上的正是「不含」的标签时
+// 才算（#386 的 2-39、#644）。
+export function openTagPicker(payload, n, loaded, leaving = (tag, add) => leaves(state.route, `utag:${tag}`, add)) {
   const present = new Map();
   for (const item of loaded || []) for (const tag of item.user_tags || []) present.set(tag, (present.get(tag) || 0) + 1);
   openPicker({title: t('标签'), tagMode: true, present, subject: (loaded || []).map(x => x.uuid), placeholder: t('输入标签，或搜索 WD 通用标签…'),
     sentence: e => e.remove ? t('从 {n} 张去掉标签 {tag}', {n: number(n), tag: e.tag}) : t('给 {n} 张加上标签 {tag}', {n: number(n), tag: e.tag}),
-    pick: e => mutate('/api/tag', {...payload(), tag: e.tag, add: !e.remove}, e.remove && leaving(e.tag))});
+    pick: e => mutate('/api/tag', {...payload(), tag: e.tag, add: !e.remove}, leaving(e.tag, !e.remove))});
 }
 function openVariantMenu(payload) {
   const r = state.route, n = selCount(), items = [];

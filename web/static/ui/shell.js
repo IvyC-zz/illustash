@@ -1,7 +1,7 @@
 // 页面的框架（桌面布局，#199）：按地址切到对应页面、侧栏的计数、每个页面的标题和工具栏。页面在哪由 core/route.js
 // 负责；计数的数据由 core/meta.js 负责。
 import {workKey} from '../core/catalog.js';
-import {dayLabel, esc, isMac, localDate, number, shortcut} from '../core/format.js';
+import {esc, isMac, localDate, number, shortcut} from '../core/format.js';
 import {t} from '../core/i18n.js';
 import {REASONS, nameTip} from '../core/labels.js';
 import {onTyped} from '../core/keys.js';
@@ -20,23 +20,10 @@ import {closeInspector, closeViewer} from './detail.js';
 import {filters, markSelectButton, placeFor, rememberPlace, reload, resetForRoute, selectAll, setNsfw, short, sweep, toggleFit, toggleSelecting} from './grid.js';
 import {guideTick} from './guide.js';
 import {createLayer} from './overlay.js';
-import {filterBar, wireFilterBar} from './filters.js';
+import {conditionHelp, conditionTitle, filterBar, wireFilterBar} from './filters.js';
 import {saveButton, wireGalleries, wireSaveButton} from './galleries.js';
 import {editProfile, markOc, mergeCharacter, openLocalLinks, openRelate, splitOc, toggleMascot, toggleOc} from './palette.js';
 
-// 画师筛选的标题里显示的画师名：第一次用到时去读，读到后重画标题。
-const artistNames = {};
-function artistName(id) {
-  if (!(id in artistNames)) {
-    artistNames[id] = '…';
-    api('/api/artist?' + new URLSearchParams({id})).then(r => {
-      artistNames[id] = r.name || t('未知画师');
-      if (state.route.artist !== id) return;
-      renderHeading();
-    }).catch(e => error(readError(e)));
-  }
-  return artistNames[id];
-}
 export const navCount = (id, n, title = '') => { $(id).textContent = n ? number(n) : ''; $(id).title = title; };
 // 一次元数据读取在屏幕上改动什么：侧栏的计数，以及显示它们的标题或页面。
 function metaShown({error: e, directory, queue}) {
@@ -251,7 +238,8 @@ export function wireShell() {
 implement({
   character: {drawHeading: drawCharHeading},
   home: {heading: (r, {n}) => [t('首页'), state.recentCount ? t('最近一次同步新加入 {n} 张', {n: number(state.recentCount)}) : '']},
-  library: {heading: (r, {n}) => [r.artist ? t('画师 · {name}', {name: esc(artistName(r.artist))}) : r.day ? t('{day} 加入', {day: esc(dayLabel(r.day))}) : r.work ? esc((state.workTree || []).find(w => w.id === r.work)?.name || t('作品筛选')) : r.utag ? '# ' + esc(r.utag) : t('图库'), t('{n} 张', {n})]},
+  // 图库的标题：只有一个条件时写这个条件（ui/filters.js，旧的单值参数和条件数组一样，#644）。
+  library: {heading: (r, {n}) => [conditionTitle(r) || t('图库'), t('{n} 张', {n})]},
   characters: {heading: (r, {n}) => [t('资料库'), r.section === 'artists' ? dirHeading() : r.section === 'works' ? t('{n} 部作品', {n: number(state.index?.works?.length || 0)}) + (state.index?.watch?.works.length ? ' · ' + t('关注 {n} 部', {n: number(state.index.watch.works.length)}) : '') : t('{n} 位角色 · {works} 部作品', {n: number(state.chars.length), works: number(new Set(state.chars.map(workKey).filter(k => k !== 'oc' && k !== 'other')).size)}), !r.section && state.localLinks?.length ? `<span class="heading-links"><button class="quiet" id="localLinksButton" title="${t('补上中文名、别名和作品，和已有角色重复的可以合并')}">${t('{n} 个自建角色能对上 Danbooru', {n: number(state.localLinks.length)})}</button></span>` : '']},
   audit: {heading: (r, {n}) => [t('随机抽查'), t('还剩 {left} / {n} 张', {left: number(state.pools.audit || 0), n}) + (state.nsfw ? ` · <b>${t('R18 筛选开着：抽查要看全部才准，按 H 切换')}</b>` : '')]},
   unmatched: {heading: (r, {n}) => [t('未识别'), '']},
@@ -272,7 +260,7 @@ implement({
 // 本来就是这一节的内容清单，留在原处；资料库、角色页的副标题都是数量和状态，没有「?」。
 implement({
   home: {help: () => [t('按加入日期分组。')]},
-  library: {help: r => r.work ? [t('包含所有子作品的图。')] : r.artist ? [t('画师是按画作比对找到的。')] : [], helpHint: true},
+  library: {help: conditionHelp, helpHint: true},
   audit: {help: () => [t('鼠标移到角色 tag 上，点 ✓ 或 ✗ 回答。'), t('选中多张后按 Y（是）或 N（不是）。'), t('打开大图也可以回答。'), t('看不清的可以跳过，换一张。')]},
   unmatched: {helpHint: true},
   skipped: {help: () => [t('选中的图可以恢复到未识别。')], helpHint: true},

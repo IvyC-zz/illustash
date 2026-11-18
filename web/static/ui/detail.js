@@ -2,6 +2,7 @@
 import {esc, monthText, number, thumbSize} from '../core/format.js';
 import {unreadableText} from '../core/jobs.js';
 import {t} from '../core/i18n.js';
+import {leaves} from '../core/filters.js';
 import {REASONS, nameWithWork} from '../core/labels.js';
 import {fetchChar} from '../core/meta.js';
 import {detailAfterViewer, shownUuid} from '../core/modes.js';
@@ -117,11 +118,11 @@ export async function inspect(ident, quiet = false) {
     $('likeOne').onclick = () => likeOne(ident);
     for (const b of $('inspector').querySelectorAll('[data-artist-verdict]')) b.onclick = () => {
       const v = b.dataset.artistVerdict || null;
-      mutate('/api/artist/verdict', {ids: [ident], artist: b.dataset.artist, verdict: v, name: b.dataset.name}, v === 'no' && state.route.artist === b.dataset.artist);
+      mutate('/api/artist/verdict', {ids: [ident], artist: b.dataset.artist, verdict: v, name: b.dataset.name}, !!v && leaves(state.route, `artist:${b.dataset.artist}`, v === 'yes'));
     };
     $('inspector').querySelector('[data-artist-find]')?.addEventListener('click', () => findArtists([ident], () => inspect(ident, true)));
     for (const b of $('inspector').querySelectorAll('[data-artist-more]')) b.onclick = () => findArtistWorks(b.dataset.artistMore, b.dataset.name, () => inspect(ident, true));
-    for (const b of $('inspector').querySelectorAll('[data-untag]')) b.onclick = () => mutate('/api/tag', {ids: [ident], tag: b.dataset.untag, add: false}, state.route.utag === b.dataset.untag);
+    for (const b of $('inspector').querySelectorAll('[data-untag]')) b.onclick = () => mutate('/api/tag', {ids: [ident], tag: b.dataset.untag, add: false}, leaves(state.route, `utag:${b.dataset.untag}`, false));
     $('resumeOne')?.addEventListener('click', () => mutate('/api/change', {ids: [ident], action: 'resume'}, poolIs(state.route, 'skipped')));
     bindIdentity($('inspector'), d, ident); bindAsk($('inspector'), d, ident);
     bindFileActions($('inspector'), ident);
