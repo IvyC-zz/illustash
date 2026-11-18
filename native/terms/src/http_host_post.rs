@@ -1,5 +1,5 @@
 //! 会话 POST 业务路由；入口安全检查由 app_http 保持。
-use super::http_host_get::{ccip_status, expired, reply, reply_if_current, waited};
+use super::http_host_get::{ccip_status, expired, packs, reply, reply_if_current, waited};
 use super::*;
 use std::sync::RwLockWriteGuard;
 
@@ -22,13 +22,14 @@ pub(super) fn handle(request: Request, host: &Host, received: u64, text: &str, b
     match request.url() {
         "/api/libraries/choose" => return choose(request, host, received, &body, &translate),
         // 全应用范围，且可能要联网往返一次（#191）：从不持有会话，所以不会拖慢切换。
-        "/api/updates" => return reply(request, crate::app_updates::post(&body), true),
+        "/api/updates" => return reply(request, crate::app_updates::post(&host.root, &body), true),
         "/api/diagnostics/open-logs" => {
             return reply(request, crate::app_desktop::request("POST", "/platform/diagnostics/open-logs", 5), false);
         }
         "/api/wd-extension/package" => return wd_package(request, host, received, body, &translate),
         "/api/models" => return models(request, host, body, &translate),
         "/api/ccip-longtail/package" => return ccip_package(request, host, received, body, &translate),
+        "/api/packs" => return packs_post(request, host, received, body, &translate),
         url if url.starts_with("/api/files/") => return files(request, host, received, &body, &translate),
         _ => {}
     }
@@ -103,12 +104,18 @@ pub(super) fn handle(request: Request, host: &Host, received: u64, text: &str, b
         // 导入是后台任务（#26、#88）：请求做完校验、启动任务后立即应答；页面轮询 GET /api/imports，可以取消。
         // 识别结果导入始终绑定在开始时的图库上。取消、切换图库或退出，都会让两种导入在发布点之前停下。
         "/api/ccip-longtail/enable" | "/api/ccip-longtail/withdraw" => {
-            if !matches!(&body,Json::Object(fields) if fields.is_empty()) {
-                return failure(request, Error::invalid("参考包请求字段不正确"), true);
-            }
             let withdraw = request.url().ends_with("/withdraw");
-            let result =
-                longtail(host, &session, withdraw).and_then(|started| ccip_status(host, &session, Some(started)));
+            // 启用带 `version` 时用那个版本，就是换包（#602）。
+            let version = match &body {
+                Json::Object(fields) if fields.is_empty() => None,
+                Json::Object(fields) if fields.len() == 1 && !withdraw => match body.get("version") {
+                    Some(Json::Scalar(serde_json::Value::String(v))) if !v.is_empty() => Some(v.clone()),
+                    _ => return failure(request, Error::invalid("参考包请求字段不正确"), true),
+                },
+                _ => return failure(request, Error::invalid("参考包请求字段不正确"), true),
+            };
+            let result = longtail(host, &session, withdraw, version.as_deref())
+                .and_then(|started| ccip_status(host, &session, Some(started)));
             drop(session);
             return reply(request, result, true);
         }
@@ -293,8 +300,10 @@ fn wd_package(request: Request, host: &Host, received: u64, mut body: Json, tran
     if !host.accepts(&session, received) || header(&request, "X-CSRF-Token") != Some(&session.token) {
         return expired(request);
     }
-    let result =
-        crate::app_models::extension_post(&host.root, &body).and_then(|()| host.wd_status(&session)).map(Json::from);
+    let result = crate::app_wd_extension::card_pack(&host.root, &session.library)
+        .and_then(|current| crate::app_models::extension_post(&host.root, &body, &current))
+        .and_then(|()| host.wd_status(&session))
+        .map(Json::from);
     drop(session);
     reply(request, result, true);
 }
@@ -311,9 +320,15 @@ fn wd_extension(url: &str, host: &Host, session: &mut Session, body: &Json) -> R
         session.wd_extension.cancel(id)?;
         return host.wd_status(session).map(Json::from);
     }
-    if !matches!(body, Json::Object(fields) if fields.is_empty()) {
-        return Err(Error::invalid("WD 角色扩展请求字段不正确"));
-    }
+    // 启用和重新检查用卡片上的版本；带 `version` 时用那个版本，就是换包（#602）。撤回不带字段。
+    let version = match body {
+        Json::Object(fields) if fields.is_empty() => None,
+        Json::Object(fields) if fields.len() == 1 && url.ends_with("/enable") => match body.get("version") {
+            Some(Json::Scalar(serde_json::Value::String(v))) if !v.is_empty() => Some(v.clone()),
+            _ => return Err(Error::invalid("WD 角色扩展请求字段不正确")),
+        },
+        _ => return Err(Error::invalid("WD 角色扩展请求字段不正确")),
+    };
     if session.wd_extension.running() {
         return Err(wd_running());
     }
@@ -330,13 +345,117 @@ fn wd_extension(url: &str, host: &Host, session: &mut Session, body: &Json) -> R
     let action = if url.ends_with("/withdraw") {
         Action::Withdraw
     } else {
-        let path =
-            crate::app_models::extension_file(&host.root)?.ok_or_else(|| Error::Conflict("扩展包还没就位".into()))?;
-        Action::Enable(path)
+        let pack = match &version {
+            Some(version) => crate::app_packs::by_version(&host.root, version)?.wd,
+            None => crate::app_wd_extension::card_pack(&host.root, &session.library)?,
+        };
+        let path = crate::app_models::extension_file(&host.root, &pack)?
+            .ok_or_else(|| Error::Conflict("扩展包还没就位".into()))?;
+        Action::Enable(pack, path)
     };
     let identity = crate::app_tasks::TaskIdentity::new(&session.library, session.generation, &session.token)?;
     snapshot["task"] = session.wd_extension.start_for(&session.library, identity, action)?;
     Ok(snapshot.into())
+}
+
+/// `POST /api/packs`（#602）：一个角色资料包的文件操作和开关。
+/// - 文件：`download`（可带 `version`）、`import`（可带 `paths`，不带时打开选择框）、`cancel`（不带 `id`）、`discard`、
+///   `delete`，见 `app_models::character_pack_post`；
+/// - 开关：`enable`（可带 `version`，就是换包）用两个组成部分依次检查本图库，`withdraw` 撤回启用了的组成部分，
+///   `cancel` 带 `id` 取消检查（只在扫描阶段）；`decline` 记下已有图库不要默认启用（`app_packs::decline`）。
+///
+/// 成功时回复完整的 `GET /api/packs`；选择框关掉时回复 `{cancelled:true}`。
+fn packs_post(request: Request, host: &Host, received: u64, mut body: Json, translate: Translate) {
+    let Json::Object(fields) = &body else { return failure(request, Error::invalid("未知操作"), true) };
+    let action = body.get("action").map(Json::text).unwrap_or("").to_owned();
+    if action == "import" && body.get("paths").is_none() {
+        if fields.len() != 1 {
+            return failure(request, Error::invalid("未知参数"), true);
+        }
+        match model_paths("wd-extension", translate) {
+            Ok(Some(paths)) => body.set("paths", paths),
+            Ok(None) => return cancelled(request),
+            Err(e) => return failure(request, e, true),
+        }
+    }
+    let mut session = host.session.write().expect("角色资料包会话锁中毒");
+    if !host.accepts(&session, received) || header(&request, "X-CSRF-Token") != Some(&session.token) {
+        return expired(request);
+    }
+    let result = pack_action(host, &mut session, &action, &body).and_then(|()| packs(host, &session));
+    drop(session);
+    reply(request, result, true);
+}
+
+fn pack_action(host: &Host, session: &mut Session, action: &str, body: &Json) -> Result<()> {
+    use crate::app_wd_extension::{Action, Part};
+    let Json::Object(fields) = body else { return Err(Error::invalid("未知操作")) };
+    let only = |allowed: &[&str]| fields.iter().all(|(k, _)| allowed.contains(&k.as_str()));
+    let lib = crate::app_packs::for_library(&host.root, &session.library)?;
+    match action {
+        "cancel" if body.get("id").is_some() => {
+            let Some(Json::Scalar(serde_json::Value::String(id))) = body.get("id") else {
+                return Err(Error::invalid("角色资料包任务编号不合法"));
+            };
+            if id.is_empty() || !only(&["action", "id"]) {
+                return Err(Error::invalid("角色资料包任务编号不合法"));
+            }
+            return session.wd_extension.cancel(id);
+        }
+        "download" | "import" | "cancel" | "discard" | "delete" => {
+            if action == "delete"
+                && (session.wd_extension.running() || host.imports.recognition_running(session.generation))
+            {
+                return Err(Error::Conflict("正在检查角色，请等任务结束后再删除角色资料包".into()));
+            }
+            return crate::app_models::character_pack_post(&host.root, body, &lib.card);
+        }
+        "decline" if only(&["action"]) => return crate::app_packs::decline(&host.root, &session.library),
+        "enable" if only(&["action", "version"]) => {}
+        "withdraw" if only(&["action"]) => {}
+        "decline" | "enable" | "withdraw" => return Err(Error::invalid("角色资料包请求字段不正确")),
+        _ => return Err(Error::invalid("未知的角色资料包操作")),
+    }
+    if session.library.frozen() || session.damage().is_some() {
+        return Err(Error::Conflict("图库只读".into()));
+    }
+    if session.wd_extension.running() {
+        return Err(wd_running());
+    }
+    match host.wd_busy(session) {
+        Some("syncing") => return Err(Error::Conflict("正在同步或交付识别结果，请等它结束".into())),
+        Some(_) => return Err(Error::Conflict("图库正在导入、导出或更新角色索引，请等它结束".into())),
+        None => {}
+    }
+    let action = if action == "withdraw" {
+        Action::PackWithdraw { wd: lib.wd.is_some() || lib.ccip.is_none(), ccip: lib.ccip.is_some() }
+    } else {
+        let pack = match body.get("version") {
+            None => lib.card.clone(),
+            Some(Json::Scalar(serde_json::Value::String(v))) if !v.is_empty() => {
+                crate::app_packs::by_version(&host.root, v)?
+            }
+            Some(_) => return Err(Error::invalid("角色资料包请求字段不正确")),
+        };
+        let missing = || Error::Conflict("角色资料包还没就位".into());
+        let wd_path = crate::app_models::extension_file(&host.root, &pack.wd)?.ok_or_else(missing)?;
+        let shared = crate::app_resources::shared_path(&host.root)?;
+        let ccip_path = crate::app_ccip_longtail::package_path(&shared, &pack.ccip);
+        if !ccip_path.try_exists()? {
+            return Err(missing());
+        }
+        let wd_scan = crate::app_wd_extension::stored_vectors(&session.library)? > 0;
+        let ccip_scan = crate::app_ccip_longtail::stored_vectors(&session.library)? > 0;
+        Action::Pack {
+            root: host.root.clone(),
+            wd: Some(Box::new(Part { pack: pack.wd.clone(), path: wd_path, scan: wd_scan })),
+            ccip: Some(Box::new(Part { pack: pack.ccip.clone(), path: ccip_path, scan: ccip_scan })),
+        }
+    };
+    let identity = crate::app_tasks::TaskIdentity::new(&session.library, session.generation, &session.token)?;
+    session.wd_extension.start_for(&session.library, identity, action)?;
+    crate::app_ccip_longtail::clear_auto_task(&session.library);
+    Ok(())
 }
 
 fn wd_idle(session: &Session) -> Result<()> {
@@ -362,6 +481,13 @@ fn ccip_status_current(host: &Host, received: u64) -> Result<Json> {
     }
     ccip_status(host, &session, None)
 }
+fn ccip_card(host: &Host, received: u64) -> Result<crate::app_packs::Pack> {
+    let session = host.session.read().expect("http_host_post session lock poisoned");
+    if !host.accepts(&session, received) {
+        return Err(Error::Conflict("图库已切换，请重新加载页面".into()));
+    }
+    crate::app_ccip_longtail::card_pack(&host.root, &session.library)
+}
 fn ccip_package(request: Request, host: &Host, received: u64, mut body: Json, translate: Translate) {
     if body.get("action").map(Json::text) == Some("import") && body.get("paths").is_none() {
         // 参考包是一个 ZIP：单选，只列 .zip（#559 走查：原来借用识别模型的选择器，能多选 .onnx、.json）。
@@ -377,7 +503,8 @@ fn ccip_package(request: Request, host: &Host, received: u64, mut body: Json, tr
         let session = host.session.read().expect("http_host_post session lock poisoned");
         session.syncer.running() || host.imports.recognition_running(session.generation)
     };
-    let result = crate::app_models::longtail_package_post(&host.root, &body, in_use)
+    let result = ccip_card(host, received)
+        .and_then(|current| crate::app_models::longtail_package_post(&host.root, &body, in_use, &current))
         .and_then(|()| ccip_status_current(host, received));
     reply_if_current(request, host, received, result, true);
 }
@@ -475,7 +602,7 @@ fn relate(request: Request, host: &Host, received: u64, mut session: RwLockWrite
     drop(session);
     reply_if_current(request, host, received, waited(result), true);
 }
-fn longtail(host: &Host, session: &Session, withdraw: bool) -> Result<Json> {
+fn longtail(host: &Host, session: &Session, withdraw: bool, version: Option<&str>) -> Result<Json> {
     use crate::app_ccip_longtail;
     if session.library.frozen() {
         return Err(Error::Conflict("图库只读".into()));
@@ -487,23 +614,28 @@ fn longtail(host: &Host, session: &Session, withdraw: bool) -> Result<Json> {
     let (kind, path) = if withdraw {
         (crate::app_imports::Kind::CcipWithdraw, None)
     } else {
+        let pack = match version {
+            Some(version) => crate::app_packs::by_version(&host.root, version)?.ccip,
+            None => app_ccip_longtail::card_pack(&host.root, &session.library)?,
+        };
         let shared = crate::app_resources::shared_path(&host.root)?;
-        let path = app_ccip_longtail::package_path(&shared);
+        let path = app_ccip_longtail::package_path(&shared, &pack);
         if !path.try_exists()? {
             return Err(Error::Conflict("参考包还没就位，请先从文件导入".into()));
         }
         if app_ccip_longtail::stored_vectors(&session.library)? == 0 {
             return Err(Error::Conflict("这个图库还没有 CCIP 向量，请先识别图片".into()));
         }
-        (crate::app_imports::Kind::CcipEnable, Some(path))
+        (crate::app_imports::Kind::CcipEnable, Some((pack, path)))
     };
     let identity = crate::app_tasks::TaskIdentity::new(&session.library, session.generation, &session.token)?;
     let (library, root) = (session.library.clone(), host.root.clone());
     let started = host.imports.start(identity, kind, "", move |progress| {
         let value = match path {
-            Some(path) => app_ccip_longtail::apply(
+            Some((pack, path)) => app_ccip_longtail::apply(
                 &library,
                 &root,
+                &pack,
                 &path,
                 &|| crate::app_sync::check(progress.cancellation()),
                 progress,
@@ -635,6 +767,15 @@ fn route(
                 session.index.post(&library, body, busy)
             }
         }
+        "/api/index/base" => {
+            let library = session.library.clone();
+            let busy = session.syncer.running() || session.wd_extension.running();
+            if host.imports.recognition_running(session.generation) {
+                Err(Error::Invalid("识别结果正在导入，完成后再更新角色索引".into()))
+            } else {
+                session.index.base_post(&library, body, busy)
+            }
+        }
         "/api/names" => {
             let library = session.library.clone();
             session.names.post(&library, body)
@@ -681,9 +822,12 @@ fn route(
     })
 }
 fn sync(host: &Host, received: u64, session: &mut Session) -> Result<Json> {
-    wd_idle(session)?;
-    if session.index.writing() {
-        return Err(Error::Invalid("角色索引正在更新，请稍后".into()));
+    // 角色索引在写入、WD 扩展检查在跑：这次同步排在它们后面，不报错（#607）。首次准备时模型一到齐，宿主就为图库启用
+    // 基础角色索引，页面同时发起的首次同步正好撞上。
+    if session.sync_waits() {
+        let library = session.library.clone();
+        session.syncer.queue(&library)?;
+        return Ok(Json::object([("started", false.into()), ("queued", true.into())]));
     }
     if host.imports.recognition_running(session.generation) {
         return Err(Error::Invalid("识别结果正在导入，请稍后".into()));

@@ -246,7 +246,7 @@ class PackagingResourcesTest(unittest.TestCase):
         notice = (pack.MODEL_LICENSES / 'NOTICE.txt').read_text()
         # 声明列出每个附带的模型文件和适用于它的许可文本。
         for name in ('wd_swinv2_v3_emb.onnx', 'model_feat.onnx', 'model_metrics.onnx', 'metrics.json',
-                     'wd-extension-v1.bin', 'wd-extension/Character-Index-MIT.txt',
+                     'wd-extension-v1.bin', 'wd-extension/Character-Index-MIT.txt', 'character-index-v1.bin',
                      'wd-swinv2-tagger-v3/LICENSE-2.0.txt', 'ccip/BigScience-OpenRAIL-M.pdf'):
             self.assertIn(name, notice)
         output = self.root / 'with models'

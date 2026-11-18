@@ -27,6 +27,26 @@ export async function modelsPost(body) {
   const value = await api('/api/models', {method: 'POST', body: JSON.stringify(body)});
   return value.cancelled ? value : adopt(value);
 }
+// 基础角色索引（#607）：文件和识别模型一起下载，按图库启用；这里是当前图库的状态。读到后同样通知 onModels。
+export async function loadCharacterBase() {
+  state.characterBase = await api('/api/index/base');
+  await changed.emit(state.models, started);
+  return state.characterBase;
+}
+// 启用或撤回（撤回对这台电脑上的所有图库生效）。回应是新的状态；任务在后台跑，进度和结果在角色索引任务里。
+export async function characterBasePost(enable) {
+  state.characterBase = await api('/api/index/base', {method: 'POST', body: JSON.stringify({enable})});
+  await changed.emit(state.models, started);
+  return state.characterBase;
+}
+// 基础角色索引的文件在识别模型清单里的路径；这个版本不带时为空。
+export const characterBasePath = (b = state.characterBase) => b?.included ? b.file?.path || '' : '';
+// 模型就位后还缺的可选文件：WD 加速文件（Apple 芯片的 macOS）和基础角色索引。
+export function optionalGaps(m = state.models) {
+  const missing = (m?.files || []).filter(f => f.optional && m.missing?.includes(f.path)).map(f => f.path);
+  const base = characterBasePath();
+  return {base: !!base && missing.includes(base), wd: missing.some(p => p !== base)};
+}
 // 「使用 GPU 加速识别」（#270），全应用共用，存在 preferences.json；模型状态里带着它，所以要重新读取。
 export async function saveAcceleration(on) {
   await api('/api/preferences', {method: 'POST', body: JSON.stringify({acceleration: on})});

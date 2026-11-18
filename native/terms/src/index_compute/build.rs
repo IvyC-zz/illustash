@@ -91,6 +91,16 @@ pub(super) fn build(review: &Path, tags: &Path) -> Result<Built> {
         gender_order.insert(cid.clone(), ordered_gender(&path)?);
         source.insert(cid, meta);
     }
+    // 基础角色索引（#607）的角色是预先算好锚点和阈值的精选条目；共享目录里同名的条目优先。
+    let mut prebuilt = HashMap::new();
+    for entry in crate::character_index::load_job(review)?.into_iter().flatten() {
+        if source.contains_key(&entry.id) {
+            continue;
+        }
+        gender_order.insert(entry.id.clone(), entry.gender);
+        source.insert(entry.id.clone(), Value::Object(entry.meta));
+        prebuilt.insert(entry.id, (entry.anchor, entry.n_ref, entry.thresholds));
+    }
     let mut wd = HashSet::new();
     let mut csv = csv::Reader::from_path(tags).map_err(|e| Error::invalid(e.to_string()))?;
     let header = csv.headers().map_err(|e| Error::invalid(e.to_string()))?.clone();
@@ -129,7 +139,15 @@ pub(super) fn build(review: &Path, tags: &Path) -> Result<Built> {
         let (mut nref, mut p50, mut p75, mut p90, mut arow) =
             (Value::Null, Value::Null, Value::Null, Value::Null, Value::Null);
         let fp = review.join(format!("char-index/{cid}.npy"));
-        if fp.try_exists()? {
+        if let Some((anchor, n, p)) = prebuilt.get(cid) {
+            nref = json!(n);
+            p50 = json!(p[0]);
+            p75 = json!(p[1]);
+            p90 = json!(p[2]);
+            arow = json!(vectors.len());
+            vectors.push(anchor.clone());
+            ids.push(cid.clone());
+        } else if fp.try_exists()? {
             if let Some(a) = optional_reference(&fp)? {
                 if a.len() >= 3 {
                     let (anchor, p) = a.built()?;

@@ -70,7 +70,7 @@ pub(crate) fn apply<'a>(
     extension: Extension,
     package: &str,
     scope: Option<&[String]>,
-    hits: impl IntoIterator<Item = (&'a str, &'a str, f64)>,
+    hits: impl IntoIterator<Item = (&'a str, &'a str, f64, bool)>,
 ) -> Result<usize> {
     let (source, method) = extension.evidence();
     let metric = match extension {
@@ -82,7 +82,7 @@ pub(crate) fn apply<'a>(
     let mut after = Active::new();
     let mut terms = HashMap::new();
     let mut registered = false;
-    for (uuid, tag, score) in hits {
+    for (uuid, tag, score, candidate_only) in hits {
         if in_scope.as_ref().is_some_and(|ids| !ids.contains(uuid)) {
             return Err(Error::invalid("角色扩展候选超出扫描范围"));
         }
@@ -114,12 +114,17 @@ pub(crate) fn apply<'a>(
                 entry.insert((key, term))
             }
         };
-        // 同一个包重跑同一输入复用证据行。底座重算后分数变化时记录新行。
-        let fingerprint = sha256_hex(format!("{}:{:016x}", tag, score.to_bits()).as_bytes());
+        // 同一个包重跑同一输入复用证据行。底座重算后分数变化时记录新行。二级头（#602）的证据带 `tier: 2`，
+        // 版本里也带上级别；一级头的证据和以前逐字节相同。
+        let tier = if candidate_only { ":2" } else { "" };
+        let fingerprint = sha256_hex(format!("{}:{:016x}{tier}", tag, score.to_bits()).as_bytes());
         let version = format!("{package}/{}", &fingerprint[..16]);
         let claim = Claim::Image { asset, term: *term, target: json!({"asset": [LIBRARY, uuid], "term": key}) };
         let mut data = Map::new();
         data.insert("tag".into(), json!(tag));
+        if candidate_only {
+            data.insert("tier".into(), json!(2));
+        }
         store::add_evidence(
             c,
             &NewEvidence {
@@ -205,6 +210,14 @@ pub(crate) fn fill_unassigned(c: &Connection, scoped: bool) -> Result<()> {
         )
     };
     let scope = if scoped { "AND v.uuid IN (SELECT uuid FROM touched)" } else { "" };
+    // 二级头（#602）的候选不补归属：只有一级证据支持的 WD 扩展候选才能补。
+    character_projection::assignable_extension(
+        c,
+        &format!(
+            "SELECT DISTINCT v.uuid FROM candidates v WHERE v.source='WD_EXT' {scope}
+               AND NOT EXISTS(SELECT 1 FROM memberships m WHERE m.uuid=v.uuid)"
+        ),
+    )?;
     // 基础候选与人工结论已投影完成。已有扩展来源优先，余下的按固定来源顺序取候选。
     // 分数只在同一来源的候选之间比较。
     c.execute(
@@ -217,6 +230,8 @@ pub(crate) fn fill_unassigned(c: &Connection, scoped: bool) -> Result<()> {
                JOIN terms f ON f.key={family} JOIN term_tree r ON r.term_id=f.id AND r.mascot=0
                LEFT JOIN previous_extension_sources p ON p.uuid=v.uuid
                WHERE v.source IN ('WD_EXT','CCIP_LONGTAIL') {scope} AND {restrictions}
+                 AND (v.source<>'WD_EXT' OR EXISTS(SELECT 1 FROM temp.assignable_extension x
+                       WHERE x.uuid=v.uuid AND x.entity=v.entity))
                  AND NOT EXISTS(SELECT 1 FROM memberships m WHERE m.uuid=v.uuid)
                  AND NOT EXISTS(SELECT 1 FROM family_confirmed m WHERE m.uuid=v.uuid))
              INSERT INTO memberships

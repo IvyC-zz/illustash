@@ -846,7 +846,7 @@ body:has(#settingsPage:not([hidden])) .nudge,body:has(#selectionBar:not([hidden]
 .models-notice{display:flex;flex-direction:column;gap:var(--space-6);flex:1;min-width:0}
 .models-notice .progress{margin:0}
 .models-acts{display:flex;flex-wrap:wrap;align-items:center;gap:var(--space-8)}
-#setModels .models-acts,#wdExtCard .models-acts,#ccipCard .models-acts{margin:4px 0 10px}
+#setModels .models-acts,#packCard .models-acts{margin:4px 0 10px}
 .models-results{margin:4px 0 0;padding-left:18px;font-size:var(--fs-12);line-height:1.6}
 .models-files td:first-child{white-space:nowrap}
 .models-results .mismatch,.models-results .unknown{color:var(--warn)}

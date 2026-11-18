@@ -41,6 +41,8 @@ pub(crate) enum Format {
 pub(crate) enum IndexAction {
     Apply,
     Drop,
+    /// 启用或撤回基础角色索引（#607）。
+    Base,
 }
 #[derive(Clone, Copy, Debug, Deserialize, Serialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]

@@ -21,6 +21,9 @@ pub(crate) struct Syncer {
     pub resource_root: std::path::PathBuf,
     pub per_run: usize,
     pub enabled: bool,
+    /// 有后台任务（角色索引写入、WD 扩展检查）挡着时收到的同步请求（#607）：记下来，挡着的任务结束后由恢复检查
+    /// （[`crate::app_service::Application::recover`]）接着开始，不报错。页面上显示为 `waiting`。
+    queued: bool,
 }
 impl Default for Syncer {
     fn default() -> Self {
@@ -31,6 +34,7 @@ impl Default for Syncer {
             resource_root: std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../.."),
             per_run: 0,
             enabled: true,
+            queued: false,
         }
     }
 }
@@ -40,6 +44,26 @@ impl Syncer {
     }
     pub(crate) fn take_wd_deliveries(&self) -> Vec<String> {
         self.wd_delivered.lock().expect("WD 扩展交付队列锁中毒").drain().collect()
+    }
+    /// 先记下这次同步请求，等挡着的后台任务结束（#607）。同步关着时和 [`Self::start`] 一样拒绝。
+    pub(crate) fn queue(&mut self, library: &Library) -> Result<()> {
+        self.allowed(library)?;
+        self.queued = true;
+        Ok(())
+    }
+    fn allowed(&self, library: &Library) -> Result<()> {
+        if !self.enabled || !Self::available(library) {
+            return Err(Error::Invalid("本次启动关闭了同步（--no-sync）".into()));
+        }
+        Ok(())
+    }
+    /// 有没有排着的同步请求。
+    pub(crate) fn queued(&self) -> bool {
+        self.queued
+    }
+    /// 取走排着的同步请求。
+    pub(crate) fn take_queued(&mut self) -> bool {
+        std::mem::take(&mut self.queued)
     }
     pub fn available(library: &Library) -> bool {
         !library.frozen()
@@ -57,6 +81,9 @@ impl Syncer {
                     state.set("status", "error".into());
                     state.set("message", message.chars().take(300).collect::<String>().into());
                 }
+            }
+            if self.queued && !self.running() {
+                state = Json::object([("status", "waiting".into())]);
             }
             Json::Object(
                 [
@@ -131,9 +158,9 @@ impl Syncer {
         Ok(Json::object(fields))
     }
     pub fn start(&mut self, library: &Library, generation: u64, session: &str) -> Result<bool> {
-        if !self.enabled || !Self::available(library) {
-            return Err(Error::Invalid("本次启动关闭了同步（--no-sync）".into()));
-        }
+        self.allowed(library)?;
+        // 开始（或已在进行）的这次同步就满足了排着的请求。
+        self.queued = false;
         if let Some(task) = self.task.as_mut() {
             if task.running() {
                 if matches!(
@@ -156,6 +183,10 @@ impl Syncer {
         let delivered = self.wd_delivered.clone();
         self.task = Some(crate::app_tasks::Task::start_with(identity, deadline(), move |ctx| {
             let cancel = ctx.cancellation();
+            // 新图库默认启用角色资料包（#602）：还没有任何识别向量时，在这次同步之前记成启用。
+            if let Err(error) = crate::app_packs::default_enable(&root, &library) {
+                eprintln!("无法默认启用角色资料包：{error}");
+            }
             let window = crate::app_wd_extension::DeliveryWindow::start(&library).unwrap_or_else(|error| {
                 eprintln!("无法记录本次同步的 WD 扩展范围：{error}");
                 None
@@ -218,11 +249,16 @@ impl Syncer {
         self.enabled = allowed && prefs["sync"] != false;
         Ok(())
     }
-    pub fn automatic(&mut self, library: &Library, generation: u64, session: &str) -> Result<()> {
+    /// 打开图库时的自动同步：按启动设置决定要不要同步。`wait` 为真（有后台任务挡着）时只记下请求，等它结束（#607）。
+    pub fn automatic(&mut self, library: &Library, generation: u64, session: &str, wait: bool) -> Result<()> {
         let prefs: Value = serde_json::from_str(&crate::app_settings::startup(library)?.dump())
             .map_err(|e| Error::Invalid(e.to_string()))?;
         if self.enabled && Self::available(library) && prefs["sync"] == true {
-            self.start(library, generation, session)?;
+            if wait {
+                self.queue(library)?;
+            } else {
+                self.start(library, generation, session)?;
+            }
         }
         Ok(())
     }

@@ -1,0 +1,3 @@
+# 专签数据包目录的公钥（#602），Tauri 格式：`cargo tauri signer generate` 打印的那一行（minisign 公钥文本整体再 base64）。
+# 占位：还没有配置。用户用 `python3 tools/pack_catalog.py keygen` 生成密钥对后，把公钥写在下面一行（不带 `#`）。
+# 只有说明行时，应用不读包目录，只用内置的两个包。私钥只在用户自己的电脑上，不进仓库。

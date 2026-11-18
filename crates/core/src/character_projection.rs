@@ -103,6 +103,11 @@ const CANDIDATES_RESOLVED: &str = "WITH RECURSIVE chain(term,key,depth) AS (
  WHERE e.source||'.'||e.method IN ('wd.wd_character','ccip_index.char_ext','wd_extension.linear_head','ccip_longtail.anchor_p75')
  GROUP BY a.key,k.key,e.source";
 
+/// 候选 SQL 里选来源的那一句，和 `assignable_extension` 换成的「只要一级 WD 扩展证据」。
+const CANDIDATE_SOURCES: &str = "WHERE e.source||'.'||e.method IN ('wd.wd_character','ccip_index.char_ext','wd_extension.linear_head','ccip_longtail.anchor_p75')";
+const ASSIGNABLE_SOURCES: &str =
+    "WHERE e.source='wd_extension' AND e.method='linear_head' AND json_extract(e.data,'$.tier') IS NULL";
+
 /// 小范围刷新时由图片驱动：原计划会先扫描全库证据并分组，最后才过滤图片。
 const CANDIDATE_SCOPE: (&str, &str) = (
     "FROM term_active_evidence active",
@@ -129,6 +134,29 @@ pub(crate) fn refresh_candidates(c: &Connection, uuids: &[String]) -> Result<()>
         &format!(
             "WITH rebuilt(uuid,entity,source,score) AS ({select})
              INSERT INTO candidates(uuid,entity,source,score) SELECT * FROM rebuilt WHERE uuid IN (SELECT uuid FROM candidate_scope)"
+        ),
+        [],
+    )?;
+    Ok(())
+}
+
+/// 候选里能补主归属的 WD 扩展候选（#602）：照候选的同一套 SQL 重算 `images` 选出的图，只算一级头的证据（不带
+/// `tier: 2`）。结果在临时表 `assignable_extension(uuid, entity)` 里，身份的写法和 `candidates` 完全相同。
+/// 只看还没有归属、有 WD 扩展候选的图，所以和补归属本身一样只碰少数图。
+pub(crate) fn assignable_extension(c: &Connection, images: &str) -> Result<()> {
+    c.execute_batch(
+        "CREATE TEMP TABLE IF NOT EXISTS assignable_scope(uuid TEXT PRIMARY KEY); DELETE FROM assignable_scope;
+         CREATE TEMP TABLE IF NOT EXISTS assignable_extension(uuid TEXT NOT NULL,entity TEXT NOT NULL,
+           PRIMARY KEY(uuid,entity)); DELETE FROM assignable_extension;",
+    )?;
+    c.execute(&format!("INSERT OR IGNORE INTO assignable_scope {images}"), [])?;
+    let select = if policy(c)? { CANDIDATES } else { CANDIDATES_RESOLVED };
+    let select = scoped(select, CANDIDATE_SCOPE.0, &CANDIDATE_SCOPE.1.replace("candidate_scope", "assignable_scope"))?;
+    let select = scoped(&select, CANDIDATE_SOURCES, ASSIGNABLE_SOURCES)?;
+    c.execute(
+        &format!(
+            "WITH rebuilt(uuid,entity,source,score) AS ({select})
+             INSERT OR IGNORE INTO assignable_extension SELECT uuid,entity FROM rebuilt"
         ),
         [],
     )?;

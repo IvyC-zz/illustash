@@ -1,10 +1,10 @@
 # 图库：多图库与文件夹来源
 
-状态：现行参考，2026-11-12。图库来源与包结构；安装资源及平台限制见 [BACKEND_TASKS.md](BACKEND_TASKS.md)。
+状态：现行参考，2026-11-18。图库来源与包结构；安装资源及平台限制见 [BACKEND_TASKS.md](BACKEND_TASKS.md)。
 
 ## 首次建库与参考库
 
-基础版不携带 `reference.sqlite` 或个人图库数据。桌面 App 第一次启动、没有能打开的图库时显示欢迎页，在图形界面里新建图库（见 [ARCHITECTURE_DIRECTION.md](ARCHITECTURE_DIRECTION.md) 的外壳启动段落）。命令行首次使用可执行 `bin/illustash-terms library-create --dest <新包.pilib> --folder <图片目录>`（Windows 可执行文件为 `.exe`），再用 `bin/illustash-terms http --library <新包.pilib>` 打开；服务启动仍需已初始化的图库，不会隐式创建。CLI 不给 `--reference` 时直接使用程序内置的空 source schema，角色、别名、模型运行、图片、标签、决策和 embeddings 均为空；建库不扫描图片，也不启动计算 worker。
+安装包不带 `reference.sqlite` 或个人图库数据；基础角色索引随识别模型下载（见下文[基础角色索引](#基础角色索引)）。桌面 App 第一次启动、没有能打开的图库时显示欢迎页，在图形界面里新建图库（见 [ARCHITECTURE_DIRECTION.md](ARCHITECTURE_DIRECTION.md) 的外壳启动段落）。命令行首次使用可执行 `bin/illustash-terms library-create --dest <新包.pilib> --folder <图片目录>`（Windows 可执行文件为 `.exe`），再用 `bin/illustash-terms http --library <新包.pilib>` 打开；服务启动仍需已初始化的图库，不会隐式创建。CLI 不给 `--reference` 时直接使用程序内置的空 source schema，角色、别名、模型运行、图片、标签、决策和 embeddings 均为空；建库不扫描图片，也不启动计算 worker。
 
 设置页新建图库默认查看资源根下的 `review/reference.sqlite`（设置 `ILLUSTASH_SHARED` 时改看该目录）。仅路径不存在时使用内置空 schema；已有但损坏、不完整、不可读的参考库和断链不会静默回退。显式 CLI `--reference` 必须指向有效文件。参考库只读复制表结构与索引，只复制 `characters`、`character_aliases`、`runs` 的行，不复制图片或人工决策；它代表导出时的角色索引，不自动跟随原图库更新。
 
@@ -13,6 +13,16 @@
 2026-10-01 在 macOS arm64 上用白名单基础产物和隔离用户目录实测：无共享资源或参考库时，CLI 首库、HTTP 新建与打开、首次同步以及图片内容变更后的同步均通过；只用合成图片。此结果不代表 Windows 干净机或桌面安装验收（仍由 #71 / #90 承接）。
 
 基础版首次文件夹同步完成盘点和应用导入后可浏览、人工整理；没有可选识别 worker 时状态为「待识别」，不表示盘点失败。回退时使用同版本程序和资源，旧版仍可能要求外部参考库；不要为回退把个人数据放进安装资源。
+
+## 基础角色索引
+
+2026-11-17 用户定（#607）：DeepGHS Character Index 固定版本算出的 7,367 个角色的锚点和阈值，做成识别模型清单里的可选文件 `character-index/character-index-v1.bin`（来源与许可见 [第三方组件](THIRD_PARTY.md#模型与数据)）。它和 WD、CCIP 一起默认下载；「设置 › 数据 › 识别模型」的下载、修复和从文件导入都包括它。已有图库升级后缺这个文件时，按缺失的可选文件提示下载，识别照常进行。
+
+- **接入**：包不另开识别路径。索引任务把核对过大小和 SHA-256 的包复制进任务目录，构建时把包里的角色当作精选条目，与 `char-index/` 里的条目一起算出共享锚点 `char-anchors.*`（同名时 `char-index/` 优先），角色表、别名和索引候选照常写进图库，候选来源为 `char_index`。精选条目按 p90 认领，最近 9 项。
+- **启用**：文件就位后，宿主在恢复检查里为当前图库自动启用（首次准备时它和首次同步同时发生，同步排在启用后面，写完自己开始，识别用的就是新锚点）；也可以在「设置 › 数据 › 识别模型」里手动启用（`POST /api/index/base`，状态在 `GET /api/index/base`；`/api/index` 的回复不变）。图库的角色表里已有包里的每个角色时，视为同一版本（已有图库当年装载时个别角色没算出阈值，这类角色照旧不认领）：只装上共享锚点，不重写证据，不改主归属（记为 `adopted`）。其他情况按包重建角色表和索引候选（记为 `rebuilt`）；版本不同的就是一次来源替换，人工结论照旧优先。图库应用库的 `meta.character_index_base` 记着包的 SHA-256 和启用方式。
+- **撤回**：按启用时的方式还原：`rebuilt` 的图库按不带包重建，`adopted` 的图库内容本来没动，只换回不带包的共享锚点。人工结论和历史不变。撤回写进共享目录的 `char-index-base.json`，对这台电脑上的所有图库生效：其他图库打开时跟着撤回，之后不再自动启用，要手动再启用。
+- **之后的索引任务**：「检查新角色」等索引任务按 `char-index-base.json` 带上或不带包，重建结果和启用状态一致。启用了却找不到完好的包时，任务停下并提示到「识别模型」里修复，不会按不带包的结果改写图库。
+- **身份 v2 的参考图清洗**（2026-11-18 评估，#607）：没有采用。清洗要从上游约 18 GB 的 `images.zip` 恢复每张参考图的来源；采用后锚点改变，已有同版本索引的图库要按新版本做来源替换；生产的中心加分位阈值公式对少数共用参考不敏感，也没有它能提高认领的评测结果。需要时另开研究 Issue，用 #557 的评测集比较。
 
 合成测试输入由 `tests/synthetic_source.py` 的 `source_fixture(root)` 与 `synthetic_reference(root)` 构造，只使用显式临时目录和 SQLite/JSON，不调用原生候选建库。前者保留固定小源库及相册映射，后者保留完整参考 schema 与 `characters`、`character_aliases`、`runs` 行；历史升级 schema/producer 和业务期望仍由各自既有测试持有；各测试直接导入 `source_fixture`。
 
@@ -147,9 +157,9 @@
 |---|---|---|---|
 | `crates/`、`native/terms/`、`desktop/` | 业务核心、原生宿主、桌面外壳 | 已跟踪源码，按现有边界维护 | 构建程序；不按目录名退役 |
 | `web/static/`、`tags/tags_v3.csv` | 桌面 / HTTP 界面、识别标签 | 安装资源，只读 | 基础包白名单 |
-| `models/` | 识别、CCIP 可选计算 | 独立获取；不属于 SHARED | 可选完整计算包按白名单携带，基础包不携带 |
+| `models/` | 识别、CCIP 可选计算、基础角色索引（`character-index/`） | 独立获取；不属于 SHARED | 可选完整计算包按白名单携带，基础包不携带 |
 | `review/reference.sqlite` | `app_service` 建库参考 | 只读输入；允许缺席，不允许坏库静默回退 | 不随基础包；与 #150 的独立参考索引交付对接 |
-| `review/char-index/`、`game-chars/`、`char-anchors.npy`、`char-anchors.txt` | 原生索引编排、识别与研究 worker | 共享索引 / 锚点；索引更新可写，不能当实验缓存清掉 | SHARED；不随基础包 |
+| `review/char-index/`、`game-chars/`、`char-anchors.npy`、`char-anchors.txt`、`char-index-base.json` | 原生索引编排、识别与研究 worker | 共享索引 / 锚点；索引更新可写，不能当实验缓存清掉。锚点含已启用的基础角色索引 | SHARED；不随安装包，由索引任务生成 |
 | `review/char-patch/` | `app_index` 的 watch、state、更新临时区和租约 | 跨运行持久状态，也含可重新获取的中间产物；须逐对象判断 | SHARED；不随包 |
 | `<图库>.pilib/` | `app_library`、同步、缩略图、升级备份 | 用户拥有；source / library 双库、特征、缩略图与备份随包保存 | 用户数据，不进安装包 |
 | `APP_SUPPORT/libraries.json`、`preferences.json`（界面语言、检查更新的选择）、`updates.json`（上次检查更新的结果）、设置与账号 | `app_libraries`、`app_preferences`、设置与原生账号入口 | 用户应用数据，和 SHARED 分开 | 不随包；凭据不参与研究整理 |

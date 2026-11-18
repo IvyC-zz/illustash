@@ -180,6 +180,8 @@ fn run_with(
             clean::clean(&review, &selected)?;
         }
         Some("drop") => clean::drop(&review, &selected, field(req, "reason")?.trim())?,
+        // 启用或撤回基础角色索引（#607）：不下载也不清理，只按任务目录里有没有包重建。
+        Some("base") if rows.is_empty() => {}
         _ => return Err(Error::invalid("unsupported index action")),
     }
     progress(&review, &req["identity"], "build", None, None)?;

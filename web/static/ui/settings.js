@@ -25,7 +25,7 @@ import {setFit, setNsfw, undo} from './grid.js';
 import {drawGuide, drawNudge, replayGuide} from './guide.js';
 import {renderIntegrityLine} from './integrity.js';
 import {renderModelsCard} from './models.js';
-import {PACK_KEYS, PACK_UI, packCardBody, packNote} from './packs.js';
+import {PACK_CARD, packName, packCardBody, packNote} from './packs.js';
 import {loadPack, onPack} from '../core/packs.js';
 import {openModal} from './overlay.js';
 import {renderHumanBlock, onHumanClick, wireHuman} from './human.js';
@@ -90,14 +90,14 @@ export async function renderIndexCard(fresh = true) {
   };
 }
 
-// ---------- 角色数据包（#550 WD 角色扩展、#559 CCIP 长尾包）：按图库启用，每个包一张卡片。内容在 ui/packs.js ----------
-export async function renderPackCard(key, fresh = false) {
-  const route = state.route, token = session.token, id = PACK_UI[key].card, card = $(id), x = state.packs[key];
+// ---------- 角色资料包（#602，合并了 #550 WD 角色扩展、#559 CCIP 长尾包）：按图库启用，一张卡片。内容在 ui/packs.js ----------
+export async function renderPackCard(fresh = false) {
+  const route = state.route, token = session.token, card = $(PACK_CARD), x = state.pack;
   if (!card || !onPage(state.route, 'settings')) return;
   // 先画手上的状态（还没读到时只有标题），再读新的；读到后 onPack 会再调这里。
-  if (setSettingsHTML(card, cardHead(PACK_UI[key].name(), x ? packNote(key, x) : '', 'library') + packCardBody(key, x))) wireFolds(card);
+  if (setSettingsHTML(card, cardHead(packName(), x ? packNote(x) : '', 'library') + packCardBody(x))) wireFolds(card);
   if (!fresh && x) return;
-  try { await loadPack(key); } catch (e) { if (route === state.route && token === session.token) readFailure($(id), e); }
+  try { await loadPack(); } catch (e) { if (route === state.route && token === session.token) readFailure($(PACK_CARD), e); }
 }
 
 // 上次检查时每个关注作品的情况（#561，GET /api/index/coverage）：本图库启用的数据包已经覆盖几个、自己补过几个、还缺几个。
@@ -205,12 +205,12 @@ function patchSettingsPage(html, section) {
 const SETTINGS_SECTIONS = [
   ['general', t('通用'), t('语言、外观、图片网格与默认排序'), ['setDisplay', 'setLanguage', 'setWindow']],
   ['library', t('图库'), t('当前图库、来源、同步与排除'), ['setLibraries', 'setSync', 'setExclude', 'setFold']],
-  ['characters', t('角色资料'), t('新角色检查、WD 角色扩展与 CCIP 长尾包、角色名称与翻译'), ['indexCard', 'wdExtCard', 'ccipCard', 'namesCard', 'modelCard']],
+  ['characters', t('角色资料'), t('新角色检查、角色资料包、角色名称与翻译'), ['indexCard', 'packCard', 'namesCard', 'modelCard']],
   ['artists', t('画师'), t('找回画师与绑定的账号'), ['setProvenance', 'setAccounts']],
   ['network', t('网络与隐私'), t('所有会访问网络的功能，以及它们发送什么'), ['setNetwork']],
   ['data', t('数据'), t('备份、缓存、识别模型与存储位置'), ['setData', 'setModels']],
   ['about', t('关于'), t('版本、致谢与诊断信息'), ['setAbout']]];
-const OWN_CARDS = ['setLibraries', 'setProvenance', 'setAccounts', 'indexCard', 'wdExtCard', 'ccipCard', 'namesCard', 'modelCard', 'setAbout', 'setModels'];
+const OWN_CARDS = ['setLibraries', 'setProvenance', 'setAccounts', 'indexCard', 'packCard', 'namesCard', 'modelCard', 'setAbout', 'setModels'];
 export const settingsSection = () => SETTINGS_SECTIONS.find(s => s[0] === state.route.section) || SETTINGS_SECTIONS[0];
 // 只给开发者的入口（测试图库、粘贴 Pixiv cookie）要带 ?dev 打开过一次页面后才显示。
 const devMode = (() => { try { if (new URLSearchParams(location.search).has('dev')) prefs.set('dev', true); } catch {} return !!prefs.get('dev', false); })();
@@ -324,10 +324,10 @@ function networkCard() {
       ${row('artists', t('查找画师、找 TA 的其他图'), t('Danbooru、画师主页'), t('所选图片的哈希文本；下载画师公开作品的小图，只在本机比对'), t('只在你点按钮时'))}
       ${row('characters', t('在 Danbooru 上搜角色和作品'), 'Danbooru', t('你输入的文字；自建角色的名字（核对能否对上 Danbooru）；「设为…」里 Danbooru 候选的 tag（取一张全年龄小图）'), net && !net.authorized ? names : t('只在你搜索或打开资料库时'))}
       ${acct?.saucenao?.bound ? row('artists', t('以图搜图'), 'SauceNAO', '—', t('已保存 key，还没有功能使用它')) : ''}
-      ${row('characters', t('下载 WD 角色扩展包'), 'GitHub', t('一次普通的 HTTPS 下载，取回扩展包；不发送图库里的任何信息'), t('只在你点「下载」时'))}
-      ${state.packs.ccip?.package?.sources?.length ? row('characters', t('下载 CCIP 长尾包'), 'GitHub', t('一次普通的 HTTPS 下载，取回参考包；不发送图库里的任何信息'), t('只在你点「下载」时')) : ''}
+      ${row('characters', t('下载角色资料包'), 'GitHub', t('一次普通的 HTTPS 下载，取回角色资料包；不发送图库里的任何信息'),
+        state.models?.on_demand ? t('只在你点「下载」时，或首次准备时和识别模型一起') : t('只在你点「下载」时'))}
       ${state.models?.on_demand ? row('data', t('下载识别模型'), esc(state.models.sources.join(t('、'))), t('一次普通的 HTTPS 下载，取回模型文件；不发送图库里的任何信息'), t('只在你点「下载」时')) : ''}
-      ${row('about', t('检查更新'), 'GitHub', t('一次普通的 HTTPS 请求，读取公开的版本列表；不发送图库里的任何信息'), state.updates?.auto ? t('启动时和之后每天自动') : t('只在你点「检查更新」时'))}
+      ${row('about', t('检查更新'), 'GitHub', t('一次普通的 HTTPS 请求，读取公开的版本列表和角色资料包目录；不发送图库里的任何信息'), state.updates?.auto ? t('启动时和之后每天自动') : t('只在你点「检查更新」时'))}
       ${state.updates?.install
         ? row('about', t('下载更新'), 'GitHub', t('下载新版本的安装包和签名，校验后安装；不发送图库里的任何信息'), t('只在你点「下载并重启」时')) : ''}
     </table>
@@ -428,7 +428,7 @@ export async function renderSettings(fetchMissing = true, refresh = false) {
   if ($('setAccounts') || section === 'network') { if (!state.accounts || !$('setAccounts')?.innerHTML) loadAccounts(); else renderAccountsCard(); }
   if (state.index?.works) renderIndexCard(false);
   if (state.names) renderNamesCard(false);
-  for (const key of PACK_KEYS) if ($(PACK_UI[key].card)) renderPackCard(key, fetchMissing);
+  if ($(PACK_CARD)) renderPackCard(fetchMissing);
   wireFolds(page);
   for (const box of page.querySelectorAll('[data-fold]')) box.onchange = async () => {
     const kinds = [...page.querySelectorAll('[data-fold]:checked')].map(b => b.dataset.fold);
@@ -870,6 +870,7 @@ function redrawUpdates() {
 }
 
 // 设置各页的处理函数，以及读取或更改它们的数据之后要做的事。页面启动时调用一次。
+let catalogChecked;
 export function wireSettings() {
   // 名称联网授权和检查更新的按钮不只在设置页里（搜索结果下面的「允许查询…」、导览里的更新提示），所以在 document 上
   // 用一个监听接住（#432 ③-9，原来是三个）。
@@ -887,6 +888,8 @@ export function wireSettings() {
     else if (what === 'pixiv') toast(detail.error ? detail.error.message : t('已绑定 Pixiv：{name}', {name: detail.bound.name || detail.bound.user_id}));
     else if (what === 'updates') {
       drawNudge(); drawUpdateButton();
+      // 检查更新时后端顺带读了包目录（#602）：检查时间变了就重读一次角色资料包（读到过才读）。
+      if (state.updates?.checked_at !== catalogChecked) { catalogChecked = state.updates?.checked_at; if (state.pack) loadPack().catch(() => {}); }
       for (const el of document.querySelectorAll('.set-scope[data-scope="browser"]')) el.outerHTML = scope('browser');
       if ($('aboutUpdates')) $('aboutUpdates').innerHTML = updatesLine();
       // 显示它的设置页只在有变化时重画，绝不在用户输入时重画；下载进度只改上面那一行。
@@ -901,7 +904,7 @@ export function wireSettings() {
     e.stopPropagation();
     openTasks({armProvenance: b.dataset.openTasks === 'provenance'});
   });
-  onPack(key => renderPackCard(key));
+  onPack(() => renderPackCard());
   $('settingsPage').addEventListener('click', onHumanClick);
   wireHuman({undo});
   $('settingsPage').addEventListener('input', onLibraryInput);

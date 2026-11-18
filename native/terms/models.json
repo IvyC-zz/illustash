@@ -44,6 +44,20 @@
       "url": "https://github.com/shio-vinyl/illustash/releases/download/wd-coreml-v1/wd-swinv2-v3-v1.onnx"
     }
   },
+  "character_index": {
+    "revision": 1,
+    "format": "illustash-character-index/1",
+    "version": "character_index@2025-09-25",
+    "characters": 7367,
+    "ccip_sha256": "4ea118d16496274f4f6e08d3afc768cc592389e8f7f32f8732ce2215c228ac5f",
+    "license": "MIT",
+    "file": {
+      "path": "character-index/character-index-v1.bin",
+      "size": 25787626,
+      "sha256": "ce814cbcd9619babde566f46d80f7d9b0ce9f1c4dff20d8c679ac2bb0fa1fcb0",
+      "url": "https://github.com/shio-vinyl/illustash/releases/download/character-index-v1/character-index-v1.bin"
+    }
+  },
   "wd_extension": {
     "revision": 1,
     "format": "illustash-wd-extension/1",
