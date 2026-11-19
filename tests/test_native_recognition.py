@@ -97,6 +97,10 @@ class NativeRecognitionTest(unittest.TestCase):
 
     def test_wd_import_applies_default_mascot_and_keeps_user_override(self):
         tag = 'sensei_(blue_archive)'
+        vocab = self.resources / 'tags' / 'tags_v3.csv'
+        with vocab.open('a', encoding='utf-8', newline='\n') as f:
+            f.write(f'{tag},4\n')
+        self.specs['wd']['tags_sha256'] = hashlib.sha256(vocab.read_bytes()).hexdigest()
         def import_wd(asset):
             p = self.incoming(ids=(asset,), name='wd-' + asset)
             with (p / 'labels.jsonl').open('a', encoding='utf-8', newline='\n') as f:
