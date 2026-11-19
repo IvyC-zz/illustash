@@ -1061,41 +1061,40 @@ impl Updater {
                             waiting = true;
                         }
                         Err(e) => {
-                            let d = crate::diagnostics::failure(
-                                crate::diagnostics::Operation::Names,
-                                crate::diagnostics::Stage::Background,
-                                &e,
-                                if published.get() {
-                                    crate::diagnostics::Publication::MayBePartial
-                                } else {
-                                    crate::diagnostics::Publication::NotCommitted
-                                },
-                            );
-                            s["diagnostic"] = d.value();
-                            s["status"] = json!("error");
-                            let message = match e {
-                                Error::Invalid(s) | Error::Network(s) => s,
+                            let message = match &e {
+                                Error::Invalid(s) | Error::Network(s) => s.clone(),
                                 e => {
                                     // 名称只写 library.sqlite；读 source.sqlite 失败在发生的地方记日志。
                                     eprintln!("名称获取失败：{e:?}");
                                     format!("名称数据库操作失败：{error}", error = e)
                                 }
                             };
-                            s["error"] = json!(message);
-                            final_error = Some(message.clone());
                             if let Ok(c) = net::db(&path) {
                                 let _ = c.execute(
                                     "UPDATE backend_effects SET error=? WHERE id=? AND status='pending'",
-                                    rusqlite::params![message, id],
+                                    rusqlite::params![&message, id],
                                 );
                             }
+                            final_error = Some((e, message));
                         }
                     }
                 }
                 let mut s = state.lock().expect("app_names mutex poisoned");
-                if let Some(error) = final_error {
+                if let Some((error, message)) = final_error {
+                    // 同一轮可能在一次失败之后继续提交名称。最终回执要覆盖整轮的写入。
+                    let diagnostic = crate::diagnostics::failure(
+                        crate::diagnostics::Operation::Names,
+                        crate::diagnostics::Stage::Background,
+                        &error,
+                        if published.get() {
+                            crate::diagnostics::Publication::MayBePartial
+                        } else {
+                            crate::diagnostics::Publication::NotCommitted
+                        },
+                    );
                     s["status"] = json!("error");
-                    s["error"] = json!(error);
+                    s["error"] = json!(message);
+                    s["diagnostic"] = diagnostic.value();
                 } else if waiting {
                     s["status"] = json!("unauthorized");
                 }
