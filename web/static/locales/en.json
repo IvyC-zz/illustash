@@ -2673,7 +2673,6 @@
   "网络错误（{kind}）": "network error ({kind})",
   "写入模型文件失败：{error}": "Couldn't write the model file: {error}",
   "读不到所选文件 {name}：{error}": "Can't read the chosen file {name}: {error}",
-  "{name} 不是有效的 ZIP：{error}": "{name} isn't a valid ZIP: {error}",
   "{name} 读取失败：{error}": "Reading {name} failed: {error}",
   "读取所选文件失败：{error}": "Reading the chosen file failed: {error}",
   "模型正在下载或导入，请等它结束": "The models are being downloaded or imported; wait for it to finish",
