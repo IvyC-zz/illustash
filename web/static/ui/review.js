@@ -50,8 +50,9 @@ export function drawGroups() {
 }
 function groupSection(g) {
   const off = groups.off.get(g.cid) || new Set(), n = g.members.length - off.size, max = 16;
-  // 「是 X 吗？」的组同样能整组标为原创角色或跳过（#386 的 2-41）；原创角色新建一个独立的，和组页的「整组标为原创角色」一样（2-29）。
-  const ocSkip = `<button class="quiet" data-gact="oc" title="${t('新建一个原创角色，把这组图都设为它')}">${t('原创角色')}</button><button class="quiet" data-gact="skip">${t('跳过')}</button>`;
+  // 「是 X 吗？」的组同样能整组标为原创角色或跳过（#386 的 2-41）；原创角色设为共用的「原创角色（未细分）」，和组页的
+  // 「整组标为原创角色」一样，不新建独立的（#694）。
+  const ocSkip = `<button class="quiet" data-gact="oc" title="${t('把这组图都设为「原创角色（未细分）」')}">${t('原创角色')}</button><button class="quiet" data-gact="skip">${t('跳过')}</button>`;
   const head = g.lead
     ? `<span class="gsec-q">${t('是 {name} 吗？', {name: `<a href="${charHash(g.lead.id)}">${esc(g.lead.name)}</a>`})}<small>${t('{n} 张的线索都指向 TA', {n: number(g.lead.count)})}</small></span>
        <button class="primary" data-gact="yes"${n ? '' : ' disabled'}>${off.size ? t('其余 {n} 张是', {n: number(n)}) : t('都是')} ✓</button><button class="secondary" data-gact="no">${t('都不是')} ✗</button><button class="quiet" data-gact="assign">${t('是别人…')}</button>${ocSkip}`
@@ -325,7 +326,7 @@ export function wireReview() {
     if (act === 'yes') done(await mutate('/api/change', {ids, action: 'confirmed', entity: g.lead.id}, false));
     else if (act === 'no') { if (await mutate('/api/change', {ids, action: 'rejected', entity: g.lead.id}, false)) renderGroups(true); }
     else if (act === 'skip') done(await mutate('/api/change', {ids, action: 'unknown'}, false));
-    else if (act === 'oc') done(await markOc({ids}, false, true));
+    else if (act === 'oc') done(await markOc({ids}, false));
     // 面板顶上写「第 N 组 · M 张」，和缩略图一起（#424 的 2-3）；能多选，和选择栏的「设为…」一样（2-24）。
     else if (act === 'assign') openPicker({title: t('这 {n} 张是…', {n: number(n)}), subjectText: t('第 {id} 组', {id: g.cid}) + ' · ' + t('{n} 张', {n: number(n)}),
       sentence: x => t('把这 {n} 张设为 {name}', {n: number(n), name: x.name}), suggest: {ids}, exclude: g.lead ? [g.lead.id] : [], multi: true,

@@ -280,7 +280,6 @@
     "other": "{n} pictures"
   },
   "关联 Danbooru…": "Link to Danbooru…",
-  "按长相分组，每组设为一个新的原创角色": "Group pictures by look and make each group a new original character",
   "按相似细分": "Split by similarity",
   "把剩下的机器识别都记为已检查；以后新识别的图会重新计入未检查": "Mark the remaining machine identifications as checked; pictures identified later count as unchecked again",
   "标为已检查": "Mark as checked",
@@ -314,7 +313,7 @@
     "one": "{n} character you created matches Danbooru",
     "other": "{n} characters you created match Danbooru"
   },
-  "新建一个原创角色，把这组图都设为它": "Create an original character and assign this group to it",
+  "把这组图都设为「原创角色（未细分）」": "Assign this group to “Original character (unsplit)”",
   "整组标为原创角色": "Mark group as original character",
   "判断关系": "Compare",
   "正在读取…": "Loading…",
@@ -457,7 +456,6 @@
   "常用": "Frequent",
   "已加入，再点一次取消": "Added; click again to remove",
   "再加一个角色（⇧+点击）": "Add another character (⇧+click)",
-  "新建原创角色「{name}」": "New original character “{name}”",
   "新建「{name}」": "New “{name}”",
   "没有匹配的角色": "No matching characters",
   "输入角色 tag 或别名": "Type a character tag or alias",
