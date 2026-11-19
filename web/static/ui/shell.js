@@ -22,7 +22,7 @@ import {guideTick} from './guide.js';
 import {createLayer} from './overlay.js';
 import {filterBar, wireFilterBar} from './filters.js';
 import {saveButton, wireGalleries, wireSaveButton} from './galleries.js';
-import {editProfile, markOc, mergeCharacter, openLocalLinks, openRelate, splitOc, toggleMascot, toggleOc} from './palette.js';
+import {editProfile, markOc, mergeCharacter, openLocalLinks, openRelate, toggleMascot, toggleOc} from './palette.js';
 
 // 画师筛选的标题里显示的画师名：第一次用到时去读，读到后重画标题。
 const artistNames = {};
@@ -199,7 +199,7 @@ function drawCharHeading(h, r, c) {
   const checked = !tagOnly && c.reviewed_at ? ' · ' + t('上次检查 {date}', {date: localDate(c.reviewed_at)}) : '';   // 后端存的是 UTC（#386 的 2-15）
   const unchecked = !tagOnly && (c.unchecked || r.check) ? ` · <a class="unchecked-link${r.check ? ' on' : ''}" href="${hashFor({...r, check: r.check ? '' : '1', maybe: ''})}" title="${r.check ? t('显示全部') : t('只看机器识别、还没检查过的图')}">${t('未检查 {n}', {n: number(c.unchecked)})}${r.check ? ' ×' : ''}</a>` : '';
   h.innerHTML = `<div class="heading-main"><h1 class="tag-title" title="${esc(nameTip(c))}">${esc(c.name)}${c.mascot ? '' : workSmall(c)}</h1><p>${c.mascot ? `<span class="oc-badge" title="${c.mascot_origin === 'default' ? t('老师、博士、训练员这类没有固定形象的玩家化身和吉祥物默认只当标签。') : ''}${t('不算角色：不出现在角色列表里，也不算多人图；图上仍挂着这个标签')}">${t('只当标签')}</span> ` : ''}${t('{n} 张', {n: number(c.count)})}${unchecked}${checked}${!c.tag && c.kind !== 'oc' && !c.label_only ? ` · <button class="link-button" id="profileNudge" title="${t('补上中文名、别名和所属作品')}">${t('关联 Danbooru…')}</button>` : ''}</p></div>
-      <div class="heading-actions">${c.label_only ? `<button class="quiet" id="splitOcButton" title="${t('按长相分组，每组设为一个新的原创角色')}">${t('按相似细分')}</button>` : ''}${tagOnly ? '' : `<button class="quiet" id="sweepButton" ${c.unchecked ? '' : 'disabled'} title="${t('把剩下的机器识别都记为已检查；以后新识别的图会重新计入未检查')}">${t('标为已检查')}</button>`}<div class="tag-control more-control"><button class="quiet" id="moreButton" title="${t('更多操作')}" aria-label="${t('更多操作')}">⋯</button><div id="morePopover" class="menu menu-drop more-menu" hidden>${c.label_only || tagOnly ? '' : `<button class="menu-item" id="ocButton" title="${t('画师自己的原创角色，不属于任何作品')}">${c.kind === 'oc' ? t('取消原创角色') : t('标为原创角色')}</button>`}${c.label_only ? '' : `<button class="menu-item" id="mascotButton" title="${c.mascot ? t('恢复成角色：出现在角色列表里，同框就算多人图') : t('像佩洛洛这样的吉祥物、玩家化身：不算角色，不算多人图；图上仍挂着这个标签，可以按它筛选')}">${c.mascot ? t('算作角色') : t('不算角色，只当标签')}</button>`}<button class="menu-item" id="profileButton" title="${t('名称、别名、所属作品、Danbooru 关联')}">${t('编辑资料…')}</button><button class="menu-item" id="mergeButton" title="${t('把这个角色的图和人工结论并到另一个角色')}">${t('合并到另一个角色…')}</button></div></div></div>`;
+      <div class="heading-actions">${tagOnly ? '' : `<button class="quiet" id="sweepButton" ${c.unchecked ? '' : 'disabled'} title="${t('把剩下的机器识别都记为已检查；以后新识别的图会重新计入未检查')}">${t('标为已检查')}</button>`}<div class="tag-control more-control"><button class="quiet" id="moreButton" title="${t('更多操作')}" aria-label="${t('更多操作')}">⋯</button><div id="morePopover" class="menu menu-drop more-menu" hidden>${c.label_only || tagOnly ? '' : `<button class="menu-item" id="ocButton" title="${t('画师自己的原创角色，不属于任何作品')}">${c.kind === 'oc' ? t('取消原创角色') : t('标为原创角色')}</button>`}${c.label_only ? '' : `<button class="menu-item" id="mascotButton" title="${c.mascot ? t('恢复成角色：出现在角色列表里，同框就算多人图') : t('像佩洛洛这样的吉祥物、玩家化身：不算角色，不算多人图；图上仍挂着这个标签，可以按它筛选')}">${c.mascot ? t('算作角色') : t('不算角色，只当标签')}</button>`}<button class="menu-item" id="profileButton" title="${t('名称、别名、所属作品、Danbooru 关联')}">${t('编辑资料…')}</button><button class="menu-item" id="mergeButton" title="${t('把这个角色的图和人工结论并到另一个角色')}">${t('合并到另一个角色…')}</button></div></div></div>`;
   $('sweepButton')?.addEventListener('click', sweep);
   $('moreButton').onclick = () => setMenu(moreMenu, $('morePopover').hidden);
   $('mergeButton').onclick = () => { setMenu(moreMenu, false); mergeCharacter(c); };
@@ -207,7 +207,6 @@ function drawCharHeading(h, r, c) {
   $('profileNudge')?.addEventListener('click', () => editProfile(c));
   $('ocButton')?.addEventListener('click', () => { setMenu(moreMenu, false); toggleOc(c); });
   $('mascotButton')?.addEventListener('click', () => { setMenu(moreMenu, false); toggleMascot(c); });
-  $('splitOcButton')?.addEventListener('click', () => splitOc(c));
 }
 export function renderHeading() {
   const r = state.route, h = $('heading'), c = state.char, view = viewOf(r, c);
@@ -224,7 +223,7 @@ export function renderHeading() {
   wireHelpTip(); view.wireHeading?.(h, r);
   $('localLinksButton')?.addEventListener('click', openLocalLinks);
   $('sgroupRelate')?.addEventListener('click', async () => openRelate(await api('/api/ids?' + new URLSearchParams({...filters(), limit: 12}))));
-  $('groupOc')?.addEventListener('click', () => markOc({filter: filters(), exclude: [], confirm: state.total > 500}, false, true));
+  $('groupOc')?.addEventListener('click', () => markOc({filter: filters(), exclude: [], confirm: state.total > 500}, false));
 }
 
 // 页面这一部分注册的处理函数。页面启动时调用一次。
@@ -259,7 +258,7 @@ implement({
   groups: {heading: (r, {n}) => [t('未识别'), '']},
   // 一组整理完了，标题不写「0 张」，由空状态给去处（#386 的 2-12）。
   group: {heading: (r, {n}) => [t('第 {id} 组', {id: esc(r.id)}), [state.totalReady && !state.total ? '' : t('{n} 张长得像的未识别图', {n}), ...(state.groupTraits || []).map(esc)].filter(Boolean).join(' · '),
-      `<span class="heading-links">${state.total ? `<button class="quiet" id="groupOc" title="${t('新建一个原创角色，把这组图都设为它')}">${t('整组标为原创角色')}</button>` : ''}${state.groupNear ? `<a class="quiet link" href="#/g/${state.groupNearId}">${esc(state.groupNear)} →</a>` : ''}</span>`]},
+      `<span class="heading-links">${state.total ? `<button class="quiet" id="groupOc" title="${t('把这组图都设为「原创角色（未细分）」')}">${t('整组标为原创角色')}</button>` : ''}${state.groupNear ? `<a class="quiet link" href="#/g/${state.groupNearId}">${esc(state.groupNear)} →</a>` : ''}</span>`]},
   duplicates: {heading: (r, {n}) => [t('重复'), r.dup ? '' : t('{n} 张', {n: number(state.dupInfo.count || 0)})]},
   similar: {heading: (r, {n}) => [t('重复'), '']},
   'artist-audit': {heading: (r, {n}) => [t('画师抽查'), state.nsfw ? `<b>${t('这页不按 R18 筛选：R18 的图也在里面')}</b>` : '']},

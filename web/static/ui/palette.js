@@ -32,7 +32,7 @@ let pickerNav = {index: 0, mark() {}};
 export const targets = list => list.length > 1 ? {entities: list.map(e => e.id)} : {entity: list[0].id};
 // 「换成」接受多个角色；只有一个时照以前的方式发送。
 export const newIds = list => list.length > 1 ? list.map(e => e.id) : list[0].id;
-const stageKey = e => e.id || (e.remote ? 'tag:' + e.tag : 'new:' + (e.oc ? 'oc:' : '') + e.create);
+const stageKey = e => e.id || (e.ocShared ? 'oc:shared' : e.remote ? 'tag:' + e.tag : 'new:' + e.create);
 // 最近使用的标签（tagPicks）和角色（picks）按图库分开存（#523）：标签和角色都属于图库，角色 ID 换了图库甚至指向
 // 别的角色。各记最近 8 个。
 const recentIn = async () => libraryPrefs(await currentLibraryId());
@@ -72,7 +72,9 @@ async function paletteSearch() {
     sections = [{label: '', items}];
     if (!p.jump) {
       // 还不在图库里：Danbooru 角色（只用输入的文字）稍后就到；只在本地新建的一项留在最后。
-      const create = list.some(e => e.name.toLowerCase() === q.toLowerCase()) ? [] : [{create: q, name: q, hint: t('只在本地新建，不关联 Danbooru')}, {create: q, oc: true, name: q, hint: t('画师的原创角色，不属于任何作品')}];
+      // 原创角色不按名字新建，只给共用的「原创角色（未细分）」（ocShared，选中时才建；#694）。它已在本地结果里时不重复。
+      const shared = list.some(e => e.label_only) ? [] : [{ocShared: true, name: t('原创角色（未细分）'), hint: t('画师的原创角色，不属于任何作品')}];
+      const create = list.some(e => e.name.toLowerCase() === q.toLowerCase()) ? [] : [{create: q, name: q, hint: t('只在本地新建，不关联 Danbooru')}, ...shared];
       const remote = {label: t('Danbooru 角色 · 选中即新建并关联'), items: [], note: t('正在查 Danbooru…')};
       sections.push(remote, {label: '', items: create});
       clearTimeout(p.remoteTimer);
@@ -104,15 +106,16 @@ function renderPalette(sections, q, keep = false) {
   const p = palette, current = keep ? p.list[pickerNav.index] : null;
   p.list = sections.flatMap(s => s.items);
   pickerNav.index = current ? Math.max(0, p.list.indexOf(current)) : 0;
-  // 只在本地新建是兜底：只要有别的匹配，它绝不是默认项。
-  if (!current && p.list[pickerNav.index]?.create) pickerNav.index = Math.max(0, p.list.findIndex(e => !e.create));
+  // 只在本地新建和共用原创角色是兜底：只要有别的匹配，它们绝不是默认项。
+  const fallback = e => e.create || e.ocShared;
+  if (!current && fallback(p.list[pickerNav.index] || {})) pickerNav.index = Math.max(0, p.list.findIndex(e => !fallback(e)));
   let n = 0;
   $('pickerResults').innerHTML = sections.filter(s => s.items.length || s.note).map(s => (s.label ? `<div class="palette-label">${s.label}</div>` : '') + (s.note && !s.items.length ? `<p class="palette-note">${esc(s.note)}${s.allow ? ' ' + namesAllowButton : ''}</p>` : '') + s.items.map(e => {
     const i = n++, char = e.id && state.charMap.get(e.id), cover = char?.cover;
     const work = p.tagMode || e.create || e.remove ? '' : e.remote ? e.work_name || '' : e.id ? workLabel(e) : '';
     const staged = p.multi && p.staged.some(x => stageKey(x) === stageKey(e));
     const add = p.multi ? `<span class="palette-add${staged ? ' on' : ''}" data-add="${i}" title="${staged ? t('已加入，再点一次取消') : t('再加一个角色（⇧+点击）')}">${staged ? '✓' : '＋'}</span>` : '';
-    return `<button class="palette-item${staged ? ' staged' : ''}" data-i="${i}" role="option">${cover ? `<img src="/image?id=${encodeURIComponent(cover)}" alt="" loading="lazy">` : e.remote ? `<img class="remote" src="/api/entity-preview?tag=${encodeURIComponent(e.tag)}" alt="" loading="lazy" title="${t('Danbooru 上评分最高的一张全年龄图')}">` : `<span class="palette-glyph${e.remote ? ' remote' : ''}">${e.remote ? 'D' : e.create ? '＋' : e.remove ? '−' : e.tag ? '#' : '◌'}</span>`}<span class="palette-text"><span class="palette-name">${e.create ? (e.oc ? t('新建原创角色「{name}」', {name: esc(e.name)}) : t('新建「{name}」', {name: esc(e.name)})) : esc(e.name)}${work ? `<small class="char-work">${esc(work)}</small>` : ''}</span><small>${esc(e.hint || '')}${char && !e.counted ? ' ' + t('{n} 张', {n: number(char.count)}) : ''}</small></span>${i < 9 && !q ? `<kbd>${i + 1}</kbd>` : ''}${add}</button>`;
+    return `<button class="palette-item${staged ? ' staged' : ''}" data-i="${i}" role="option">${cover ? `<img src="/image?id=${encodeURIComponent(cover)}" alt="" loading="lazy">` : e.remote ? `<img class="remote" src="/api/entity-preview?tag=${encodeURIComponent(e.tag)}" alt="" loading="lazy" title="${t('Danbooru 上评分最高的一张全年龄图')}">` : `<span class="palette-glyph${e.remote ? ' remote' : ''}">${e.remote ? 'D' : e.create ? '＋' : e.remove ? '−' : e.tag ? '#' : '◌'}</span>`}<span class="palette-text"><span class="palette-name">${e.create ? t('新建「{name}」', {name: esc(e.name)}) : esc(e.name)}${work ? `<small class="char-work">${esc(work)}</small>` : ''}</span><small>${esc(e.hint || '')}${char && !e.counted ? ' ' + t('{n} 张', {n: number(char.count)}) : ''}</small></span>${i < 9 && !q ? `<kbd>${i + 1}</kbd>` : ''}${add}</button>`;
   }).join('')).join('') || `<p class="palette-empty">${q ? t('没有匹配的角色') : t('输入角色 tag 或别名')}</p>`;
   for (const img of $('pickerResults').querySelectorAll('img')) img.addEventListener('error', () => img.replaceWith(Object.assign(document.createElement('span'), img.classList.contains('remote') ? {className: 'palette-glyph remote', textContent: 'D'} : {className: 'palette-glyph', textContent: '◌'})), {once: true});
   highlight();
@@ -157,7 +160,8 @@ export function stage(e) {
 async function resolveEntity(e) {
   const p = palette;
   const entity = e.remote ? await post('/api/entities', {tag: e.tag, typed: e.typed})
-    : e.create ? await post('/api/entities', e.oc ? {name: e.create, kind: 'oc'} : {name: e.create}) : e;
+    : e.ocShared ? await post('/api/oc/shared', {kind: 'oc'})
+    : e.create ? await post('/api/entities', {name: e.create}) : e;
   if (p && !p.items) remember(p.recent, 'picks', {id: entity.id, name: entity.name}, x => x.id === entity.id);
   return entity;
 }
@@ -187,17 +191,19 @@ export function mergeCharacter(c) {
     }});
 }
 // ---------- 原创角色 ----------
-// 原创角色（kind='oc'）：画师自己的角色，不属于任何作品。没起名的叫「原创角色 N」。
-// 单张或零散的快速标注用共用的那一个「原创角色（未细分）」；整组标为原创角色（按组整理页的组头、组页标题的
-// 「整组标为原创角色」）都新建一个独立的 OC（separate，用户 2026-11-14 在 #386 定，2-29）。返回写入是否成功。
-export async function markOc(body, leaving, separate = false) {
-  let entity; try { entity = await post(separate ? '/api/entities' : '/api/oc/shared', {kind: 'oc'}); } catch (err) { toast(err.message); return false; }
+// 原创角色（kind='oc'）：画师自己的角色，不属于任何作品。
+// 界面上的「标为原创角色」（选中图的工具条、按组整理页的组头、组页标题的「整组标为原创角色」、角色选择器）一律设为
+// 共用的「原创角色（未细分）」：只当标签，不学习、不出候选。按长相聚出的一组常混着几位画师各自的 OC，不再整组新建
+// 独立的原创角色（用户 2026-11-19 定，#694；以后怎么细分见 #695）。后端仍能建独立原创角色，已有的照常显示。返回写入是否成功。
+export async function markOc(body, leaving) {
+  let entity; try { entity = await post('/api/oc/shared', {kind: 'oc'}); } catch (err) { toast(err.message); return false; }
   await rememberChar(entity);
   const ok = await mutate('/api/change', {...body, action: 'confirmed', entity: entity.id}, leaving);
   if (ok && poolIs(state.route, 'cluster') && !state.total) go(charRoute(entity.id));
   return !!ok;
 }
 // 拆分共用的 OC 标记：按需计算相似分组，每组一次点击归到它自己的 OC（可撤销）。
+// 界面入口（角色页的「按相似细分」）随 #694 隐藏，只剩样式清单调用；留给 #695 重新设计细分时参考。
 export async function splitOc(c) {
   const d = $('ocSplitDialog'), body = $('ocSplitBody');
   $('ocSplitTitle').textContent = t('按相似细分 · {name}', {name: c.name});
