@@ -245,6 +245,8 @@
 - `GET /api/characters?q=&min=0`：父角色数组，字段 `id,name,work,count,unchecked,cover,variants`；每个子标签含 `id,name,count,parent_id`。`unchecked` 为当前机器归属数。
 - `GET /api/assets`：`entity,variant,q,tag,pool,status,order,offset,limit`。`status=all|confirmed|machine|unknown`；`order=suspicious|newest|oldest|hinted`（`hinted`：有未被否定的机器线索的图排前面，强证据先于弱线索、分数高的在前，其余按最新）；每项带 `hint`：尚无归属的图给出最强未否定线索 `{id,name}`，否则为 `null`；`pool=unmatched`。`variant` 使用实体 ID；也兼容把变体 ID 作为 entity 传入。分页上限 200。 `count=0` 可跳过总数统计，此时 `total` 为 `null`，图片字段与排序不变；前端仅在同一列表读取周期内复用总数，重新加载时重新统计。
 - `GET /api/assets/count`：使用图库相同筛选参数（搜索使用 `q`，不接收分页参数），仅返回 `{total}`，不加载图片附属信息。
+- `GET /api/home` 和 `GET /api/calendar` 共用 `/api/assets` 的筛选。按本机加入日分组，组内图片按指定的 `order` 取样，默认先取当天最新加入的。两条接口仍按日期排日组。按天的 `days` 默认 5，范围 1–20，`before` 是下一页的排除上界。当天的计数、角色和取样使用同一个选区。
+- `GET /api/calendar?month=YYYY-MM` 返回 `{days,total,prev,next}`。月份必填，日组按日期升序，只返回有匹配图的日子。每组为 `{day,count,samples,color}`，`day` 为 `YYYY-MM-DD`，`samples` 最多 4 张，与按天视图的图片对象一致，并接受 `marks`。`total` 是全月匹配图数，`prev`、`next` 是筛选后最近的有图月份（`YYYY-MM`），没有对应月份时为 `null`。
 - 组合筛选（#445）在原筛选上叠加 `has`、`not`、`from` 和 `to`。`has` 与 `not` 是 URL 编码的 JSON 字符串数组，分别要求全部满足和全部排除。可用 `char:<id>`、`work:<id>`、`artist:<key>`、`tag:<WD 标签>`、`utag:<我的标签>`、`source:pixiv|x|other` 和 `fav`。条件只按首个冒号分隔，重复项去重，合计至多 20 条，每条至多 160 字符。日期区间沿用加入日期，两端包含，可只提供一端。无出处的图归入 `other`。列表、计数、ID、按筛选选图的写入及画廊封面使用同一选区。
 - `GET /api/user-tags?limit=` 可指定 1–1,000 条，默认 60 条。
 - `GET /api/galleries` 按 `position,id` 返回 `[{id,name,params,position,cover_manual}]`，`position` 是保存的整数顺序值，可能不连续；创建和更新回复的 `gallery` 同样带 `position`。保存的条件失效时仍返回该画廊。
@@ -254,7 +256,7 @@
 - 每张图片返回 `memberships`，每个父角色包含 `status,origin,evidence:{sources,max_score},variants`。状态区分 `confirmed` 与 `machine`；`confirmed` 数组为前端兼容字段。
 - `GET /api/detail?id=` 另返回 `ownership`，包含有效归属与 `rejected` 父角色记录，每项带 origin 和证据。原始 assertions/candidates 继续返回，保留历史人工结论和逐来源证据。
 - `GET /api/ids` 使用相同筛选和排序，直接返回 UUID 数组；支持 offset/limit，limit 最大 5000，供跨区段选择使用。
-- 收藏（#447）：`has=["fav"]` 只看收藏，`not=["fav"]` 排除收藏。实际请求对 JSON 数组做 URL 编码，条件与其他筛选取交集，`has` 和 `not` 合计至多 20 条。列表、计数、ID 和按筛选选图的写入都用这一口径。图片本身或重复组内任一份有有效收藏，即算收藏。`GET /api/assets`、`GET /api/home`、`GET /api/detail` 带 `marks=fav` 时在每个图片对象末尾附布尔字段 `fav`，详情在顶层附该字段。省略 `marks` 时沿用原回复。
+- 收藏（#447）：`has=["fav"]` 只看收藏，`not=["fav"]` 排除收藏。实际请求对 JSON 数组做 URL 编码，条件与其他筛选取交集，`has` 和 `not` 合计至多 20 条。列表、计数、ID 和按筛选选图的写入都用这一口径。图片本身或重复组内任一份有有效收藏，即算收藏。`GET /api/assets`、`GET /api/home`、`GET /api/calendar`、`GET /api/detail` 带 `marks=fav` 时在每个图片对象末尾附布尔字段 `fav`，详情在顶层附该字段。省略 `marks` 时沿用原回复。
 - `/api/entities` 仍用于查找或创建实体；`/api/review-pools` 仅返回「未识别」。`/api/tasks` 返回 404；pending/conflicts 筛选返回 400。
 
 ### 写入与撤销

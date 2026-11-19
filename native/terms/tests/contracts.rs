@@ -28,6 +28,8 @@ mod entry;
 #[path = "common/wait.rs"]
 mod wait;
 
+#[path = "contracts/calendar.rs"]
+mod calendar;
 #[path = "contracts/library_50k.rs"]
 mod library_50k;
 #[path = "contracts/library_scale.rs"]
