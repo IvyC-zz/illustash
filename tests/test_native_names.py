@@ -222,7 +222,7 @@ class NativeNamesTest(unittest.TestCase):
         self.stop(self.process);self.process,self.log=self.start(self.lib.path);self.finish()
         wait_until(lambda:all(s=='done' for _,s,_ in self.events()))
     def enable_error(self):
-        self.stop(self.process);self.enabled=True;self.process,self.log=self.start(self.lib.path);self.finish('error')
+        self.stop(self.process);self.enabled=True;self.process,self.log=self.start(self.lib.path);return self.finish('error')
 
     def start_blocked_refresh(self):
         self.env['ILLUSTASH_TEST_TRACE_NAMES_CANCEL'] = '1'
@@ -294,7 +294,8 @@ class NativeNamesTest(unittest.TestCase):
     def test_ack_failure_replays_without_false_completion(self):
         with sqlite3.connect(self.lib.db) as c:
             c.execute("CREATE TRIGGER synthetic_ack_failure BEFORE UPDATE OF status ON backend_effects WHEN NEW.kind LIKE 'names:%' BEGIN SELECT RAISE(ABORT,'synthetic ack failure'); END")
-        self.enable_error()
+        state = self.enable_error()
+        self.assertEqual(state['diagnostic']['publication'], 'may_be_partial')
         self.assertTrue(any(s=='pending' for _,s,_ in self.events()))
         with closing(sqlite3.connect(self.lib.db)) as c:
             formal=c.execute(NAMES+' ORDER BY t.key,n.role,n.source,n.value').fetchall()
@@ -324,7 +325,8 @@ class NativeNamesTest(unittest.TestCase):
         self.enable()
         with sqlite3.connect(self.lib.db) as c:
             c.execute("INSERT INTO backend_effects(kind) VALUES ('names:malformed')")
-        self.finish('error')
+        state = self.finish('error')
+        self.assertEqual(state['diagnostic']['publication'], 'not_committed')
         ident=self.alice
         self.assertEqual(self.request('/api/names',{'action':'refresh','entity':ident})['status'],200)
         wait_until(lambda:self.events()[-1][1]=='done')
