@@ -651,9 +651,7 @@ pub fn read(context: &LibraryContext, url: &str) -> Result<Option<(Json, u16)>> 
                 tx.commit()?;
                 Ok(Some((payload, 200)))
             }
-            Err(Error::Invalid(m))
-                if path == ARTIST_DIRECTORY || (path == "/api/works" && crate::app_colors::requested(&q)) =>
-            {
+            Err(Error::Invalid(m)) if path == ARTIST_DIRECTORY || crate::app_colors::wants_work_covers(path, &q) => {
                 Ok(refused(m))
             }
             Err(e) => Err(e),
@@ -804,7 +802,7 @@ fn read_library(
         "/api/works" => {
             register_names(c)?;
             let mut result = works(c, value("q"))?;
-            if crate::app_colors::requested(q) {
+            if crate::app_colors::wants_work_covers(path, q) {
                 work_covers(c, &mut result, value("nsfw"))?;
             }
             result

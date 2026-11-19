@@ -227,7 +227,7 @@
 
  "native/terms/src/app_characters.rs":"6c9e9e080970dce30092747ebcf6bdcaee7d99a8463500888e5dab278f4a0cbd",
 
- "native/terms/src/app_colors.rs":"a11f47702fae4818fb77114f868404b3180c2801da80ad9d447a62bd0d8d4cad",
+ "native/terms/src/app_colors.rs":"3f5cdca06ac2534b729e03d4eafec4f34cae7f1cfe40f12982634285c39c13f1",
 
  "native/terms/src/app_colors/palette.rs":"db2645476768766de99d58ee7fbb4ade268a75cbf2d0fb55cfe1dd65511e1412",
 
@@ -409,7 +409,7 @@
 
  "native/terms/src/http_local.rs":"ca8ecfa9bae02238143782e8064510e0b2820eeb76c94fcc1626409f7e34714e",
 
- "native/terms/src/http_read.rs":"7c427b8b1c191a6b6036e5dfd469ff19514c4bc1d8bee1051d5fddb85cd3c015",
+ "native/terms/src/http_read.rs":"7b04fb360369789b39833e1352ae73947ab27c86232d752b49f67f0da3b8bd56",
 
  "native/terms/src/image_samples/mod.rs":"3322652e6cd2806e1c739a67ecca850060eb2d4d2c9fd49d74d1ade3bafbefd6",
 
@@ -643,7 +643,7 @@
  "crates/core/src/character_graph.rs":{"database-write":{"INSERT OR IGNORE INTO:term_identity_baseline":1,"dynamic-or-wrapper":7,"ATTACH":3,"DELETE FROM:reprojected":1,"INSERT INTO:reprojected":1,"INSERT OR REPLACE INTO:identity_suspended":1,"DELETE FROM:graph_projection":1,"INSERT INTO:graph_projection":1,"DELETE FROM:identity_canonical":1,"INSERT INTO:identity_canonical":1,"UPDATE:set":1,"UPDATE:term_tree":1,"UPDATE:terms":1,"INSERT OR REPLACE INTO:meta":1}},
  "native/terms/src/app_source_empty.sql":{"database-write":["CREATE TABLE:assets","CREATE TABLE:labels","CREATE INDEX:idx_labels_dim_val","CREATE INDEX:idx_labels_uuid","CREATE TABLE:decisions","CREATE TABLE:runs","CREATE TABLE:embeddings","CREATE TABLE:characters","CREATE TABLE:character_aliases"]},
  "native/terms/src/app_settings.rs":{"database-write":[[0,3],27,5,[1,2],34]},
- "native/terms/src/http_read.rs":{"http-branch":[[77,2],78,248,[89,3],[246,2],24,99,[85,2],[240,2],[16,2],82,84,91,[93,2],[250,5],[251,2],[252,2],[253,2],[254,2],[255,3],[23,2],[44,3],75,26,86,256,257,258,[331,3],"/api/artist-directory",[332,2],"/api/galleries|/api/galleries/covers"],"database-write":[[187,2],202,0,7,[1,2]]},
+ "native/terms/src/http_read.rs":{"http-branch":[[77,2],78,248,[89,3],[246,2],24,99,[85,2],[240,2],[16,2],82,84,91,[93,2],[250,5],[251,2],[252,2],[253,2],[254,2],[255,3],[23,2],[44,2],75,26,86,256,257,258,[331,3],"/api/artist-directory",[332,2],"/api/galleries|/api/galleries/covers"],"database-write":[[187,2],202,0,7,[1,2]]},
  "crates/core/src/character_learning.rs":{"database-write":[[0,4],1,"DELETE FROM:proto_claims","INSERT INTO:proto_claims"]},
  "native/terms/src/app_migrate_data.rs":{"database-write":[57,0,61,"DELETE FROM:similar_groups","INSERT INTO:similar_groups"]},
  "native/terms/src/app_migration_sql/derived.sql":{"database-write":[108,165,161,137,110,167,52,133,107,130,169,168,118,166,117,129,106,128,163,170,119,162,116,154,125,136,172,56,156,114,54,48,174,55]},
@@ -738,7 +738,7 @@
  "native/terms/src/http_example_search.rs":{"database-write":{"dynamic-or-wrapper":2,"DELETE FROM:temp.like_rank":1,"INSERT INTO:temp.like_rank":1}},
  "native/terms/src/app_similar_seen.rs":{"database-write":{"dynamic-or-wrapper":4,"INSERT INTO:similar_seen":2,"DELETE FROM:similar_seen":2,"INSERT INTO:actions":1,"COMMIT":1}},
  "native/terms/src/app_relocation.rs":{"database-write":[341,[232,5],182,[0,17],176,[5,2],[7,3],342,[339,2],[343,2],11,[344,4],379,[1,3]]},
- "native/terms/src/app_colors.rs":{"http-branch":{"/api/calendar":3,"/api/detail":3,"/api/assets|/api/artist-directory":1,"/api/assets":1,"/api/galleries/covers|/api/characters":1,"/api/works":1,"/api/home|/api/calendar":1},"database-write":{"dynamic-or-wrapper":3,"CREATE TABLE IF NOT EXISTS:colors":1,"INSERT INTO:colors":1,"COMMIT":1,"ATTACH":5}}
+ "native/terms/src/app_colors.rs":{"http-branch":{"/api/works":2,"/api/calendar":3,"/api/detail":3,"/api/assets|/api/artist-directory":1,"/api/assets":1,"/api/galleries/covers|/api/characters":1,"/api/home|/api/calendar":1},"database-write":{"dynamic-or-wrapper":3,"CREATE TABLE IF NOT EXISTS:colors":1,"INSERT INTO:colors":1,"COMMIT":1,"ATTACH":5}}
 },
 "policies":{
  "application":{"final_owner":"rust","responsibility":"HTTP 参数/目标、人工命令、正式事务/投影；Python 包装待迁移","acceptance":"合成状态码/原始字节、返回/DB/历史/撤销/事件对照；竞争与注入失败原子回滚","deletion_condition":"Rust 调用链及无 Python 验收后删生产 Python；保留旧对照","stages":["M2","M3"]},

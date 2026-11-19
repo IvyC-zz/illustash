@@ -254,6 +254,10 @@ pub(crate) fn requested(q: &HashMap<String, String>) -> bool {
     q.get("marks").is_some_and(|marks| marks.split(',').any(|mark| mark == "color"))
 }
 
+pub(crate) fn wants_work_covers(route: &str, q: &HashMap<String, String>) -> bool {
+    route == "/api/works" && requested(q)
+}
+
 fn field_array<'a>(body: &'a mut Json, key: &str) -> Option<&'a mut Vec<Json>> {
     let Json::Object(fields) = body else { return None };
     let (_, Json::Array(items)) = fields.iter_mut().find(|(name, _)| name == key)? else { return None };

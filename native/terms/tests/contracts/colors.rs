@@ -34,7 +34,7 @@ fn image_colors_http_contract() {
     let category = "image-colors";
     let (_scratch, root, package) = materialize(&load("http_api"), category);
     migrate_fixture_terms(&package, category);
-    let db = illustash_terms::open(&package.join("library.sqlite")).unwrap();
+    let mut db = illustash_terms::open(&package.join("library.sqlite")).unwrap();
     let assets = [
         ("color-muted", [125, 125, 125], "20"),
         ("color-yellow", [255, 255, 0], "19"),
@@ -52,7 +52,9 @@ fn image_colors_http_contract() {
         )
         .unwrap();
     }
-    db.execute_batch(
+    let tx = db.transaction().unwrap();
+    illustash_terms::schema::begin_writing(&tx).unwrap();
+    tx.execute_batch(
         "INSERT INTO assets(uuid,filename,added_at) VALUES ('color-unavailable','color-unavailable','2026-11-21');
          INSERT INTO terms(key,kind,origin) VALUES ('tone-artist','artist','test'),('tone-character','character','test'),
                                                     ('tone-work','work','test'),('tone-child','work','test');
@@ -68,6 +70,7 @@ fn image_colors_http_contract() {
               WHERE t.key='tone-artist';",
     )
     .unwrap();
+    illustash_terms::schema::commit_writing(tx).unwrap();
 
     let binary = Path::new(env!("CARGO_BIN_EXE_illustash-terms"));
     let (_host, origin, token) = launch(&root, &package, category, false, binary);
