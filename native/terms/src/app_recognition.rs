@@ -17,6 +17,8 @@ const SCHEMA: &str = r#"CREATE TABLE IF NOT EXISTS recognition_imports(
  CREATE TABLE IF NOT EXISTS recognition_assets(
  asset TEXT PRIMARY KEY, digest TEXT NOT NULL, package TEXT NOT NULL);
  CREATE TABLE IF NOT EXISTS embeddings(uuid TEXT NOT NULL,model TEXT NOT NULL,vec BLOB NOT NULL,PRIMARY KEY(uuid,model));"#;
+const SYNC_WD_PACKAGE: &str = "sync_wd_package_sha256";
+
 fn invalid() -> Error {
     Error::Invalid("识别结果包不合法或与目标图库不匹配".into())
 }
@@ -641,11 +643,19 @@ fn import_internal(
     }
     let duplicate = seen && added.is_empty();
     if !duplicate {
+        // 只在宿主自己的回执信封里固定同步所选版本；原包、公开摘要及逐图指纹已定。
+        let mut receipt = pkg.manifest.clone();
+        if let Some(wd) = wd {
+            if receipt.get("format").is_some() {
+                receipt = json!({"recognition": receipt});
+            }
+            receipt[SYNC_WD_PACKAGE] = json!(wd.sha256());
+        }
         tx.execute(
             "INSERT INTO recognition_imports(digest,manifest,assets,status) VALUES (?,?,?,'pending')",
             params![
                 delivery.as_deref().unwrap_or(&pkg.digest),
-                crate::character_json::dump(&pkg.manifest, true),
+                crate::character_json::dump(&receipt, true),
                 crate::character_json::dump(&json!(added), true)
             ],
         )?;
@@ -846,6 +856,7 @@ fn resume_scored(
         .collect::<rusqlite::Result<Vec<_>>>()?;
     let mut unavailable = Vec::new();
     let mut unavailable_error = String::new();
+    let mut loaded_wd = None;
     for (digest, raw, raw_manifest) in pending {
         let mut deferred = Vec::new();
         let process: Result<()> = (|| {
@@ -903,14 +914,36 @@ fn resume_scored(
                 } else {
                     crate::app_ccip_longtail::score_delivery(root, &app, &src, &ids, &check)
                 };
-                let wd_score = wd.map(|wd| wd.score(&tx, &digest, &raw_manifest, &ids, cancel)).transpose()?.flatten();
+                // 只认宿主包装的标记，公开结果包的额外字段不能要求 WD 扩展写入。
+                let pinned_wd =
+                    if manifest.get("format").is_none() { manifest[SYNC_WD_PACKAGE].as_str() } else { None };
+                let delivery_wd = if let Some(pinned) = pinned_wd {
+                    let available = match wd {
+                        Some(task_pack) => Some(task_pack),
+                        None => loaded_wd
+                            .get_or_insert_with(|| {
+                                crate::app_wd_extension::Delivery::load(root, library).unwrap_or_else(|error| {
+                                    eprintln!("无法加载识别恢复的 WD 扩展包：{error}");
+                                    None
+                                })
+                            })
+                            .as_ref(),
+                    };
+                    available.filter(|pack| pack.sha256() == pinned)
+                } else {
+                    None
+                };
+                let wd_score = delivery_wd
+                    .map(|pack| pack.score(&tx, &digest, &raw_manifest, &ids, cancel))
+                    .transpose()?
+                    .flatten();
                 check()?;
                 let app_tx = app.transaction_with_behavior(TransactionBehavior::Immediate)?;
                 crate::schema::begin_writing(&app_tx)?;
                 import_changes(&app_tx, &src, library, &ids)?;
                 let longtail_observation =
                     crate::app_ccip_longtail::publish_delivery(&app_tx, &digest, &ids, longtail)?;
-                if let (Some(wd), Some(score)) = (wd, wd_score) {
+                if let (Some(wd), Some(score)) = (delivery_wd, wd_score) {
                     wd.publish(&app_tx, &ids, score)?;
                 }
                 app_tx.execute("INSERT INTO backend_effects(kind) VALUES ('imported')", [])?;

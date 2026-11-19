@@ -292,7 +292,7 @@ fn writer(path: &std::path::Path) -> Result<Connection> {
 }
 /// 可供 M4 复用：文件盘点后本地刷新；imported 事件与应用变更同事务提交，保留 pending 给 M4 消费。
 pub(crate) fn run(library: &Library, cancel: &AtomicBool, update: &dyn Fn(Value)) -> Result<Value> {
-    run_with(library, cancel, None, &std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../.."), 0, update)
+    run_with(library, cancel, None, &crate::app_resources::default_root(), 0, update)
 }
 fn run_with(
     library: &Library,

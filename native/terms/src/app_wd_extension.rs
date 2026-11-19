@@ -749,6 +749,10 @@ pub(crate) struct Delivery {
 }
 
 impl Delivery {
+    pub(crate) fn sha256(&self) -> &str {
+        &self.sha256
+    }
+
     pub(crate) fn load(resources: &Path, library: &Library) -> Result<Option<Self>> {
         let app = crate::app_library::read_connection(&library.db())?;
         let Some((pack, path)) = enabled_pack(resources, &app)? else { return Ok(None) };

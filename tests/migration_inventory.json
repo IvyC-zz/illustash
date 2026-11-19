@@ -325,7 +325,7 @@
 
  "native/terms/src/app_provenance_sources.rs":"b5b95d67aa5753245bcbac3a32d36da0094d27650df1760db62d150d5168f868",
 
- "native/terms/src/app_recognition.rs":"8f0efcf249770434d2caf0233b5485fb33132eaf6582084f273a481b3b368725",
+ "native/terms/src/app_recognition.rs":"a83374bec11491f21d5f320c1f0d086e81d6442bfddde41c8de71018262f6542",
 
  "native/terms/src/app_relocation.rs":"724e05449464c8d2fe2def7c7aec487d7ddb09fa8212e19d60e181cbd45b801d",
 
@@ -347,7 +347,7 @@
 
  "native/terms/src/app_sources.rs":"185979b4e3d72ddcd243bcc670b5c981fe3291b56cbf6f87c47dc5080b97828e",
 
- "native/terms/src/app_sync.rs":"049910ed1cf600bf09cc6497c42dc7d99996b979cf2157d9ef6c36d63bd5c9e9",
+ "native/terms/src/app_sync.rs":"5f9500a8f51fba12bf09c15abee6cd82e1c4238f38dc09297d5da36356984821",
 
  "native/terms/src/app_tasks.rs":"3a2653f069763b5c2d5f50580679a064e21b1f048a530a886829d483871ba400",
 
@@ -355,7 +355,7 @@
 
  "native/terms/src/app_upgrade.rs":"a54111dd23542c882a5ac02a2a0913b0333625af44950108d8af33a2dbd1c5e6",
 
- "native/terms/src/app_wd_extension.rs":"d158a7a204c610593576bf52e7d3ffb1fcddd8462f01a01e4e96a0ecfd208ec4",
+ "native/terms/src/app_wd_extension.rs":"f96e511854815940a288f1bf258927b68a3b6d09ea15d02eac411d103db1b173",
 
  "native/terms/src/app_wd_extension/scoring.rs":"c486e27eae74356b12c836caee045adb61e164c5ffb433171327df47e55b1221",
 
