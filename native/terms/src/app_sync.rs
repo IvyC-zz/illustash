@@ -345,7 +345,8 @@ fn run_with(
     let step = std::cell::Cell::new("recognition resume, source.sqlite and library.sqlite");
     let result: Result<(&str, String, Value)> = (|| {
         // 仅撤回没有应用投影、且已确定不能验证输入的 pending；随后扫描可重新识别这些图片。
-        crate::app_recognition::retire_unverifiable(library, cancel)?;
+        let active = || context.map_or_else(|| check(cancel), crate::app_tasks::TaskContext::check);
+        retry_recognition_write(active, || crate::app_recognition::retire_unverifiable(library, cancel))?;
         let mut sources: Vec<(String, Value)> = Vec::new();
         let mut scanned = 0;
         let mut unreadable = 0;
@@ -406,8 +407,9 @@ fn run_with(
         }
         // 先扫描，避免已删除/换内容的图片被旧 pending 永久挡住；仍有效的结果再恢复。
         step.set("recognition resume, source.sqlite and library.sqlite");
-        let recovery = crate::app_recognition::resume_at(library, root, cancel, &crate::app_research::dispatch)?;
-        let deferred = crate::app_recognition::unavailable_inputs(&recovery)?;
+        let deferred = retry_recognition_write(active, || {
+            crate::app_recognition::resume_sync(library, root, cancel)?.unavailable_inputs()
+        })?;
         unreadable += deferred.len() as u64;
         step.set("sync record, library.sqlite");
         let c = writer(&library.db())?;
@@ -1115,23 +1117,26 @@ impl Batches<'_> {
             }
             None => None,
         };
-        let imported = ctx.receive_part(ctx.identity(), || match &prepared {
-            Some(prepared) => crate::app_recognition::import_worker_package(
-                library,
-                prepared,
-                self.inputs.as_ref().expect("claims task snapshot"),
-                ctx.cancellation(),
-                &crate::app_research::dispatch,
-            ),
-            None => crate::app_recognition::import_package(
-                library,
-                package,
-                self.root,
-                ctx.cancellation(),
-                &crate::app_research::dispatch,
-            ),
-        })?;
-        let deferred = crate::app_recognition::unavailable_inputs(&imported)?;
+        let deferred = retry_recognition_write(
+            || ctx.check(),
+            || {
+                ctx.receive_part(ctx.identity(), || {
+                    match &prepared {
+                        Some(prepared) => crate::app_recognition::import_worker_package(
+                            library,
+                            prepared,
+                            self.inputs.as_ref().expect("claims task snapshot"),
+                            ctx.cancellation(),
+                            &crate::app_research::dispatch,
+                        ),
+                        None => {
+                            crate::app_recognition::import_sync_package(library, package, self.root, ctx.cancellation())
+                        }
+                    }?
+                    .unavailable_inputs()
+                })
+            },
+        )?;
         if ids.iter().any(|id| deferred.contains(id)) {
             self.deferred.extend(ids.iter().cloned());
             counts["failed"] = json!(counts["failed"].as_u64().unwrap_or(0) + ids.len() as u64);
@@ -1141,16 +1146,37 @@ impl Batches<'_> {
             counts["imported"].as_u64().expect("internal sync counter must be unsigned")
                 + ids.iter().filter(|u| !self.already_counted.contains(*u)).count() as u64
         );
-        remember_labels(library, ids, ctx.cancellation())?;
+        retry_recognition_write(|| ctx.check(), || remember_labels(library, ids, ctx.cancellation()))?;
         self.import_done += ids.len();
-        writer(&library.db())?.execute(
-            "UPDATE sync_runs SET imported=?,failed=? WHERE id=?",
-            params![counts["imported"].as_u64(), counts["failed"].as_u64(), self.run_id],
+        retry_recognition_write(
+            || ctx.check(),
+            || {
+                writer(&library.db())?.execute(
+                    "UPDATE sync_runs SET imported=?,failed=? WHERE id=?",
+                    params![counts["imported"].as_u64(), counts["failed"].as_u64(), self.run_id],
+                )?;
+                Ok(())
+            },
         )?;
         update(json!({"import_done":self.import_done,"imported":counts["imported"],"failed":counts["failed"]}));
         Ok(())
     }
 }
+/// 识别导入及它的回执都是幂等的。短暂写锁释放后重试，退让前已释放事务和任务接收边界。
+fn retry_recognition_write<T>(check: impl Fn() -> Result<()>, mut write: impl FnMut() -> Result<T>) -> Result<T> {
+    const RETRIES: usize = 3;
+    for attempt in 0..=RETRIES {
+        check()?;
+        match write() {
+            Err(error) if attempt < RETRIES && crate::app_recognition::database_busy(&error) => {
+                std::thread::sleep(std::time::Duration::from_millis(100));
+            }
+            result => return result,
+        }
+    }
+    unreachable!("重试上限返回最后一次写入结果")
+}
+
 /// 结果包 manifest 里的图片列表。
 fn manifest_assets(path: &std::path::Path) -> Result<Vec<String>> {
     Ok(read_recognition_manifest(path)?.assets)

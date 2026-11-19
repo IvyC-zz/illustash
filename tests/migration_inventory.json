@@ -325,7 +325,7 @@
 
  "native/terms/src/app_provenance_sources.rs":"b5b95d67aa5753245bcbac3a32d36da0094d27650df1760db62d150d5168f868",
 
- "native/terms/src/app_recognition.rs":"f377d10ba39832f881b895b6987f2f53975415a2e6ba8abd149128aeda9c06c6",
+ "native/terms/src/app_recognition.rs":"bd3aca009bacd559cc2435ee2ec4d172781ece5522365a2753f5132f53b0fab3",
 
  "native/terms/src/app_relocation.rs":"724e05449464c8d2fe2def7c7aec487d7ddb09fa8212e19d60e181cbd45b801d",
 
@@ -347,7 +347,7 @@
 
  "native/terms/src/app_sources.rs":"185979b4e3d72ddcd243bcc670b5c981fe3291b56cbf6f87c47dc5080b97828e",
 
- "native/terms/src/app_sync.rs":"516a207016555b1342085b817af9574fdac2fbf4f19af0ac63f86524bf09602f",
+ "native/terms/src/app_sync.rs":"b321585433f69f3fa4f9db26fffea382979bc2aeb0f512c207b0f1853874f397",
 
  "native/terms/src/app_tasks.rs":"3a2653f069763b5c2d5f50580679a064e21b1f048a530a886829d483871ba400",
 

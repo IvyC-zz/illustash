@@ -102,7 +102,7 @@ impl Fixture {
         let cancel = AtomicBool::new(false);
         let inputs = WorkerInputs::load(&self.library, &self.identity, &self.resources, &cancel)?;
         let prepared = prepare_worker_package(&self.library, path, sidecar, &inputs, &cancel)?;
-        import_worker_package(&self.library, &prepared, &inputs, &cancel, &|_, _| Ok(()))
+        import_worker_package(&self.library, &prepared, &inputs, &cancel, &|_, _| Ok(())).map(Recovery::response)
     }
 }
 impl Drop for Fixture {
@@ -207,7 +207,7 @@ fn source_commit_projection_crash_and_dispatch_failure_use_existing_resume() {
             Err(Error::Invalid("synthetic dispatch crash".into()))
         })
         .unwrap();
-        assert_eq!(result["status"], "pending");
+        assert_eq!(result.response()["status"], "pending");
         assert_eq!(count(&f.source(), "SELECT count(*) FROM recognition_imports WHERE status='pending'"), 1);
         assert_eq!(count(&f.source(), "SELECT count(*) FROM labels WHERE source='wd_v3'"), 1);
         if projection_failure {
@@ -314,7 +314,7 @@ fn external_model_root_is_authoritative_for_producer_and_importer() {
     let inputs = WorkerInputs::load(&f.library, &f.identity, &f.resources, &cancel).unwrap();
     let prepared = prepare_worker_package(&f.library, &path, &sidecar, &inputs, &cancel).unwrap();
     assert_eq!(
-        import_worker_package(&f.library, &prepared, &inputs, &cancel, &|_, _| Ok(())).unwrap()["status"],
+        import_worker_package(&f.library, &prepared, &inputs, &cancel, &|_, _| Ok(())).unwrap().response()["status"],
         "done"
     );
     let before = count(&f.source(), "SELECT count(*) FROM recognition_imports");

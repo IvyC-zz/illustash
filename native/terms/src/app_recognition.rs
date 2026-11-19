@@ -345,7 +345,7 @@ pub fn import_package(
     cancel: &AtomicBool,
     dispatch: &dyn Fn(&Library, &str) -> Result<()>,
 ) -> Result<Value> {
-    import_internal(library, path, root, cancel, dispatch, None, &Silent)
+    import_internal(library, path, root, cancel, dispatch, None, &Silent).map(Recovery::response)
 }
 /// 通过 `observer` 报告各阶段并发布源库事务的 `import_package`（#88）。
 pub(crate) fn import_package_observed(
@@ -356,7 +356,15 @@ pub(crate) fn import_package_observed(
     dispatch: &dyn Fn(&Library, &str) -> Result<()>,
     observer: &dyn Observer,
 ) -> Result<Value> {
-    import_internal(library, path, root, cancel, dispatch, None, observer)
+    import_internal(library, path, root, cancel, dispatch, None, observer).map(Recovery::response)
+}
+pub(crate) fn import_sync_package(
+    library: &Library,
+    path: &Path,
+    root: &Path,
+    cancel: &AtomicBool,
+) -> Result<Recovery> {
+    import_internal(library, path, root, cancel, &crate::app_research::dispatch, None, &Silent)
 }
 /// 只归一个识别任务所有；在取 TaskContext::receive 之前构建。
 pub(crate) struct WorkerInputs {
@@ -440,7 +448,7 @@ pub(crate) fn import_worker_package(
     inputs: &WorkerInputs,
     cancel: &AtomicBool,
     dispatch: &dyn Fn(&Library, &str) -> Result<()>,
-) -> Result<Value> {
+) -> Result<Recovery> {
     if inputs.identity.library_id != library.id() || inputs.identity.package != library.instance_path() {
         return Err(invalid());
     }
@@ -454,7 +462,7 @@ fn import_internal(
     dispatch: &dyn Fn(&Library, &str) -> Result<()>,
     claims: Option<(&PreparedWorkerPackage, &WorkerInputs)>,
     observer: &dyn Observer,
-) -> Result<Value> {
+) -> Result<Recovery> {
     if library.frozen() {
         return Err(Error::Conflict("图库只读".into()));
     }
@@ -633,8 +641,8 @@ fn import_internal(
         fingerprint,
     });
     let mut result = resume_scored(library, root, cancel, dispatch, replay)?;
-    result["digest"] = json!(pkg.digest);
-    result["duplicate"] = json!(duplicate);
+    result.response["digest"] = json!(pkg.digest);
+    result.response["duplicate"] = json!(duplicate);
     Ok(result)
 }
 /// 只取仍属于这次交付的有效资产；旧回执不能再发布被扫描撤销或被新交付接管的结果。
@@ -741,7 +749,37 @@ pub(crate) fn resume_at(
     cancel: &AtomicBool,
     dispatch: &dyn Fn(&Library, &str) -> Result<()>,
 ) -> Result<Value> {
-    resume_scored(library, root, cancel, dispatch, None)
+    resume_scored(library, root, cancel, dispatch, None).map(Recovery::response)
+}
+
+pub(crate) fn resume_sync(library: &Library, root: &Path, cancel: &AtomicBool) -> Result<Recovery> {
+    resume_scored(library, root, cancel, &crate::app_research::dispatch, None)
+}
+
+pub(crate) struct Recovery {
+    response: Value,
+    busy: Option<Error>,
+}
+impl Recovery {
+    fn response(self) -> Value {
+        self.response
+    }
+
+    pub(crate) fn unavailable_inputs(self) -> Result<std::collections::HashSet<String>> {
+        match self.busy {
+            Some(error) => Err(error),
+            None => unavailable_inputs(&self.response),
+        }
+    }
+}
+impl From<Value> for Recovery {
+    fn from(response: Value) -> Self {
+        Self { response, busy: None }
+    }
+}
+
+pub(crate) fn database_busy(error: &Error) -> bool {
+    matches!(error, Error::Sql(sql) if sql.sqlite_error_code() == Some(rusqlite::ErrorCode::DatabaseBusy))
 }
 
 struct PreparedLongtail<'a> {
@@ -756,7 +794,7 @@ fn resume_scored(
     cancel: &AtomicBool,
     dispatch: &dyn Fn(&Library, &str) -> Result<()>,
     prepared: Option<PreparedLongtail<'_>>,
-) -> Result<Value> {
+) -> Result<Recovery> {
     if library.frozen() {
         return Err(Error::Conflict("图库只读".into()));
     }
@@ -764,7 +802,7 @@ fn resume_scored(
     let exists: bool =
         c.query_row("SELECT EXISTS(SELECT 1 FROM sqlite_master WHERE name='recognition_imports')", [], |r| r.get(0))?;
     if !exists {
-        return Ok(json!({"status":"done"}));
+        return Ok(json!({"status":"done"}).into());
     }
     // 不用进程全局锁或按图库 ID 的锁，就让这个包的并发恢复串行执行。
     let tx = c.transaction_with_behavior(TransactionBehavior::Immediate)?;
@@ -876,19 +914,22 @@ fn resume_scored(
                     continue;
                 }
                 tx.commit()?;
-                return Ok(json!({"status":"pending","error":message}));
+                return Ok(Recovery {
+                    response: json!({"status":"pending","error":message}),
+                    busy: database_busy(&e).then_some(e),
+                });
             }
         }
     }
     tx.commit()?;
     if unavailable.is_empty() {
-        Ok(json!({"status":"done"}))
+        Ok(json!({"status":"done"}).into())
     } else {
-        Ok(json!({"status":"pending","error":unavailable_error,"unavailable_inputs":unavailable}))
+        Ok(json!({"status":"pending","error":unavailable_error,"unavailable_inputs":unavailable}).into())
     }
 }
 /// 同步只容忍输入暂不可读的回执；其他验证、发布或通知错误保持失败。
-pub(crate) fn unavailable_inputs(result: &Value) -> Result<std::collections::HashSet<String>> {
+fn unavailable_inputs(result: &Value) -> Result<std::collections::HashSet<String>> {
     if result["status"] == "done" {
         return Ok(Default::default());
     }
