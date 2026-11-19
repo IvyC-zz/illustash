@@ -251,7 +251,7 @@ schema v1 已随第 2、3 步用于切换，不能改；新增一次迁移 v2，
 | `import_changes`（同步） | 否 | `import`，一个事务（方案第 9 节） | assets、album 批次、imported、相册别名、duplicates、折叠、auto_rules、excluded、sync_added、meta.indexed | imported |
 | `refresh`、`reindex_characters` | 否 | `refresh` / `reindex`，附索引同步 | 同上 | 无 |
 | WD 重交后重算派生 | 否 | `rederive`：重算 single / lead / 归属 / 规则 / 排除 | 同上 | 无 |
-| 默认只当标签的名单 | 否 | `default_tags` | — | 无 |
+| 默认只当标签的名单 | 否 | `default_tags`，WD 导入新建角色时也套用默认名单 | — | 无 |
 | 作品证据 | 否 | `work_evidence` | 作品树 | 无 |
 | 学习发布 | 否 | `learning-snapshot` / `publish-learning` | 私有表、折叠 | 无 |
 | `undo` | — | `undo`，按方案第 6.3 节分派 | — | verdict |

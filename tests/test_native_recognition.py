@@ -3,6 +3,7 @@
 原 Python 导入器在同一个包上的结果已通过 tests/fixed_expectations.py 录制（#9）。
 """
 import concurrent.futures
+from contextlib import closing
 import hashlib
 import json
 import shutil
@@ -93,6 +94,37 @@ class NativeRecognitionTest(unittest.TestCase):
         r = self.recognition_import({'path': str(p)})
         self.assertEqual(r['status'], 200, r['body'])
         return json.loads(r['body'])
+
+    def test_wd_import_applies_default_mascot_and_keeps_user_override(self):
+        tag = 'sensei_(blue_archive)'
+        vocab = self.resources / 'tags' / 'tags_v3.csv'
+        with vocab.open('a', encoding='utf-8', newline='\n') as f:
+            f.write(f'{tag},4\n')
+        self.specs['wd']['tags_sha256'] = hashlib.sha256(vocab.read_bytes()).hexdigest()
+        def import_wd(asset):
+            p = self.incoming(ids=(asset,), name='wd-' + asset)
+            with (p / 'labels.jsonl').open('a', encoding='utf-8', newline='\n') as f:
+                f.write('\n' + json.dumps(dict(asset=asset, dim='character', value=tag, confidence=.99)))
+            self.manifest(p, ids=(asset,))
+            self.import_result(p)
+        def mascot():
+            with closing(sqlite3.connect(self.lib.db)) as c:
+                return c.execute(
+                    "SELECT t.key, r.mascot, r.mascot_origin FROM term_links l "
+                    "JOIN terms t ON t.id=l.term_id JOIN term_tree r ON r.term_id=t.id "
+                    "WHERE l.system='wd_character' AND l.key=?", (tag,)
+                ).fetchone()
+
+        self.assertIsNone(mascot())
+        import_wd('a')
+        entity, flag, origin = mascot()
+        self.assertEqual((flag, origin), (1, 'default'))
+        with closing(sqlite3.connect(self.lib.db)) as c:
+            self.assertIsNone(c.execute("SELECT 1 FROM memberships WHERE entity=?", (entity,)).fetchone())
+        edited = self.request('/api/character/mascot', {'entity': entity, 'mascot': False})
+        self.assertEqual(edited['status'], 200, edited['body'])
+        import_wd('b')
+        self.assertEqual(mascot(), (entity, 0, 'user'))
 
     def test_valid_duplicate_fingerprint_source_reference_and_human_history(self):
         p=self.incoming()
