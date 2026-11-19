@@ -181,6 +181,32 @@ fn indexed(c: &Connection, rows: &[Entity]) -> Result<Value> {
 fn index_keys(rows: &[Entity]) -> BTreeSet<&str> {
     rows.iter().filter_map(|r| r.keys.get("ccip").map(String::as_str)).collect()
 }
+/// 源库在写锁外读取。写入索引名之前，在应用库事务内复核每个身份的来源，并按身份写入。
+fn seed_index_names(c: &mut Connection, rows: &[Entity], index: &Value) -> Result<bool> {
+    let indexed: HashMap<_, _> =
+        index.as_array().into_iter().flatten().filter_map(|row| Some((row[0].as_str()?, row))).collect();
+    let seeds: HashMap<_, _> =
+        rows.iter().filter_map(|r| Some((r.id.as_str(), (r, indexed.get(r.keys.get("ccip")?.as_str())?)))).collect();
+    if seeds.is_empty() {
+        return Ok(false);
+    }
+    let ids = dump(&json!(seeds.keys().collect::<Vec<_>>()));
+    crate::names_commands::seed_checked(c, |tx| {
+        let mut valid = Vec::with_capacity(seeds.len());
+        for r in entities(tx, &ids)? {
+            let (before, names) = seeds[r.id.as_str()];
+            if r.tag == before.tag
+                && r.work == before.work
+                && r.parent == before.parent
+                && r.variant == before.variant
+                && r.keys.get("ccip") == before.keys.get("ccip")
+            {
+                valid.push((r.id, json!({"zh":names[1],"ja":names[2],"en":names[3]})));
+            }
+        }
+        Ok(valid)
+    })
+}
 fn fingerprint_with(c: &Connection, rows: &[Entity], indexed: &Value, full: bool) -> Result<String> {
     let mut values = vec![];
     for r in rows {
@@ -729,27 +755,16 @@ fn lookup(
     }) {
         return Ok(());
     }
-    let mut seed = vec![];
-    if *kind == "work" {
-        if let Some(n) = crate::names_view::work_name(key) {
-            seed.push(json!({"op":"put","kind":"work","key":key,"lang":"zh","source":"builtin","value":n}));
-        }
-    } else if *kind == "skin" {
-        if let Some(n) = crate::names_view::skin_zh(key) {
-            seed.push(json!({"op":"put","kind":"skin","key":key,"lang":"zh","source":"builtin","value":n}));
-        }
-    } else {
-        for r in &before {
-            let Some(cid) = r.keys.get("ccip") else { continue };
-            let Some(n) = index.as_array().and_then(|a| a.iter().find(|v| v[0].as_str() == Some(cid))) else {
-                continue;
-            };
-            let names = json!({"zh":n[1],"ja":n[2],"en":n[3]});
-            seed.push(json!({"op":"seed_index","entity":r.id,"key":r.tag,"names":names}));
-        }
+    let builtin = match *kind {
+        "work" => crate::names_view::work_name(key).map(str::to_owned),
+        "skin" => crate::names_view::skin_zh(key),
+        _ => None,
+    };
+    if let Some(name) = builtin {
+        command(c, vec![json!({"op":"put","kind":kind,"key":key,"lang":"zh","source":"builtin","value":name})])?;
     }
-    if !seed.is_empty() {
-        command(c, seed)?;
+    if job.character() {
+        seed_index_names(c, &before, &index)?;
     }
     let ops = if *kind == "skin" { translate_skin(source, key)? } else { enrich(source, kind, key, work)? };
     net::check(&source.cancel)?;
@@ -2449,6 +2464,17 @@ mod sources_tests {
     mod tests {
         use super::*;
 
+        fn index_name(c: &Connection, id: &str) -> Option<String> {
+            c.query_row(
+                "SELECT n.value FROM term_names n JOIN terms t ON t.id=n.term_id
+                 WHERE t.key=? AND n.source='index' AND n.role='display' AND n.lang='ja'",
+                [id],
+                |r| r.get::<_, String>(0),
+            )
+            .optional()
+            .unwrap()
+        }
+
         fn add_candidate(c: &Connection, asset: &str, tag: &str) {
             assert_eq!(
                 c.execute(
@@ -2528,6 +2554,61 @@ mod sources_tests {
                 .unwrap();
             lib.run(&p, None, false).unwrap();
             assert_eq!(p.calls(), calls);
+        }
+
+        #[test]
+        fn index_names_are_not_written_after_tag_is_rebound() {
+            let lib = Library::load();
+            let mut c = lib.db();
+            let alice = crate::names_commands::tag_entities(&c, "alice").unwrap().remove(0);
+            let bob = crate::names_commands::tag_entities(&c, "bob").unwrap().remove(0);
+            let before = scope(&c, Some(&alice)).unwrap();
+            let index = indexed(&c, &before).unwrap();
+            assert!(index.as_array().unwrap().iter().any(|r| r[0] == "alice" && r[2] == "アリス"));
+
+            let tx = c.transaction_with_behavior(rusqlite::TransactionBehavior::Immediate).unwrap();
+            crate::schema::begin_writing(&tx).unwrap();
+            for (entity, tag) in [(&alice, "synthetic_new_alice"), (&bob, "alice")] {
+                crate::character_commands::command(&tx, &json!({"op":"set_profile","entity":entity,"tag":tag}))
+                    .unwrap();
+            }
+            crate::schema::commit_writing(tx).unwrap();
+            assert_eq!(crate::names_commands::tag_entities(&c, "alice").unwrap(), std::slice::from_ref(&bob));
+
+            assert!(!seed_index_names(&mut c, &before, &index).unwrap());
+            assert_eq!(index_name(&c, &alice), None);
+            assert_eq!(index_name(&c, &bob), None);
+
+            let current = scope(&c, Some(&alice)).unwrap();
+            assert!(seed_index_names(&mut c, &current, &index).unwrap());
+            assert_eq!(index_name(&c, &alice).as_deref(), Some("アリス"));
+            assert_eq!(index_name(&c, &bob), None);
+        }
+
+        #[test]
+        fn individual_lookup_retries_when_its_index_name_changes() {
+            let lib = Library::load();
+            let alice = crate::names_commands::tag_entities(&lib.db(), "alice").unwrap().remove(0);
+            let source_db = lib.root.join("source.sqlite");
+            let changed = AtomicBool::new(false);
+            let p = Providers::start_with(move |url, query| {
+                if url == "/wiki_pages.json"
+                    && test_provider::param(query, "search[title]") == "alice"
+                    && !changed.swap(true, Ordering::SeqCst)
+                {
+                    Connection::open(&source_db)
+                        .unwrap()
+                        .execute("UPDATE characters SET name_ja=? WHERE char_id='alice'", ["アリス改"])
+                        .unwrap();
+                }
+            });
+            let failure = lib.run(&p, Some(&alice), false).unwrap_err();
+            assert!(matches!(failure, Error::Invalid(s) if s == "名称来源已改变，请重试"));
+            assert_eq!(index_name(&lib.db(), &alice).as_deref(), Some("アリス"));
+            assert_ne!(lib.char("alice").source, "bangumi");
+
+            lib.run(&p, Some(&alice), false).unwrap();
+            assert_eq!(index_name(&lib.db(), &alice).as_deref(), Some("アリス改"));
         }
 
         #[test]
