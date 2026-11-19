@@ -145,9 +145,6 @@ fn entities(c: &Connection, ids: &str) -> Result<Vec<Entity>> {
     }
     Ok(rows)
 }
-fn fingerprint(c: &Connection, rows: &[Entity]) -> Result<String> {
-    fingerprint_with(c, rows, &indexed(c, rows)?, true)
-}
 /// `rows` 的 CCIP 键对应的索引名称（source.sqlite）：来源指纹中位于应用数据库之外的部分，在查询的写事务之前读取，
 /// 而不是在它的锁下读取（#275）。
 fn indexed(c: &Connection, rows: &[Entity]) -> Result<Value> {
@@ -161,6 +158,32 @@ fn indexed(c: &Connection, rows: &[Entity]) -> Result<Value> {
 }
 fn index_keys(rows: &[Entity]) -> BTreeSet<&str> {
     rows.iter().filter_map(|r| r.keys.get("ccip").map(String::as_str)).collect()
+}
+/// 源库在写锁外读取。写入索引名之前，在应用库事务内复核每个身份的来源，并按身份写入。
+fn seed_index_names(c: &mut Connection, rows: &[Entity], index: &Value) -> Result<bool> {
+    let indexed: HashMap<_, _> =
+        index.as_array().into_iter().flatten().filter_map(|row| Some((row[0].as_str()?, row))).collect();
+    let seeds: HashMap<_, _> =
+        rows.iter().filter_map(|r| Some((r.id.as_str(), (r, indexed.get(r.keys.get("ccip")?.as_str())?)))).collect();
+    if seeds.is_empty() {
+        return Ok(false);
+    }
+    let ids = dump(&json!(seeds.keys().collect::<Vec<_>>()));
+    crate::names_commands::seed_checked(c, |tx| {
+        let mut valid = Vec::with_capacity(seeds.len());
+        for r in entities(tx, &ids)? {
+            let (before, names) = seeds[r.id.as_str()];
+            if r.tag == before.tag
+                && r.work == before.work
+                && r.parent == before.parent
+                && r.variant == before.variant
+                && r.keys.get("ccip") == before.keys.get("ccip")
+            {
+                valid.push((r.id, json!({"zh":names[1],"ja":names[2],"en":names[3]})));
+            }
+        }
+        Ok(valid)
+    })
 }
 fn fingerprint_with(c: &Connection, rows: &[Entity], indexed: &Value, full: bool) -> Result<String> {
     let mut values = vec![];
@@ -539,7 +562,8 @@ fn keep(first: &mut Option<Error>, e: Error) {
 fn run(source: &mut Source, entity: Option<&str>, state: &Mutex<Value>) -> Result<()> {
     let mut c = net::db(&source.path)?;
     let rows = scope(&c, entity)?;
-    let fp = fingerprint(&c, &rows)?;
+    let index = indexed(&c, &rows)?;
+    let fp = fingerprint_with(&c, &rows, &index, true)?;
     let done: BTreeSet<String> = if entity.is_some() {
         Default::default()
     } else {
@@ -588,12 +612,6 @@ fn run(source: &mut Source, entity: Option<&str>, state: &Mutex<Value>) -> Resul
             }
         } else {
             jobs.insert(("character", r.tag.clone(), r.work.clone()));
-            if let Some(key) = r.keys.get("ccip") {
-                // 图库包的 source 里已有导入的索引；不扫描外部索引。
-                let src = source.path.with_file_name("source.sqlite");
-                let src = crate::app_library::read_connection(&src)?;
-                if let Some(names)=src.query_row("SELECT name_zh,name_ja,name_en FROM characters WHERE char_id=?",[key],|r|Ok(json!({"zh":r.get::<_,Option<String>>(0)?,"ja":r.get::<_,Option<String>>(1)?,"en":r.get::<_,Option<String>>(2)?}))).optional()?{seed.push(json!({"op":"seed_index","entity":r.id,"key":r.tag,"names":names}));}
-            }
         }
     }
     // 作品先完成，角色再使用它们的语言证据。
@@ -607,6 +625,8 @@ fn run(source: &mut Source, entity: Option<&str>, state: &Mutex<Value>) -> Resul
     if !jobs.is_empty() {
         net::check(&source.cancel)?;
         command(&mut c, seed)?;
+        let characters: Vec<_> = rows.iter().filter(|r| r.parent.is_none()).cloned().collect();
+        seed_index_names(&mut c, &characters, &index)?;
     }
 
     let mut first_error = None;
@@ -2331,6 +2351,45 @@ mod sources_tests {
     #[cfg(test)]
     mod tests {
         use super::*;
+
+        #[test]
+        fn index_names_are_not_written_after_tag_is_rebound() {
+            let lib = Library::load();
+            let mut c = lib.db();
+            let alice = crate::names_commands::tag_entities(&c, "alice").unwrap().remove(0);
+            let bob = crate::names_commands::tag_entities(&c, "bob").unwrap().remove(0);
+            let before = scope(&c, Some(&alice)).unwrap();
+            let index = indexed(&c, &before).unwrap();
+            assert!(index.as_array().unwrap().iter().any(|r| r[0] == "alice" && r[2] == "アリス"));
+
+            let tx = c.transaction_with_behavior(rusqlite::TransactionBehavior::Immediate).unwrap();
+            crate::schema::begin_writing(&tx).unwrap();
+            for (entity, tag) in [(&alice, "synthetic_new_alice"), (&bob, "alice")] {
+                crate::character_commands::command(&tx, &json!({"op":"set_profile","entity":entity,"tag":tag}))
+                    .unwrap();
+            }
+            crate::schema::commit_writing(tx).unwrap();
+            assert_eq!(crate::names_commands::tag_entities(&c, "alice").unwrap(), std::slice::from_ref(&bob));
+
+            assert!(!seed_index_names(&mut c, &before, &index).unwrap());
+            let index_name = |c: &Connection, id: &str| {
+                c.query_row(
+                    "SELECT n.value FROM term_names n JOIN terms t ON t.id=n.term_id
+                     WHERE t.key=? AND n.source='index' AND n.role='display' AND n.lang='ja'",
+                    [id],
+                    |r| r.get::<_, String>(0),
+                )
+                .optional()
+                .unwrap()
+            };
+            assert_eq!(index_name(&c, &alice), None);
+            assert_eq!(index_name(&c, &bob), None);
+
+            let current = scope(&c, Some(&alice)).unwrap();
+            assert!(seed_index_names(&mut c, &current, &index).unwrap());
+            assert_eq!(index_name(&c, &alice).as_deref(), Some("アリス"));
+            assert_eq!(index_name(&c, &bob), None);
+        }
 
         #[test]
         fn recognition_links_and_memberships_do_not_invalidate_a_character_lookup() {
