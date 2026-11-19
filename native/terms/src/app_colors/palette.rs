@@ -105,7 +105,13 @@ pub(super) fn rank(rgb: [u8; 3]) -> i64 {
     let bucket = if span <= 12 {
         6
     } else {
-        let offset = if high == r { g - b } else if high == g { b - r + 2 * span } else { r - g + 4 * span };
+        let offset = if high == r {
+            g - b
+        } else if high == g {
+            b - r + 2 * span
+        } else {
+            r - g + 4 * span
+        };
         (2 * offset + span).div_euclid(2 * span).rem_euclid(6)
     };
     bucket * 511 + high + low
@@ -119,7 +125,13 @@ mod tests {
     #[test]
     fn chooses_a_dominant_color_and_reports_area_shares() {
         let image = RgbImage::from_fn(24, 24, |x, _| {
-            Rgb(if x < 11 { [242, 242, 240] } else if x < 20 { [204, 0, 40] } else { [0, 180, 0] })
+            Rgb(if x < 11 {
+                [242, 242, 240]
+            } else if x < 20 {
+                [204, 0, 40]
+            } else {
+                [0, 180, 0]
+            })
         });
         let colors = extract(&image);
         assert_eq!(colors[0], Swatch { rgb: [204, 0, 40], share: 9.0 / 24.0 });
@@ -131,8 +143,9 @@ mod tests {
     fn keeps_grayscale_and_sorts_by_hue_then_lightness() {
         let image = RgbImage::from_fn(24, 24, |x, _| Rgb(if x < 16 { [80; 3] } else { [240; 3] }));
         assert_eq!(extract(&image)[0].rgb, [80; 3]);
-        let ranks = [[128, 0, 12], [255, 0, 5], [255, 255, 0], [0, 255, 0], [0, 255, 255], [0, 0, 255], [255, 0, 255], [0; 3]]
-            .map(rank);
+        let ranks =
+            [[128, 0, 12], [255, 0, 5], [255, 255, 0], [0, 255, 0], [0, 255, 255], [0, 0, 255], [255, 0, 255], [0; 3]]
+                .map(rank);
         assert!(ranks.windows(2).all(|pair| pair[0] < pair[1]));
         assert_eq!(extract(&RgbImage::new(0, 0)), []);
     }
