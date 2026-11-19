@@ -647,7 +647,7 @@ pub fn read(context: &LibraryContext, url: &str) -> Result<Option<(Json, u16)>> 
         let result = read_library(&tx, context, path, &q, audit_n);
         return match result {
             Ok(mut payload) => {
-                crate::app_colors::decorate_response(&tx, context, path, &q, &mut payload)?;
+                crate::app_colors::decorate_response(&tx, context, path, &q, &mut payload);
                 tx.commit()?;
                 Ok(Some((payload, 200)))
             }
@@ -675,7 +675,7 @@ pub fn read(context: &LibraryContext, url: &str) -> Result<Option<(Json, u16)>> 
     };
     match result {
         Ok((mut body, status)) => {
-            crate::app_colors::decorate_response(&tx, context, path, &q, &mut body)?;
+            crate::app_colors::decorate_response(&tx, context, path, &q, &mut body);
             tx.commit()?;
             Ok(Some((body, status)))
         }

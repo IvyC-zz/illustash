@@ -300,10 +300,10 @@ pub(crate) fn decorate_response(
     route: &str,
     q: &HashMap<String, String>,
     body: &mut Json,
-) -> Result<()> {
+) {
     let mark = requested(q);
     if !mark && route != "/api/calendar" {
-        return Ok(());
+        return;
     }
     let mut groups = Vec::new();
     let mut image_rows: Vec<&mut Json> = Vec::new();
@@ -340,7 +340,7 @@ pub(crate) fn decorate_response(
             }
             "uuid"
         }
-        _ => return Ok(()),
+        _ => return,
     };
     let samples = if route == "/api/calendar" { "samples" } else { "items" };
     let mut ids: Vec<String> = image_rows.iter().map(|row| asset_id(row, id_key).to_owned()).collect();
@@ -371,5 +371,4 @@ pub(crate) fn decorate_response(
             day.set("color", color);
         }
     }
-    Ok(())
 }

@@ -227,7 +227,7 @@
 
  "native/terms/src/app_characters.rs":"6c9e9e080970dce30092747ebcf6bdcaee7d99a8463500888e5dab278f4a0cbd",
 
- "native/terms/src/app_colors.rs":"fe94db19301fa97a7ce9cba4f3f9e5fff52473a3068a2ee8facd31803702ca4b",
+ "native/terms/src/app_colors.rs":"a11f47702fae4818fb77114f868404b3180c2801da80ad9d447a62bd0d8d4cad",
 
  "native/terms/src/app_colors/palette.rs":"db2645476768766de99d58ee7fbb4ade268a75cbf2d0fb55cfe1dd65511e1412",
 
@@ -409,7 +409,7 @@
 
  "native/terms/src/http_local.rs":"ca8ecfa9bae02238143782e8064510e0b2820eeb76c94fcc1626409f7e34714e",
 
- "native/terms/src/http_read.rs":"d5e33b3cb4da288359d6b04f86afa4ed0d8c2d6a19c6fbb7e9d706034d4287a0",
+ "native/terms/src/http_read.rs":"7c427b8b1c191a6b6036e5dfd469ff19514c4bc1d8bee1051d5fddb85cd3c015",
 
  "native/terms/src/image_samples/mod.rs":"3322652e6cd2806e1c739a67ecca850060eb2d4d2c9fd49d74d1ade3bafbefd6",
 

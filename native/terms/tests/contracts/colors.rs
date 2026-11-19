@@ -72,8 +72,8 @@ fn image_colors_http_contract() {
     let binary = Path::new(env!("CARGO_BIN_EXE_illustash-terms"));
     let (_host, origin, token) = launch(&root, &package, category, false, binary);
     wait_for(|| color_count(&package) == assets.len());
-    let get = |url| get(&origin, &token, url);
-    let raw = |url| raw_get(&origin, &token, url);
+    let get = |url: &str| get(&origin, &token, url);
+    let raw = |url: &str| raw_get(&origin, &token, url);
 
     let (status, gallery, _) = request_json(
         &origin,
