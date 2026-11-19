@@ -240,7 +240,9 @@ impl Session {
     }
     /// 启动到期的后台检查（`delay` 让页面先加载）。
     pub(crate) fn start_checks(&mut self, delay: std::time::Duration) {
-        self.colors.start(&self.library);
+        if !self.halted {
+            self.colors.start(&self.library);
+        }
         if let Err(error) = self.human_backups.start(&self.library, self.generation, &self.token) {
             eprintln!("人工备份未能启动：{error}");
         }

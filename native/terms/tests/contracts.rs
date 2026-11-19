@@ -28,6 +28,8 @@ mod entry;
 #[path = "common/wait.rs"]
 mod wait;
 
+#[path = "contracts/colors.rs"]
+mod colors;
 #[path = "contracts/library_50k.rs"]
 mod library_50k;
 #[path = "contracts/library_scale.rs"]

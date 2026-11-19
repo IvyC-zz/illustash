@@ -440,7 +440,7 @@ pub(crate) fn selection(
     let like = crate::http_example_search::Search::parse(f)?;
     let order = f.get("order").map(String::as_str).unwrap_or(if like.is_some() { "similar" } else { "newest" });
     let ordering = if order == "color" {
-        crate::app_colors::ordering(c, context)?
+        crate::app_colors::ordering(c, context)
     } else if like.is_some() {
         match order {
             "similar" => "(SELECT rank FROM temp.like_rank WHERE uuid=a.uuid)".into(),

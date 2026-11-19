@@ -227,7 +227,7 @@
 
  "native/terms/src/app_characters.rs":"6c9e9e080970dce30092747ebcf6bdcaee7d99a8463500888e5dab278f4a0cbd",
 
- "native/terms/src/app_colors.rs":"4451cce4403365a0cc132ce0b254557753ddc79d592c19765fcf61d994fb48b2",
+ "native/terms/src/app_colors.rs":"93286a38afeda3e5b29023b58799beea05aae3c2e345fe59df717a18431c8bbe",
 
  "native/terms/src/app_colors/palette.rs":"db2645476768766de99d58ee7fbb4ade268a75cbf2d0fb55cfe1dd65511e1412",
 
@@ -341,7 +341,7 @@
 
  "native/terms/src/app_resources.rs":"d691ec21499b906972a02d49a21790f2a301c34eb4dea0bd9c301675dd9e2c0a",
 
- "native/terms/src/app_service.rs":"063ecdf7a3719573b5035279a006001589f1a81a3b6b7f48268b776cda60e0ea",
+ "native/terms/src/app_service.rs":"6194963920bf6e7abea64cb945689c6089d52129f08539f45bba95353b88fb33",
 
  "native/terms/src/app_settings.rs":"20f5eb9c25a3a14920b85b48e75186564c5e01f6129cca02b06b2f63d60b2c41",
 
@@ -395,7 +395,7 @@
 
  "native/terms/src/http_artists.rs":"2fec7a75db8c4448c9d442d256d5dc52ab19eab1c19be4f54a6b71ad94092577",
 
- "native/terms/src/http_browse.rs":"dd19ba7af65a4eea870c31f3da2797aa52f83cf240fbf3052b284e31782f5fdd",
+ "native/terms/src/http_browse.rs":"6691ad577d1c6ecd8f1df5335676c2ce21568935ea0eefd6b7b4d47bde98e4f7",
 
  "native/terms/src/http_characters.rs":"03e4c82c04a2708b576a26a6c8dbbd49834f7bf4126240f06e17da4827478f9e",
 
