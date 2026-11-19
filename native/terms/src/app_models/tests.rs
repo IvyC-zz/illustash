@@ -37,6 +37,11 @@ struct Server {
     hits: Hits,
 }
 fn serve(routes: Vec<(&str, Vec<u8>, Mode)>) -> Server {
+    serve_observed(routes, || {})
+}
+
+fn serve_observed(routes: Vec<(&str, Vec<u8>, Mode)>, observe: impl Fn() + Send + Sync + 'static) -> Server {
+    let observe = Arc::new(observe);
     let listener = TcpListener::bind("127.0.0.1:0").unwrap();
     let base = format!("http://{}", listener.local_addr().unwrap());
     let routes: Arc<HashMap<String, Route>> = Arc::new(
@@ -50,7 +55,7 @@ fn serve(routes: Vec<(&str, Vec<u8>, Mode)>) -> Server {
     std::thread::spawn(move || {
         for stream in listener.incoming() {
             let Ok(mut stream) = stream else { continue };
-            let (routes, seen) = (routes.clone(), seen.clone());
+            let (routes, seen, observe) = (routes.clone(), seen.clone(), observe.clone());
             std::thread::spawn(move || {
                 let mut reader = BufReader::new(stream.try_clone().unwrap());
                 let mut first = String::new();
@@ -69,6 +74,7 @@ fn serve(routes: Vec<(&str, Vec<u8>, Mode)>) -> Server {
                     }
                 }
                 seen.lock().unwrap().push((path.clone(), range.clone()));
+                observe();
                 let Some(route) = routes.get(&path) else {
                     let _ =
                         stream.write_all(b"HTTP/1.1 404 Not Found\r\nContent-Length: 0\r\nConnection: close\r\n\r\n");
@@ -434,6 +440,40 @@ fn a_failed_source_hands_over_and_a_dropped_connection_resumes() {
     assert!(!hits.iter().any(|(p, _)| p.starts_with("/ms/") && !p.ends_with("big.onnx")));
     let info = post(models, &place, json!({"action": "download"})).unwrap_err();
     assert!(info.to_string().contains("已经就位"));
+}
+
+#[test]
+fn retry_keeps_the_downloaded_progress_while_hashing_the_partial_file() {
+    let fixture = Fixture::new();
+    let data = bytes(320_000, 3);
+    let models = models();
+    let base = 19;
+    *models.job.lock().unwrap() = Some(json!({"done": base, "speed": 0}));
+    let (send, receive) = std::sync::mpsc::channel();
+    let server = serve_observed(vec![("/release/pack.bin", data.clone(), Mode::DropOnce(120_000))], move || {
+        send.send(models.snapshot()).unwrap();
+    });
+    let place = project_place(&fixture, &server, &data);
+    let entry = &place.manifest.files[0];
+    let partial = partial_dir(&place.root);
+    let address = format!("{}/release/pack.bin", server.base);
+    let agent = agent(None);
+    let mut meter = Meter::new(models, base);
+    meter.shown -= Duration::from_secs(1);
+    assert!(matches!(fetch(&agent, &address, &partial, entry, &mut meter), Err(Failure::Retry(_))));
+    let at_start = receive.recv_timeout(crate::test_wait::limit()).unwrap();
+    let disconnected = models.snapshot();
+    // 不等墙钟走过刷新间隔；旧版重算断点时的 tick(0) 在这里会真的写出回退后的进度。
+    meter.shown -= Duration::from_secs(1);
+    assert!(fetch(&agent, &address, &partial, entry, &mut meter).is_ok());
+    let after_hash = receive.recv_timeout(crate::test_wait::limit()).unwrap();
+    meter.finish(entry.size);
+    let done = [at_start, disconnected, after_hash.clone(), models.snapshot()].map(|job| job["done"].as_u64().unwrap());
+    assert_eq!(done, [base, base + 120_000, base + 120_000, base + entry.size]);
+    assert!(done.windows(2).all(|pair| pair[0] <= pair[1]));
+    assert_eq!(after_hash["speed"], 0);
+    assert_eq!(server.hits.lock().unwrap()[1].1.as_deref(), Some("bytes=120000-"));
+    assert_eq!(fs::read(partial.join(&entry.path)).unwrap(), data);
 }
 
 /// 只有一个来源的文件（像角色资料包那样直接从项目 Release 下载），测同一来源上的重试（#642）。
