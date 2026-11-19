@@ -27,8 +27,7 @@ fn calendar_and_home_filter_http_contract() {
          ('undated','keep-undated.png',80,120,NULL);
          INSERT INTO duplicates VALUES
           ('a','g',2,0,'2024-02-29',1,0),('copy','g',2,1,'2024-02-29',0,1);
-         INSERT INTO excluded VALUES ('excluded','manual','test');
-         INSERT INTO asset_tags(uuid,tag,origin) VALUES ('d','skip','test');",
+         INSERT INTO excluded VALUES ('excluded','manual','test');",
     )
     .unwrap();
     for (id, image) in [("present", "a"), ("filtered", "d")] {
@@ -79,6 +78,8 @@ fn calendar_and_home_filter_http_contract() {
         get("/api/assets?nsfw=only&day=2024-02-29")["items"]
     );
 
+    let (status, _, _) = request_json(&origin, "/api/tag", Some(&json!({"ids":["d"],"tag":"skip"})), &token);
+    assert_eq!(status, 200);
     let (status, _, _) = request_json(&origin, "/api/favorite", Some(&json!({"ids":["a","d","jan"]})), &token);
     assert_eq!(status, 200);
     let filters = "has=%5B%22fav%22%5D&not=%5B%22utag%3Askip%22%5D&q=keep&from=2024-02-01&to=2024-02-29&marks=fav";
