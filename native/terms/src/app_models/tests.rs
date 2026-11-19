@@ -653,6 +653,39 @@ fn imported_files_and_zip_entries_are_matched_by_hash_whatever_their_names() {
 }
 
 #[test]
+fn an_equal_size_import_creates_only_the_matched_versions_nested_directory() {
+    let fixture = Fixture::new();
+    let server = server(vec![]);
+    let candidate = |version: &str, path: &str, data: &[u8]| {
+        let mut place = fixture.place(&server);
+        let mut manifest = (*place.manifest).clone();
+        manifest.pack = version.into();
+        manifest.files = vec![Entry {
+            path: path.into(),
+            size: data.len() as u64,
+            sha256: sha(data),
+            source: Source::Project { url: format!("{}/{version}", server.base) },
+            optional: false,
+        }];
+        place.manifest = Box::leak(Box::new(manifest));
+        place.root = fixture.dir.join(version);
+        place
+    };
+    let places = [candidate("old", "unused/old.onnx", b"old"), candidate("new", "nested/v2/new.onnx", b"new")];
+    let chosen = fixture.dir.join("renamed.onnx");
+    fs::write(&chosen, b"new").unwrap();
+    let models = models();
+    let candidates = places.clone();
+    models.start("import", 3, move |models| import_into(models, &candidates, &[chosen], &[])).unwrap();
+    let job = finished(models);
+    assert_eq!(job["status"], "done", "{job}");
+    assert_eq!(job["results"], json!([{"name": "renamed.onnx", "result": "accepted", "path": "nested/v2/new.onnx"}]));
+    assert_eq!(fs::read(places[1].root.join("nested/v2/new.onnx")).unwrap(), b"new");
+    assert!(!places[0].root.exists());
+    assert!(places.iter().all(|place| !partial_dir(&place.root).exists()));
+}
+
+#[test]
 fn reference_package_uses_the_whole_zip_for_download_and_import_verification() {
     let fixture = Fixture::new();
     let mut zip = zip::ZipWriter::new(std::io::Cursor::new(Vec::new()));

@@ -921,7 +921,9 @@ fn import_into(
                         if already(i, entry) {
                             return Ok(("already", Some(&entry.path)));
                         }
-                        fs::rename(&temporary, partials[i].join(&entry.path))?;
+                        let destination = partials[i].join(&entry.path);
+                        fs::create_dir_all(destination.parent().expect("model file has a parent"))?;
+                        fs::rename(&temporary, destination)?;
                         Ok(("accepted", Some(&entry.path)))
                     })();
                     let _ = fs::remove_file(temporary);
