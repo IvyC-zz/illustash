@@ -3,10 +3,10 @@ import argparse
 from collections import Counter, defaultdict
 import csv
 from pathlib import Path
-import sys
 
 import numpy as np
 
+from frozen import baseline_entries, canonical, matrix_file, native_scan, reference_stats
 from sample import load, save
 
 
@@ -124,7 +124,7 @@ def shared_reference_ids(anchors, references, data, crop):
     return shared
 
 
-def fit_panel(model, kind, refs, data, reference_stats):
+def fit_panel(model, kind, refs, data):
     vectors = []
     thresholds = []
     for ids in refs.values():
@@ -135,10 +135,10 @@ def fit_panel(model, kind, refs, data, reference_stats):
     return np.stack(vectors), np.asarray(thresholds)
 
 
-def panel_predictions(rows, model, crop, refs, data, reference_stats):
+def panel_predictions(rows, model, crop, refs, data):
     # 只比较本组共有的长尾角色。不能用旧模型的向量或阈值给新模型打分。
     names = np.array(list(refs))
-    panels = {kind: fit_panel(model, kind, refs, data, reference_stats) for kind in ('whole', crop)}
+    panels = {kind: fit_panel(model, kind, refs, data) for kind in ('whole', crop)}
 
     def selected(i, kind, layer):
         if kind not in panels:
@@ -159,7 +159,7 @@ def panel_predictions(rows, model, crop, refs, data, reference_stats):
     return {key: predictions[key] for key in keys}
 
 
-def published_predictions(args, rows, data, aliases, baseline_entries, matrix_file, native_scan, canonical):
+def published_predictions(args, rows, data, aliases):
     with np.load(args.index / 'index.npz', allow_pickle=False) as packed:
         entries = baseline_entries(load(args.index / 'loaded-characters.json'), packed)
         base = packed['anchors']
@@ -201,7 +201,6 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('directory', type=Path)
     parser.add_argument('--features', type=Path, required=True)
-    parser.add_argument('--legacy', type=Path, required=True, help='#534 的 experiments/issue_534 目录，旁边是 issue_380')
     parser.add_argument('--native', type=Path, required=True, help='#534 生产锚点扫描驱动')
     parser.add_argument('--aliases', type=Path, required=True)
     parser.add_argument('--index', type=Path, required=True)
@@ -209,11 +208,6 @@ def main():
     parser.add_argument('--output', type=Path, required=True)
     parser.add_argument('--allow-partial', action='store_true', help='仅用于验证未完成的提取流水线')
     args = parser.parse_args()
-    sys.path.insert(0, str(args.legacy.resolve()))
-    from evaluate import baseline_entries, matrix_file, native_scan
-    from index import reference_stats
-    from coverage import canonical
-
     sample = load(args.directory / 'sample.json')
     references = [r for r in sample if r['cohort'] == 'reference']
     rows = [r for r in sample if r['cohort'] != 'reference']
@@ -228,8 +222,7 @@ def main():
     if not rows:
         raise ValueError('没有可评分的评测图')
     aliases = load(args.aliases)
-    predictions, receipt, all_roles = published_predictions(
-        args, rows, data, aliases, baseline_entries, matrix_file, native_scan, canonical)
+    predictions, receipt, all_roles = published_predictions(args, rows, data, aliases)
     result = {'native': receipt, 'available': len(data), 'evaluation': len(rows), 'shared_panels': {}}
     tail = set(anchors)
     for name, roster in [('published_all', all_roles), ('published_longtail', set(anchors))]:
@@ -245,7 +238,7 @@ def main():
         baseline = None
         for model in MODELS:
             if training:
-                preds = panel_predictions(rows, model, crop, training, data, reference_stats)
+                preds = panel_predictions(rows, model, crop, training, data)
                 if model == 'current':
                     baseline = preds['whole']
                 panel[model] = {k: measure(rows, receipts, p, set(training), baseline) for k, p in preds.items()}
