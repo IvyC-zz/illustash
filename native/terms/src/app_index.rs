@@ -12,6 +12,7 @@ use crate::{
 };
 use rusqlite::{params, Connection, OptionalExtension};
 use serde_json::{json, Value};
+use sha2::{Digest, Sha256};
 use std::{
     collections::BTreeSet,
     io::Read,
@@ -68,13 +69,24 @@ fn meta(p: &Path, id: &str) -> Value {
         Value::Null
     }
 }
-fn feature_digest(c: &Connection) -> Result<String> {
-    use sha2::{Digest, Sha256};
+const FINGERPRINT_ROWS: [&str; 4] = [
+    "SELECT * FROM characters ORDER BY char_id",
+    "SELECT * FROM character_aliases ORDER BY char_id,alias",
+    "SELECT * FROM labels WHERE dim IN ('char_ext','character','general') ORDER BY uuid,dim,value",
+    "SELECT uuid FROM assets ORDER BY uuid",
+];
+
+fn feature_digest(c: &Connection, progress: &mut impl FnMut() -> Result<()>) -> Result<String> {
     let mut digest = Sha256::new();
     if c.query_row("SELECT EXISTS(SELECT 1 FROM sqlite_master WHERE name='embeddings')", [], |r| r.get::<_, bool>(0))? {
         let mut q = c.prepare("SELECT uuid,vec FROM embeddings WHERE model='ccip' ORDER BY uuid")?;
         let mut rows = q.query([])?;
+        let mut count = 0;
         while let Some(r) = rows.next()? {
+            if count % 4096 == 0 {
+                progress()?;
+            }
+            count += 1;
             let uuid: String = r.get(0)?;
             digest.update(uuid.as_bytes());
             digest.update(r.get_ref(1)?.as_blob().map_err(|_| Error::Invalid("CCIP 特征不是二进制".into()))?);
@@ -82,21 +94,56 @@ fn feature_digest(c: &Connection) -> Result<String> {
     }
     Ok(format!("{:x}", digest.finalize()))
 }
-fn fingerprint(c: &Connection) -> Result<String> {
-    Ok(crate::strict_json::sha256_hex(
-        serde_json::to_string(&json!([
-            crate::app_migrate_data::rows(c, "SELECT * FROM characters ORDER BY char_id")?,
-            crate::app_migrate_data::rows(c, "SELECT * FROM character_aliases ORDER BY char_id,alias")?,
-            crate::app_migrate_data::rows(
-                c,
-                "SELECT * FROM labels WHERE dim IN ('char_ext','character','general') ORDER BY uuid,dim,value"
-            )?,
-            crate::app_migrate_data::rows(c, "SELECT uuid FROM assets ORDER BY uuid")?,
-            feature_digest(c)?
-        ]))
-        .map_err(|e| Error::Invalid(e.to_string()))?
-        .as_bytes(),
-    ))
+
+/// 保留旧日志的指纹字节和标签排序，每次只在 Rust 中保存一行。
+fn fingerprint_rows(c: &Connection, mut progress: impl FnMut() -> Result<()>) -> Result<String> {
+    let mut digest = Sha256::new();
+    let mut encoded = Vec::new();
+    digest.update(b"[");
+    for sql in FINGERPRINT_ROWS {
+        progress()?;
+        digest.update(b"[");
+        let mut q = c.prepare_cached(sql)?;
+        let cols = q.column_count();
+        let mut rows = q.query([])?;
+        let mut values = Vec::with_capacity(cols);
+        let mut count = 0;
+        while let Some(row) = rows.next()? {
+            if count > 0 {
+                digest.update(b",");
+            }
+            if count % 4096 == 0 {
+                progress()?;
+            }
+            count += 1;
+            for i in 0..cols {
+                values.push(crate::source_rows::cell(row.get_ref(i)?)?);
+            }
+            serde_json::to_writer(&mut encoded, &values).map_err(|e| Error::invalid(e.to_string()))?;
+            digest.update(&encoded);
+            values.clear();
+            encoded.clear();
+        }
+        digest.update(b"],");
+    }
+    let feature = feature_digest(c, &mut progress)?;
+    serde_json::to_writer(&mut digest, &feature).map_err(|e| Error::invalid(e.to_string()))?;
+    digest.update(b"]");
+    Ok(format!("{:x}", digest.finalize()))
+}
+
+fn fingerprint(c: &Connection, ctx: &TaskContext) -> Result<String> {
+    // SQLite 在第一行出来前可能要排序。进度回调让取消在这段期间也能中断查询。
+    let stop = ctx.clone();
+    c.progress_handler(16_384, Some(move || stop.check().is_err()))?;
+    let result = fingerprint_rows(c, || {
+        ctx.check()?;
+        ctx.progressed();
+        Ok(())
+    });
+    c.progress_handler(0, None::<fn() -> bool>)?;
+    ctx.check()?;
+    result
 }
 // 关注列表存的是作品 ID（docs/DATA_MODEL.md），它们只在所属的图库里存在，
 // 所以每个图库在自己的 prefs 里保存自己的列表和阈值（#205）。没有列表的图库从旧版本共用的 `watch.json` 开始：
@@ -1165,7 +1212,7 @@ fn snapshot_library(lib: &Library, folder: &Path, ctx: &TaskContext) -> Result<S
     }
     let snapshot = crate::app_library::read_connection(&folder.join("pi.db"))?;
     crate::app_recognition::require_published_inputs(&crate::app_library::read_connection(&lib.db())?, &snapshot)?;
-    fingerprint(&snapshot)
+    fingerprint(&snapshot, ctx)
 }
 /// 为每个新角色下载最多二十张 Danbooru 参考图，除非它的索引已经打过补丁。写下了图片列表的角色就算完成；
 /// 同一任务后来的运行会跳过它，并复用停下时那个角色的图片（#287）。还要下载的角色需要联网、
@@ -1482,7 +1529,7 @@ fn commit_source(
         let _ = std::fs::remove_dir_all(&folder);
         invalid(message)
     };
-    if fingerprint(src)? != job.before {
+    if fingerprint(src, ctx)? != job.before {
         return changed_inputs("索引计算输入已改变，请重试检查");
     };
     let result = job
@@ -1501,7 +1548,7 @@ fn commit_source(
         }
     }
     let tx = src.transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)?;
-    if fingerprint(&tx)? != job.before {
+    if fingerprint(&tx, ctx)? != job.before {
         return changed_inputs("索引计算输入已改变");
     };
     crate::app_recognition::require_published_inputs(&crate::app_library::read_connection(&lib.db())?, &tx)?;
@@ -1906,7 +1953,7 @@ fn backup_db(src: &Connection, path: &Path, ctx: &TaskContext) -> Result<()> {
         ctx.check()?;
         match copy.step(256)? {
             StepResult::Done => return Ok(()),
-            StepResult::More => {}
+            StepResult::More => ctx.progressed(),
             _ if Instant::now() >= end => return invalid("索引备份超时"),
             _ => std::thread::sleep(Duration::from_millis(10)),
         }
@@ -2018,6 +2065,32 @@ mod tests {
     }
 
     #[test]
+    fn streamed_fingerprint_preserves_existing_index_job_digest() {
+        let c = Connection::open_in_memory().unwrap();
+        c.execute_batch(
+            "CREATE TABLE characters(char_id TEXT, note TEXT);
+             CREATE TABLE character_aliases(char_id TEXT, alias TEXT);
+             CREATE TABLE labels(uuid TEXT, dim TEXT, value TEXT, conf REAL, source TEXT);
+             CREATE INDEX idx_labels_dim_val ON labels(dim,value);
+             CREATE TABLE assets(uuid TEXT);
+             CREATE TABLE embeddings(uuid TEXT, model TEXT, vec BLOB);
+             INSERT INTO characters VALUES ('two','引号\"'), ('one',NULL);
+             INSERT INTO character_aliases VALUES ('two','é'), ('two','\n');
+             INSERT INTO labels VALUES ('a','general','applicable',0.0000000123,'wd'),
+                 ('a','general','applicable',0.25,'legacy'), ('b','char_ext','x',1,'index'),
+                 ('a','rating','excluded',1,'wd'), ('a','character','t',NULL,'wd');
+             INSERT INTO assets VALUES ('b'), ('a');
+             INSERT INTO embeddings VALUES ('a','wd',X'01'), ('a','ccip',X'04030201');",
+        )
+        .unwrap();
+        let mut fields: Vec<Value> =
+            FINGERPRINT_ROWS.iter().map(|sql| json!(crate::app_migrate_data::rows(&c, sql).unwrap())).collect();
+        fields.push(json!(crate::strict_json::sha256_hex(b"a\x04\x03\x02\x01")));
+        let old = crate::strict_json::sha256_hex(serde_json::to_string(&fields).unwrap().as_bytes());
+        assert_eq!(fingerprint_rows(&c, || Ok(())).unwrap(), old);
+    }
+
+    #[test]
     fn recognition_publication_gates_index_snapshot_source_commit_and_replay() {
         let root = std::env::temp_dir().join(format!("illustash-index-pending-{}", crate::store::new_key().unwrap()));
         let images = root.join("images");
@@ -2064,7 +2137,7 @@ mod tests {
             write(&journal, &protocol::value(&job)?)?;
             // 快照之后才出现 pending，且索引指纹本身未变：源提交门禁仍必须拒绝。
             src.execute("INSERT INTO recognition_assets VALUES ('a','fingerprint','receipt')", [])?;
-            assert_eq!(fingerprint(&src)?, before);
+            assert_eq!(fingerprint(&src, &ctx)?, before);
             assert!(commit_source(&lib, &shared, &dir, &journal, &mut job, &ctx, &mut src)
                 .unwrap_err()
                 .to_string()
