@@ -1910,7 +1910,7 @@ dependencies = [
 
 [[package]]
 name = "illustash-core"
-version = "0.3.0"
+version = "0.3.1"
 dependencies = [
  "getrandom 0.3.4",
  "regex",
@@ -1923,7 +1923,7 @@ dependencies = [
 
 [[package]]
 name = "illustash-desktop"
-version = "0.3.0"
+version = "0.3.1"
 dependencies = [
  "block2",
  "getrandom 0.3.4",
@@ -1947,7 +1947,7 @@ dependencies = [
 
 [[package]]
 name = "illustash-platform"
-version = "0.3.0"
+version = "0.3.1"
 dependencies = [
  "chrono",
  "illustash-core",
@@ -1961,14 +1961,14 @@ dependencies = [
 
 [[package]]
 name = "illustash-relation-fft"
-version = "0.3.0"
+version = "0.3.1"
 dependencies = [
  "cc",
 ]
 
 [[package]]
 name = "illustash-terms"
-version = "0.3.0"
+version = "0.3.1"
 dependencies = [
  "base64 0.22.1",
  "chrono",
