@@ -334,12 +334,13 @@ class NativeNamesTest(unittest.TestCase):
 
     def test_diagnostic_includes_names_committed_after_an_earlier_failure(self):
         # 禁用名称时先排好两个事件，重启后由同一轮恢复按顺序处理。
-        with sqlite3.connect(self.lib.db) as c:
+        learned = NAMES + " WHERE t.key=? AND n.source='danbooru' AND n.value='爱丽丝'"
+        with closing(sqlite3.connect(self.lib.db)) as c, c:
             c.execute("UPDATE backend_effects SET status='done' WHERE kind LIKE 'names:%'")
             failed = c.execute("INSERT INTO backend_effects(kind) VALUES ('names:malformed')").lastrowid
             request = 'names:' + json.dumps({'entity': self.alice, 'refresh': True})
             succeeded = c.execute("INSERT INTO backend_effects(kind) VALUES (?)", [request]).lastrowid
-            before = c.execute(NAMES + " WHERE n.value='爱丽丝'").fetchall()
+            before = c.execute(learned, [self.alice]).fetchall()
         self.assertEqual(before, [])
 
         state = self.enable_error()
@@ -349,7 +350,7 @@ class NativeNamesTest(unittest.TestCase):
         self.assertEqual(events[failed], ('pending', state['error']))
         self.assertEqual(events[succeeded], ('done', ''))
         with closing(sqlite3.connect(self.lib.db)) as c:
-            self.assertTrue(c.execute(NAMES + " WHERE n.value='爱丽丝'").fetchall())
+            self.assertTrue(c.execute(learned, [self.alice]).fetchall())
 
     def test_explicit_no_network_and_key_save_cannot_authorize(self):
         self.request('/api/names',{'action':'model_api','key':'synthetic-secret'})
