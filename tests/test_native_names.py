@@ -32,6 +32,7 @@ class TextService:
         self.calls = []
         self.entered, self.release = threading.Event(), threading.Event()
         self.block = False
+        self.block_tag = None
         self.hold_deadline = WAIT
         self.failure = None
         self.failures_left = 0
@@ -44,7 +45,8 @@ class TextService:
             def reply(self):
                 body = json.loads(self.rfile.read(int(self.headers['Content-Length']))) if 'Content-Length' in self.headers else None
                 outer.calls.append((self.path, body))
-                if outer.block:
+                tag = urllib.parse.parse_qs(urllib.parse.urlsplit(self.path).query).get('search[title]', [''])[0]
+                if outer.block or (outer.block_tag and outer.block_tag in tag):
                     outer.entered.set()
                     if not outer.release.wait(outer.hold_deadline): raise AssertionError('synthetic hold deadline')
                 if outer.failure or outer.failures_left:
@@ -304,7 +306,7 @@ class NativeNamesTest(unittest.TestCase):
 
     def test_query_source_changed_while_pending_rejects_old_name(self):
         self.enable();ident=self.alice
-        self.service.block=True
+        self.service.block_tag = "alice"
         refresh=self.request('/api/names',{'action':'refresh','entity':ident})
         self.assertEqual(refresh['status'],200,refresh['body'])
         self.assertTrue(self.service.entered.wait(WAIT))

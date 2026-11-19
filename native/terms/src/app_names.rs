@@ -9,9 +9,9 @@ use crate::{
 use rusqlite::{Connection, OptionalExtension};
 use serde_json::{json, Value};
 use std::{
-    collections::{BTreeMap, BTreeSet, HashMap},
+    collections::{BTreeMap, BTreeSet, HashMap, VecDeque},
     sync::{
-        atomic::{AtomicBool, Ordering},
+        atomic::{AtomicBool, AtomicI64, Ordering},
         Arc, Mutex,
     },
     time::{Duration, Instant},
@@ -69,9 +69,10 @@ struct Entity {
     variant: String,
     keys: BTreeMap<String, String>,
     tag: String,
+    images: i64,
 }
 fn scope(c: &Connection, entity: Option<&str>) -> Result<Vec<Entity>> {
-    let active: BTreeSet<String> = if let Some(id) = entity {
+    let active: BTreeMap<String, i64> = if let Some(id) = entity {
         let parent: Option<Option<String>> = c
             .query_row(
                 &format!(
@@ -84,23 +85,31 @@ fn scope(c: &Connection, entity: Option<&str>) -> Result<Vec<Entity>> {
             .optional()?;
         let root = parent.ok_or_else(|| Error::Invalid("角色不存在".into()))?.unwrap_or_else(|| id.into());
         c.prepare(&format!(
-            "SELECT id FROM {ENTITIES} WHERE id=?1 OR parent_id=?1",
+            "SELECT id, 0 FROM {ENTITIES} WHERE id=?1 OR parent_id=?1",
             ENTITIES = crate::character_entities::ENTITIES
         ))?
-        .query_map([&root], |r| r.get(0))?
+        .query_map([&root], |r| Ok((r.get(0)?, r.get(1)?)))?
         .collect::<rusqlite::Result<_>>()?
     } else {
         let sql = format!(
-            "SELECT entity FROM memberships
-             UNION SELECT entity FROM candidates
-             UNION SELECT parent_id
-             FROM {ENTITIES}
-             WHERE id IN (SELECT entity FROM memberships UNION SELECT entity FROM candidates) AND parent_id IS NOT NULL",
+            "WITH appearances(entity,uuid) AS (
+                SELECT entity,uuid FROM memberships UNION SELECT entity,uuid FROM candidates
+             ), families(entity,uuid) AS (
+                SELECT entity,uuid FROM appearances
+                UNION SELECT r.parent_id,a.uuid FROM appearances a JOIN {ENTITIES} r ON r.id=a.entity
+                WHERE r.parent_id IS NOT NULL
+             )
+             SELECT entity,count(*) FROM families GROUP BY entity",
             ENTITIES = crate::character_entities::ENTITIES
         );
-        c.prepare(&sql)?.query_map([], |r| r.get(0))?.collect::<rusqlite::Result<_>>()?
+        c.prepare(&sql)?.query_map([], |r| Ok((r.get(0)?, r.get(1)?)))?.collect::<rusqlite::Result<_>>()?
     };
-    entities(c, &dump(&json!(active)))
+    let ids = dump(&json!(active.keys().collect::<Vec<_>>()));
+    let mut rows = entities(c, &ids)?;
+    for r in &mut rows {
+        r.images = active[&r.id];
+    }
+    Ok(rows)
 }
 /// 按身份 ID 读取名称来源。查单项时不必扫描图库归属，也不在应用写锁内重读整库链接。
 fn entities(c: &Connection, ids: &str) -> Result<Vec<Entity>> {
@@ -122,6 +131,7 @@ fn entities(c: &Connection, ids: &str) -> Result<Vec<Entity>> {
                 variant: r.get::<_, Option<String>>(3)?.unwrap_or_default(),
                 keys: Default::default(),
                 tag: String::new(),
+                images: 0,
             })
         })?
         .collect::<rusqlite::Result<Vec<_>>>()?;
@@ -154,9 +164,18 @@ fn indexed(c: &Connection, rows: &[Entity]) -> Result<Value> {
     let Some(path) = c.path() else {
         return Ok(Value::Null);
     };
+    let keys = index_keys(rows);
+    if keys.is_empty() {
+        return Ok(json!([]));
+    }
     let src = crate::app_library::read_connection(&std::path::Path::new(path).with_file_name("source.sqlite"))?;
-    let ids = dump(&json!(index_keys(rows)));
-    let rows = crate::app_migrate_data::rows_with(&src,"SELECT char_id,name_zh,name_ja,name_en FROM characters WHERE char_id IN (SELECT value FROM json_each(?)) ORDER BY char_id",[ids]);
+    let ids = dump(&json!(keys));
+    let rows = crate::app_migrate_data::rows_with(
+        &src,
+        "SELECT char_id,name_zh,name_ja,name_en FROM characters
+         WHERE char_id IN (SELECT value FROM json_each(?)) ORDER BY char_id",
+        [ids],
+    );
     Ok(json!(rows.inspect_err(|e| eprintln!("名称获取读 source.sqlite 失败：{e:?}"))?))
 }
 fn index_keys(rows: &[Entity]) -> BTreeSet<&str> {
@@ -503,15 +522,58 @@ fn endpoint(base: &str) -> String {
 fn done_key(kind: &str, key: &str, work: &str) -> String {
     dump(&json!(["done", 1, kind, key, work]))
 }
-fn job_scope(rows: &[Entity], kind: &str, key: &str, work: &str) -> Vec<Entity> {
-    rows.iter()
-        .filter(|r| match kind {
-            "work" => r.work == key,
-            "character" => r.parent.is_none() && r.tag == key && r.work == work,
-            _ => r.variant == key,
-        })
-        .cloned()
-        .collect()
+#[derive(Clone, Debug, Eq, Ord, PartialEq, PartialOrd)]
+struct Job {
+    kind: &'static str,
+    key: String,
+    work: String,
+}
+impl Job {
+    fn new(kind: &'static str, key: &str, work: &str) -> Self {
+        Self { kind, key: key.to_owned(), work: work.to_owned() }
+    }
+    fn marker(&self) -> String {
+        done_key(self.kind, &self.key, &self.work)
+    }
+    fn character(&self) -> bool {
+        self.kind == "character"
+    }
+}
+/// 先按图片数排角色，角色需要的作品紧接着一起查。后续批次新出现的角色排在已知角色之前。
+fn jobs(rows: &[Entity], known: &mut BTreeSet<Job>, attempted: &BTreeSet<Job>) -> VecDeque<Job> {
+    let mut characters = BTreeMap::new();
+    let mut other = BTreeSet::new();
+    for r in rows {
+        if !r.work.is_empty() {
+            other.insert(Job::new("work", &r.work, ""));
+        }
+        if r.parent.is_none() {
+            let weight = characters.entry(Job::new("character", &r.tag, &r.work)).or_insert(0);
+            *weight = (*weight).max(r.images);
+        } else if !r.variant.is_empty() {
+            other.insert(Job::new("skin", &r.variant, ""));
+        }
+    }
+    let mut characters: Vec<_> = characters.into_iter().collect();
+    characters.sort_by(|(a, aw), (b, bw)| {
+        known.contains(a).cmp(&known.contains(b)).then_with(|| bw.cmp(aw)).then_with(|| a.cmp(b))
+    });
+    let mut jobs = VecDeque::new();
+    for (character, _) in characters {
+        known.insert(character.clone());
+        if attempted.contains(&character) {
+            continue;
+        }
+        if !character.work.is_empty() {
+            let work = Job::new("work", &character.work, "");
+            if other.remove(&work) && !attempted.contains(&work) {
+                jobs.push_back(work);
+            }
+        }
+        jobs.push_back(character);
+    }
+    jobs.extend(other.into_iter().filter(|job| !attempted.contains(job)));
+    jobs
 }
 /// 角色按实际的写入目标核对来源。归属和候选只负责排队，不决定某个文字键应该写给谁。
 fn character_job(c: &Connection, planned: &[Entity], key: &str, work: &str) -> Result<Vec<Entity>> {
@@ -526,6 +588,39 @@ fn character_job(c: &Connection, planned: &[Entity], key: &str, work: &str) -> R
     }
     Ok(current)
 }
+fn job_fingerprint(c: &Connection, job: &Job, rows: &[Entity], index: &Value) -> Result<String> {
+    let key = if job.character() { &job.work } else { &job.key };
+    let kind = if job.character() { "work" } else { job.kind };
+    let mut inputs = vec![json!(crate::app_migrate_data::rows_with(
+        c,
+        "SELECT lang,source,value FROM term_key_names WHERE kind=?1 AND key=?2
+           AND (source IN ('user','index') OR (?3 AND source IN ('bangumi','wiki')))
+         ORDER BY lang,source,value",
+        rusqlite::params![kind, key, job.character()],
+    )?)];
+    if job.character() {
+        inputs.push(json!(fingerprint_with(c, rows, index, false)?));
+        inputs.push(json!(aliases(c, "work", key, false)?));
+    } else if kind == "work" {
+        inputs.push(json!(crate::app_migrate_data::rows_with(
+            c,
+            &format!(
+                "SELECT l.entity_id,l.core_system,l.key,l.current FROM {LINKS} l
+                 WHERE l.entity_id IN (SELECT q.entity_id FROM {LINKS} q
+                   WHERE q.core_system='qualifier' AND q.key=?1)
+                   AND l.core_system IN ('qualifier','danbooru')
+                 ORDER BY l.entity_id,l.core_system,l.key",
+                LINKS = crate::character_links::LINKS
+            ),
+            [key],
+        )?));
+    }
+    Ok(crate::strict_json::sha256_hex(dump(&json!(inputs)).as_bytes()))
+}
+/// 流式识别导入和识别恢复都在发布投影时写下此事件。名称只看序号，不消费研究的事件。
+fn latest_import(c: &Connection) -> Result<i64> {
+    Ok(c.query_row("SELECT coalesce(max(id),0) FROM backend_effects WHERE kind='imported'", [], |r| r.get(0))?)
+}
 /// 因为缺少同意而暂缓的名称查询：任务等待同意，而不是失败。
 fn unauthorized(e: &Error) -> bool {
     matches!(e, Error::Network(m) if m == net::UNAUTHORIZED)
@@ -536,135 +631,67 @@ fn keep(first: &mut Option<Error>, e: Error) {
         *first = Some(e);
     }
 }
-fn run(source: &mut Source, entity: Option<&str>, state: &Mutex<Value>) -> Result<()> {
+fn run(source: &mut Source, entity: Option<&str>, state: &Mutex<Value>) -> Result<i64> {
     let mut c = net::db(&source.path)?;
-    let rows = scope(&c, entity)?;
-    let fp = fingerprint(&c, &rows)?;
-    let done: BTreeSet<String> = if entity.is_some() {
-        Default::default()
+    // 先记事件序号，再读名称范围。并发提交至多触发一次额外刷新，不能越过新批次。
+    let mut imported = if entity.is_none() { latest_import(&c)? } else { 0 };
+    let mut rows = scope(&c, entity)?;
+    let (done, mut legacy_current) = if entity.is_some() {
+        (HashMap::new(), false)
     } else {
-        // 完成标记只对与它们一起记录的来源成立。属于其他来源的标记，以及还没开始的刷新，都让范围重新开始：
-        // 在任何查询之前的一个事务里完成，这样这次运行写下的标记无论怎样结束都算数，
-        // 中途失败的运行只重复它没完成的部分（#275）。
         let tx = c.transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)?;
-        let previous: Option<String> = tx
-            .query_row(&format!("SELECT value FROM name_cache WHERE key='{SOURCES}'"), [], |r| r.get(0))
-            .optional()?;
         let refreshing = tx
             .query_row(&format!("SELECT 1 FROM name_cache WHERE key='{REFRESHING}'"), [], |_| Ok(()))
             .optional()?
             .is_some();
-        if previous.as_deref() != Some(&fp) || (source.force && !refreshing) {
+        if source.force && !refreshing {
             tx.execute("DELETE FROM name_cache WHERE key LIKE '[\"done\",%'", [])?;
-            tx.execute(&format!("INSERT OR REPLACE INTO name_cache VALUES ('{SOURCES}',?)"), [&fp])?;
-            if source.force {
-                tx.execute(&format!("INSERT OR REPLACE INTO name_cache VALUES ('{REFRESHING}','1')"), [])?;
-            }
+            tx.execute(&format!("INSERT OR REPLACE INTO name_cache VALUES ('{REFRESHING}','1')"), [])?;
         }
-        let done = tx
-            .prepare("SELECT key FROM name_cache WHERE key LIKE '[\"done\",%'")?
-            .query_map([], |r| r.get(0))?
+        let done: HashMap<String, String> = tx
+            .prepare("SELECT key,value FROM name_cache WHERE key LIKE '[\"done\",%'")?
+            .query_map([], |r| Ok((r.get(0)?, r.get(1)?)))?
             .collect::<rusqlite::Result<_>>()?;
+        let previous: Option<String> = tx
+            .query_row(&format!("SELECT value FROM name_cache WHERE key='{SOURCES}'"), [], |r| r.get(0))
+            .optional()?;
         tx.commit()?;
-        done
-    };
-    let mut jobs = BTreeSet::new();
-    let mut seed = vec![];
-    for r in &rows {
-        if !r.work.is_empty() {
-            jobs.insert(("work", r.work.clone(), String::new()));
-            if let Some(n) = crate::names_view::work_name(&r.work) {
-                seed.push(json!({"op":"put","kind":"work","key":r.work,"lang":"zh","source":"builtin","value":n}));
-            }
-        }
-        if r.parent.is_some() {
-            if !r.variant.is_empty() {
-                jobs.insert(("skin", r.variant.clone(), String::new()));
-                if let Some(n) = crate::names_view::skin_zh(&r.variant) {
-                    seed.push(
-                        json!({"op":"put","kind":"skin","key":r.variant,"lang":"zh","source":"builtin","value":n}),
-                    );
-                }
-            }
+        // 0.3.0 完成值是时间戳，只有旧版存过的整轮来源仍一致时才可信。新的完成值按单项使用。
+        let legacy_current = if done.values().any(|value| value.parse::<f64>().is_ok()) {
+            previous.as_deref() == Some(&fingerprint(&c, &rows)?)
         } else {
-            jobs.insert(("character", r.tag.clone(), r.work.clone()));
-            if let Some(key) = r.keys.get("ccip") {
-                // 图库包的 source 里已有导入的索引；不扫描外部索引。
-                let src = source.path.with_file_name("source.sqlite");
-                let src = crate::app_library::read_connection(&src)?;
-                if let Some(names)=src.query_row("SELECT name_zh,name_ja,name_en FROM characters WHERE char_id=?",[key],|r|Ok(json!({"zh":r.get::<_,Option<String>>(0)?,"ja":r.get::<_,Option<String>>(1)?,"en":r.get::<_,Option<String>>(2)?}))).optional()?{seed.push(json!({"op":"seed_index","entity":r.id,"key":r.tag,"names":names}));}
+            false
+        };
+        (done, legacy_current)
+    };
+    let mut attempted = BTreeSet::new();
+    let mut known = BTreeSet::new();
+    let mut pending = jobs(&rows, &mut known, &attempted);
+    let mut first_error = None;
+    loop {
+        net::check(&source.cancel)?;
+        if entity.is_none() {
+            let latest = latest_import(&c)?;
+            if latest > imported {
+                imported = latest;
+                rows = scope(&c, None)?;
+                pending = jobs(&rows, &mut known, &attempted);
+                legacy_current = false;
             }
         }
-    }
-    // 作品先完成，角色再使用它们的语言证据。
-    let mut jobs: Vec<_> = jobs.into_iter().filter(|(k, t, w)| !done.contains(&done_key(k, t, w))).collect();
-    jobs.sort_by_key(|(k, _, _)| match *k {
-        "work" => 0,
-        "character" => 1,
-        _ => 2,
-    });
-    *state.lock().expect("app_names mutex poisoned") = json!({"status":"running","done":0,"total":jobs.len()});
-    if !jobs.is_empty() {
-        net::check(&source.cancel)?;
-        command(&mut c, seed)?;
-    }
-
-    let mut first_error = None;
-    for (i, (kind, key, work)) in jobs.iter().enumerate() {
-        let result = (|| {
-            net::check(&source.cancel)?;
-            let planned = job_scope(&rows, kind, key, work);
-            let current = |c: &Connection| {
-                if *kind == "character" {
-                    character_job(c, &planned, key, work)
-                } else {
-                    Ok(planned.clone())
-                }
-            };
-            let job = current(&c)?;
-            let index = if *kind == "character" { indexed(&c, &job)? } else { Value::Null };
-            let job_fp = fingerprint_with(&c, &job, &index, false)?;
-            let ops = if *kind == "skin" { translate_skin(source, key)? } else { enrich(source, kind, key, work)? };
-            net::check(&source.cancel)?;
-            // 写事务前先用最新的 CCIP 键重查索引名称。识别新加的链接可以没有对应名称，这时查询内容没变。
-            // 事务内只核对这次读源库所用的键，因此持有应用写锁时不用等 source.sqlite（#275）。
-            let checked = current(&c)?;
-            if *kind == "character" && indexed(&c, &checked)? != index {
-                return invalid("名称来源已改变，请重试");
-            }
-            let tx = c.transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)?;
-            let publishing = current(&tx)?;
-            if index_keys(&publishing) != index_keys(&checked)
-                || fingerprint_with(&tx, &publishing, &index, false)? != job_fp
-            {
-                return invalid("名称来源已改变，请重试");
-            }
-            crate::schema::begin_writing(&tx)?;
-            for op in ops {
-                crate::names_commands::one(&tx, &op)?;
-            }
-            tx.execute(
-                "INSERT OR REPLACE INTO name_cache VALUES (?,?)",
-                [
-                    done_key(kind, key, work),
-                    dump(&json!(std::time::SystemTime::now()
-                        .duration_since(std::time::UNIX_EPOCH)
-                        .unwrap_or_default()
-                        .as_secs_f64())),
-                ],
-            )?;
-            net::check(&source.cancel)?;
-            // 别名镜像和显示投影在提交时跟着更新一次（legacy_names::after_write）。
-            crate::schema::commit_writing(tx)?;
-            Ok(())
-        })();
+        *state.lock().expect("app_names mutex poisoned") = json!({
+            "status":"running",
+            "done":attempted.len(),"total":attempted.len()+pending.len()
+        });
+        let Some(job) = pending.pop_front() else { break };
+        let result = lookup(&mut c, source, &rows, &job, done.get(&job.marker()), legacy_current);
         if let Err(e) = result {
             if source.cancel.load(Ordering::SeqCst) {
                 return Err(e);
             }
             keep(&mut first_error, e);
         }
-        state.lock().expect("app_names mutex poisoned")["done"] = json!(i + 1);
+        attempted.insert(job);
     }
     if let Some(e) = first_error {
         Err(e)
@@ -673,10 +700,87 @@ fn run(source: &mut Source, entity: Option<&str>, state: &Mutex<Value>) -> Resul
             // 刷新已完成；如果这一步失败，重试会找到每个标记，什么都不再查询。
             c.execute(&format!("DELETE FROM name_cache WHERE key='{REFRESHING}'"), [])?;
         }
-        Ok(())
+        Ok(imported)
     }
 }
-/// 完成标记所对应的来源（整个范围的指纹）。
+fn lookup(
+    c: &mut Connection,
+    source: &mut Source,
+    rows: &[Entity],
+    job: &Job,
+    marker: Option<&String>,
+    legacy_current: bool,
+) -> Result<()> {
+    let Job { kind, key, work } = job;
+    let planned: Vec<_> =
+        rows.iter().filter(|r| r.parent.is_none() && r.tag == *key && r.work == *work).cloned().collect();
+    let current = |c: &Connection| {
+        if job.character() {
+            character_job(c, &planned, key, work)
+        } else {
+            Ok(Vec::new())
+        }
+    };
+    let before = current(c)?;
+    let index = if job.character() { indexed(c, &before)? } else { Value::Null };
+    let job_fp = job_fingerprint(c, job, &before, &index)?;
+    if marker.is_some_and(|value| {
+        (legacy_current && value.parse::<f64>().is_ok())
+            || serde_json::from_str::<Value>(value).is_ok_and(|done| done["sources"].as_str() == Some(&job_fp))
+    }) {
+        return Ok(());
+    }
+    let mut seed = vec![];
+    if *kind == "work" {
+        if let Some(n) = crate::names_view::work_name(key) {
+            seed.push(json!({"op":"put","kind":"work","key":key,"lang":"zh","source":"builtin","value":n}));
+        }
+    } else if *kind == "skin" {
+        if let Some(n) = crate::names_view::skin_zh(key) {
+            seed.push(json!({"op":"put","kind":"skin","key":key,"lang":"zh","source":"builtin","value":n}));
+        }
+    } else {
+        for r in &before {
+            let Some(cid) = r.keys.get("ccip") else { continue };
+            let Some(n) = index.as_array().and_then(|a| a.iter().find(|v| v[0].as_str() == Some(cid))) else {
+                continue;
+            };
+            let names = json!({"zh":n[1],"ja":n[2],"en":n[3]});
+            seed.push(json!({"op":"seed_index","entity":r.id,"key":r.tag,"names":names}));
+        }
+    }
+    if !seed.is_empty() {
+        command(c, seed)?;
+    }
+    let ops = if *kind == "skin" { translate_skin(source, key)? } else { enrich(source, kind, key, work)? };
+    net::check(&source.cancel)?;
+    // 写事务前先用最新的 CCIP 键重查索引名称。识别新加的链接可以没有对应名称，这时查询内容没变。
+    // 事务内只核对这次读源库所用的键，因此持有应用写锁时不用等 source.sqlite（#275）。
+    let checked = current(c)?;
+    if job.character() && indexed(c, &checked)? != index {
+        return invalid("名称来源已改变，请重试");
+    }
+    let tx = c.transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)?;
+    let publishing = current(&tx)?;
+    if index_keys(&publishing) != index_keys(&checked) || job_fingerprint(&tx, job, &publishing, &index)? != job_fp {
+        return invalid("名称来源已改变，请重试");
+    }
+    crate::schema::begin_writing(&tx)?;
+    for op in ops {
+        crate::names_commands::one(&tx, &op)?;
+    }
+    tx.execute("INSERT OR REPLACE INTO name_cache VALUES (?,?)", [job.marker(), dump(&json!({"sources":job_fp}))])?;
+    net::check(&source.cancel)?;
+    // 别名镜像和显示投影在提交时跟着更新一次（legacy_names::after_write）。
+    crate::schema::commit_writing(tx)?;
+    Ok(())
+}
+fn enqueue(c: &Connection, entity: Option<&str>, refresh: bool) -> Result<(i64, String)> {
+    let kind = format!("names:{}", dump(&json!({"entity":entity,"refresh":refresh})));
+    c.execute("INSERT INTO backend_effects(kind) VALUES (?)", [&kind])?;
+    Ok((c.last_insert_rowid(), kind))
+}
+/// 0.3.0 的完成标记所对应的整个范围的指纹。
 const SOURCES: &str = "[\"sources\", 1]";
 /// 正在进行的全范围刷新：它的重试保留它已写下的标记。
 const REFRESHING: &str = "[\"refreshing\", 1]";
@@ -745,6 +849,7 @@ pub(crate) struct Updater {
     /// 连续失败的运行次数，用于重试退避（`retry_after`）。
     failures: u32,
     last_seen: i64,
+    processed_import: Arc<AtomicI64>,
 }
 impl Updater {
     pub fn new(library: &Library, enabled: bool, authorized: bool, generation: u64, session: &str) -> Result<Self> {
@@ -763,6 +868,7 @@ impl Updater {
             retry: Instant::now(),
             failures: 0,
             last_seen: 0,
+            processed_import: Arc::default(),
         })
     }
     pub fn stop(&mut self) {
@@ -827,10 +933,7 @@ impl Updater {
             // 新的刷新从头开始，而不是接着没完成的那次。
             c.execute(&format!("DELETE FROM name_cache WHERE key='{REFRESHING}'"), [])?;
         }
-        c.execute(
-            "INSERT INTO backend_effects(kind) VALUES (?)",
-            [format!("names:{}", dump(&json!({"entity":entity,"refresh":refresh})))],
-        )?;
+        enqueue(&c, entity, refresh)?;
         // 显式的请求也会立即重试失败的那些。
         self.settle();
         self.retry = Instant::now();
@@ -861,13 +964,24 @@ impl Updater {
         }
         self.settle();
         let pending = (|| -> Result<Vec<(i64, String)>> {
-            let c = crate::app_library::read_connection(&library.instance_path().join("library.sqlite"))?;
-            let v = c
+            let path = library.instance_path().join("library.sqlite");
+            let c = crate::app_library::read_connection(&path)?;
+            let mut v: Vec<(i64, String)> = c
                 .prepare(
                     "SELECT id,kind FROM backend_effects WHERE status='pending' AND kind LIKE 'names:%' ORDER BY id",
                 )?
                 .query_map([], |r| Ok((r.get(0)?, r.get(1)?)))?
                 .collect::<rusqlite::Result<_>>()?;
+            if (self.cli || self.grant.load(Ordering::SeqCst))
+                && latest_import(&c)? > self.processed_import.load(Ordering::SeqCst)
+                && !v.iter().any(|(_, kind)| {
+                    kind.strip_prefix("names:")
+                        .and_then(|raw| serde_json::from_str::<Value>(raw).ok())
+                        .is_some_and(|args| args.get("entity") == Some(&Value::Null) && args["refresh"].is_boolean())
+                })
+            {
+                v.push(enqueue(&net::db(&path)?, None, false)?);
+            }
             Ok(v)
         })();
         let mut pending = match pending {
@@ -887,6 +1001,7 @@ impl Updater {
         self.retry = Instant::now() + Duration::from_secs(60);
         let cancel = self.cancel.clone();
         let state = self.state.clone();
+        let processed_import = self.processed_import.clone();
         let path = library.instance_path().join("library.sqlite");
         let (authorized, grant) = (self.cli, self.grant.clone());
         *state.lock().expect("app_names mutex poisoned") = json!({"status":"running","done":0,"total":0});
@@ -917,7 +1032,10 @@ impl Updater {
                         if !completed.contains(&request_key) {
                             let mut source =
                                 Source::new(path.clone(), cancel.clone(), authorized, refresh)?.granted(grant.clone());
-                            run(&mut source, entity, &state)?;
+                            let imported = run(&mut source, entity, &state)?;
+                            if entity.is_none() {
+                                processed_import.store(imported, Ordering::SeqCst);
+                            }
                             completed.insert(request_key);
                         }
                         net::check(&cancel)?;
@@ -1458,7 +1576,7 @@ mod matching_tests {
             let mut source =
                 Source::new(self.root.join("library.sqlite"), Arc::new(AtomicBool::new(false)), true, force)?
                     .with_bases(&provider.base, &provider.base);
-            run(&mut source, Some(&self.tag), &Mutex::new(json!({})))
+            run(&mut source, Some(&self.tag), &Mutex::new(json!({}))).map(|_| ())
         }
         fn choice(&self, kind: &str, key: &str) -> crate::names_view::Choice {
             crate::names_view::View::load(&self.db()).unwrap().choose(kind, key).unwrap()
@@ -1914,7 +2032,7 @@ mod sources_tests {
             let mut source =
                 Source::new(self.root.join("library.sqlite"), Arc::new(AtomicBool::new(false)), true, force)?
                     .with_bases(&p.base, &p.base);
-            run(&mut source, entity, &Mutex::new(json!({})))
+            run(&mut source, entity, &Mutex::new(json!({}))).map(|_| ())
         }
         fn configure_model(&self, p: &Providers) {
             self.db()
@@ -2331,6 +2449,87 @@ mod sources_tests {
     #[cfg(test)]
     mod tests {
         use super::*;
+
+        fn add_candidate(c: &Connection, asset: &str, tag: &str) {
+            assert_eq!(
+                c.execute(
+                    "INSERT INTO candidates(uuid,entity,source,score)
+                 SELECT ?1,t.key,'WD',0.9 FROM terms t JOIN term_links l ON l.term_id=t.id
+                 WHERE l.system='danbooru' AND l.key=?2",
+                    [asset, tag],
+                )
+                .unwrap(),
+                1
+            );
+        }
+
+        #[test]
+        fn new_roles_jump_the_queue_and_completed_jobs_survive_scope_changes() {
+            let lib = Library::load();
+            {
+                let mut c = lib.db();
+                let tx = c.transaction().unwrap();
+                crate::schema::begin_writing(&tx).unwrap();
+                crate::character_entities::create(
+                    &tx,
+                    &crate::character_entities::New { id: "zoe", kind: "character", ..Default::default() },
+                    "import",
+                )
+                .unwrap();
+                tx.execute(
+                    "INSERT INTO term_links(system,key,term_id,source)
+                     SELECT 'danbooru','zoe',id,'import' FROM terms WHERE key='zoe'",
+                    [],
+                )
+                .unwrap();
+                for asset in ["new-1", "new-2", "new-3"] {
+                    add_candidate(&tx, asset, "alice");
+                }
+                crate::schema::commit_writing(tx).unwrap();
+            }
+            let path = lib.root.join("library.sqlite");
+            let published = AtomicBool::new(false);
+            let p = Providers::start_with(move |url, query| {
+                if url != "/wiki_pages.json"
+                    || test_provider::param(query, "search[title]") != "alice"
+                    || published.swap(true, Ordering::SeqCst)
+                {
+                    return;
+                }
+                let mut c = net::db(&path).unwrap();
+                let tx = c.transaction_with_behavior(rusqlite::TransactionBehavior::Immediate).unwrap();
+                crate::schema::begin_writing(&tx).unwrap();
+                add_candidate(&tx, "new-4", "zoe");
+                tx.execute("INSERT INTO backend_effects(kind) VALUES ('imported')", []).unwrap();
+                crate::schema::commit_writing(tx).unwrap();
+            });
+            p.set(|a| {
+                a.wikis.insert("zoe".into(), vec!["佐伊".into()]);
+            });
+            lib.run(&p, None, false).unwrap();
+            let calls = p.calls();
+            let queried: Vec<_> = calls
+                .iter()
+                .filter_map(|(url, _)| {
+                    url.strip_prefix("/wiki_pages.json?").map(|query| test_provider::param(query, "search[title]"))
+                })
+                .collect();
+            assert_eq!(queried, ["Example", "alice", "zoe", "bob"]);
+            assert_eq!(lib.char("alice").name, "爱丽丝");
+            assert_eq!(lib.char("zoe").name, "佐伊");
+
+            // 模拟名称 worker 重新启动，又发生一批识别。已完成来源没有变化，不重新写完成键。
+            lib.db()
+                .execute_batch(
+                    "INSERT INTO backend_effects(kind) VALUES ('imported');
+                 CREATE TRIGGER no_repeat BEFORE INSERT ON name_cache
+                 WHEN NEW.key LIKE '[\"done\",%' AND EXISTS(SELECT 1 FROM name_cache WHERE key=NEW.key)
+                 BEGIN SELECT RAISE(ABORT,'已有完成键'); END;",
+                )
+                .unwrap();
+            lib.run(&p, None, false).unwrap();
+            assert_eq!(p.calls(), calls);
+        }
 
         #[test]
         fn recognition_links_and_memberships_do_not_invalidate_a_character_lookup() {
