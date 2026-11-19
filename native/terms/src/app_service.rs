@@ -504,9 +504,6 @@ impl Application {
         }
         let library = session.library.clone();
         session.provenance.recover();
-        if let Err(error) = self.start_wd_auto(&mut session) {
-            eprintln!("WD 扩展自动检查未能启动：{error}");
-        }
         let busy = session.syncer.running() || session.wd_extension.running();
         session.index.recover(&library, busy);
         let base_busy = busy
@@ -552,23 +549,6 @@ impl Application {
         } else {
             None
         }
-    }
-
-    fn start_wd_auto(&self, session: &mut Session) -> Result<()> {
-        if session.wd_extension.running() || self.wd_busy(session).is_some() {
-            return Ok(());
-        }
-        let ids = session.syncer.take_wd_deliveries();
-        if ids.is_empty() {
-            return Ok(());
-        }
-        let app = crate::app_library::read_connection(&session.library.db())?;
-        let Some((pack, path)) = crate::app_wd_extension::enabled_pack(&self.root, &app)? else { return Ok(()) };
-        drop(app);
-        let identity = crate::app_tasks::TaskIdentity::new(&session.library, session.generation, &session.token)?;
-        let action = crate::app_wd_extension::Action::Auto(pack, path, ids);
-        session.wd_extension.start_for(&session.library, identity, action)?;
-        Ok(())
     }
 
     /// 新图库第一次同步时角色资料包还不在本机（#630）：包就位后照默认启用，和用户点「启用」走同一个任务，检查已有的识别

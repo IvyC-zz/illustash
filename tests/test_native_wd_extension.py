@@ -1,5 +1,5 @@
 """WD 扩展包走原生 HTTP 与同步入口，包、图片和底座指纹均为合成数据。"""
-from contextlib import contextmanager
+from contextlib import closing, contextmanager
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 import json
 import shutil
@@ -232,25 +232,59 @@ class NativeWdExtensionTest(SyntheticWdLibrary, unittest.TestCase):
 class NativeWdExtensionSyncTest(SyntheticWdLibrary, unittest.TestCase):
     worker = sync_fixture.NativeSyncTest.worker
 
-    def test_native_library_new_scopes_auto_to_finished_delivery(self):
+    def test_sync_scores_each_batch_and_preserves_committed_results_after_cancellation(self):
+        def sync_state():
+            return json.loads(self.request('/api/sync')['body'])['state']
+
+        def candidates():
+            with closing(sqlite3.connect(self.lib.db)) as db:
+                return db.execute(
+                    "SELECT uuid,entity,score FROM candidates WHERE source='WD_EXT' ORDER BY uuid,entity"
+                ).fetchall()
+
         self.worker()
         self.assertEqual(self.request('/api/sync', {})['status'], 200)
-        wait_until(lambda: json.loads(self.request('/api/sync')['body'])['state']['status'] == 'done')
+        wait_until(lambda: sync_state()['status'] == 'done')
         package = self.fixture('http://127.0.0.1:1', tags=(self.resources / 'tags' / 'tags_v3.csv').read_bytes())
         self.restart()
-        # 首次启用检查当前全部向量。
         self.state('/package', {'action': 'import', 'paths': [str(package)]})
         self.assertEqual(self.finish('import', key='download')['package']['status'], 'ready')
         self.state('/enable', {})
         manual = self.finish('enable')
         self.assertEqual(manual['task']['status'], 'done', manual)
-        self.assertGreater(manual['task']['result']['changed'], 0)
+        self.assertEqual(manual['library']['scored'], 1)
+        before = candidates()
 
-        image(self.new_folder / 'auto.png', 'orange')
+        for i, color in enumerate(('orange', 'green', 'purple')):
+            image(self.new_folder / f'auto-{i}.png', color)
+        self.worker('stream-gated')
+        (self.root / 'last-request').unlink()
         self.assertEqual(self.request('/api/sync', {})['status'], 200)
-        auto = self.finish('auto')
-        self.assertEqual(auto['task']['status'], 'done', auto)
-        self.assertEqual(auto['task']['result']['changed'], 1)
-        self.assertEqual(auto['task']['result']['scored'], 1)
-        self.assertEqual(auto['library']['images'], manual['library']['images'] + 1)
-        self.assertEqual(auto['library']['checked_at'], manual['library']['checked_at'])
+        request = self.root / 'last-request'
+        wait_until(request.exists)
+        ids = json.loads(request.read_text())
+        self.assertEqual(len(ids), 3)
+        for i in range(2):
+            (self.root / f'release-batch-{i}').touch()
+            wait_until(lambda: sync_state().get('import_done') == i + 1)
+            self.assertEqual(sync_state()['status'], 'recognising')
+            self.assertEqual(self.state()['library']['scored'], manual['library']['scored'] + i + 1)
+            self.assertEqual({u for u, _, _ in candidates()}, {u for u, _, _ in before} | set(ids[:i + 1]))
+        committed = candidates()
+
+        # 第三批没有交付，停止宿主，确认重新打开后已交付的候选和计数都保留。
+        self.worker('stream')
+        self.assertEqual(candidates(), committed)
+        self.assertEqual(self.state()['library']['scored'], 3)
+        request.unlink()
+        self.assertEqual(self.request('/api/sync', {})['status'], 200)
+        wait_until(lambda: sync_state()['status'] == 'done')
+        self.assertEqual(json.loads(request.read_text()), ids[2:])
+        self.assertEqual(self.state()['library']['scored'], 4)
+        self.assertEqual(self.state()['library']['checked_at'], manual['library']['checked_at'])
+
+        # 用同一包重新检查全部图，批次路径和原来整库路径得出同样的角色和分数。
+        streamed = candidates()
+        self.state('/enable', {})
+        self.assertEqual(self.finish('enable')['task']['status'], 'done')
+        self.assertEqual(candidates(), streamed)

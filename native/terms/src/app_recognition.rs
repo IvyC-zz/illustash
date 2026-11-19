@@ -345,7 +345,7 @@ pub fn import_package(
     cancel: &AtomicBool,
     dispatch: &dyn Fn(&Library, &str) -> Result<()>,
 ) -> Result<Value> {
-    import_internal(library, path, root, cancel, dispatch, None, &Silent).map(Recovery::response)
+    import_internal(library, path, root, cancel, dispatch, ImportOptions::default()).map(Recovery::response)
 }
 /// 通过 `observer` 报告各阶段并发布源库事务的 `import_package`（#88）。
 pub(crate) fn import_package_observed(
@@ -356,15 +356,24 @@ pub(crate) fn import_package_observed(
     dispatch: &dyn Fn(&Library, &str) -> Result<()>,
     observer: &dyn Observer,
 ) -> Result<Value> {
-    import_internal(library, path, root, cancel, dispatch, None, observer).map(Recovery::response)
+    import_internal(library, path, root, cancel, dispatch, ImportOptions { observer, ..ImportOptions::default() })
+        .map(Recovery::response)
 }
 pub(crate) fn import_sync_package(
     library: &Library,
     path: &Path,
     root: &Path,
     cancel: &AtomicBool,
+    wd: Option<&crate::app_wd_extension::Delivery>,
 ) -> Result<Recovery> {
-    import_internal(library, path, root, cancel, &crate::app_research::dispatch, None, &Silent)
+    import_internal(
+        library,
+        path,
+        root,
+        cancel,
+        &crate::app_research::dispatch,
+        ImportOptions { wd, ..ImportOptions::default() },
+    )
 }
 /// 只归一个识别任务所有；在取 TaskContext::receive 之前构建。
 pub(crate) struct WorkerInputs {
@@ -448,21 +457,40 @@ pub(crate) fn import_worker_package(
     inputs: &WorkerInputs,
     cancel: &AtomicBool,
     dispatch: &dyn Fn(&Library, &str) -> Result<()>,
+    wd: Option<&crate::app_wd_extension::Delivery>,
 ) -> Result<Recovery> {
     if inputs.identity.library_id != library.id() || inputs.identity.package != library.instance_path() {
         return Err(invalid());
     }
-    import_internal(library, &prepared.package, &inputs.root, cancel, dispatch, Some((prepared, inputs)), &Silent)
+    import_internal(
+        library,
+        &prepared.package,
+        &inputs.root,
+        cancel,
+        dispatch,
+        ImportOptions { claims: Some((prepared, inputs)), wd, ..ImportOptions::default() },
+    )
 }
+struct ImportOptions<'a> {
+    claims: Option<(&'a PreparedWorkerPackage, &'a WorkerInputs)>,
+    wd: Option<&'a crate::app_wd_extension::Delivery>,
+    observer: &'a dyn Observer,
+}
+impl Default for ImportOptions<'_> {
+    fn default() -> Self {
+        Self { claims: None, wd: None, observer: &Silent }
+    }
+}
+
 fn import_internal(
     library: &Library,
     path: &Path,
     root: &Path,
     cancel: &AtomicBool,
     dispatch: &dyn Fn(&Library, &str) -> Result<()>,
-    claims: Option<(&PreparedWorkerPackage, &WorkerInputs)>,
-    observer: &dyn Observer,
+    options: ImportOptions<'_>,
 ) -> Result<Recovery> {
+    let ImportOptions { claims, observer, wd } = options;
     if library.frozen() {
         return Err(Error::Conflict("图库只读".into()));
     }
@@ -640,7 +668,7 @@ fn import_internal(
         hits,
         fingerprint,
     });
-    let mut result = resume_scored(library, root, cancel, dispatch, replay)?;
+    let mut result = resume_scored(library, root, cancel, dispatch, replay, wd)?;
     result.response["digest"] = json!(pkg.digest);
     result.response["duplicate"] = json!(duplicate);
     Ok(result)
@@ -749,11 +777,16 @@ pub(crate) fn resume_at(
     cancel: &AtomicBool,
     dispatch: &dyn Fn(&Library, &str) -> Result<()>,
 ) -> Result<Value> {
-    resume_scored(library, root, cancel, dispatch, None).map(Recovery::response)
+    resume_scored(library, root, cancel, dispatch, None, None).map(Recovery::response)
 }
 
-pub(crate) fn resume_sync(library: &Library, root: &Path, cancel: &AtomicBool) -> Result<Recovery> {
-    resume_scored(library, root, cancel, &crate::app_research::dispatch, None)
+pub(crate) fn resume_sync(
+    library: &Library,
+    root: &Path,
+    cancel: &AtomicBool,
+    wd: Option<&crate::app_wd_extension::Delivery>,
+) -> Result<Recovery> {
+    resume_scored(library, root, cancel, &crate::app_research::dispatch, None, wd)
 }
 
 pub(crate) struct Recovery {
@@ -794,6 +827,7 @@ fn resume_scored(
     cancel: &AtomicBool,
     dispatch: &dyn Fn(&Library, &str) -> Result<()>,
     prepared: Option<PreparedLongtail<'_>>,
+    wd: Option<&crate::app_wd_extension::Delivery>,
 ) -> Result<Recovery> {
     if library.frozen() {
         return Err(Error::Conflict("图库只读".into()));
@@ -869,12 +903,16 @@ fn resume_scored(
                 } else {
                     crate::app_ccip_longtail::score_delivery(root, &app, &src, &ids, &check)
                 };
+                let wd_score = wd.map(|wd| wd.score(&tx, &digest, &raw_manifest, &ids, cancel)).transpose()?.flatten();
                 check()?;
                 let app_tx = app.transaction_with_behavior(TransactionBehavior::Immediate)?;
                 crate::schema::begin_writing(&app_tx)?;
                 import_changes(&app_tx, &src, library, &ids)?;
                 let longtail_observation =
                     crate::app_ccip_longtail::publish_delivery(&app_tx, &digest, &ids, longtail)?;
+                if let (Some(wd), Some(score)) = (wd, wd_score) {
+                    wd.publish(&app_tx, &ids, score)?;
+                }
                 app_tx.execute("INSERT INTO backend_effects(kind) VALUES ('imported')", [])?;
                 let event = app_tx.last_insert_rowid().to_string();
                 app_tx.execute("INSERT INTO meta VALUES (?,?)", params![marker, event])?;
