@@ -1,7 +1,7 @@
 // 不带识别模型的安装包在第一次使用时下载的模型（#168，native/terms/src/app_models.rs）。和更新检查一样全应用共用：
 // 每个图库、每个窗口里状态相同，切换图库时下载照常继续。不碰 DOM。onModels(before, start) 在每次读取或改动后通知，带上改动前的
 // 状态，以及正在运行或刚结束的任务开始时模型是否已就位（readyWhenStarted）。
-import {api} from './session.js';
+import {api, session} from './session.js';
 import {state} from './state.js';
 import {listeners} from './events.js';
 const changed = listeners();
@@ -27,18 +27,29 @@ export async function modelsPost(body) {
   const value = await api('/api/models', {method: 'POST', body: JSON.stringify(body)});
   return value.cancelled ? value : adopt(value);
 }
-// 基础角色索引（#607）：文件和识别模型一起下载，按图库启用；这里是当前图库的状态。读到后同样通知 onModels。
-export async function loadCharacterBase() {
-  state.characterBase = await api('/api/index/base');
-  await changed.emit(state.models, started);
-  return state.characterBase;
+// 「检查新角色」的轮询可能只看到索引任务的终态。只要这张卡自己读到正在更新，就跟到它结束。
+let baseTimer = 0, baseRequest = 0;
+function watchCharacterBase() {
+  clearTimeout(baseTimer);
+  if (!state.characterBase?.running || session.stale) return;
+  baseTimer = setTimeout(() => loadCharacterBase().catch(() => {}), 1000);
 }
-// 启用或撤回（撤回对这台电脑上的所有图库生效）。回应是新的状态；任务在后台跑，进度和结果在角色索引任务里。
-export async function characterBasePost(enable) {
-  state.characterBase = await api('/api/index/base', {method: 'POST', body: JSON.stringify({enable})});
-  await changed.emit(state.models, started);
-  return state.characterBase;
+async function readCharacterBase(options) {
+  clearTimeout(baseTimer);
+  const request = ++baseRequest;
+  try {
+    const value = await api('/api/index/base', options);
+    if (request === baseRequest) {
+      state.characterBase = value;
+      await changed.emit(state.models, started);
+    }
+    return state.characterBase;
+  } finally {
+    if (request === baseRequest) watchCharacterBase();
+  }
 }
+export const loadCharacterBase = () => readCharacterBase();
+export const characterBasePost = enable => readCharacterBase({method: 'POST', body: JSON.stringify({enable})});
 // 基础角色索引的文件在识别模型清单里的路径；这个版本不带时为空。
 export const characterBasePath = (b = state.characterBase) => b?.included ? b.file?.path || '' : '';
 // 模型就位后还缺的可选文件：WD 加速文件（Apple 芯片的 macOS）和基础角色索引。

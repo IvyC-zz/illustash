@@ -165,6 +165,36 @@ test('基础角色索引（#607）：缺文件时提示和按钮按缺的是哪�
   } finally { context.state.characterBase = saved; }
 });
 
+test('a base index update keeps polling even when the general index task missed its running state', async () => {
+  const {fetch, setTimeout, clearTimeout} = globalThis;
+  const saved = context.state.characterBase;
+  const replies = [{running: true}, null, {running: false, included: true, enabled: true, available: true, writable: true}];
+  const timers = new Map();
+  let timer = 0, calls = 0;
+  globalThis.setTimeout = (fn, delay) => { assert.equal(delay, 1000); timers.set(++timer, fn); return timer; };
+  globalThis.clearTimeout = id => timers.delete(id);
+  globalThis.fetch = async path => {
+    assert.equal(path, '/api/index/base');
+    calls++;
+    const value = replies.shift();
+    if (!value) throw new Error('synthetic temporary failure');
+    return {ok: true, json: async () => value};
+  };
+  try {
+    await context.loadCharacterBase();
+    assert.equal(context.state.characterBase.running, true);
+    await timers.get(timer)();
+    assert.equal(context.state.characterBase.running, true);
+    await timers.get(timer)();
+    assert.match(context.characterBaseLine(), /data-models="base-withdraw"/);
+    assert.equal(calls, 3);
+    assert.equal(timers.size, 0);
+  } finally {
+    Object.assign(globalThis, {fetch, setTimeout, clearTimeout});
+    context.state.characterBase = saved;
+  }
+});
+
 // 依次读到这些状态（core/models.js 的 adopt 的做法），返回每次读取后「模型刚到」的判断（#375）。第一个 before 为空：
 // 页面刚打开。
 function arrivals(...seen) {
