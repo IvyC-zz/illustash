@@ -209,6 +209,13 @@ function page(language, languages = ['zh-CN'], tables = {en: english}) {
   return {context, document, elements, t: (...args) => vm.runInContext('t', context)(...args), I18N: vm.runInContext('I18N', context)};
 }
 
+test('the native file picker offers English for every title and file filter', () => {
+  const name = 'desktop/src/picker.rs';
+  const keys = rustKeys(name, readFileSync(path.join(ROOT, name), 'utf8')).keys;
+  assert.ok(keys.length);
+  for (const key of keys) assert.ok(english[key], key);
+});
+
 test('the language setting picks the table; system follows the first browser language', () => {
   for (const [language, languages, expected] of [['en', ['zh-CN'], 'en'], ['zh-CN', ['en-US'], 'zh-CN'], ['system', ['zh-TW', 'en'], 'zh-CN'],
     ['system', ['zh'], 'zh-CN'], ['system', ['en-GB', 'zh-CN'], 'en'], ['system', ['ja-JP'], 'en'], [undefined, ['fr'], 'en']]) {
