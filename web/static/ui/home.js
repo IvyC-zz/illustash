@@ -169,22 +169,27 @@ function revealHome(uuid) {
   b?.scrollIntoView({block: 'nearest', inline: 'nearest', behavior: matchMedia('(prefers-reduced-motion: reduce)').matches ? 'auto' : 'smooth'});
 }
 export function markHomeFocus() { if (onPage(state.route, 'home')) for (const b of $('homePage').querySelectorAll('.home-j')) b.classList.toggle('on', b.dataset.id === state.focused); }
-// 首页「认一认」：一个角色，几张机器识别出的图；点掉错的，然后确认其余的。
+// 首页「认一认」：一个角色，几张机器识别出的图；点掉错的，然后确认其余的。整批都错时直接点「都不是」；全部点掉以后
+// 主按钮本身就是「都不是」，常驻的那个就不再画（#675）。
 async function nextAsk() {
   if (!viewOpts.ask) return null;
   try { return (await api('/api/ask?' + new URLSearchParams({nsfw: state.nsfw, skip: home.askSkip.join(',')}))).batch; } catch { return null; }
 }
-function askCardHTML() {
+export function askCardHTML() {
   const b = home.ask; if (!b || !viewOpts.ask || !b.items.length) return '';
-  const off = home.askOff.size, why = b.kind === 'hint' ? t('和你确认过的 TA 很像') : b.kind === 'seed' ? '' : t('随机抽查');
+  const off = home.askOff.size, all = off === b.items.length, why = b.kind === 'hint' ? t('和你确认过的 TA 很像') : b.kind === 'seed' ? '' : t('随机抽查');
   return `<section class="ask-card" id="askCard"><div class="ask-head"><b>${t('认一认')}</b><span>${t('这些是 {name} 吗？', {name: `<a href="${charHash(b.entity)}">${esc(b.name)}</a>${workSmall({id: b.entity, name: b.name})}`})}</span><small>${why}</small></div>
     <div class="ask-row">${b.items.map(x => `<button class="ask-img${home.askOff.has(x.uuid) ? ' off' : ''}" data-askimg="${esc(x.uuid)}" data-peek="${esc(x.uuid)}" title="${home.askOff.has(x.uuid) ? t('点一下：改回「是」') : t('点一下：不是 TA')} · ${t('长按或 Space 看大图')}" style="aspect-ratio:${ratio(x)}"><img src="/image?id=${encodeURIComponent(x.uuid)}&size=thumb" alt="" loading="lazy" draggable="false"><i aria-hidden="true">✕</i></button>`).join('')}</div>
-    <div class="ask-foot"><span>${off ? t('{n} 张不是 TA', {n: off}) : t('点掉不是 TA 的')}</span><button class="secondary" data-askcard="later">${t('以后再说')}</button><button class="primary" data-askcard="ok">${off === b.items.length ? t('都不是') : off ? t('其余 {n} 张是', {n: b.items.length - off}) : t('都对')}</button></div></section>`;
+    <div class="ask-foot"><span>${off ? t('{n} 张不是 TA', {n: off}) : t('点掉不是 TA 的')}</span><button class="secondary" data-askcard="later">${t('以后再说')}</button>${all ? ''
+      : `<button class="secondary" data-askcard="none" title="${t('{n} 张都记成不是 TA', {n: b.items.length})}">${t('都不是')}</button>`}<button class="primary" data-askcard="ok">${
+      all ? t('都不是') : off ? t('其余 {n} 张是', {n: b.items.length - off}) : t('都对')}</button></div></section>`;
 }
 function redrawAskCard() { const el = $('askCard'), html = askCardHTML(); if (!el) return drawHome(); if (!html) { el.remove(); return; } const t = document.createElement('div'); t.innerHTML = html; el.replaceWith(t.firstElementChild); }
 async function submitAskCard(how) {
   const b = home.ask; if (!b || edits.busy) return;
-  const ids = b.items.map(x => x.uuid), no = ids.filter(u => home.askOff.has(u)), yes = ids.filter(u => !home.askOff.has(u));
+  // 「都不是」（#675）：不管点掉了哪几张，整批都记成不是 TA，和全部点掉再确认是同一个请求。
+  const ids = b.items.map(x => x.uuid), off = how === 'none' ? new Set(ids) : home.askOff;
+  const no = ids.filter(u => off.has(u)), yes = ids.filter(u => !off.has(u));
   home.askSkip.push(b.entity); home.askOff = new Set();
   if (how === 'later') {
     home.ask = null; redrawAskCard();

@@ -1,21 +1,24 @@
 // 筛选条（#445）：图库、角色页和画廊页工具栏里的条件胶囊和「＋ 条件」选择器。条件怎么读写在 core/filters.js；
-// 这里只画胶囊、读名字、开选择器。胶囊的名字是链接：点一下在「含」和「不含」之间切换；× 去掉。
+// 这里只画胶囊、读名字、开选择器。胶囊的名字是链接：点一下在「含」和「不含」之间切换；× 去掉。图库页的标题和「?」
+// 也从这里读（#644）：旧的单值参数和条件数组两种写法，标题、说明和名字都一样。
 import {loadWorkTree} from '../core/catalog.js';
 import {dayLabel, esc, number} from '../core/format.js';
 import {I18N, t} from '../core/i18n.js';
-import {addCondition, conditions, count, datesLabel, dropCondition, flipCondition, kindOf, LIMIT, setDates, SOURCES, validDates, valueOf, yearDates} from '../core/filters.js';
+import {nameWithWork} from '../core/labels.js';
+import {addCondition, conditions, count, datesLabel, dropCondition, flipCondition, kindOf, LIMIT, setDates, sole, SOURCES, validDates, valueOf, yearDates} from '../core/filters.js';
 import {go, hashFor} from '../core/route.js';
 import {api} from '../core/session.js';
 import {onTyped} from '../core/keys.js';
 import {state} from '../core/state.js';
 import {listNav} from './combo.js';
 import {openDialog} from './dialog.js';
-import {$, toast} from './dom.js';
+import {$, charOption, toast} from './dom.js';
 import {createLayer} from './overlay.js';
 
 // ---------- 条件的文字 ----------
-// 角色、作品、画师、画面标签的名字第一次用到时去读；读到后只换胶囊上的文字（整条工具栏重画会打断正在输入的搜索框）。
-const names = new Map();
+// 角色、作品、画师、画面标签的名字第一次用到时去读；读到后只换胶囊和标题上的那段文字（整条工具栏重画会打断正在输入的
+// 搜索框）。names 里 null 是正在读，'' 是读不到。图库标题和胶囊共用这一份，同一位画师只读一次（#644）。
+const names = new Map(), fetched = new Map();
 const SOURCE_NAMES = {pixiv: 'Pixiv', x: 'X', other: t('其他出处')};
 const tagText = key => key.replaceAll('_', ' ');
 // 一个条件的文字；还没读到名字时先用 id。
@@ -25,33 +28,63 @@ export function conditionLabel(c) {
   if (kind === 'source') return SOURCE_NAMES[value] || value;
   if (kind === 'utag') return '# ' + value;
   if (kind === 'char') { const found = state.charMap.get(value); if (found) return found.name; }
-  if (names.has(c)) return names.get(c) || (kind === 'tag' ? tagText(value) : value);
-  lookUp(c);
-  return kind === 'tag' ? tagText(value) : value;
+  if (!names.has(c)) lookUp(c);
+  return names.get(c) || (kind === 'tag' ? tagText(value) : value);
 }
-// 读一个条件的名字，读到后换掉胶囊上的文字。读不到就一直用 id（作品或画师删了，后端会在读图时说明）。
+// 标题上的名字：还在读时写「…」，不先露出 id。
+function pendingLabel(c) { const label = conditionLabel(c); return names.get(c) === null ? '…' : label; }
+// 角色条件的角色：图库里的角色，或单独读到的（只当标签的角色不在 state.chars 里）。
+const charOf = c => state.charMap.get(valueOf(c)) || fetched.get(c);
+// 读一个条件的名字，读到后换掉胶囊和标题上的文字。读不到就一直用 id（作品或画师删了，后端会在读图时说明）；画师没有名字
+// 时写「未知画师」。
 async function lookUp(c) {
-  names.set(c, '');
+  names.set(c, null);
   const kind = kindOf(c), value = valueOf(c);
   let name = '';
   try {
     if (kind === 'tag' && I18N.language === 'zh-CN') name = (await api('/api/general-tags?' + new URLSearchParams({q: value, format: 'menu'}))).find(x => x.tag === value)?.zh || '';
     else if (kind === 'work') { if (!state.workTree) await loadWorkTree(); name = state.workTree.find(w => w.id === value)?.name || ''; }
-    else if (kind === 'artist') name = (await api('/api/artist?' + new URLSearchParams({id: value}))).name || '';
-    else if (kind === 'char') name = (await api('/api/characters?' + new URLSearchParams({id: value})))[0]?.name || '';
-  } catch { return; }
-  if (!name) return;
+    else if (kind === 'artist') name = (await api('/api/artist?' + new URLSearchParams({id: value}))).name || t('未知画师');
+    else if (kind === 'char') { const found = (await api('/api/characters?' + new URLSearchParams({id: value})))[0]; if (found) fetched.set(c, found); name = found?.name || ''; }
+  } catch { name = ''; }
   names.set(c, name);
-  for (const a of document.querySelectorAll('[data-cond]')) if (a.dataset.cond === c) a.textContent = pillText(c, a.dataset.neg === '1');
+  for (const a of document.querySelectorAll('[data-cond]')) if (a.dataset.cond === c) { a.textContent = pillText(c, a.dataset.neg === '1'); a.title = pillTitle(c, a.dataset.neg === '1'); }
+  for (const a of document.querySelectorAll('[data-cond-name]')) if (a.dataset.condName === c) a.textContent = conditionLabel(c);
 }
 const pillText = (c, negated) => negated ? t('不含 {name}', {name: conditionLabel(c)}) : conditionLabel(c);
+// 胶囊的悬停提示：角色胶囊只写名字，悬停时写「名字（作品）」（#294、#678），后面是点一下做什么。
+function pillTitle(c, negated) {
+  const hint = negated ? t('点一下改回包含') : t('点一下改成不含'), char = kindOf(c) === 'char' && charOf(c);
+  return char ? nameWithWork(char) + ' · ' + hint : hint;
+}
+
+// ---------- 图库的标题 ----------
+// 只有一个条件（或旧写法的某一天）时，标题写这个条件；从哪条路进来（旧的单值参数、筛选条上加的条件数组）都一样（#644）。
+// 名字放在 data-cond-name 里，读到后由 lookUp 换上。收藏由图库页自己判断，这里不出标题。没有这样的条件时返回 ''。
+const named = c => `<span data-cond-name="${esc(c)}">${esc(pendingLabel(c))}</span>`;
+export function conditionTitle(r) {
+  const x = conditions(r), c = sole(r);
+  if (!c) return !x.has.length && !x.not.length && !x.from && !x.to && x.day ? esc(t('{day} 加入', {day: dayLabel(x.day)})) : '';
+  const kind = kindOf(c);
+  if (kind === 'artist') return t('画师 · {name}', {name: named(c)});
+  if (kind === 'work') return named(c);
+  if (kind === 'utag') return esc(conditionLabel(c));
+  return '';
+}
+// 图库「?」里跟条件有关的说明：含某部作品、某位画师时各写一句，不论有几个条件。
+export function conditionHelp(r) {
+  const kinds = new Set(conditions(r).has.map(kindOf)), lines = [];
+  if (kinds.has('work')) lines.push(t('包含所有子作品的图。'));
+  if (kinds.has('artist')) lines.push(t('画师是按画作比对找到的。'));
+  return lines;
+}
 
 // ---------- 筛选条 ----------
 // 工具栏里搜索框后面的一段：每个条件一枚胶囊，日期一枚，最后是「＋ 条件」和它的选择器。
 export function filterBar(r) {
   const x = conditions(r);
   const pill = (c, negated) => `<span class="variant-chip">` +
-    `<a href="${esc(hashFor(flipCondition(r, c)))}" data-cond="${esc(c)}" data-neg="${negated ? 1 : 0}" title="${negated ? t('点一下改回包含') : t('点一下改成不含')}">${esc(pillText(c, negated))}</a>` +
+    `<a href="${esc(hashFor(flipCondition(r, c)))}" data-cond="${esc(c)}" data-neg="${negated ? 1 : 0}" title="${esc(pillTitle(c, negated))}">${esc(pillText(c, negated))}</a>` +
     `<button data-drop="${esc(c)}" title="${t('去掉条件')}" aria-label="${t('去掉条件')}">×</button></span>`;
   const when = x.from || x.to ? datesLabel(x.from, x.to) : x.day ? t('{day} 加入', {day: dayLabel(x.day)}) : '';
   const dates = when ? `<span class="variant-chip"><span>${esc(when)}</span><button data-drop-dates title="${t('去掉日期')}" aria-label="${t('去掉日期')}">×</button></span>` : '';
@@ -81,7 +114,8 @@ function setMenu(open, reason) {
 let nav = null, options = [], userTags = null;
 
 // ---------- 选择器 ----------
-// 选项：{label, detail, section, cond} 或 {label, section, dates: true}（开起止日期对话框）、{label, year}。
+// 选项：{label, detail, section, cond} 或 {label, section, dates: true}（开起止日期对话框）、{label, year}。角色选项另带
+// html：名字和作品小字，和「跳到角色」同一种写法（dom.js 的 charOption）。
 const fold = s => s.toLocaleLowerCase(I18N.locale).normalize('NFKC');
 const SECTION_NAMES = () => ({source: t('出处'), date: t('时间'), mine: t('我的标签'), tag: t('画面标签'), char: t('角色'), work: t('作品'), artist: t('画师'), other: t('其他')});
 async function candidates(q) {
@@ -102,7 +136,8 @@ async function candidates(q) {
     // 中文页面上画面标签显示中文名（#446），后面小字是原来的标签。
     const zh = x => I18N.language === 'zh-CN' && x.zh;
     out.push(...tags.slice(0, 12).map(x => ({section: 'tag', label: zh(x) || tagText(x.tag), detail: zh(x) ? tagText(x.tag) : '', cond: `tag:${x.tag}`})));
-    out.push(...state.chars.filter(c => hit(c.name) || (c.tag && hit(c.tag))).slice(0, 8).map(c => ({section: 'char', label: c.name, detail: number(c.count), cond: `char:${c.id}`})));
+    const chars = state.chars.filter(c => hit(c.name) || (c.tag && hit(c.tag))).slice(0, 8);
+    out.push(...chars.map(c => ({section: 'char', label: c.name, html: charOption(c), detail: number(c.count), cond: `char:${c.id}`})));
     if (!state.workTree) await loadWorkTree().catch(() => {});
     out.push(...(state.workTree || []).filter(w => hit(w.name)).slice(0, 6).map(w => ({section: 'work', label: w.name, detail: w.qualifier || '', cond: `work:${w.id}`})));
     out.push(...artists.map(a => ({section: 'artist', label: a.name, detail: number(a.count), cond: `artist:${a.id}`})));
@@ -118,7 +153,7 @@ async function loadOptions() {
   let last = '', html = '';
   found.forEach((o, i) => {
     if (o.section !== last) { html += `<div class="palette-label">${esc(sections[o.section])}</div>`; last = o.section; }
-    html += `<button class="menu-item" data-i="${i}">${esc(o.label)}${o.detail ? ` <small>${esc(o.detail)}</small>` : ''}</button>`;
+    html += `<button class="menu-item" data-i="${i}">${o.html || esc(o.label)}${o.detail ? ` <small>${esc(o.detail)}</small>` : ''}</button>`;
   });
   $('condOptions').innerHTML = html || `<p>${t('没有匹配的条件')}</p>`;
   nav?.mark(0);

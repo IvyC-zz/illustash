@@ -152,3 +152,34 @@ test('home rows: full rows fill the width; a day with few pictures and a short l
   const full = rows(homeRows(pics(1, 1, 1, 1, 1, 1, 1), 1372, 190));
   assert.equal(full.length, 1); assert.ok(full[0].tiles.every(s => s.startsWith('flex:1 ')));
 });
+test('认一认「都不是」常驻在底栏，一次把整批记成不是 TA；全部点掉以后只剩主按钮的「都不是」（#675）', async () => {
+  const {home, wireHome} = homeModule, {state, edits} = web.core(), page = web.fakePage(), posts = [];
+  globalThis.ResizeObserver ||= class { observe() {} };
+  gridModule.viewOpts.ask = true;
+  Object.assign(state, {route: {page: 'home'}, nsfw: '', focused: null, viewer: -1});
+  const items = ['a', 'b', 'c'].map(uuid => ({uuid, width: 100, height: 100}));
+  const batch = () => ({entity: 'e1', kind: 'hint', name: 'A', items});
+  Object.assign(home, {days: [], ask: batch(), askSkip: [], askOff: new Set(['b'])});
+  const card = () => homeModule.askCardHTML(), buttons = html => [...html.matchAll(/data-askcard="(\w+)"[^>]*>([^<]*)</g)].map(m => [m[1], m[2]]);
+  // 点掉一张：常驻的「都不是」和「其余 2 张是」同时在；全部点掉：只剩主按钮的「都不是」，两个不同时出现。
+  assert.deepEqual(buttons(card()), [['later', '以后再说'], ['none', '都不是'], ['ok', '其余 2 张是']]);
+  home.askOff = new Set(['a', 'b', 'c']);
+  assert.deepEqual(buttons(card()), [['later', '以后再说'], ['ok', '都不是']]);
+  // 点「都不是」（只点掉了一张）和全部点掉再确认，发出的是同一个请求，撤销记下来。
+  globalThis.fetch = async (path, init) => {
+    if (path === '/api/ask/answer') posts.push(JSON.parse(init.body));
+    const body = path === '/api/ask/answer' ? {undo: {id: posts.length, label: 'x'}} : path.startsWith('/api/ask') ? {batch: null} : path.startsWith('/api/home') ? {days: [], next: ''} : {};
+    return {status: 200, ok: true, json: async () => body};
+  };
+  wireHome();
+  // 第一个 click 监听是首页自己的；后面那个是 wirePeek 的捕获监听。
+  const click = how => page.el('homePage').listeners.click[0]({target: {closest: sel => sel === '[data-askcard]' ? {dataset: {askcard: how}} : null}});
+  for (const [off, how] of [[['b'], 'none'], [['a', 'b', 'c'], 'ok']]) {
+    Object.assign(home, {ask: batch(), askOff: new Set(off)});
+    click(how); await new Promise(r => setTimeout(r, 20));
+    assert.equal(edits.latest?.id, posts.length);
+  }
+  assert.equal(posts.length, 2);
+  assert.deepEqual(posts[0], {entity: 'e1', kind: 'hint', yes: [], no: ['a', 'b', 'c']});
+  assert.deepEqual(posts[1], posts[0]);
+});

@@ -139,3 +139,63 @@ test('写入之后的列表：回复里的画廊换进原来的位置，删除�
   assert.deepEqual(state.galleries.map(g => g.id), [2, 5]);
   assert.equal(c.galleryOf('5').name, 'new');
 });
+
+test('旧的单值参数和条件数组两种写法：唯一的条件、离开本页的判断一样（#644）', () => {
+  const legacy = {page: 'library', artist: 'a1'}, list = {page: 'library', has: ['artist:a1']};
+  assert.equal(c.sole(legacy), 'artist:a1');
+  assert.equal(c.sole(list), 'artist:a1');
+  assert.equal(c.sole({page: 'library', has: ['artist:a1', 'fav']}), '');
+  assert.equal(c.sole({page: 'library', artist: 'a1', not: ['fav']}), '');
+  assert.equal(c.sole({page: 'library', has: ['fav'], char: 'c1'}), '');
+  // 搜索词不影响标题，但侧栏「收藏」只在没有搜索词时亮
+  assert.equal(c.sole({page: 'library', has: ['fav'], q: '海'}), 'fav');
+  assert.equal(c.only({page: 'library', has: ['fav'], q: '海'}, 'fav'), false);
+  for (const r of [legacy, list, {page: 'library', has: ['artist:a1', 'source:x']}]) {
+    assert.equal(c.leaves(r, 'artist:a1', false), true);
+    assert.equal(c.leaves(r, 'artist:a1', true), false);
+  }
+  const excluded = {page: 'library', not: ['utag:看过了']};
+  assert.equal(c.leaves(excluded, 'utag:看过了', true), true);
+  assert.equal(c.leaves(excluded, 'utag:看过了', false), false);
+  assert.equal(c.leaves({page: 'library', utag: '看过了'}, 'utag:看过了', false), true);
+  assert.equal(c.leaves({page: 'library'}, 'utag:看过了', false), false);
+});
+
+test('图库标题和「?」：两种写法一样；画师名标题和胶囊共用一份，只读一次（#644）', async () => {
+  const {conditionTitle, conditionHelp, conditionLabel, filterBar} = await web.load('ui/filters.js');
+  const calls = [];
+  globalThis.fetch = async path => { calls.push(path); return reply({id: 'a7', name: '合成画师'}); };
+  const legacy = {page: 'library', artist: 'a7'}, list = {page: 'library', has: ['artist:a7']};
+  // 还在读时标题写「…」，不露出 id
+  assert.match(conditionTitle(legacy), /画师 · <span data-cond-name="artist:a7">…<\/span>/);
+  await new Promise(resolve => setTimeout(resolve, 0));
+  assert.equal(conditionTitle(list), conditionTitle(legacy));
+  assert.match(conditionTitle(list), /合成画师/);
+  assert.equal(conditionLabel('artist:a7'), '合成画师');
+  filterBar(legacy); filterBar(list);
+  assert.equal(calls.filter(p => p.startsWith('/api/artist?')).length, 1);
+  assert.deepEqual(conditionHelp(legacy), ['画师是按画作比对找到的。']);
+  assert.deepEqual(conditionHelp(list), conditionHelp(legacy));
+  assert.deepEqual(conditionHelp({page: 'library', work: 'w1', has: ['artist:a7', 'source:x']}), ['包含所有子作品的图。', '画师是按画作比对找到的。']);
+  // 两个以上条件、只有收藏：标题由图库页自己写
+  assert.equal(conditionTitle({page: 'library', has: ['artist:a7', 'source:x']}), '');
+  assert.equal(conditionTitle({page: 'library', has: ['fav']}), '');
+  assert.equal(conditionTitle({page: 'library', utag: '看过了'}), conditionTitle({page: 'library', has: ['utag:看过了']}));
+  assert.equal(conditionTitle({page: 'library', day: '2025-03-04'}), '2025-03-04 加入'.replace('2025-03-04', c.dayLabel('2025-03-04')));
+});
+
+test('角色胶囊只写名字，悬停写「名字（作品）」；原创角色写「原创」（#678）', async () => {
+  const {filterBar} = await web.load('ui/filters.js');
+  const {charOption} = await web.load('ui/dom.js');
+  const {state} = c;
+  const chars = [{id: 'c1', name: '合成角色', work_id: 'w1', work_name: '合成作品', count: 3}, {id: 'c2', name: '原创甲', kind: 'oc', count: 1}, {id: 'c3', name: '无作品', count: 1}];
+  state.charMap = new Map(chars.map(x => [x.id, x]));
+  const bar = filterBar({page: 'library', has: ['char:c1'], not: ['char:c2', 'char:c3']});
+  assert.match(bar, /title="合成角色（合成作品） · 点一下改成不含">合成角色<\/a>/);
+  assert.match(bar, /title="原创甲（原创） · 点一下改回包含">不含 原创甲<\/a>/);
+  assert.match(bar, /title="无作品 · 点一下改回包含">不含 无作品<\/a>/);
+  // 菜单里的角色行和「跳到角色」同一种写法
+  assert.equal(charOption(chars[0]), '合成角色<small class="char-work">合成作品</small>');
+  assert.equal(charOption(chars[2]), '无作品');
+  assert.equal(charOption({name: 'Karen'}, 'Blue Archive'), 'Karen<small class="char-work">Blue Archive</small>');
+});
