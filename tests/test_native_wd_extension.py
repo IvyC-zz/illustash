@@ -15,7 +15,7 @@ import unittest
 from tests.folder_fixture import image
 from tests.fixed_expectations import Library
 from tests import test_native_lifecycle as lifecycle, test_native_sync as sync_fixture
-from tests.test_native_recognition import NativeRecognitionTest
+from tests import test_native_recognition as recognition_fixture
 from tests.test_read_http import free_port, wait_until
 from tools.dev_preview import isolated_env
 from tools.wait_limit import WAIT
@@ -234,8 +234,8 @@ class NativeWdExtensionTest(SyntheticWdLibrary, unittest.TestCase):
 class NativeWdExtensionSyncTest(SyntheticWdLibrary, unittest.TestCase):
     worker = sync_fixture.NativeSyncTest.worker
 
-    incoming = NativeRecognitionTest.incoming
-    manifest = NativeRecognitionTest.manifest
+    incoming = recognition_fixture.NativeRecognitionTest.incoming
+    manifest = recognition_fixture.NativeRecognitionTest.manifest
 
     def sync_state(self):
         return json.loads(self.request('/api/sync')['body'])['state']
@@ -385,3 +385,19 @@ class NativeWdExtensionSyncTest(SyntheticWdLibrary, unittest.TestCase):
         settled()
         self.assertNotIn(asset, {u for u, _, _ in self.candidates()})
         self.assertEqual(self.state()['library']['scored'], 4)
+
+
+        # 待投影期间撤回原包。显式恢复仍交付基础识别结果，但不恢复已撤回的扩展证据。
+        interrupt_projection()
+        image(self.new_folder / 'after-withdraw.png', 'yellow', (75, 46))
+        self.assertEqual(self.request('/api/sync', {})['body'], b'{"started": true}')
+        wait_until(lambda: self.sync_state()['status'] == 'error')
+        _, receipt = pending()
+        self.assertEqual(receipt['sync_wd_package_sha256'], active)
+        unblock_projection()
+        self.state('/withdraw', {})
+        self.assertEqual(self.finish('withdraw')['task']['status'], 'done')
+        self.assertEqual(recover_http({'resume': True})['status'], 'done')
+        settled()
+        self.assertEqual(self.candidates(), [])
+        self.assertEqual(self.state()['library']['scored'], 0)
