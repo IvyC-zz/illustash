@@ -76,6 +76,19 @@ test('下载中：进度、速度、来源、代理和取消；失败时写原�
   assert.equal(c.packLine(pack({download: {kind: 'download', status: 'cancelled'}})), '已取消');
 });
 
+test('坏 ZIP 导入后，卡片和任务都写出文件名和原因', () => {
+  const download = {kind: 'import', status: 'failed', message: 'bad.zip 不是有效的 ZIP 文件'};
+  const message = '角色资料包没能导入：bad.zip 不是有效的 ZIP 文件';
+  for (const current of [{}, READY]) {
+    const x = pack({current, download});
+    assert.equal(c.packDot(x), 'warn');
+    assert.match(c.packStatus(x), /角色资料包没能导入：bad\.zip 不是有效的 ZIP 文件/);
+    assert.equal(c.packTask(x).line, message);
+    assert.equal(c.packTask(x).warn, true);
+    assert.equal(c.downloadText(download, pack(), x), message);
+  }
+});
+
 test('已下载、本图库没启用：已有识别结果的图库提示一次，可以启用或不用；新图库第一次同步时启用', () => {
   const ask = pack({current: READY, library: {prompt: 'ask'}});
   assert.equal(c.packLine(ask), '角色资料包现在默认启用，本图库还没启用');

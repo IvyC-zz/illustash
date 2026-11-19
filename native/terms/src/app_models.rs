@@ -941,8 +941,8 @@ fn import_into(
         let zip = !whole && path.extension().is_some_and(|x| x.eq_ignore_ascii_case("zip"));
         if zip {
             let file = fs::File::open(path).map_err(unreadable)?;
-            let mut archive = zip::ZipArchive::new(file)
-                .map_err(|e| Stop::Failed(format!("{name} 不是有效的 ZIP：{error}", error = e)))?;
+            let mut archive =
+                zip::ZipArchive::new(file).map_err(|_| Stop::Failed(format!("{name} 不是有效的 ZIP 文件")))?;
             let unreadable_entry = |error| Stop::Failed(format!("{name} 读取失败：{error}"));
             for i in 0..archive.len() {
                 let mut item = archive.by_index(i).map_err(unreadable_entry)?;
@@ -1586,6 +1586,20 @@ fn import_paths(body: &Json) -> Result<Vec<PathBuf>> {
     }
 }
 
+/// 同一种组成部分只有一个工作线程。在发布任务终态前，清掉零字节断点文件和空目录，留下可续传的数据。
+fn cleanup_pack_partials(places: &[Place]) {
+    for place in places {
+        let partial = partial_dir(&place.root);
+        for entry in &place.manifest.files {
+            let path = part(&partial, entry);
+            if fs::symlink_metadata(&path).is_ok_and(|m| m.is_file() && m.len() == 0) {
+                let _ = fs::remove_file(path);
+            }
+        }
+        let _ = fs::remove_dir(partial);
+    }
+}
+
 /// 从文件导入：离线包里的目录先验签采用（`app_packs::adopt_archives`），再按采用后的目录，让 `kinds` 里每种组成部分
 /// 各自的导入任务认所选的文件。认不出的文件在各自的结果里是 `unknown`，页面合并时以认出的那边为准。
 fn start_import(resources: &Path, kinds: &[PackKind], paths: Vec<PathBuf>) -> Result<()> {
@@ -1594,7 +1608,11 @@ fn start_import(resources: &Path, kinds: &[PackKind], paths: Vec<PathBuf>) -> Re
     for &kind in kinds {
         let places = places_of(resources, kind)?;
         let (paths, notes) = (paths.clone(), notes.clone());
-        models_of(kind).start("import", total, move |models| import_into(models, &places, &paths, &notes))?;
+        models_of(kind).start("import", total, move |models| {
+            let outcome = import_into(models, &places, &paths, &notes);
+            cleanup_pack_partials(&places);
+            outcome
+        })?;
         note_pack_job(kind, None);
     }
     Ok(())
@@ -1603,11 +1621,17 @@ fn start_import(resources: &Path, kinds: &[PackKind], paths: Vec<PathBuf>) -> Re
 /// 下载一个组成部分（已经就位时什么都不做），记下它属于哪个版本。
 fn start_download(resources: &Path, component: &Pack, version: &str) -> Result<bool> {
     let mut place = place_of(resources, component)?;
-    if usable(&place.root, &place.manifest.files[0]) {
+    let entry = &place.manifest.files[0];
+    if usable(&place.root, entry) {
         return Ok(false);
     }
     place.proxy = proxy();
-    post_at(models_of(component.kind), place, &Json::object([("action", "download".into())]))?;
+    let total = if has(&partial_dir(&place.root), entry) { 0 } else { entry.size };
+    models_of(component.kind).start("download", total, move |models| {
+        let outcome = download(models, &place);
+        cleanup_pack_partials(std::slice::from_ref(&place));
+        outcome
+    })?;
     note_pack_job(component.kind, Some(version.to_owned()));
     Ok(true)
 }

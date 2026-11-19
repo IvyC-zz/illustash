@@ -20,6 +20,8 @@ const lib = x => x?.library || {};
 const size = x => bytes(pkg(x).size || 0);
 const left = x => Math.max(0, (pkg(x).size || 0) - (pkg(x).have || 0));
 const ready = x => pkg(x).status === 'ready';
+const importFailed = d => d?.kind === 'import' && d.status === 'failed';
+const importError = d => d.message ? t('角色资料包没能导入：{reason}', {reason: tb(d.message)}) : t('角色资料包没能导入');
 // 两个组成部分启用了任何一个都算已启用（换包时一边没换成也是）。
 const on = x => !!lib(x).enabled;
 // 不能启用或重新检查的原因（library.blocked）。没有识别结果也能启用：新识别的图交付时再检查。
@@ -57,6 +59,7 @@ export function packLine(x = current()) {
     return t('正在下载 {done} / {total}', {done: bytes(d.done), total: bytes(d.total)}) + (d.speed ? ' · ' + t('{speed}/秒', {speed: bytes(d.speed)}) : '')
       + (d.source ? ' · ' + t('来自 {source}', {source: d.source}) : '') + (d.proxy ? ' · ' + t('经代理 {proxy}', {proxy: d.proxy}) : '');
   }
+  if (importFailed(d)) return importError(d);
   if (task?.status === 'failed') {
     const reason = tb(task.message || '');
     if (task.kind === 'auto') return t('检查新识别的图没有完成，图库没有改动：{reason}', {reason});
@@ -84,7 +87,7 @@ export function packDot(x = current()) {
   if (!x) return 'off';
   if (packRunning(x) || packDownloading(x)) return 'busy';
   const ccipError = x.ccip?.library?.error;
-  if (x.task?.status === 'failed' || (!ready(x) && x.download?.status === 'failed') || (on(x) && ccipError)) return 'warn';
+  if (x.task?.status === 'failed' || importFailed(x.download) || (!ready(x) && x.download?.status === 'failed') || (on(x) && ccipError)) return 'warn';
   return on(x) ? '' : 'off';
 }
 export function packBar(x = current()) {
@@ -217,7 +220,8 @@ export function packTask(x = current()) {
   const running = packRunning(x), downloading = packDownloading(x);
   const busyText = running && x.task.kind === 'withdraw' ? t('撤回角色资料包中') : running ? t('检查角色资料包中')
     : x.download?.kind === 'import' ? t('导入角色资料包中') : t('下载角色资料包中');
-  const failed = x.task?.status === 'failed' ? x.task : !ready(x) && x.download?.status === 'failed' ? x.download : null;
+  const d = x.download;
+  const failed = importFailed(d) ? d : x.task?.status === 'failed' ? x.task : !ready(x) && d?.status === 'failed' ? d : null;
   return {key: 'pack', name: packName(), busy: busyText, active: running || downloading, warn: !!failed, off: packDot(x) === 'off',
     line: packLine(x), body: packBar(x), action: packActions(x, true), diagnostic: failed?.diagnostic};
 }
@@ -240,6 +244,7 @@ export function downloadText(d, before, x = current()) {
   if (packOffer(before)?.downloading && d.kind === 'download') {
     return d.status === 'done' ? t('新版本已下载') : d.status === 'failed' ? t('新版本没能下载：{reason}', {reason: tb(d.message || '')}) : '';
   }
+  if (importFailed(d)) return importError(d);
   if (d.status === 'failed' && d.kind === 'download') return packLine(x);
   return ready(x) && d.status === 'done' ? t('角色资料包已就位') : '';
 }
