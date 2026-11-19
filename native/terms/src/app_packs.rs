@@ -37,6 +37,8 @@ const CATALOG_LIMIT: u64 = 1 << 20;
 const SIGNATURE_LIMIT: u64 = 4096;
 const FILE_LIMIT: u64 = 512 << 20;
 const ENTRY_LIMIT: usize = 64;
+const SHARD_LIMIT: usize = 128;
+pub(crate) const WD_COEFFICIENT_BYTES: u64 = (1024 + 1) * 4;
 /// 专签数据包的公钥（Tauri 格式：minisign 公钥文本整体再 base64 一次）。`#` 开头的行是说明；只有说明时目录不启用。
 const PUBKEY_FILE: &str = include_str!("../pack-key.pub");
 /// 这个构建随带的 WD 标签表 `resources/tags/tags_v3.csv`（见 docs/THIRD_PARTY.md）。
@@ -89,6 +91,19 @@ pub(crate) struct File {
     pub(crate) url: String,
 }
 
+/// WD 分片的有序清单。完整包的字节是头部、所有权重、所有偏置。
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(crate) struct Shards {
+    pub(crate) header: File,
+    pub(crate) coefficients: Vec<File>,
+}
+
+impl Shards {
+    pub(crate) fn files(&self) -> impl Iterator<Item = &File> {
+        std::iter::once(&self.header).chain(&self.coefficients)
+    }
+}
+
 /// 包依赖的基础模型身份。
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(crate) enum Base {
@@ -110,6 +125,7 @@ pub(crate) struct Pack {
     /// 其中只出候选、永不补主归属的二级头数（只有 WD 的 `/2` 格式有）。
     pub(crate) candidate_only: usize,
     pub(crate) file: File,
+    pub(crate) shards: Option<Shards>,
     pub(crate) base: Base,
     pub(crate) license: String,
     pub(crate) builtin: bool,
@@ -208,8 +224,15 @@ struct RawComponent {
     #[serde(default)]
     candidate_only: usize,
     file: RawFile,
+    shards: Option<RawShards>,
     base: RawBase,
     license: String,
+}
+
+#[derive(Deserialize)]
+struct RawShards {
+    header: RawFile,
+    coefficients: Vec<RawFile>,
 }
 
 #[derive(Deserialize)]
@@ -218,6 +241,43 @@ struct RawFile {
     size: u64,
     sha256: String,
     url: String,
+}
+
+impl RawFile {
+    fn valid(&self) -> bool {
+        let tag = self.url.strip_prefix(RELEASE_PREFIX).and_then(|rest| rest.split_once('/'));
+        segment(&self.name, 128)
+            && (1..=FILE_LIMIT).contains(&self.size)
+            && hex64(&self.sha256)
+            && tag.is_some_and(|(tag, name)| segment(tag, 64) && name == self.name)
+    }
+
+    fn into_file(self) -> File {
+        File { name: self.name, size: self.size, sha256: self.sha256, url: self.url }
+    }
+}
+
+impl RawShards {
+    fn validate(self, file: &RawFile, kind: Kind, heads: usize, version: &str) -> Result<Shards> {
+        let valid = kind == Kind::Wd
+            && (1..=SHARD_LIMIT).contains(&self.coefficients.len())
+            && std::iter::once(&self.header)
+                .chain(&self.coefficients)
+                .all(|f| f.valid() && f.name == format!("wd-shard-{}.bin", f.sha256))
+            && self.coefficients.iter().all(|f| f.size % WD_COEFFICIENT_BYTES == 0);
+        if !valid {
+            return Err(bad(&format!("条目 {version} 的 WD 分片不合法")));
+        }
+        let coefficients_size = self.coefficients.iter().map(|f| f.size).sum::<u64>();
+        if coefficients_size != heads as u64 * WD_COEFFICIENT_BYTES || coefficients_size + self.header.size != file.size
+        {
+            return Err(bad(&format!("条目 {version} 的 WD 分片大小不符")));
+        }
+        Ok(Shards {
+            header: self.header.into_file(),
+            coefficients: self.coefficients.into_iter().map(RawFile::into_file).collect(),
+        })
+    }
 }
 
 #[derive(Deserialize, Default)]
@@ -343,20 +403,16 @@ impl Catalog {
     }
 
     fn component(kind: Kind, raw: RawComponent, revision: u32, version: &str) -> Result<Pack> {
-        let f = &raw.file;
-        let tag = f.url.strip_prefix(RELEASE_PREFIX).and_then(|rest| rest.split_once('/'));
         let valid = (1..=64).contains(&raw.format.len())
             && raw.format.bytes().all(|b| b.is_ascii_graphic())
             && (1..=1_000_000).contains(&raw.heads)
             && raw.candidate_only <= raw.heads
-            && segment(&f.name, 128)
-            && (1..=FILE_LIMIT).contains(&f.size)
-            && hex64(&f.sha256)
-            && tag.is_some_and(|(tag, name)| segment(tag, 64) && name == f.name)
+            && raw.file.valid()
             && short(&raw.license, 200);
         if !valid {
             return Err(bad(&format!("条目 {version} 的组成部分 {} 不合法", kind.key())));
         }
+        let shards = raw.shards.map(|s| s.validate(&raw.file, kind, raw.heads, version)).transpose()?;
         let hex = |v: &Option<String>| v.as_deref().filter(|s| hex64(s)).map(str::to_owned);
         let base = match kind {
             Kind::Wd => Base::Wd {
@@ -374,11 +430,32 @@ impl Catalog {
             format: raw.format,
             heads: raw.heads,
             candidate_only: raw.candidate_only,
-            file: File { name: raw.file.name, size: raw.file.size, sha256: raw.file.sha256, url: raw.file.url },
+            file: raw.file.into_file(),
+            shards,
             base,
             license: raw.license,
             builtin: false,
         })
+    }
+
+    fn require_same_version_files(&self, previous: &Self) -> Result<()> {
+        let same_parts = |new: &Pack, old: &Pack| {
+            new.file.sha256 == old.file.sha256
+                && new.shards.iter().flat_map(Shards::files).map(|f| &f.sha256).eq(old
+                    .shards
+                    .iter()
+                    .flat_map(Shards::files)
+                    .map(|f| &f.sha256))
+        };
+        for entry in &self.entries {
+            let earlier = previous.entries.iter().find(|old| old.version == entry.version);
+            if let (Some(new), Some(old)) = (entry.pack.as_ref(), earlier.and_then(|e| e.pack.as_ref())) {
+                if new.revision != old.revision || !same_parts(&new.wd, &old.wd) || !same_parts(&new.ccip, &old.ccip) {
+                    return Err(bad(&format!("已发布的版本 {} 不能替换文件或修订号", entry.version)));
+                }
+            }
+        }
+        Ok(())
     }
 
     /// 本版本能用的角色资料包：种类认识，两个组成部分的格式都支持、基础模型都和这个构建的对得上，满足最低应用版本。
@@ -465,6 +542,7 @@ pub(crate) fn builtin_wd() -> Result<Pack> {
         heads: spec.heads,
         candidate_only: 0,
         file: File { name, size, sha256, url },
+        shards: None,
         base: Base::Wd {
             model: spec.base_sha256.clone(),
             tags: spec.tags_sha256.clone().unwrap_or_else(|| WD_TAGS_SHA256.into()),
@@ -490,6 +568,7 @@ pub(crate) fn builtin_ccip() -> Result<Pack> {
             sha256: release.sha256.clone(),
             url: release.url.clone(),
         },
+        shards: None,
         base: Base::Ccip { model: release.ccip_sha256.clone() },
         license: "MIT".into(),
         builtin: true,
@@ -600,6 +679,7 @@ fn adopt_at(path: &Path, bytes: &[u8], signature: &[u8], key: &str) -> Result<Ad
         if catalog.serial == current.serial {
             return Err(bad("和本机已有的目录序号相同、内容不同"));
         }
+        catalog.require_same_version_files(&current)?;
     }
     let envelope =
         json!({"format":CACHE_FORMAT,"catalog":STANDARD.encode(bytes),"signature":STANDARD.encode(signature)});

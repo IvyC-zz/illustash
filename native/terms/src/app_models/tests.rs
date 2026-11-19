@@ -348,6 +348,7 @@ impl Fixture {
             on_demand: true,
             in_use: false,
             raw_archive: false,
+            shards: None,
         }
     }
     fn hf(&self, path: &str) -> String {
@@ -592,6 +593,7 @@ fn imported_files_and_zip_entries_are_matched_by_hash_whatever_their_names() {
         on_demand: true,
         in_use: false,
         raw_archive: false,
+        shards: None,
     };
     let chosen = fixture.dir.join("downloads");
     fs::create_dir_all(&chosen).unwrap();

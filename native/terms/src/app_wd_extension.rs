@@ -876,6 +876,7 @@ mod tests {
                 sha256: crate::strict_json::sha256_hex(bytes),
                 url: String::new(),
             },
+            shards: None,
             base: Base::Wd { model: "model".into(), tags: "tags".into() },
             license: "Apache-2.0".into(),
             builtin: false,

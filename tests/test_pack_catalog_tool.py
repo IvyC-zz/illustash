@@ -9,6 +9,7 @@ import unittest
 import zipfile
 
 from tools import pack_catalog
+from tests.pack_shards_fixture import shard_fixture
 
 FIXTURES = Path(__file__).resolve().parent / 'fixtures' / 'pack_catalog'
 PLACEHOLDER = ('# 专签数据包目录的公钥（#602），Tauri 格式：`cargo tauri signer generate` 打印的那一行。\n'
@@ -73,6 +74,30 @@ class PackCatalogToolTest(unittest.TestCase):
                      'components': {**v2['components'], 'wd': {**v2['components']['wd'], 'candidate_only': 1}}}
         with self.assertRaises(pack_catalog.CatalogError):
             pack_catalog.build([tiered_v1])
+
+    def test_shards_preserve_file_bytes_and_reuse_the_previous_release(self):
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            (first, second), (old, new) = shard_fixture(root)
+            old_wd = old['packs'][0]['components']['wd']
+            new_wd = new['packs'][1]['components']['wd']
+            old_parts = pack_catalog.shard_files(old_wd['shards'])
+            new_parts = pack_catalog.shard_files(new_wd['shards'])
+            self.assertEqual(len(old_parts), 3)
+            self.assertEqual(old_parts[:-1], new_parts[:-1])
+            self.assertNotEqual(old_parts[-1]['sha256'], new_parts[-1]['sha256'])
+            self.assertEqual([path.name for path in (root / 'second').iterdir()], [new_parts[-1]['name']])
+            self.assertEqual(new_wd['file']['sha256'], pack_catalog.sha256(second.read_bytes()))
+            self.assertEqual(first.stat().st_size, second.stat().st_size)
+
+            old_entry = old['packs'][0]
+            new_entry = {**new['packs'][1], 'version': old_entry['version'], 'revision': old_entry['revision']}
+            with self.assertRaisesRegex(pack_catalog.CatalogError, '不能替换'):
+                pack_catalog.build([new_entry], old)
+
+            new_wd['shards']['coefficients'][-1]['size'] += 1
+            with self.assertRaisesRegex(pack_catalog.CatalogError, '分片不合法'):
+                pack_catalog.check_catalog(new)
 
     def test_verify_checks_the_key_and_the_bytes(self):
         data = (FIXTURES / 'packs.json').read_bytes()
