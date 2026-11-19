@@ -1812,6 +1812,8 @@ mod tests {
         assert_eq!(migrate_to(&mut c, 10).unwrap(), 9);
         assert!(store::term_by_key(&c, FAVORITE_KEY).unwrap().is_none());
         assert_eq!(store::state(&c, asset, tag).unwrap().as_deref(), Some("confirmed"));
+        // 撤销只认当前版本的库；第 10 版以后的升级不碰撤销记录和类型触发器，先升到当前版本再撤销。
+        migrate_to(&mut c, SCHEMA_VERSION).unwrap();
         store::undo(&mut c, Some(action)).unwrap();
         assert_ne!(store::state(&c, asset, tag).unwrap().as_deref(), Some("confirmed"));
         let mark = store::create_term(&c, Kind::Mark, Some(FAVORITE_KEY), "user").unwrap();
