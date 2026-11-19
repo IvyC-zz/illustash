@@ -17,6 +17,7 @@ from pathlib import Path
 import random
 import struct
 import sys
+import tempfile
 import zipfile
 
 from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
@@ -24,6 +25,7 @@ from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
 HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE.parents[2]))
 from tools import pack_catalog  # noqa: E402
+from tests.pack_shards_fixture import invalid_assembly, shard_fixture  # noqa: E402
 
 # 这个构建的模型身份（native/terms/models.json、resources/tags/tags_v3.csv）：目录里的包要和它对得上才算可用。
 WD_MODEL = 'ae25f5f12b2d5891728fb7768fa63d65bf13a83d6d4823e3a1bf7b42875c74ff'
@@ -152,6 +154,13 @@ def main():
     write('packs.json.sig-b', b.sign((HERE / 'packs.json').read_bytes()))
     for version, files in (('0.2', [HERE / 'wd-extension-v2.bin', ccip_v1]), ('1.0', [HERE / 'wd-extension-v3.bin', ccip_v2])):
         pack_catalog.offline(HERE / 'packs.json', files, HERE / f'character-pack-{version}-offline.zip')
+    with tempfile.TemporaryDirectory() as temp:
+        _, catalogs = shard_fixture(Path(temp))
+        names = ('packs-shards-a.json', 'packs-shards-b.json', 'packs-shards-invalid.json')
+        for name, catalog in zip(names, (*catalogs, invalid_assembly(catalogs[-1]))):
+            data = pack_catalog.dumps(catalog)
+            write(name, data)
+            write(name + '.sig', a.sign(data))
     tauri = HERE / 'packs.json.tauri.sig'
     if tauri.exists():
         try:

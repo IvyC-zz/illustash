@@ -51,6 +51,9 @@ FORMATS = {
     'ccip': ('illustash-557-ccip-offline/1',),
 }
 WD_DIM = 1024
+WD_SHARD_HEADS = 1024
+WD_COEFFICIENT_BYTES = (WD_DIM + 1) * 4
+SHARD_LIMIT = 128
 CCIP_DIM = 768
 SEGMENT = re.compile(r'^[A-Za-z0-9][A-Za-z0-9._-]*$')
 VERSION = re.compile(r'^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)(-[0-9A-Za-z.-]+)?$')
@@ -144,8 +147,42 @@ def component(kind, path, tag, name=None, license_text=None):
     }
 
 
+def shard_files(shards):
+    return [shards.get('header'), *shards['coefficients']] if shards else []
+
+
+def write_wd_shards(data, heads, output, tag, previous):
+    """保留完整包字节，分片由 JSON 头和各批次的权重、偏置构成。已有片沿用签名目录里的地址。"""
+    known = {}
+    for pack in (previous or {}).get('packs', []):
+        wd = (pack.get('components') or {}).get('wd') or {}
+        known.update((f['sha256'], f) for f in shard_files(wd.get('shards')))
+    output.mkdir(parents=True, exist_ok=True)
+
+    def write(body):
+        digest = sha256(body)
+        if digest in known:
+            return known[digest]
+        name = f'wd-shard-{digest}.bin'
+        spec = {'name': name, 'size': len(body), 'sha256': digest, 'url': f'{RELEASE_PREFIX}{tag}/{name}'}
+        (output / name).write_bytes(body)
+        known[digest] = spec
+        return spec
+
+    header_end = data.index(b'\n') + 1
+    bias_offset = header_end + heads * WD_DIM * 4
+    header = write(data[:header_end])
+    coefficients = []
+    for start in range(0, heads, WD_SHARD_HEADS):
+        end = min(start + WD_SHARD_HEADS, heads)
+        weights = data[header_end + start * WD_DIM * 4:header_end + end * WD_DIM * 4]
+        bias = data[bias_offset + start * 4:bias_offset + end * 4]
+        coefficients.append(write(weights + bias))
+    return {'header': header, 'coefficients': coefficients}
+
+
 def entry(*, version, revision, wd, ccip, min_app, stage=None, license_text=None, note_zh=None, note_en=None,
-          wd_tag=None, ccip_tag=None, wd_name=None, ccip_name=None):
+          wd_tag=None, ccip_tag=None, wd_name=None, ccip_name=None, wd_shards=None, previous=None):
     """从两个组成部分的包文件写出一条目录条目。两个组成部分的 Release 默认就是这个版本的（tag 是
     `character-pack-<版本名>`）。`stage` 为 `preview` 时是测试版，不写就是正式版。"""
     tag = f'character-pack-{version}'
@@ -166,24 +203,45 @@ def entry(*, version, revision, wd, ccip, min_app, stage=None, license_text=None
         if not (note_zh and note_en):
             raise CatalogError('说明要中英文都写')
         result['note'] = {'zh-CN': note_zh, 'en': note_en}
+    if wd_shards is not None:
+        if previous is not None:
+            check_catalog(previous)
+        wd_component = result['components']['wd']
+        wd_component['shards'] = write_wd_shards(Path(wd).read_bytes(), wd_component['heads'], Path(wd_shards), tag, previous)
     check_entry(result)
     return result
 
 
 # ---------- 目录的规则（和 native/terms/src/app_packs.rs 的 Catalog::parse 一致）----------
 
+def valid_file(file):
+    url = file.get('url', '')
+    rest = url[len(RELEASE_PREFIX):] if isinstance(url, str) and url.startswith(RELEASE_PREFIX) else ''
+    tag, _, tail = rest.partition('/')
+    size = file.get('size')
+    return (segment(file.get('name'), 128) and isinstance(size, int) and 1 <= size <= FILE_LIMIT
+            and hex64(file.get('sha256')) and segment(tag, 64) and tail == file.get('name'))
+
+
 def check_component(key, c, version):
     f = c.get('file') or {}
-    url = f.get('url', '')
-    rest = url[len(RELEASE_PREFIX):] if url.startswith(RELEASE_PREFIX) else ''
-    tag, _, tail = rest.partition('/')
     ok = (isinstance(c.get('format'), str) and 0 < len(c['format']) <= 64
           and isinstance(c.get('heads'), int) and 1 <= c['heads'] <= 1_000_000
           and isinstance(c.get('candidate_only', 0), int) and 0 <= c.get('candidate_only', 0) <= c['heads']
-          and segment(f.get('name'), 128) and isinstance(f.get('size'), int) and 1 <= f['size'] <= FILE_LIMIT
-          and hex64(f.get('sha256')) and segment(tag, 64) and tail == f.get('name') and short(c.get('license'), 200))
+          and valid_file(f) and short(c.get('license'), 200))
     if not ok:
         raise CatalogError(f'条目 {version} 的组成部分 {key} 不合法')
+    shards = c.get('shards')
+    if shards is not None:
+        coefficients = shards.get('coefficients') if isinstance(shards, dict) else None
+        valid = (key == 'wd' and isinstance(coefficients, list) and 1 <= len(coefficients) <= SHARD_LIMIT
+                 and all(isinstance(part, dict) and valid_file(part)
+                         and part['name'] == f"wd-shard-{part['sha256']}.bin" for part in shard_files(shards))
+                 and all(part['size'] % WD_COEFFICIENT_BYTES == 0 for part in coefficients)
+                 and sum(part['size'] for part in coefficients) == c['heads'] * WD_COEFFICIENT_BYTES
+                 and sum(part['size'] for part in shard_files(shards)) == f['size'])
+        if not valid:
+            raise CatalogError(f'条目 {version} 的 WD 分片不合法')
     base = c.get('base') or {}
     if key == 'wd' and not (hex64(base.get('wd_model_sha256')) and hex64(base.get('wd_tags_sha256'))):
         raise CatalogError(f'条目 {version} 缺少 WD 模型或标签表的 SHA-256')
@@ -240,9 +298,17 @@ def check_catalog(catalog, strict=True):
 
 
 def build(entries, previous=None, strict=True):
-    """把条目并进上一份目录（同版本名的替换），序号加一。"""
+    """把条目并进上一份目录，序号加一。已有版本只能更新说明等元数据。"""
     packs = list(previous['packs']) if previous else []
     for e in entries:
+        known = next((p for p in packs if p['version'] == e['version']), None)
+        if known:
+            def files(pack):
+                return [(part['file']['sha256'], tuple(f['sha256'] for f in shard_files(part.get('shards'))))
+                        for _, part in sorted((pack.get('components') or {}).items())]
+
+            if files(known) != files(e) or known['revision'] != e['revision']:
+                raise CatalogError(f'已发布的版本 {e["version"]} 不能替换文件或修订号')
         packs = [p for p in packs if p['version'] != e['version']] + [e]
     packs.sort(key=lambda p: (p['kind'], p['revision']))
     catalog = {'format': CATALOG_FORMAT, 'serial': (previous['serial'] + 1) if previous else 1, 'packs': packs}
@@ -369,6 +435,8 @@ def main(argv=None):
     make.add_argument('--note-en')
     make.add_argument('--wd-tag', help='WD 部分所在的 Release，默认就是这个版本的')
     make.add_argument('--ccip-tag', help='CCIP 部分所在的 Release，默认就是这个版本的')
+    make.add_argument('--wd-shards', type=Path, help='输出新的 WD 分片到指定目录')
+    make.add_argument('--previous', type=Path, help='上一份目录，沿用其中已有分片的下载地址')
     make.add_argument('--wd-name')
     make.add_argument('--ccip-name')
     make.add_argument('--output', type=Path, required=True)
@@ -402,7 +470,8 @@ def main(argv=None):
         elif args.command == 'entry':
             result = entry(version=args.version, revision=args.revision, stage=args.stage, wd=args.wd, ccip=args.ccip,
                            min_app=args.min_app, license_text=args.license, note_zh=args.note_zh, note_en=args.note_en,
-                           wd_tag=args.wd_tag, ccip_tag=args.ccip_tag, wd_name=args.wd_name, ccip_name=args.ccip_name)
+                           wd_tag=args.wd_tag, ccip_tag=args.ccip_tag, wd_name=args.wd_name, ccip_name=args.ccip_name,
+                           wd_shards=args.wd_shards, previous=json.loads(args.previous.read_bytes()) if args.previous else None)
             args.output.write_text(json.dumps(result, ensure_ascii=False, indent=2) + '\n', encoding='utf-8')
             parts = result['components']
             print(f'已写出 {args.output}：{result["version"]}，WD {parts["wd"]["heads"]} 个头、CCIP {parts["ccip"]["heads"]} 个角色')

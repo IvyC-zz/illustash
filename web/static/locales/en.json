@@ -3163,6 +3163,7 @@
   "WD 扩展包缺少阈值": "The WD extension package has no threshold",
   "WD 扩展包缺少逐头阈值或级别": "The WD extension package lacks per-head thresholds or tiers",
   "WD 扩展包阈值或级别数目不符": "The WD extension package has the wrong number of thresholds or tiers",
+  "WD 扩展包校验失败": "The WD extension pack could not be verified",
   "WD 扩展包阈值或级别不合法": "The WD extension package has an invalid threshold or tier",
   "WD 扩展包的二级头数和目录不符": "The WD extension package’s suggestion-only heads don’t match the catalog",
   "包目录无效：{why}": "Pack catalog invalid: {why}",

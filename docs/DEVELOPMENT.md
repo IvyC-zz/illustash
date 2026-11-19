@@ -188,12 +188,15 @@ stderr 每行最多取前 4 KiB 在内存识别，未知非空行只记未分类
 - **包格式分级**：`illustash-wd-extension/1` 的 WD 部分全部是一级头，可以另带逐头阈值 `thresholds`。`illustash-wd-extension/2` 必须带 `thresholds` 和 `tiers`，每个头 1 或 2：一级和现在一样可以补主归属，二级只出现在「也可能是」里，永远不补主归属，也不影响已有的主归属（证据带 `tier: 2`，见[词条存储](TERMS_SCHEMA.md#16-第-10-版03)）。几千头的二级包用这个格式。CCIP 部分只有一级。
 - **目录里保留还在支持的版本**：已启用某个版本的图库，只要这个版本还在目录里（或是内置的），就照常自动检查新图；从目录里删掉一个版本，等于不再支持它，用它的图库不再自动检查，要换成别的版本或撤回。同一个版本名永远对应同一组文件：内容变了就是新版本，修订号加一。
 
+**WD 分片（#638）**：分片版在 `components.wd` 保留完整二进制的 `file`，另外写 `shards.header` 和有序的 `shards.coefficients`。每片的字段和文件相同，按完整 SHA-256 命名。头部和各片的权重、偏置按原顺序重组；应用先校验每片，再校验完整文件。只有完整文件就位后才能启用或换包。已校验的分片放在共享扩展目录的 `wd-shards/`，之后的版本可以复用；删除未完成的部分时保留这些完整的共享分片。
+
 **专签数据包的密钥**：和应用更新的密钥分开，规矩相同（私钥只由用户保管，不进仓库、不交给 CI 和代理会话，不出现在 Issue、PR 和对话里；备份、丢失和泄露的处理照上一节）。2026-11-18 已生成（#602）：公钥在 `native/terms/pack-key.pub`，私钥由用户保管在自己 Mac 的 `~/.tauri/illustash-packs.key`。带这把公钥的构建才读包目录；更早的构建里 `pack-key.pub` 只有说明行，只用内置的 0.1。换钥匙时用户重新运行 `python3 tools/pack_catalog.py keygen <私钥路径>`：它调用 `cargo tauri signer generate`（按提示设密码，不要留空），再把公钥写进 `pack-key.pub`，开一个普通代码级的 PR。换钥匙要发一个新版本，旧版本仍只认旧钥匙签的目录。
 
 **发一个新版本**（签名和上传由用户做，代理会话可以准备前三步）：
 
 1. 准备两个组成部分的文件并核对 SHA-256（复封入口见 `tools/build_wd_extension.py`、`tools/build_ccip_longtail.py`，或研究会话交付的冻结文件）。新文件改成发布用的名字，内容不变。
 2. 写条目：`python3 tools/pack_catalog.py entry --version 0.2 --stage preview --revision 2 --wd wd-extension-v2.bin --ccip A-longtail-p75.zip --ccip-tag ccip-longtail-v1 --min-app 0.3.0 --note-zh '…' --note-en '…' --output character-pack-0.2.entry.json`（正式版不带 `--stage`）。格式、头数、二级头数和基础模型都从包文件里读。
+   - 发分片版时，在第 2 步加 `--wd-shards <只存本次新片的目录>`，若有上一份目录则加 `--previous packs.json`。沿用同一批头的顺序，在尾部追加新头，以便复用旧分片。只有变动的分片写到输出目录，复用的分片在条目里仍指向原 Release。把 `--min-app` 设为首个支持分片的应用版本。第 5 步照常收进完整 WD 文件和 CCIP 文件。第 6 步上传新分片、变更的 CCIP 文件和完整离线 ZIP。分片版的完整 WD 文件可从离线 ZIP 导入。
 3. 并进目录：先取上一份 `gh release download packs -p packs.json`（第一次发布时没有，省略 `--previous`），再 `python3 tools/pack_catalog.py build --previous packs.json --entry character-pack-0.2.entry.json --output packs.json`，序号自动加一。
 4. 签名（用户）：`python3 tools/pack_catalog.py sign --key ~/.tauri/illustash-packs.key packs.json`，写出 `packs.json.sig` 并核对。只想核对时用 `verify packs.json`（装了 `cryptography` 时完整核对签名，否则只核对密钥编号）。
 5. 离线包：`python3 tools/pack_catalog.py offline --catalog packs.json --file wd-extension-v2.bin --file A-longtail-p75.zip --output character-pack-0.2-offline.zip`，要附许可文本时加 `--extra LICENSE-2.0.txt` 等。

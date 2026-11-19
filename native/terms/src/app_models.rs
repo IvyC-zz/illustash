@@ -238,6 +238,7 @@ struct Place {
     in_use: bool,
     /// 参考包的整个 ZIP 都是清单中的文件。
     raw_archive: bool,
+    shards: Option<shards::Download>,
 }
 impl Place {
     fn app(resources: &Path) -> Result<Self> {
@@ -257,6 +258,7 @@ impl Place {
             on_demand: on_demand(),
             in_use: false,
             raw_archive: false,
+            shards: None,
         })
     }
     fn mirror(&self) -> String {
@@ -729,6 +731,9 @@ fn check_space(partial: &Path, needed: u64) -> std::result::Result<(), Stop> {
 }
 
 fn download(models: &Models, place: &Place) -> std::result::Result<Value, Stop> {
+    if let Some(shards) = &place.shards {
+        return shards.download(models, place);
+    }
     let partial = partial_dir(&place.root);
     fs::create_dir_all(&partial)?;
     let missing_bytes = |optional| {
@@ -768,65 +773,64 @@ fn download(models: &Models, place: &Place) -> std::result::Result<Value, Stop> 
         if !needed {
             continue;
         }
-        let mut tried = Vec::new();
-        let mut done = false;
-        for (label, address) in place.sources(entry) {
-            // 本机上的来源（本地镜像、测试）从不走代理。
-            let local = url::Url::parse(&address)
-                .is_ok_and(|u| matches!(u.host_str(), Some("127.0.0.1" | "localhost" | "[::1]")));
-            let via = if local { None } else { place.proxy.as_deref().map(host) };
-            models.set(|job| {
-                job["source"] = label.clone().into();
-                job["file"] = entry.path.clone().into();
-                job["proxy"] = via.into();
-            });
-            // 中途断开的连接从停下的地方接着下，没连上的重新连，在同一个来源上重试几次，每次多等一会儿（#642）。
-            let mut drops = 0;
-            loop {
-                match fetch(if local { &direct } else { &proxied }, &address, &partial, entry, &mut meter) {
-                    Ok(()) => {
-                        done = true;
-                        break;
-                    }
-                    Err(Failure::Stop(stop)) => return Err(stop),
-                    Err(Failure::Retry(why)) if drops < 3 => {
-                        drops += 1;
-                        eprintln!("models: {label} {}: {why}; retrying", entry.path);
-                        let until = Instant::now() + backoff(drops);
-                        while let Some(left) = until.checked_duration_since(Instant::now()).filter(|d| !d.is_zero()) {
-                            if models.stopped() {
-                                return Err(Stop::Cancelled);
-                            }
-                            std::thread::sleep(left.min(Duration::from_millis(50)));
-                        }
-                    }
-                    Err(Failure::Retry(why) | Failure::Next(why)) => {
-                        tried.push((label.clone(), why));
-                        break;
-                    }
-                }
-            }
-            if done {
-                break;
-            }
-        }
-        if !done {
-            // 每个来源的原因分开，让页面能逐个显示（和翻译）。
-            models.set(|job| {
-                job["failed_file"] = entry.path.clone().into();
-                job["failures"] = tried.iter().map(|(source, why)| json!({"source": source, "why": why})).collect();
-            });
-            let reasons: Vec<String> = tried.iter().map(|(source, why)| format!("{source} 出错：{why}")).collect();
-            return Err(Stop::Failed(format!(
-                "{path} 下载失败（{reason}）",
-                path = entry.path,
-                reason = reasons.join("；")
-            )));
-        }
+        fetch_entry(place, entry, &partial, &direct, &proxied, &mut meter)?;
         meter.finish(entry.size);
     }
     activate(&place.root, &partial, place.manifest)?;
     Ok(json!({"message": null}))
+}
+
+/// 下载一个文件到指定的暂存目录，沿用模型下载的来源切换和同源续传。
+fn fetch_entry(
+    place: &Place,
+    entry: &Entry,
+    partial: &Path,
+    direct: &ureq::Agent,
+    proxied: &ureq::Agent,
+    meter: &mut Meter,
+) -> std::result::Result<(), Stop> {
+    let mut tried = Vec::new();
+    for (label, address) in place.sources(entry) {
+        // 本机上的来源（本地镜像、测试）从不走代理。
+        let local =
+            url::Url::parse(&address).is_ok_and(|u| matches!(u.host_str(), Some("127.0.0.1" | "localhost" | "[::1]")));
+        let via = if local { None } else { place.proxy.as_deref().map(host) };
+        meter.models.set(|job| {
+            job["source"] = label.clone().into();
+            job["file"] = entry.path.clone().into();
+            job["proxy"] = via.into();
+        });
+        // 中途断开的连接从停下的地方接着下，没连上的重新连，在同一个来源上重试几次，每次多等一会儿（#642）。
+        let mut drops = 0;
+        loop {
+            match fetch(if local { direct } else { proxied }, &address, partial, entry, meter) {
+                Ok(()) => return Ok(()),
+                Err(Failure::Stop(stop)) => return Err(stop),
+                Err(Failure::Retry(why)) if drops < 3 => {
+                    drops += 1;
+                    eprintln!("models: {label} {}: {why}; retrying", entry.path);
+                    let until = Instant::now() + backoff(drops);
+                    while let Some(left) = until.checked_duration_since(Instant::now()).filter(|d| !d.is_zero()) {
+                        if meter.models.stopped() {
+                            return Err(Stop::Cancelled);
+                        }
+                        std::thread::sleep(left.min(Duration::from_millis(50)));
+                    }
+                }
+                Err(Failure::Retry(why) | Failure::Next(why)) => {
+                    tried.push((label.clone(), why));
+                    break;
+                }
+            }
+        }
+    }
+    // 每个来源的原因分开，让页面能逐个显示（和翻译）。
+    meter.models.set(|job| {
+        job["failed_file"] = entry.path.clone().into();
+        job["failures"] = tried.iter().map(|(source, why)| json!({"source": source, "why": why})).collect();
+    });
+    let reasons: Vec<String> = tried.iter().map(|(source, why)| format!("{source} 出错：{why}")).collect();
+    Err(Stop::Failed(format!("{path} 下载失败（{reason}）", path = entry.path, reason = reasons.join("；"))))
 }
 
 /// 所有文件都在 `partial` 里（或已经在根目录里）：一步把它们变成根目录的文件。
@@ -860,16 +864,14 @@ fn activate(root: &Path, partial: &Path, manifest: &Manifest) -> std::io::Result
 
 // ---------- import ----------
 
-/// 边计算哈希边把 `reader` 复制到条目的 `.part`；哈希对上时以它自己的名字保留。
-fn copy_checked(
+/// 拷贝并计算选中文件的摘要。等长的不同版本共用这一次读取，再按摘要选目标。
+fn copy_import(
     reader: &mut dyn Read,
-    partial: &Path,
-    entry: &Entry,
+    path: &Path,
+    size: u64,
     meter: &mut Meter,
-) -> std::result::Result<bool, Stop> {
-    let path = part(partial, entry);
-    fs::create_dir_all(path.parent().expect("model part has a parent"))?;
-    let mut file = fs::File::create(&path)?;
+) -> std::result::Result<Option<String>, Stop> {
+    let mut file = fs::File::create(path)?;
     let mut digest = Sha256::new();
     let mut buffer = vec![0; 1 << 18];
     let mut length = 0u64;
@@ -879,21 +881,18 @@ fn copy_checked(
             break;
         }
         length += n as u64;
-        if length > entry.size {
-            break;
+        if length > size {
+            return Ok(None);
         }
         file.write_all(&buffer[..n])?;
         digest.update(&buffer[..n]);
         meter.tick(length)?;
     }
-    file.sync_all()?;
-    drop(file);
-    if length != entry.size || format!("{:x}", digest.finalize()) != entry.sha256 {
-        fs::remove_file(&path)?;
-        return Ok(false);
+    if length != size {
+        return Ok(None);
     }
-    fs::rename(&path, partial.join(&entry.path))?;
-    Ok(true)
+    file.sync_all()?;
+    Ok(Some(format!("{:x}", digest.finalize())))
 }
 
 /// 用户选的文件：每个文件或 ZIP 里的每一项，先按大小、再按 SHA-256 匹配。名字和文件夹无关紧要（上游的两个 ONNX
@@ -917,10 +916,9 @@ fn import_into(
     }
     let raw_archive = places.iter().any(|place| place.raw_archive);
     let wanted = |size: u64| {
-        places
-            .iter()
-            .enumerate()
-            .find_map(|(i, place)| place.manifest.files.iter().find(|e| e.size == size).map(|e| (i, e)))
+        places.iter().enumerate().flat_map(move |(i, place)| {
+            place.manifest.files.iter().filter(move |entry| entry.size == size).map(move |entry| (i, entry))
+        })
     };
     let mut results = Vec::new();
     let mut meter = Meter::new(models, 0);
@@ -930,38 +928,40 @@ fn import_into(
                 results.push(json!({"name": name, "result": result, "path": null}));
                 return Ok(());
             }
-            let result = match wanted(size) {
-                None => "unknown",
-                Some((i, entry))
-                    if !places[i].raw_archive && (usable(&places[i].root, entry) || usable(&partials[i], entry)) =>
-                {
-                    "already"
-                }
-                Some((i, entry)) => {
-                    let place = &places[i];
-                    let installed = place.raw_archive
-                        && crate::recognition_compute::models::hash(&place.root.join(&entry.path), &|| Ok(()))
-                            .is_ok_and(|sha| sha == entry.sha256);
+            let entries: Vec<_> = wanted(size).collect();
+            let already = |i: usize, entry: &Entry| usable(&places[i].root, entry) || usable(&partials[i], entry);
+            let (result, logical_path) = match entries.as_slice() {
+                [] => ("unknown", None),
+                [(i, entry)] if !places[*i].raw_archive && already(*i, entry) => ("already", Some(&entry.path)),
+                [(first, entry), ..] => {
                     models.set(|job| job["file"] = entry.path.clone().into());
-                    let ok = copy_checked(reader, &partials[i], entry, meter)?;
-                    meter.finish(entry.size);
-                    if ok && installed {
-                        "already"
-                    } else if ok {
-                        "accepted"
-                    } else {
-                        "mismatch"
-                    }
+                    let unique = crate::store::new_key().map_err(|e| Stop::Failed(e.reason()))?;
+                    let temporary = partials[*first].join(format!("import-{unique}.tmp"));
+                    let outcome: std::result::Result<_, Stop> = (|| {
+                        let digest = copy_import(reader, &temporary, size, meter)?;
+                        meter.finish(size);
+                        let found = digest.and_then(|sha| entries.iter().find(|(_, entry)| entry.sha256 == sha));
+                        let Some(&(i, entry)) = found else { return Ok(("mismatch", Some(&entry.path))) };
+                        if already(i, entry) {
+                            return Ok(("already", Some(&entry.path)));
+                        }
+                        let destination = partials[i].join(&entry.path);
+                        fs::create_dir_all(destination.parent().expect("model file has a parent"))?;
+                        fs::rename(&temporary, destination)?;
+                        Ok(("accepted", Some(&entry.path)))
+                    })();
+                    let _ = fs::remove_file(temporary);
+                    outcome?
                 }
             };
-            results.push(json!({"name": name, "result": result, "path": wanted(size).map(|(_, e)| e.path.clone())}));
+            results.push(json!({"name": name, "result": result, "path": logical_path}));
             Ok(())
         };
     for path in paths {
         let name = path.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
         let unreadable = |e: std::io::Error| Stop::Failed(format!("读不到所选文件 {name}：{error}", error = e));
         let metadata = fs::metadata(path).map_err(unreadable)?;
-        let whole = raw_archive && metadata.is_file() && wanted(metadata.len()).is_some();
+        let whole = raw_archive && metadata.is_file() && wanted(metadata.len()).next().is_some();
         let zip = !whole && path.extension().is_some_and(|x| x.eq_ignore_ascii_case("zip"));
         if zip {
             let file = fs::File::open(path).map_err(unreadable)?;
@@ -1072,6 +1072,7 @@ fn longtail_place(resources: &Path, pack: &crate::app_packs::Pack) -> Result<Pla
         on_demand: true,
         in_use: false,
         raw_archive: true,
+        shards: None,
     })
 }
 
@@ -1226,6 +1227,7 @@ fn post_at(models: &'static Models, place: Place, body: &Json) -> Result<Json> {
                 .filter(|e| !(has(&place.root, e) || has(&partial, e)))
                 .map(|e| e.size)
                 .sum();
+            let total = place.shards.as_ref().map_or(total, |s| s.download_size(&place));
             let job = place.clone();
             models.start("download", total, move |models| download(models, &job))?;
         }
@@ -1247,6 +1249,9 @@ fn post_at(models: &'static Models, place: Place, body: &Json) -> Result<Json> {
         "discard" => {
             if models.running.load(Ordering::SeqCst) {
                 return Err(Error::Invalid("模型正在下载或导入，请先取消".into()));
+            }
+            if let Some(shards) = &place.shards {
+                shards.discard(&place)?;
             }
             let partial = partial_dir(&place.root);
             if partial.exists() {
@@ -1451,6 +1456,7 @@ fn extension_place(resources: &Path, pack: &crate::app_packs::Pack) -> Result<Pl
         on_demand: true,
         in_use: false,
         raw_archive: false,
+        shards: pack.shards.as_ref().map(shards::Download::new).transpose()?,
     })
 }
 
@@ -1477,6 +1483,8 @@ pub(crate) fn extension_info(resources: &Path, pack: &crate::app_packs::Pack) ->
     let partial = partial_dir(&place.root);
     let have = if ready || usable(&partial, entry) {
         entry.size
+    } else if let Some(shards) = &place.shards {
+        shards.progress(&place).0
     } else {
         fs::metadata(part(&partial, entry)).map_or(0, |m| m.len().min(entry.size))
     };
@@ -1515,6 +1523,12 @@ fn component_progress(resources: &Path, pack: &Pack) -> Result<(bool, u64, bool)
     let entry = &place.manifest.files[0];
     let partial = partial_dir(&place.root);
     let ready = has(&place.root, entry);
+    if !ready {
+        if let Some(shards) = &place.shards {
+            let (have, started) = shards.progress(&place);
+            return Ok((false, have, started));
+        }
+    }
     let started = !ready && (has(&partial, entry) || part(&partial, entry).is_file());
     let have = if ready || has(&partial, entry) {
         entry.size
@@ -1768,6 +1782,8 @@ fn pack_post(resources: &Path, body: &Json, current: &Pack, unknown: &str) -> Re
     }
     Ok(())
 }
+
+mod shards;
 
 #[cfg(test)]
 mod tests;
