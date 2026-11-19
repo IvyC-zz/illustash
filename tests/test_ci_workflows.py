@@ -58,16 +58,24 @@ class CiWorkflowTest(unittest.TestCase):
         self.git('commit', '-m', 'synthetic main change')
         main = self.git('rev-parse', 'HEAD')
         cases = [
-            (['README.md'], False),
-            (['AGENTS.md', 'docs/nested/guide.md'], False),
-            (['docs/THIRD_PARTY.md'], True),
-            (['docs/BACKEND_TASKS.md'], True),
-            (['docs/assets/demo.png'], True),
-            (['vendor/LICENSE.md'], True),
-            (['README.md', 'native/terms/src/lib.rs'], True),
-            (['.github/workflows/ci.yml'], True),
+            (['README.md'], 'docs'),
+            (['AGENTS.md', 'docs/nested/guide.md'], 'docs'),
+            (['docs/THIRD_PARTY.md'], 'code'),
+            (['docs/BACKEND_TASKS.md'], 'code'),
+            (['docs/assets/demo.png'], 'code'),
+            (['vendor/LICENSE.md'], 'code'),
+            (['README.md', 'native/terms/src/lib.rs'], 'code'),
+            (['.github/workflows/ci.yml'], 'code'),
+            (['README.md', 'web/static/ui/settings.js', 'tests/i18n.test.cjs'], 'frontend'),
+            (['web/static/app.css', 'tools/check_frontend.py', 'tools/frontend_baseline.json',
+              'tools/styleguide/index.html', 'tests/test_styleguide_sync.py'], 'frontend'),
+            (['web/static/core/jobs.js', 'web/static/app.css'], 'code'),
+            (['web/static/i18n.js'], 'code'),
+            (['web/static/splash.js'], 'code'),
+            (['web/static/locales/new.json'], 'code'),
+            (['web/static/index.html', 'desktop/build.rs'], 'code'),
         ]
-        for paths, code in cases:
+        for paths, scope in cases:
             with self.subTest(paths=paths):
                 self.git('checkout', '-B', 'synthetic-pr', base)
                 for name in paths:
@@ -81,13 +89,13 @@ class CiWorkflowTest(unittest.TestCase):
                 self.output.unlink(missing_ok=True)
                 result = self.shell(job_script('changes'), GITHUB_EVENT_NAME='pull_request')
                 self.assertEqual(result.returncode, 0, result.stderr)
-                self.assertEqual(self.output.read_text().strip(), f'code={str(code).lower()}')
+                self.assertEqual(self.output.read_text().strip(), f'scope={scope}')
 
     def test_manual_dispatch_always_runs_checks(self):
         # 不在 git 仓库里运行：手动触发不依赖检出或文件列表。
         result = self.shell(job_script('changes'), GITHUB_EVENT_NAME='workflow_dispatch')
         self.assertEqual(result.returncode, 0, result.stderr)
-        self.assertEqual(self.output.read_text().strip(), 'code=true')
+        self.assertEqual(self.output.read_text().strip(), 'scope=code')
 
     def repository(self):
         self.git('init', '-b', 'main')
@@ -124,21 +132,21 @@ class CiWorkflowTest(unittest.TestCase):
         self.commit({'README.md': '合成文档\n', 'docs/guide.md': '合成说明\n'})
         self.git('checkout', '-q', 'main')
         self.git('merge', '-q', '--no-ff', '--no-edit', 'docs-pr')
-        self.assertEqual(self.push_scope(base)[0], 'code=false')
+        self.assertEqual(self.push_scope(base)[0], 'scope=docs')
         # 随包分发的 Markdown 按代码算。
         before = self.git('rev-parse', 'HEAD')
         self.commit({'docs/THIRD_PARTY.md': '合成许可\n'})
-        self.assertEqual(self.push_scope(before)[0], 'code=true')
+        self.assertEqual(self.push_scope(before)[0], 'scope=code')
         # 多提交 push：只要其中有代码就进代码分支，即使最后一个提交只改文档。
         before = self.git('rev-parse', 'HEAD')
         self.commit({'native/terms/src/lib.rs': '// 合成代码\n'})
         self.commit({'README.md': '再改文档\n'})
-        self.assertEqual(self.push_scope(before)[0], 'code=true')
+        self.assertEqual(self.push_scope(before)[0], 'scope=code')
         # 把代码改名进 docs/ 时，删掉的旧路径仍算代码。
         before = self.git('rev-parse', 'HEAD')
         self.git('mv', 'source.rs', 'docs/moved.md')
         self.git('commit', '-m', 'synthetic move')
-        self.assertEqual(self.push_scope(before)[0], 'code=true')
+        self.assertEqual(self.push_scope(before)[0], 'scope=code')
 
     def test_push_without_a_usable_before_commit_runs_checks(self):
         self.repository()
@@ -146,7 +154,7 @@ class CiWorkflowTest(unittest.TestCase):
         for before in ('', '0' * 40, 'not-a-commit', 'f' * 40):
             with self.subTest(before=before):
                 scope, stdout = self.push_scope(before)
-                self.assertEqual(scope, 'code=true')
+                self.assertEqual(scope, 'scope=code')
                 self.assertIn('按代码改动处理', stdout)
 
     def test_moving_code_into_documents_still_checks_the_removed_code(self):
@@ -161,11 +169,11 @@ class CiWorkflowTest(unittest.TestCase):
         self.git('commit', '-m', 'synthetic move')
         result = self.shell(job_script('changes'), GITHUB_EVENT_NAME='pull_request')
         self.assertEqual(result.returncode, 0, result.stderr)
-        self.assertEqual(self.output.read_text().strip(), 'code=true')
+        self.assertEqual(self.output.read_text().strip(), 'scope=code')
 
-    def needs(self, code='true', result='success', changes='success'):
+    def needs(self, scope='code', result='success', changes='success'):
         jobs = dict.fromkeys(('core', 'js', 'desktop', 'contracts'), {'result': result})
-        return {**jobs, 'changes': {'result': changes, 'outputs': {'code': code}}}
+        return {**jobs, 'changes': {'result': changes, 'outputs': {'scope': scope}}}
 
     def check_result(self, needs, success):
         result = self.shell(job_script('ok'), NEEDS=json.dumps(needs))
@@ -173,7 +181,17 @@ class CiWorkflowTest(unittest.TestCase):
 
     def test_summary_accepts_complete_code_checks_and_document_skips(self):
         self.check_result(self.needs(), True)
-        self.check_result(self.needs(code='false', result='skipped'), True)
+        self.check_result(self.needs(scope='docs', result='skipped'), True)
+
+    def test_frontend_requires_js_and_skips_only_native_jobs(self):
+        needs = self.needs(scope='frontend', result='skipped')
+        self.check_result(needs, False)
+        needs['js'] = {'result': 'failure'}
+        self.check_result(needs, False)
+        needs['js'] = {'result': 'success'}
+        self.check_result(needs, True)
+        needs['desktop'] = {'result': 'cancelled'}
+        self.check_result(needs, False)
 
     def test_push_runs_do_not_cancel_each_other_but_heavy_jobs_replace_older_ones(self):
         # #501：纯文档 push 不能取消上一轮还在写缓存的代码运行。workflow 级的组每次 push 各不相同，
@@ -184,7 +202,7 @@ class CiWorkflowTest(unittest.TestCase):
         for job in ('core', 'desktop', 'contracts', 'windows'):
             with self.subTest(job=job):
                 body = job_body(job)
-                self.assertIn("if: needs.changes.outputs.code == 'true'", body)
+                self.assertIn("if: needs.changes.outputs.scope == 'code'", body)
                 group = re.search(r'^    concurrency:\n      group: (.*)\n      cancel-in-progress: true$', body, re.M).group(1)
                 self.assertEqual(group, f"ci-{job}-${{{{ github.event_name == 'push' && github.ref || github.run_id }}}}")
 
@@ -212,7 +230,7 @@ class CiWorkflowTest(unittest.TestCase):
         # 文档分流不能掩盖失败、取消或不一致的构建结果。
         for status in ('failure', 'cancelled', 'success'):
             with self.subTest(document_result=status):
-                needs = self.needs(code='false', result='skipped')
+                needs = self.needs(scope='docs', result='skipped')
                 needs['core'] = {'result': status}
                 self.check_result(needs, False)
 
@@ -222,7 +240,7 @@ class CiWorkflowTest(unittest.TestCase):
                 self.check_result(self.needs(changes=changes), False)
         for code in ('', 'unknown', None):
             with self.subTest(code=code):
-                self.check_result(self.needs(code=code), False)
+                self.check_result(self.needs(scope=code), False)
 
 
 if __name__ == '__main__':

@@ -45,7 +45,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 5
     outputs:
-      code: ${{ steps.scope.outputs.code }}
+      scope: ${{ steps.scope.outputs.scope }}
     steps:
       - uses: actions/checkout@v4
         if: github.event_name != 'workflow_dispatch'
@@ -66,24 +66,33 @@ jobs:
               if ! [[ "$base" =~ ^[0-9a-f]{40}$ ]] || [[ "$base" =~ ^0+$ ]] ||
                  ! { git cat-file -e "$base^{commit}" 2>/dev/null || git fetch --no-tags --depth=1 origin "$base"; }; then
                 echo "取不到推送前的提交（${base:-空}），按代码改动处理"
-                echo code=true >> "$GITHUB_OUTPUT"; exit 0
+                echo scope=code >> "$GITHUB_OUTPUT"; exit 0
               fi ;;
-            *) echo code=true >> "$GITHUB_OUTPUT"; exit 0 ;;
+            *) echo scope=code >> "$GITHUB_OUTPUT"; exit 0 ;;
           esac
           # 改名同时检查旧路径，避免把移入 docs/ 的代码删除误判成纯文档。
-          git diff --no-renames --name-only "$base" HEAD > "$RUNNER_TEMP/changed.txt"
-          echo "改动 $(wc -l < "$RUNNER_TEMP/changed.txt") 个文件"
-          if grep -qEv '^([^/]+|docs/.+)\.md$' "$RUNNER_TEMP/changed.txt" ||
-             grep -qEx 'docs/(THIRD_PARTY|BACKEND_TASKS)\.md' "$RUNNER_TEMP/changed.txt"; then
-            echo code=true >> "$GITHUB_OUTPUT"
-          else
-            echo '只改文档，跳过构建与测试'
-            echo code=false >> "$GITHUB_OUTPUT"
-          fi
+          git diff --no-renames --name-only -z "$base" HEAD > "$RUNNER_TEMP/changed"
+          scope=docs
+          while IFS= read -r -d '' file; do
+            case "$file" in
+              # 随包文档，以及 desktop/build.rs 和 app_activity.rs 编译时读取的前端输入。
+              docs/THIRD_PARTY.md|docs/BACKEND_TASKS.md|web/static/i18n.js|web/static/splash.js|web/static/locales/*|web/static/core/jobs.js)
+                scope=code; break ;;
+              docs/*.md) ;;
+              web/static/*|tools/styleguide/*|tools/check_frontend.py|tools/frontend_baseline.json|tools/check_styleguide.py|tests/test_frontend_architecture.py|tests/test_styleguide_sync.py)
+                scope=frontend ;;
+              tests/*/*) scope=code; break ;;
+              tests/*.test.cjs|tests/test_pixiv_poll.js) scope=frontend ;;
+              */*) scope=code; break ;;
+              *.md) ;;
+              *) scope=code; break ;;
+            esac
+          done < "$RUNNER_TEMP/changed"
+          echo "scope=$scope" >> "$GITHUB_OUTPUT"
 
   core:
     needs: changes
-    if: needs.changes.outputs.code == 'true'
+    if: needs.changes.outputs.scope == 'code'
     name: Rust 格式、clippy 与编译
     concurrency:
       group: ci-core-${{ github.event_name == 'push' && github.ref || github.run_id }}
@@ -114,13 +123,6 @@ jobs:
       - run: pip install -r tests/requirements.txt
       - name: Dependency boundary
         run: python tools/check_architecture.py
-      - name: Frontend structure
-        run: python tools/check_frontend.py --strict-stale
-      - name: Style guide sync
-        run: python tools/check_styleguide.py
-      # 这两条测试读 web/static 的原文，界面级 PR 只跑 node --test 时覆盖不到（2026-11-16）。
-      - name: Frontend checker tests
-        run: python -m unittest tests.test_frontend_architecture tests.test_styleguide_sync
       # cargo test 由本机全量覆盖，macos-full.yml 可手动运行（#501）；这里只查格式、clippy（含测试目标）和编译。
       - name: Core fmt/clippy/build
         run: |
@@ -148,7 +150,7 @@ jobs:
 
   js:
     needs: changes
-    if: needs.changes.outputs.code == 'true'
+    if: needs.changes.outputs.scope == 'code' || needs.changes.outputs.scope == 'frontend'
     name: 前端 JS
     runs-on: ubuntu-latest
     timeout-minutes: 15
@@ -159,11 +161,21 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: 22
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+      - name: Frontend structure
+        run: python tools/check_frontend.py --strict-stale
+      - name: Style guide sync
+        run: python tools/check_styleguide.py
+      # 这两条测试读 web/static 的原文，界面级 PR 只跑 node --test 时覆盖不到（2026-11-16）。
+      - name: Frontend checker tests
+        run: python -m unittest tests.test_frontend_architecture tests.test_styleguide_sync
       - run: node --test tests/*.test.cjs tests/test_pixiv_poll.js
 
   desktop:
     needs: changes
-    if: needs.changes.outputs.code == 'true'
+    if: needs.changes.outputs.scope == 'code'
     name: 桌面壳 fmt/clippy (macOS)
     concurrency:
       group: ci-desktop-${{ github.event_name == 'push' && github.ref || github.run_id }}
@@ -188,7 +200,7 @@ jobs:
 
   contracts:
     needs: changes
-    if: needs.changes.outputs.code == 'true'
+    if: needs.changes.outputs.scope == 'code'
     name: 原生固定契约（无 Python）
     concurrency:
       group: ci-contracts-${{ github.event_name == 'push' && github.ref || github.run_id }}
@@ -218,7 +230,7 @@ jobs:
   # windows-full.yml，平时在 Windows 验收机上发布前跑一次，这份手动备用。结论单独显示，不进「全部检查」的等待链。
   windows:
     needs: changes
-    if: needs.changes.outputs.code == 'true' && !github.event.repository.private
+    if: needs.changes.outputs.scope == 'code' && !github.event.repository.private
     name: Windows x64 快检
     runs-on: windows-latest
     timeout-minutes: 45
@@ -280,7 +292,7 @@ jobs:
           if-no-files-found: ignore
           retention-days: 7
 
-  # 分支保护只要求这一项：job 改名或增减时不用改保护规则。只有确认只改文档才容许跳过构建；
+  # 分支保护只要求这一项：job 改名或增减时不用改保护规则。按分流结果逐一核对必需和跳过的 job；
   # 来自 fork 的 PR 没有运行检查，这里判失败。草稿 PR 不跑，转 Ready 后重跑；仓库私有时同「改动范围」。
   # Windows 试运行期间不计入代码 PR 的通过判定，也不在 needs 里：汇总不等 Windows，Windows 快检单独显示实际结论（#501）。
   ok:
@@ -299,13 +311,15 @@ jobs:
           jq -r 'to_entries[] | "\(.key): \(.value.result)"' <<< "$NEEDS"
           if ! jq -e '
             .changes.result == "success" and
-            (.changes.outputs.code as $code |
-              if $code == "true" then
+            (.changes.outputs.scope as $scope |
+              if $scope == "code" then
                 all(to_entries[]; .key == "changes" or .value.result == "success")
-              elif $code == "false" then
+              elif $scope == "frontend" then
+                .js.result == "success" and all(.core, .desktop, .contracts; .result == "skipped")
+              elif $scope == "docs" then
                 all(to_entries[]; .key == "changes" or .value.result == "skipped")
               else false end)
           ' <<< "$NEEDS" > /dev/null; then
-            echo '::error::检查未完成：代码改动必须全部成功，只有文档改动允许跳过；fork PR 不自动运行'
+            echo '::error::检查未完成：实际运行结果与改动范围不符；fork PR 不自动运行'
             exit 1
           fi
