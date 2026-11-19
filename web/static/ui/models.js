@@ -5,7 +5,7 @@ import {esc, bytes, home, number} from '../core/format.js';
 import {state} from '../core/state.js';
 import {SYNC_ACTIVE, INDEX_ACTIVE, startSync, pollSync, pollIndex, onJob, indexEndText} from '../core/jobs.js';
 import {loadModels, modelsPost, modelsWaiting, modelsFinished, modelsArrived, onModels, saveAcceleration, fallbacks,
-  loadCharacterBase, characterBasePost, characterBasePath, optionalGaps} from '../core/models.js';
+  loadCharacterBase, characterBasePost, characterBasePath, optionalGaps, waitingForBaseDownload} from '../core/models.js';
 import {$, toast, redraw, busy} from './dom.js';
 import {confirmAction} from './dialog.js';
 import {loadPack} from '../core/packs.js';
@@ -18,7 +18,9 @@ export function modelsLine(m = state.models) {
   if (!m) return '…';
   const j = m.job;
   if (running(m) && j.kind === 'import') return t('正在核对所选文件 {done} / {total}', {done: bytes(j.done), total: bytes(j.total)});
-  if (running(m)) return t('正在下载 {done} / {total}', {done: bytes(j.done), total: bytes(j.total)})
+  const progress = running(m) ? {done: bytes(j.done), total: bytes(j.total)} : null;
+  if (running(m)) return (j.file && j.file === characterBasePath()
+    ? t('正在下载基础角色索引 {done} / {total}', progress) : t('正在下载 {done} / {total}', progress))
     + (j.speed ? ' · ' + t('{speed}/秒', {speed: bytes(j.speed)}) : '') + (j.source ? ' · ' + t('来自 {source}', {source: j.source}) : '')
     + (j.proxy ? ' · ' + t('经代理 {proxy}', {proxy: j.proxy}) : '');
   if (m.status === 'ready') {
@@ -81,10 +83,13 @@ export function importSummary(job) {
 
 // 识别等待模型期间向导的横条，出现在这个安装的每个图库里。
 export function modelsNotice() {
-  const m = state.models; if (!modelsWaiting(m)) return '';
+  const m = state.models, waitingIndex = waitingForBaseDownload(m) && !SYNC_ACTIVE.includes(state.sync?.status);
+  if (!modelsWaiting(m) && !waitingIndex) return '';
   // 有事发生之后，这一行才说明现状：下载在进行、已停止，或者已经有一部分在这里。
   const line = running(m) || m.job || m.have ? esc(modelsLine(m)) : '';
-  return `<div class="models-notice"><span>${running(m) ? '' : t('识别要用的模型还没下载（约 {size}）。图片会先加入图库，可以浏览和手动整理；模型就位后会自动开始识别。', {size: bytes(m.total)}) + ' '}${line}</span>
+  const note = running(m) ? '' : t('识别要用的模型还没下载（约 {size}）。图片会先加入图库，可以浏览和手动整理；首次准备结束后会自动开始识别。', {size: bytes(m.total)});
+  const wait = waitingIndex ? t('下载结束后开始识别。') : '';
+  return `<div class="models-notice"><span>${[esc(note), line, esc(wait)].filter(Boolean).join(' ')}</span>
     ${modelsBar(m)}${running(m) ? '' : modelsFailures(m)}<div class="models-acts">${modelsActions(m)}${running(m) ? '' : manualLink(m)}</div>${running(m) ? '' : importSummary(m.job)}</div>`;
 }
 

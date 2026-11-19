@@ -2612,6 +2612,13 @@
   "每次打开图库后会在后台检查识别结果数据库，整理记录数据库每 7 天检查一次；上次没有正常关闭时，打开前先检查两个库。": "After a library opens, its recognition database is checked in the background, and its curation database every 7 days; if it wasn't closed normally last time, both are checked before it opens.",
   "正在核对所选文件 {done} / {total}": "Checking the chosen files {done} / {total}",
   "正在下载 {done} / {total}": "Downloading {done} / {total}",
+  "正在下载基础角色索引 {done} / {total}": "Downloading the base character index {done} / {total}",
+  "下载结束后开始识别。": "Recognition starts when the download ends.",
+  "基础角色索引更新结束后开始同步": "Sync starts when the base character index finishes updating",
+  "有 {n} 张图等待识别（正在下载基础角色索引）": {
+    "one": "{n} picture awaiting recognition (downloading the base character index)",
+    "other": "{n} pictures awaiting recognition (downloading the base character index)"
+  },
   "{speed}/秒": "{speed}/s",
   "来自 {source}": "from {source}",
   "经代理 {proxy}": "through proxy {proxy}",
@@ -2630,7 +2637,7 @@
   "SHA-256 不符，已拒绝": "SHA-256 doesn't match, refused",
   "不是需要的模型文件": "not one of the model files",
   "已经有了": "already here",
-  "识别要用的模型还没下载（约 {size}）。图片会先加入图库，可以浏览和手动整理；模型就位后会自动开始识别。": "The models recognition needs aren't downloaded yet (about {size}). Pictures are added to the library first, and you can browse and sort them by hand; recognition starts by itself once the models are in place.",
+  "识别要用的模型还没下载（约 {size}）。图片会先加入图库，可以浏览和手动整理；首次准备结束后会自动开始识别。": "The models recognition needs aren't downloaded yet (about {size}). Pictures are added to the library first, and you can browse and sort them by hand; recognition starts automatically when initial setup finishes.",
   "识别模型": "Recognition models",
   "图片识别要用 WD 和 CCIP 两个模型，安装包里没有带，第一次使用时下载。每个文件都按应用里写好的大小和 SHA-256 核对，对不上就不用。": "Recognizing pictures uses two models, WD and CCIP. The installer doesn't include them; they are downloaded the first time they are needed. Every file is checked against the size and SHA-256 written into the app and is not used if they differ.",
   "这个安装自带识别模型。": "This installation comes with the recognition models.",

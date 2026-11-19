@@ -73,7 +73,7 @@ test('an import lists what it made of each chosen file', () => {
 test('the guide bar explains what works without the models, and goes once they are in place', () => {
   context.state.models = models();
   const html = context.modelsNotice();
-  assert.match(html, /识别要用的模型还没下载（约 618.0 MB）。图片会先加入图库，可以浏览和手动整理；模型就位后会自动开始识别。/);
+  assert.match(html, /识别要用的模型还没下载（约 618.0 MB）。图片会先加入图库，可以浏览和手动整理；首次准备结束后会自动开始识别。/);
   assert.match(html, /手动下载说明/);
   context.state.models = models({status: 'ready'});
   assert.equal(context.modelsNotice(), '');
@@ -93,6 +93,37 @@ test('pictures waiting for the models say so in the sync line', () => {
   assert.equal(context.syncLine({status: 'needs_recognition', total: 3}), '有 3 张图等待识别（识别模型还没下载）');
   context.state.models = models({on_demand: false});
   assert.equal(context.syncLine({status: 'needs_recognition', total: 3}), '有 3 张图等待识别（识别服务未启动）');
+});
+
+test('slow initial base index download is reported in the guide and the sync task', async () => {
+  const fetch = globalThis.fetch, setTimeout = globalThis.setTimeout;
+  const previous = {models: context.state.models, characterBase: context.state.characterBase, sync: context.state.sync};
+  const file = 'character-index/synthetic.bin';
+  const ready = models({status: 'ready'});
+  context.state.characterBase = {included: true, file: {path: file}};
+  context.state.sync = {status: 'needs_recognition', total: 3};
+  let response = models();
+  globalThis.setTimeout = () => 0;
+  globalThis.fetch = async () => ({ok: true, json: async () => response});
+  try {
+    await context.loadModels();
+    response = {...ready, job: {status: 'running', kind: 'download', file, done: MB, total: 2 * MB}};
+    await context.loadModels();
+    assert.match(context.modelsNotice(), /正在下载基础角色索引.*下载结束后开始识别。/);
+    assert.equal(context.syncLine(context.state.sync), '有 3 张图等待识别（正在下载基础角色索引）');
+    response = {...ready, job: {status: 'failed', kind: 'download', failed_file: file}};
+    await context.loadModels();
+    assert.equal(context.modelsNotice(), '');
+    await context.loadModels();
+    response = {...ready, job: {status: 'running', kind: 'download', file, done: MB, total: 2 * MB}};
+    await context.loadModels();
+    assert.equal(context.modelsNotice(), '', '补下载索引不会让再次识别进入首次准备等待');
+  } finally {
+    globalThis.fetch = async () => ({ok: true, json: async () => ready});
+    await context.loadModels();
+    Object.assign(globalThis, {fetch, setTimeout});
+    Object.assign(context.state, previous);
+  }
 });
 
 test('downloaded models can be deleted, but not while something uses them', () => {

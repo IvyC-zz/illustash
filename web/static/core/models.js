@@ -41,6 +41,12 @@ export async function characterBasePost(enable) {
 }
 // 基础角色索引的文件在识别模型清单里的路径；这个版本不带时为空。
 export const characterBasePath = (b = state.characterBase) => b?.included ? b.file?.path || '' : '';
+// 首次准备等同一次模型下载结束才启动识别。已经就位后补下载索引不属于首次准备。
+export function waitingForBaseDownload(m = state.models) {
+  const base = characterBasePath();
+  return !!base && started !== true && m?.status === 'ready' && m.job?.status === 'running'
+    && m.job.kind === 'download' && m.job.file === base;
+}
 // 模型就位后还缺的可选文件：WD 加速文件（Apple 芯片的 macOS）和基础角色索引。
 export function optionalGaps(m = state.models) {
   const missing = (m?.files || []).filter(f => f.optional && m.missing?.includes(f.path)).map(f => f.path);
