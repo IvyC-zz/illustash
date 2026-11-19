@@ -18,6 +18,7 @@ tiny_http = "0.12"
 tauri-plugin-dialog = "2"
 # 应用内更新（#279，updater.rs）。默认特性：rustls、系统代理、zip。
 tauri-plugin-updater = "2.14"
+tokio = { version = "1", features = ["time"] }
 getrandom = "0.3"
 libc = "0.2"
 # 词条核心链进外壳：外壳兼当 illustash-terms 命令行（main.rs），版本与外壳一致，不另带边车程序。
@@ -37,6 +38,11 @@ objc2-user-notifications = { version = "0.3", default-features = false, features
 tauri = { version = "2.12", features = ["tray-icon"] }
 tauri-plugin-single-instance = "2"
 windows = { version = "0.62", features = ["Data_Xml_Dom", "Foundation", "UI_Notifications", "Win32_Foundation", "Win32_System_Com", "Win32_System_Ole", "Win32_System_SystemServices", "Win32_UI_Shell", "Win32_UI_Shell_Common"] }
+
+[dev-dependencies]
+# 本机 HTTP 服务器模拟更新包在响应中途断开，使用更新插件相同的客户端。
+reqwest = { version = "0.13", default-features = false }
+rustls = { version = "0.23", default-features = false, features = ["ring"] }
 
 [profile.release]
 strip = true
