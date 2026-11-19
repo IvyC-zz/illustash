@@ -1,9 +1,8 @@
 //! 外壳的界面语言（#173，docs/WEB_V2.md「界面语言」）：全 App 共用的设置在 libraries.json 旁边的
 //! preferences.json 里，译文表是 web/static/locales 里的那些，由 build.rs 编译进来。`tr("中文原文")` 翻译外壳
-//! 自己的文字（菜单、选择框、启动错误）；启动页从 `page_script` 拿到 i18n.js 和选中的那份表。语言每次启动定一次：
-//! 设置改了，外壳在下次打开窗口时才显示新语言。`system` 在这里按 i18n.js 的规则跟随系统首选语言，并把结果告诉
-//! 启动页，所以菜单、选择框和启动页始终一致。
-use std::sync::OnceLock;
+//! 自己的文字（菜单、选择框、启动错误）；启动页从 `page_script` 拿到 i18n.js 和选中的那份表。新生成的文字读取当前偏好。
+//! `system` 按 i18n.js 的规则跟随系统首选语言。
+use std::{path::PathBuf, sync::OnceLock};
 
 use serde_json::{Map, Value};
 
@@ -59,12 +58,12 @@ fn preference(text: Option<&str>, codes: &[&str]) -> String {
 
 /// `preferences.json` 的原文；外壳的其他设置（关窗后任务做完时，#451）也从这里读。
 pub fn preference_text() -> Option<String> {
-    preference_file()
+    std::fs::read_to_string(preference_path()?).ok()
 }
 
-fn preference_file() -> Option<String> {
+fn preference_path() -> Option<PathBuf> {
     let home = illustash_platform::app_paths::user_home().ok()?;
-    std::fs::read_to_string(illustash_platform::app_paths::app_support(&home).join("preferences.json")).ok()
+    Some(illustash_platform::app_paths::app_support(&home).join("preferences.json"))
 }
 
 /// web/static/i18n.js 对 `system` 的规则：取第一个有译文表的首选语言，先按完整代码匹配，再按主语言匹配
@@ -95,17 +94,23 @@ fn resolve(preference: &str, wanted: &[String], codes: &[&str]) -> String {
     }
 }
 
-/// 外壳这次启动显示的语言：`zh-CN` 或某份译文表的代码。
-pub fn language() -> &'static str {
-    // 单元测试从不读用户的设置或系统；它们看到的是现有测试预期的中文。
+/// 外壳每次生成文字时读取当前语言。编译进来的译文表可复用，偏好可以由图库宿主随时改写。
+fn language() -> String {
     if cfg!(test) {
-        return SOURCE;
+        return SOURCE.into();
     }
-    static LANGUAGE: OnceLock<String> = OnceLock::new();
-    LANGUAGE.get_or_init(|| {
-        let codes: Vec<&str> = locales().iter().map(|l| l.code).collect();
-        resolve(&preference(preference_file().as_deref(), &codes), &system_languages(), &codes)
-    })
+    language_at(preference_path().as_deref())
+}
+
+fn language_at(path: Option<&std::path::Path>) -> String {
+    let codes: Vec<&str> = locales().iter().map(|l| l.code).collect();
+    let text = path.and_then(|path| std::fs::read_to_string(path).ok());
+    let choice = preference(text.as_deref(), &codes);
+    if choice == SYSTEM {
+        resolve(&choice, &system_languages(), &codes)
+    } else {
+        choice
+    }
 }
 
 fn table() -> Option<&'static Map<String, Value>> {
@@ -128,13 +133,13 @@ fn fill(text: &str, params: &[(&str, &dyn std::fmt::Display)]) -> String {
     out
 }
 
-/// 外壳的文字，用这次启动的语言；没有译文时就是中文本身。调用时总是传字面量，
+/// 外壳的文字，用当前设置的语言；没有译文时就是中文本身。调用时总是传字面量，
 /// 这样 tests/i18n.test.cjs 才能拿它和译文表核对。
 pub fn tr(text: &str) -> String {
     lookup(table(), text).to_owned()
 }
 
-/// `tr` with `{name}` placeholders: `tr_with("无法启动本地服务：{error}", &[("error", &e)])`.
+/// 用参数替换译文里的 `{name}` 占位符，例如 `tr_with("无法启动本地服务：{error}", &[("error", &e)])`.
 pub fn tr_with(text: &str, params: &[(&str, &dyn std::fmt::Display)]) -> String {
     fill(lookup(table(), text), params)
 }
@@ -142,7 +147,7 @@ pub fn tr_with(text: &str, params: &[(&str, &dyn std::fmt::Display)]) -> String 
 /// 主窗口的初始化脚本：只用在外壳自己的启动页上（从不用在 127.0.0.1 上的图库页，它从服务取 /i18n.js），
 /// 给出 /i18n.js 开始时用的那三个值，供 dist/i18n.js 使用。
 pub fn page_script() -> String {
-    script(language(), locales())
+    script(&language(), locales())
 }
 
 fn script(language: &str, locales: &[Locale]) -> String {
@@ -268,6 +273,20 @@ mod tests {
         ] {
             assert_eq!(preference(text, &codes), expected, "{text:?}");
         }
+    }
+
+    #[test]
+    fn shell_rereads_the_shared_preference_between_messages() {
+        let mut nonce = [0u8; 12];
+        getrandom::fill(&mut nonce).unwrap();
+        let file = std::env::temp_dir().join(format!("illustash-language-{nonce:x?}.json"));
+        for (code, expected) in [("en", "Reload Page"), ("zh-CN", "刷新页面")] {
+            std::fs::write(&file, serde_json::json!({"language":code}).to_string()).unwrap();
+            let language = language_at(Some(&file));
+            let locale = locales().iter().find(|l| l.code == language);
+            assert_eq!(lookup(locale.map(|l| &l.table), "刷新页面"), expected);
+        }
+        std::fs::remove_file(file).unwrap();
     }
 
     #[test]
