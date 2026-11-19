@@ -276,6 +276,28 @@ fn condition_filter(
                     }
                     "utag" => clause.add("a.uuid IN (SELECT uuid FROM asset_tags WHERE tag=?)", [key.into()]),
                     "source" => source_filter(c, context, key, &mut clause)?,
+                    "gallery" => {
+                        let id = key
+                            .parse::<i64>()
+                            .ok()
+                            .filter(|n| *n > 0 && key.bytes().all(|b| b.is_ascii_digit()))
+                            .ok_or_else(|| Error::invalid("画廊编号不正确"))?
+                            .to_string();
+                        if !exists(c, "SELECT 1 FROM galleries WHERE id=? AND kind='manual'", &[&id])? {
+                            return invalid("手选画廊不存在");
+                        }
+                        clause.add(
+                            "a.uuid IN (
+                               WITH members AS MATERIALIZED (
+                                 SELECT m.uuid FROM gallery_members m JOIN assets x ON x.uuid=m.uuid
+                                 WHERE m.gallery_id=?)
+                               SELECT uuid FROM members
+                               UNION ALL
+                               SELECT y.uuid FROM members m JOIN duplicates d ON d.uuid=m.uuid
+                               JOIN duplicates y ON y.grp=d.grp)",
+                            [id],
+                        );
+                    }
                     _ => return invalid("筛选参数不正确"),
                 }
             }
