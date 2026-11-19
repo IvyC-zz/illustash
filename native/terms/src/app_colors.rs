@@ -206,7 +206,7 @@ fn attach(c: &Connection, package: &Path) -> Result<()> {
 
 fn backfill(library: &Library, stop: &Receiver<()>) -> Result<()> {
     let c =
-        crate::sqlite::open_with_flags(&library.db(), OpenFlags::SQLITE_OPEN_READ_ONLY | OpenFlags::SQLITE_OPEN_URI)?;
+        crate::sqlite::open_with_flags(library.db(), OpenFlags::SQLITE_OPEN_READ_ONLY | OpenFlags::SQLITE_OPEN_URI)?;
     c.busy_timeout(Duration::from_millis(250))?;
     let nonempty: bool = c.query_row("SELECT EXISTS(SELECT 1 FROM assets WHERE src_path<>'')", [], |row| row.get(0))?;
     if !nonempty {
