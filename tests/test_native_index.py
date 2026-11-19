@@ -280,6 +280,7 @@ class NativeIndexTest(unittest.TestCase):
         with sqlite3.connect(self.lib.source) as c:c.execute("CREATE TRIGGER fail_index BEFORE DELETE ON characters BEGIN SELECT RAISE(ABORT,'synthetic'); END")
         before=snapshot(self.lib.source)
         self.index({'action':'apply','tags':['carol_example']});v=self.finish();self.assertEqual(v['state']['status'],'error',v)
+        self.assertEqual(v['state']['diagnostic']['publication'], 'not_committed')
         after=snapshot(self.lib.source)
         for k in ('characters','character_aliases','labels'):self.assertEqual(before[k],after[k])
         with sqlite3.connect(self.lib.source) as c:c.execute('DROP TRIGGER fail_index')
@@ -288,6 +289,7 @@ class NativeIndexTest(unittest.TestCase):
     def test_source_commit_app_failure_sigkill_restart_idempotent(self):
         with sqlite3.connect(self.lib.db) as c:c.execute("CREATE TRIGGER fail_projection BEFORE INSERT ON meta WHEN NEW.key LIKE 'index_job:%' BEGIN SELECT RAISE(ABORT,'synthetic'); END")
         v=self.apply();self.assertEqual(v['state']['status'],'error',v)
+        self.assertEqual(v['state']['diagnostic']['publication'], 'may_be_partial')
         with sqlite3.connect(self.lib.source) as c:self.assertEqual(c.execute("SELECT count(*) FROM characters WHERE char_id='carol_example'").fetchone()[0],1)
         self.process.kill();self.process.wait()
         with sqlite3.connect(self.lib.db) as c:c.execute('DROP TRIGGER fail_projection')
@@ -308,7 +310,11 @@ class NativeIndexTest(unittest.TestCase):
 
     def test_network_failure_no_check_replacement(self):
         old=self.check()['check'];self.fail_network=True
-        self.index({'action':'check','allow_network':True});self.assertEqual(self.finish()['state']['status'],'error');self.assertEqual(self.index()['check'],old)
+        self.index({'action':'check','allow_network':True})
+        state = self.finish()['state']
+        self.assertEqual(state['status'], 'error')
+        self.assertEqual(state['diagnostic']['publication'], 'not_committed')
+        self.assertEqual(self.index()['check'], old)
 
     def test_repeat_busy_cancel_switch_same_id_and_shutdown(self):
         self.mode.write_text('sleep');self.check();self.index({'action':'apply','tags':['carol_example']})

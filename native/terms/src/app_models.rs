@@ -451,7 +451,7 @@ impl Models {
                         crate::diagnostics::Stage::Background,
                         crate::diagnostics::Cause::Background,
                         None,
-                        crate::diagnostics::Publication::MayBePartial,
+                        crate::diagnostics::Publication::NotApplicable,
                         crate::diagnostics::Retry::CheckState,
                     );
                     job["diagnostic"] = d.value();

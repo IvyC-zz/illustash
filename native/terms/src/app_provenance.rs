@@ -415,7 +415,7 @@ impl Runner {
             let c = cache::connect(&self.path())?;
             // 在接收门之前就结束的运行保留到下一次运行，供检查（#31）。
             let _ = cache::collect(self.library.instance_path(), &c, true);
-            cache::forget_changed_content(&c, &self.library)?;
+            let removed_evidence = cache::forget_changed_content(&c, &self.library)?;
             c.execute("INSERT INTO runs(kind,steps) VALUES (?,?)", [kind, *steps])?;
             let id = c.last_insert_rowid();
             if kind == "new" {
@@ -479,7 +479,12 @@ impl Runner {
                             crate::diagnostics::Operation::Provenance,
                             crate::diagnostics::Stage::Background,
                             e,
-                            crate::diagnostics::Publication::MayBePartial,
+                            // 新证据尚未提交，但准备阶段可能已撤掉属于旧图片内容的证据。
+                            if removed_evidence {
+                                crate::diagnostics::Publication::MayBePartial
+                            } else {
+                                crate::diagnostics::Publication::NotCommitted
+                            },
                         );
                         s.set("diagnostic", d.value().into());
                     }

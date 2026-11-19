@@ -225,6 +225,7 @@ class CharacterIndexTest(unittest.TestCase):
             time.sleep(.05)
         self.assertEqual((state['status'], state['kind']), ('error', 'base'), state)
         self.assertIn('基础角色索引文件缺失或损坏', state['message'])
+        self.assertEqual(state['diagnostic']['publication'], 'not_committed')
         self.assertEqual(self.tables(), before)
         self.assertIsNone(self.mark())
         self.install(self.package[:-1])

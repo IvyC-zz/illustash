@@ -9,6 +9,7 @@ use crate::{
 use rusqlite::{Connection, OptionalExtension};
 use serde_json::{json, Value};
 use std::{
+    cell::Cell,
     collections::{BTreeMap, BTreeSet, HashMap},
     sync::{
         atomic::{AtomicBool, Ordering},
@@ -509,7 +510,7 @@ fn keep(first: &mut Option<Error>, e: Error) {
         *first = Some(e);
     }
 }
-fn run(source: &mut Source, entity: Option<&str>, state: &Mutex<Value>) -> Result<()> {
+fn run(source: &mut Source, entity: Option<&str>, state: &Mutex<Value>, published: &Cell<bool>) -> Result<()> {
     let mut c = net::db(&source.path)?;
     let rows = scope(&c, entity)?;
     let fp = fingerprint(&c, &rows)?;
@@ -579,7 +580,11 @@ fn run(source: &mut Source, entity: Option<&str>, state: &Mutex<Value>) -> Resul
     *state.lock().expect("app_names mutex poisoned") = json!({"status":"running","done":0,"total":jobs.len()});
     if !jobs.is_empty() {
         net::check(&source.cancel)?;
+        let has_seed = !seed.is_empty();
         command(&mut c, seed)?;
+        if has_seed {
+            published.set(true);
+        }
     }
 
     let mut first_error = None;
@@ -617,6 +622,7 @@ fn run(source: &mut Source, entity: Option<&str>, state: &Mutex<Value>) -> Resul
             net::check(&source.cancel)?;
             // 别名镜像和显示投影在提交时跟着更新一次（legacy_names::after_write）。
             crate::schema::commit_writing(tx)?;
+            published.set(true);
             Ok(())
         })();
         if let Err(e) = result {
@@ -858,6 +864,7 @@ impl Updater {
         self.thread = Some(crate::app_tasks::Task::start(identity, None, move |ctx| {
             ctx.receive(ctx.identity(), || {
                 let mut completed = BTreeSet::new();
+                let published = Cell::new(false);
                 let (mut final_error, mut waiting) = (None, false);
                 for (id, kind) in pending {
                     if ctx.check().is_err() || net::check(&cancel).is_err() {
@@ -878,7 +885,7 @@ impl Updater {
                         if !completed.contains(&request_key) {
                             let mut source =
                                 Source::new(path.clone(), cancel.clone(), authorized, refresh)?.granted(grant.clone());
-                            run(&mut source, entity, &state)?;
+                            run(&mut source, entity, &state, &published)?;
                             completed.insert(request_key);
                         }
                         net::check(&cancel)?;
@@ -901,7 +908,11 @@ impl Updater {
                                 crate::diagnostics::Operation::Names,
                                 crate::diagnostics::Stage::Background,
                                 &e,
-                                crate::diagnostics::Publication::MayBePartial,
+                                if published.get() {
+                                    crate::diagnostics::Publication::MayBePartial
+                                } else {
+                                    crate::diagnostics::Publication::NotCommitted
+                                },
                             );
                             s["diagnostic"] = d.value();
                             s["status"] = json!("error");
@@ -1419,7 +1430,7 @@ mod matching_tests {
             let mut source =
                 Source::new(self.root.join("library.sqlite"), Arc::new(AtomicBool::new(false)), true, force)?
                     .with_bases(&provider.base, &provider.base);
-            run(&mut source, Some(&self.tag), &Mutex::new(json!({})))
+            run(&mut source, Some(&self.tag), &Mutex::new(json!({})), &Cell::new(false))
         }
         fn choice(&self, kind: &str, key: &str) -> crate::names_view::Choice {
             crate::names_view::View::load(&self.db()).unwrap().choose(kind, key).unwrap()
@@ -1871,7 +1882,7 @@ mod sources_tests {
             let mut source =
                 Source::new(self.root.join("library.sqlite"), Arc::new(AtomicBool::new(false)), true, force)?
                     .with_bases(&p.base, &p.base);
-            run(&mut source, entity, &Mutex::new(json!({})))
+            run(&mut source, entity, &Mutex::new(json!({})), &Cell::new(false))
         }
         fn configure_model(&self, p: &Providers) {
             self.db()
@@ -2145,7 +2156,7 @@ mod sources_tests {
             // 回环提供方算作本地；同意保护的是远端地址。
             .with_bases("https://names.invalid", "https://names.invalid")
             .granted(Arc::new(AtomicBool::new(false)));
-        let e = run(&mut source, None, &Mutex::new(json!({}))).unwrap_err();
+        let e = run(&mut source, None, &Mutex::new(json!({})), &Cell::new(false)).unwrap_err();
         assert!(unauthorized(&e), "{e:?}");
         assert!(p.calls().is_empty());
         lib.run(&p, None, false).unwrap();

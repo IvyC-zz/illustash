@@ -482,6 +482,7 @@ fn a_source_that_keeps_closing_the_connection_fails_after_a_few_tries() {
     post(models, &place, json!({"action": "download"})).unwrap();
     let job = finished(models);
     assert_eq!(job["status"], "failed", "{job}");
+    assert_eq!(job["diagnostic"]["publication"], "not_applicable");
     assert_eq!(server.hits.lock().unwrap().len(), 4, "第一次加三次重试");
     assert_eq!(job["failed_file"], "pack.bin");
     let host = server.base.trim_start_matches("http://");
