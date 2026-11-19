@@ -657,7 +657,7 @@ fn pack_withdraw(library: &Library, wd: bool, ccip: bool, progress: &Progress<'_
         *done = out.clone();
     }
     if ccip {
-        if let Some((_, state)) = progress.0 {
+        if let Progress::Task(_, state) = progress {
             lock_ignoring_poison(state)["part"] = "ccip".into();
         }
         let result = crate::app_ccip_longtail::withdraw(library, progress)?;

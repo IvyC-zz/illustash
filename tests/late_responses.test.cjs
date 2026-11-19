@@ -36,6 +36,25 @@ test('a group page answer that arrives after navigating home does not take over 
   assert.ok(!requests.some(p => p.startsWith('/api/assets')), 'the group page never reads its pictures');
 });
 
+test('a recognition batch refreshes an already imported folder while sync is running', async () => {
+  const {state, pollSync, onJob} = web.core(), changes = [];
+  state.sync = {status: 'recognising', imported: 5, import_done: 0};
+  const reply = {state: {status: 'recognising', imported: 5, import_done: 1}, history: []};
+  const fetch = globalThis.fetch, setTimeout = globalThis.setTimeout;
+  globalThis.fetch = async () => ({status: 200, ok: true, json: async () => reply});
+  globalThis.setTimeout = () => 0;
+  const off = onJob((job, change) => { if (job === 'sync') changes.push([change.arrived, change.ended]); });
+  try {
+    await pollSync();
+    await pollSync();
+  } finally {
+    off();
+    globalThis.fetch = fetch;
+    globalThis.setTimeout = setTimeout;
+  }
+  assert.deepEqual(changes, [[true, false], [false, false]]);
+});
+
 test('an older sync answer that arrives last does not move the state back', async () => {
   // core/jobs.js 轮询同步；它的定时器是页面的 setTimeout。
   const {state, pollSync} = web.core(), answers = [], timers = [];
