@@ -227,7 +227,7 @@
 
  "native/terms/src/app_characters.rs":"6c9e9e080970dce30092747ebcf6bdcaee7d99a8463500888e5dab278f4a0cbd",
 
- "native/terms/src/app_colors.rs":"93286a38afeda3e5b29023b58799beea05aae3c2e345fe59df717a18431c8bbe",
+ "native/terms/src/app_colors.rs":"fe94db19301fa97a7ce9cba4f3f9e5fff52473a3068a2ee8facd31803702ca4b",
 
  "native/terms/src/app_colors/palette.rs":"db2645476768766de99d58ee7fbb4ade268a75cbf2d0fb55cfe1dd65511e1412",
 
@@ -245,7 +245,7 @@
 
  "native/terms/src/app_effects.rs":"e6e90940198b185af01531a5639539f4b023663be17ea7bc4dd6f43c7b2af040",
 
- "native/terms/src/app_files.rs":"6f197757c05cb1a1a32c0af6d681e9eda7fcb1e62d94a65ca131f322cbee3905",
+ "native/terms/src/app_files.rs":"25e5d788b169d54bfad1a597c091c1ed78f54e22ce00ef78c0ed1dc9f3bdea74",
 
  "native/terms/src/app_folder.rs":"226accca1ccc85af3e6a27de750116b221bba3c9cc651108226346a04f89ce24",
 
@@ -399,7 +399,7 @@
 
  "native/terms/src/http_characters.rs":"03e4c82c04a2708b576a26a6c8dbbd49834f7bf4126240f06e17da4827478f9e",
 
- "native/terms/src/http_example_search.rs":"37086571f127c0c437a4fa223184fddd7c26adb61c1c1883f8f05ee17011ab10",
+ "native/terms/src/http_example_search.rs":"1b479b900eac347f73924504558a886153a06eaeb74c0b2d5e5cb28a1a758994",
 
  "native/terms/src/http_host_get.rs":"0822c28279b46643a344e7bacd2ab85bb4d9dba6a5096231a95c4111054da486",
 
@@ -588,7 +588,8 @@
  "native/terms/src/app_galleries.rs":{"policy":"application","current_runtime":"rust-native-galleries","storage_domain":"app","boundary_notes":{"authorization":"#445 明确保存、编辑、删除和撤销本图库画廊。"}},
  "native/terms/src/example_cache.rs":{"policy":"assets","current_runtime":"rust-native","storage_domain":"source-ro+memory-cache","boundary_notes":{"authorization":"源库以只读连接固定特征快照，事务不会写入源库。"}},
  "native/terms/src/http_example_search.rs":{"policy":"application","current_runtime":"rust-native","storage_domain":"app-ro+connection-temp","boundary_notes":{"authorization":"#449 现有读路由和筛选写事务的会话临时选集，只写 temp.like_rank。"}},
- "native/terms/src/app_similar_seen.rs":{"policy":"application","current_runtime":"rust-native-similar-seen","storage_domain":"app","boundary_notes":{"authorization":"#427 明确记下、取消和撤销相似组的「看过了」。"}}
+ "native/terms/src/app_similar_seen.rs":{"policy":"application","current_runtime":"rust-native-similar-seen","storage_domain":"app","boundary_notes":{"authorization":"#427 明确记下、取消和撤销相似组的「看过了」。"}},
+ "native/terms/src/app_colors.rs":{"policy":"assets","current_runtime":"rust-native-image-color-cache","storage_domain":"app-ro+thumbnail-cache","boundary_notes":{"authorization":"#717 按需返回颜色并补算可重建缓存，表与事务只写 thumbnails/colors-v1.sqlite。","ATTACH":"按图库实例路径以 mode=ro 挂载派生缓存，只按 UUID、来源路径与同步哈希匹配。","dynamic-or-wrapper":"一处初始化派生缓存表，其余为读取或仅在缓存事务中写入。"},"kind_overrides":{"http-branch":{"policy":"application","current_runtime":"rust-optional-color-marks"}}}
 },
 "limitations":[
  "审计生产 HTTP/DB/事务/动态执行/启动/CLI；保留研究/测试/生成代码。",
@@ -642,7 +643,7 @@
  "crates/core/src/character_graph.rs":{"database-write":{"INSERT OR IGNORE INTO:term_identity_baseline":1,"dynamic-or-wrapper":7,"ATTACH":3,"DELETE FROM:reprojected":1,"INSERT INTO:reprojected":1,"INSERT OR REPLACE INTO:identity_suspended":1,"DELETE FROM:graph_projection":1,"INSERT INTO:graph_projection":1,"DELETE FROM:identity_canonical":1,"INSERT INTO:identity_canonical":1,"UPDATE:set":1,"UPDATE:term_tree":1,"UPDATE:terms":1,"INSERT OR REPLACE INTO:meta":1}},
  "native/terms/src/app_source_empty.sql":{"database-write":["CREATE TABLE:assets","CREATE TABLE:labels","CREATE INDEX:idx_labels_dim_val","CREATE INDEX:idx_labels_uuid","CREATE TABLE:decisions","CREATE TABLE:runs","CREATE TABLE:embeddings","CREATE TABLE:characters","CREATE TABLE:character_aliases"]},
  "native/terms/src/app_settings.rs":{"database-write":[[0,3],27,5,[1,2],34]},
- "native/terms/src/http_read.rs":{"http-branch":[[77,2],78,248,[89,3],[246,2],24,99,[85,2],[240,2],[16,2],82,84,91,[93,2],[250,5],[251,2],[252,2],[253,2],[254,2],[255,3],[23,2],[44,2],75,26,86,256,257,258,[331,3],"/api/artist-directory",[332,2],"/api/galleries|/api/galleries/covers"],"database-write":[[187,2],202,0,7,[1,2]]},
+ "native/terms/src/http_read.rs":{"http-branch":[[77,2],78,248,[89,3],[246,2],24,99,[85,2],[240,2],[16,2],82,84,91,[93,2],[250,5],[251,2],[252,2],[253,2],[254,2],[255,3],[23,2],[44,3],75,26,86,256,257,258,[331,3],"/api/artist-directory",[332,2],"/api/galleries|/api/galleries/covers"],"database-write":[[187,2],202,0,7,[1,2]]},
  "crates/core/src/character_learning.rs":{"database-write":[[0,4],1,"DELETE FROM:proto_claims","INSERT INTO:proto_claims"]},
  "native/terms/src/app_migrate_data.rs":{"database-write":[57,0,61,"DELETE FROM:similar_groups","INSERT INTO:similar_groups"]},
  "native/terms/src/app_migration_sql/derived.sql":{"database-write":[108,165,161,137,110,167,52,133,107,130,169,168,118,166,117,129,106,128,163,170,119,162,116,154,125,136,172,56,156,114,54,48,174,55]},
@@ -736,7 +737,8 @@
  "native/terms/src/example_cache.rs":{"database-write":{"dynamic-or-wrapper":1,"COMMIT":1}},
  "native/terms/src/http_example_search.rs":{"database-write":{"dynamic-or-wrapper":2,"DELETE FROM:temp.like_rank":1,"INSERT INTO:temp.like_rank":1}},
  "native/terms/src/app_similar_seen.rs":{"database-write":{"dynamic-or-wrapper":4,"INSERT INTO:similar_seen":2,"DELETE FROM:similar_seen":2,"INSERT INTO:actions":1,"COMMIT":1}},
- "native/terms/src/app_relocation.rs":{"database-write":[341,[232,5],182,[0,17],176,[5,2],[7,3],342,[339,2],[343,2],11,[344,4],379,[1,3]]}
+ "native/terms/src/app_relocation.rs":{"database-write":[341,[232,5],182,[0,17],176,[5,2],[7,3],342,[339,2],[343,2],11,[344,4],379,[1,3]]},
+ "native/terms/src/app_colors.rs":{"http-branch":{"/api/calendar":3,"/api/detail":3,"/api/assets|/api/artist-directory":1,"/api/assets":1,"/api/galleries/covers|/api/characters":1,"/api/works":1,"/api/home|/api/calendar":1},"database-write":{"dynamic-or-wrapper":3,"CREATE TABLE IF NOT EXISTS:colors":1,"INSERT INTO:colors":1,"COMMIT":1,"ATTACH":5}}
 },
 "policies":{
  "application":{"final_owner":"rust","responsibility":"HTTP 参数/目标、人工命令、正式事务/投影；Python 包装待迁移","acceptance":"合成状态码/原始字节、返回/DB/历史/撤销/事件对照；竞争与注入失败原子回滚","deletion_condition":"Rust 调用链及无 Python 验收后删生产 Python；保留旧对照","stages":["M2","M3"]},

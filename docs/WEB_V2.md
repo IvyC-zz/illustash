@@ -255,6 +255,8 @@
 - `GET /api/detail?id=` 另返回 `ownership`，包含有效归属与 `rejected` 父角色记录，每项带 origin 和证据。原始 assertions/candidates 继续返回，保留历史人工结论和逐来源证据。
 - `GET /api/ids` 使用相同筛选和排序，直接返回 UUID 数组；支持 offset/limit，limit 最大 5000，供跨区段选择使用。
 - 收藏（#447）：`has=["fav"]` 只看收藏，`not=["fav"]` 排除收藏。实际请求对 JSON 数组做 URL 编码，条件与其他筛选取交集，`has` 和 `not` 合计至多 20 条。列表、计数、ID 和按筛选选图的写入都用这一口径。图片本身或重复组内任一份有有效收藏，即算收藏。`GET /api/assets`、`GET /api/home`、`GET /api/detail` 带 `marks=fav` 时在每个图片对象末尾附布尔字段 `fav`，详情在顶层附该字段。省略 `marks` 时沿用原回复。
+- 图片主色（#717）：`/api/assets`、`/api/home`、`/api/detail` 带 `marks=color` 时在图片对象末尾附 `color`（`#rrggbb` 或 `null`）；可和收藏合用 `marks=fav,color`。详情再附最多五项 `palette: [{color,share}]`，占比取 0–1，未就绪时给空数组。画廊封面、`/api/characters` 和 `/api/artist-directory` 在同一对象上附封面主色。`/api/works?marks=color` 附 `covers: [{uuid,color}]`，从作品与子作品中取最多四张最近加入的可见图片，样图接受 `nsfw`。省略颜色标记时沿用原回复。
+- `order=color` 按红、黄、绿、青、蓝、紫分段，段内明度升序，灰度随后，未算颜色的图排在最后。同键按加入时间从新到旧，再按 UUID。图库打开、导入和同步后补算缺失的颜色，优先读已有缩略图，缺失时复用缩略图解码从原图取样。派生结果在该包的 `thumbnails/colors-v1.sqlite`，删除后可补算，回退应用版本无需迁移图库。
 - `/api/entities` 仍用于查找或创建实体；`/api/review-pools` 仅返回「未识别」。`/api/tasks` 返回 404；pending/conflicts 筛选返回 400。
 
 ### 写入与撤销

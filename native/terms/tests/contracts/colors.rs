@@ -111,9 +111,10 @@ fn image_colors_http_contract() {
     let character = get("/api/characters?id=tone-character&summary=1&marks=color");
     assert_eq!(character[0]["cover"], "color-red-a");
     assert_eq!(character[0]["color"], "#eb0000");
-    let artist = get("/api/artist-directory?q=tone-artist&marks=color");
-    assert_eq!(artist["items"][0]["cover"], "color-red-a");
-    assert_eq!(artist["items"][0]["color"], "#eb0000");
+    let artists = get("/api/artist-directory?marks=color");
+    let artist = artists["items"].as_array().unwrap().iter().find(|a| a["id"] == "tone-artist").unwrap();
+    assert_eq!(artist["cover"], "color-red-a");
+    assert_eq!(artist["color"], "#eb0000");
     let works = get("/api/works?marks=color");
     for id in ["tone-work", "tone-child"] {
         let row = works.as_array().unwrap().iter().find(|w| w["id"] == id).unwrap();
@@ -131,6 +132,27 @@ fn image_colors_http_contract() {
     let red_day = home["days"].as_array().unwrap().iter().find(|day| day["day"] == "2026-11-18").unwrap();
     assert_eq!(red_day["items"][0]["fav"], true);
     assert_eq!(red_day["items"][0]["color"], "#eb0000");
+
+    // 没有导入事件，后台补算没有这张图。真实 /image 缺缓存时生成 JPEG，并立即发布颜色。
+    let fresh = root.join("folder/new-thumbnail.png");
+    RgbImage::from_pixel(18, 24, Rgb([0, 155, 0])).save(&fresh).unwrap();
+    db.execute(
+        "INSERT INTO assets(uuid,filename,src_path,width,height,added_at,src_kind)
+         VALUES ('fresh-thumb','fresh-thumb.png',?1,18,24,'2026-11-22','orig')",
+        [fresh.to_str().unwrap()],
+    )
+    .unwrap();
+    let fresh_detail = "/api/detail?id=fresh-thumb&marks=color";
+    assert_eq!(get(fresh_detail)["color"], Value::Null);
+    let jpeg = ureq::get(&format!("{origin}/image?id=fresh-thumb&size=thumb"))
+        .set("Cookie", &entry::cookie(&origin))
+        .call()
+        .unwrap();
+    assert_eq!(jpeg.header("Content-Type"), Some("image/jpeg"));
+    let mut magic = [0; 2];
+    jpeg.into_reader().read_exact(&mut magic).unwrap();
+    assert_eq!(magic, [0xff, 0xd8]);
+    assert_eq!(get(fresh_detail)["color"], "#009b00");
 
     // 同步用已发布的内容哈希和路径做一致性检查。源文件替换后，恢复任务会重新补算。
     let old = root.join("folder/color-red-a.png");

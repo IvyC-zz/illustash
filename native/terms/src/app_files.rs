@@ -41,7 +41,7 @@ impl From<Error> for Failure {
         Self::Core(e)
     }
 }
-pub enum Prepared {
+pub(crate) enum Prepared {
     Static(PathBuf, &'static str),
     /// 按语言设置和 web/static/locales 里的各语言表生成的 web/static/i18n.js（#173、#182）。
     I18n {

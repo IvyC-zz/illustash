@@ -41,11 +41,6 @@ impl Asset {
 fn cache_path(package: &Path) -> PathBuf {
     package.join("thumbnails").join(CACHE)
 }
-fn reader(package: &Path) -> Result<Connection> {
-    let c = crate::sqlite::open_with_flags(cache_path(package), OpenFlags::SQLITE_OPEN_READ_ONLY)?;
-    c.busy_timeout(Duration::from_millis(100))?;
-    Ok(c)
-}
 fn writer(package: &Path) -> Result<Connection> {
     let path = cache_path(package);
     let dir = path.parent().expect("color cache has a parent");
@@ -269,39 +264,34 @@ struct Color {
     color: String,
     palette: Option<Json>,
 }
-fn load_colors(c: &Connection, package: Option<&Path>, ids: &[String], detail: bool) -> Result<HashMap<String, Color>> {
-    let Some(package) = package.filter(|_| !ids.is_empty()) else { return Ok(HashMap::new()) };
-    let ids = serde_json::to_string(&ids).expect("asset IDs are serializable");
+fn load_colors(c: &Connection, package: Option<&Path>, ids: &[String], detail: bool) -> HashMap<String, Color> {
     let cached = (|| -> Result<_> {
-        let cache = reader(package)?;
-        let palette = if detail { "palette" } else { "NULL" };
-        let sql =
-            format!("SELECT id,source,hash,color,{palette} FROM colors WHERE id IN (SELECT value FROM json_each(?))");
-        let mut stmt = cache.prepare(&sql)?;
-        let rows = stmt.query_map([&ids], |r| {
-            let palette: Option<String> = r.get(4)?;
-            let color =
-                Color { color: r.get(3)?, palette: palette.and_then(|s| crate::http_json::parse_python(&s).ok()) };
-            Ok((r.get::<_, String>(0)?, (r.get::<_, String>(1)?, r.get::<_, String>(2)?, color)))
-        })?;
-        Ok(rows.collect::<rusqlite::Result<HashMap<_, _>>>()?)
-    })();
-    let Ok(mut cached) = cached else { return Ok(HashMap::new()) };
-    if cached.is_empty() {
-        return Ok(HashMap::new());
-    }
-    let sql = format!("SELECT {ASSET_FIELDS} FROM assets a WHERE a.uuid IN (SELECT value FROM json_each(?))");
-    let mut stmt = c.prepare(&sql)?;
-    let mut result = HashMap::new();
-    for source in stmt.query_map([&ids], Asset::from_row)? {
-        let asset = source?;
-        if let Some((path, hash, color)) = cached.remove(&asset.id) {
-            if asset.source == Path::new(&path) && asset.hash == hash {
-                result.insert(asset.id, color);
-            }
+        let Some(package) = package.filter(|_| !ids.is_empty()) else { return Ok(HashMap::new()) };
+        if !cache_path(package).is_file() {
+            return Ok(HashMap::new());
         }
-    }
-    Ok(result)
+        attach(c, package)?;
+        let ids = serde_json::to_string(&ids).expect("asset IDs are serializable");
+        let palette = if detail { "z.palette" } else { "NULL" };
+        let sql = format!(
+            "SELECT a.uuid,z.color,{palette} FROM assets a JOIN asset_colors.colors z
+             ON z.id=a.uuid AND z.source=a.src_path AND z.hash={HASH}
+             WHERE a.uuid IN (SELECT value FROM json_each(?))"
+        );
+        let mut stmt = c.prepare(&sql)?;
+        let rows = stmt.query_map([&ids], |r| {
+            let palette: Option<String> = r.get(2)?;
+            let color =
+                Color { color: r.get(1)?, palette: palette.and_then(|s| crate::http_json::parse_python(&s).ok()) };
+            Ok((r.get::<_, String>(0)?, color))
+        })?;
+        Ok(rows.collect::<rusqlite::Result<_>>()?)
+    })();
+    cached.unwrap_or_default()
+}
+
+fn asset_id<'a>(row: &'a Json, key: &str) -> &'a str {
+    row.get(key).map_or("", Json::text)
 }
 
 pub(crate) fn decorate_response(
@@ -353,14 +343,13 @@ pub(crate) fn decorate_response(
         _ => return Ok(()),
     };
     let samples = if route == "/api/calendar" { "samples" } else { "items" };
-    let id = |row: &Json| row.get(id_key).map(Json::text).unwrap_or("").to_owned();
-    let mut ids: Vec<String> = image_rows.iter().map(|row| id(row)).collect();
+    let mut ids: Vec<String> = image_rows.iter().map(|row| asset_id(row, id_key).to_owned()).collect();
     for day in &mut groups {
-        ids.extend(field_array(day, samples).into_iter().flatten().map(|row| id(row)));
+        ids.extend(field_array(day, samples).into_iter().flatten().map(|row| asset_id(row, id_key).to_owned()));
     }
     ids.retain(|id| !id.is_empty());
-    let colors = load_colors(c, context.library.as_deref(), &ids, route == "/api/detail")?;
-    let color_for = |row: &Json| colors.get(&id(row));
+    let colors = load_colors(c, context.library.as_deref(), &ids, route == "/api/detail");
+    let color_for = |row: &Json| colors.get(asset_id(row, id_key));
     let color_value = |color: Option<&Color>| color.map(|entry| entry.color.as_str()).into();
     for row in image_rows {
         let color = color_for(row);
