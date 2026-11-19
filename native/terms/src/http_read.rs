@@ -24,6 +24,7 @@ pub const CORE_ROUTES: &[&str] = &[
     "/api/ids",
     "/api/detail",
     "/api/home",
+    "/api/calendar",
     "/api/galleries",
     "/api/galleries/covers",
     "/api/fold",
@@ -559,13 +560,22 @@ pub(crate) fn tag_vocabulary(context: &LibraryContext) -> Result<Arc<Vec<String>
     Ok(tags)
 }
 
-const BROWSE_ROUTES: [&str; 7] =
-    ["/api/assets", "/api/assets/count", "/api/ids", "/api/detail", "/api/home", "/api/fold", "/api/review-pools"];
+const BROWSE_ROUTES: &[&str] = &[
+    "/api/assets",
+    "/api/assets/count",
+    "/api/ids",
+    "/api/detail",
+    "/api/home",
+    "/api/calendar",
+    "/api/fold",
+    "/api/review-pools",
+];
 /// 会渲染名字的模块读取。计数、ID 以及原始的身份和偏好读取不渲染；它们的查询路径保持在本地。
-const NAMED_ROUTES: [&str; 9] = [
+const NAMED_ROUTES: &[&str] = &[
     "/api/assets",
     "/api/detail",
     "/api/home",
+    "/api/calendar",
     "/api/galleries/covers",
     "/api/characters",
     "/api/tagged",
