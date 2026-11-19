@@ -135,6 +135,24 @@ fn danbooru_aliases(c: &Connection, kind: &str, tag: &str, values: &[Value]) -> 
     Ok(())
 }
 
+fn seed_index(c: &Connection, entity: &str, legacy_key: Option<&str>, names: &Value) -> Result<bool> {
+    let mut changed = c
+        .prepare_cached(&format!(
+            "DELETE FROM term_names WHERE term_id = {TERM_OF} AND role = 'display' AND source = 'index'"
+        ))?
+        .execute([entity])?
+        != 0;
+    for lang in ["zh", "ja", "en"] {
+        if let Some(key) = legacy_key {
+            put(c, "character", key, lang, "index", &names[lang])?;
+        } else if let Some(value) = names[lang].as_str().filter(|v| !crate::character_names::strip(v).is_empty()) {
+            put_name(c, entity, lang, "index", value, "display", 0, 0)?;
+            changed = true;
+        }
+    }
+    Ok(changed)
+}
+
 pub fn one(c: &Connection, op: &Value) -> Result<()> {
     let s = |k: &str| text(&op[k], "名字命令缺少参数");
     match s("op")? {
@@ -153,16 +171,7 @@ pub fn one(c: &Connection, op: &Value) -> Result<()> {
             Ok(())
         }
         // NameUpdater.seed：索引给的名字，先删掉这个身份原有的索引名。
-        "seed_index" => {
-            c.prepare_cached(&format!(
-                "DELETE FROM term_names WHERE term_id = {TERM_OF} AND role = 'display' AND source = 'index'"
-            ))?
-            .execute([s("entity")?])?;
-            for lang in ["zh", "ja", "en"] {
-                put(c, "character", s("key")?, lang, "index", &op["names"][lang])?;
-            }
-            Ok(())
-        }
+        "seed_index" => seed_index(c, s("entity")?, Some(s("key")?), &op["names"]).map(|_| ()),
         // Store.alias（相册标题等）。
         "alias" => alias(c, s("entity")?, s("value")?, s("source")?, op["lang"].as_str().unwrap_or("")).map(|_| ()),
         other => Err(Error::Invalid(format!("未知名字命令：{other}"))),
@@ -171,20 +180,41 @@ pub fn one(c: &Connection, op: &Value) -> Result<()> {
 
 /// 一个核心事务执行一条或一批名字命令。
 pub fn run(conn: &mut Connection, args: &Value) -> Result<Value> {
+    write(conn, |c| {
+        let ops: Vec<&Value> = match args["op"].as_str() {
+            Some("batch") => args["ops"].as_array().map(|a| a.iter().collect()).unwrap_or_default(),
+            _ => vec![args],
+        };
+        for op in &ops {
+            one(c, op)?;
+        }
+        Ok(json!({"done": ops.len()}))
+    })
+}
+
+/// 在同一个核心写事务内复核来源，再按已复核的身份替换索引名。返回本次提交是否写了索引名。
+pub fn seed_checked(
+    conn: &mut Connection,
+    resolve: impl FnOnce(&Connection) -> Result<Vec<(String, Value)>>,
+) -> Result<bool> {
+    write(conn, |c| {
+        let mut changed = false;
+        for (entity, names) in resolve(c)? {
+            changed |= seed_index(c, &entity, None, &names)?;
+        }
+        Ok(changed)
+    })
+}
+
+fn write<T>(conn: &mut Connection, apply: impl FnOnce(&Connection) -> Result<T>) -> Result<T> {
     crate::schema::require_current(conn)?;
     let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
     if !crate::legacy_names::names_in_core(&tx)? {
         return Err(Error::Conflict("名字还没切到词条核心".into()));
     }
     begin_writing(&tx)?;
-    let ops: Vec<&Value> = match args["op"].as_str() {
-        Some("batch") => args["ops"].as_array().map(|a| a.iter().collect()).unwrap_or_default(),
-        _ => vec![args],
-    };
-    for op in &ops {
-        one(&tx, op)?;
-    }
+    let value = apply(&tx)?;
     // 别名镜像由提交时的 `legacy_names::after_write` 按受影响的键同步，一个事务只同步一次。
     commit_writing(tx)?;
-    Ok(json!({"done": ops.len()}))
+    Ok(value)
 }
