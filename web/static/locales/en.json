@@ -1728,6 +1728,7 @@
   "无法定位用户主目录": "Cannot find the user's home folder",
   "选择图片文件夹": "Choose a picture folder",
   "选择图库（.pilib）": "Choose a library (.pilib)",
+  "选择人工结论文件（.illustash-human.jsonl）": "Choose a human conclusions file (.illustash-human.jsonl)",
   "选择导出的图库（.zip）": "Choose an exported library (.zip)",
   "选择 X 数据归档（.zip）": "Choose an X data archive (.zip)",
   "选择窗口输出读取失败": "Reading the file chooser's output failed",
