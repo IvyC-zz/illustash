@@ -506,6 +506,19 @@ impl<'a> Meter<'a> {
         });
         Ok(())
     }
+    /// 重连或核对断点时保留磁盘上已有的进度，暂停显示速度。
+    fn idle(&self, current: u64) {
+        self.models.set(|job| {
+            job["done"] = (self.base + current).into();
+            job["speed"] = 0.into();
+        });
+    }
+    fn begin_transfer(&mut self, current: u64) {
+        let now = Instant::now();
+        self.shown = now;
+        self.samples.clear();
+        self.samples.push((now, self.base + current));
+    }
     /// 一个文件完成了（或跳过了）：它的字节计入基数。
     fn finish(&mut self, size: u64) {
         self.base += size;
@@ -535,7 +548,7 @@ impl From<std::io::Error> for Failure {
 }
 
 /// 把 `part` 读进哈希，所以接着下载的文件从第一个字节起就经过核对。
-fn hash_existing(file: &mut fs::File, length: u64, meter: &mut Meter) -> std::result::Result<Sha256, Failure> {
+fn hash_existing(file: &mut fs::File, length: u64, models: &Models) -> std::result::Result<Sha256, Failure> {
     let mut digest = Sha256::new();
     file.seek(SeekFrom::Start(0))?;
     let mut reader = (&mut *file).take(length);
@@ -546,7 +559,9 @@ fn hash_existing(file: &mut fs::File, length: u64, meter: &mut Meter) -> std::re
             break;
         }
         digest.update(&buffer[..n]);
-        meter.tick(0)?;
+        if models.stopped() {
+            return Err(Stop::Cancelled.into());
+        }
     }
     Ok(digest)
 }
@@ -567,7 +582,8 @@ fn fetch(
         file.set_len(0)?;
         length = 0;
     }
-    let mut digest = hash_existing(&mut file, length, meter)?;
+    meter.idle(length);
+    let mut digest = hash_existing(&mut file, length, meter.models)?;
     if length < entry.size {
         let mut request = agent.get(address).set("User-Agent", "Illustash-models").set("Accept-Encoding", "identity");
         if length > 0 {
@@ -577,6 +593,7 @@ fn fetch(
             Ok(reply) => reply,
             Err(ureq::Error::Status(416, _)) => {
                 file.set_len(0)?;
+                meter.idle(0);
                 return Err(Failure::Retry("续传位置无效，从头下载".into()));
             }
             Err(ureq::Error::Status(code, _)) => return Err(Failure::Next(format!("HTTP {code}"))),
@@ -598,6 +615,7 @@ fn fetch(
                 }
                 if start != Some(length) {
                     file.set_len(0)?;
+                    meter.idle(0);
                     return Err(Failure::Retry("续传位置不符，从头下载".into()));
                 }
             }
@@ -609,12 +627,14 @@ fn fetch(
                     // 来源不支持续传：从头开始。
                     file.set_len(0)?;
                     length = 0;
+                    meter.idle(length);
                     digest = Sha256::new();
                 }
             }
             code => return Err(Failure::Next(format!("HTTP {code}"))),
         }
         file.seek(SeekFrom::Start(length))?;
+        meter.begin_transfer(length);
         let mut reader = reply.into_reader();
         let mut buffer = vec![0; 1 << 18];
         loop {
@@ -622,6 +642,7 @@ fn fetch(
                 Ok(n) => n,
                 Err(e) => {
                     file.flush()?;
+                    meter.idle(length);
                     eprintln!("models: {address}: {e}");
                     return Err(Failure::Retry("连接中断".into()));
                 }
@@ -631,6 +652,7 @@ fn fetch(
             }
             if length + n as u64 > entry.size {
                 file.set_len(0)?;
+                meter.idle(0);
                 return Err(Failure::Next("下载的数据比清单里的文件大".into()));
             }
             file.write_all(&buffer[..n])?;
@@ -640,6 +662,7 @@ fn fetch(
         }
         file.flush()?;
         if length < entry.size {
+            meter.idle(length);
             return Err(Failure::Retry("连接提前结束".into()));
         }
     }
@@ -647,6 +670,7 @@ fn fetch(
     drop(file);
     if format!("{:x}", digest.finalize()) != entry.sha256 {
         fs::remove_file(&path)?;
+        meter.idle(0);
         return Err(Failure::Next("SHA-256 与清单不符，已丢弃".into()));
     }
     fs::rename(&path, partial.join(&entry.path))?;
