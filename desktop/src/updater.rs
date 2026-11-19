@@ -10,6 +10,8 @@
 //!   而本地服务就是同一个程序。安装失败时重新启动本地服务，页面退回「打开下载页」。
 //! - 不能自己更新的安装（没有公钥的构建、不是打好的包、macOS 上从「下载」直接运行而被系统隔离到随机位置的）只提供
 //!   「打开下载页」。
+use std::error::Error as _;
+use std::future::Future;
 use std::sync::Mutex;
 use std::thread;
 use std::time::Duration;
@@ -24,6 +26,7 @@ use crate::server;
 /// 连上 GitHub 的时限；连上之后只要一直有数据就不限总时长，几十秒收不到数据才算断了。
 const CONNECT: Duration = Duration::from_secs(15);
 const STALL: Duration = Duration::from_secs(60);
+const RETRY_DELAY: Duration = Duration::from_secs(1);
 
 #[derive(Default)]
 pub struct Updates(Mutex<State>);
@@ -203,30 +206,82 @@ async fn fetch(
         .configure_client(|client| client.connect_timeout(CONNECT).read_timeout(STALL))
         .build()
         .map_err(describe)?;
-    let update = updater.check().await.map_err(describe)?.ok_or_else(|| tr("这个版本没有提供本机能用的更新包"))?;
+    let update = with_network_retry("检查应用更新", RETRY_DELAY, || updater.check())
+        .await?
+        .ok_or_else(|| tr("这个版本没有提供本机能用的更新包"))?;
     // 包要在同一个 Release 里：latest.json 只是普通文件，不信任它指向别处。
     if !update.download_url.as_str().starts_with(prefix) {
         return Err(tr("更新包不在这个版本的 Release 里，没有下载"));
     }
-    let handle = app.clone();
-    let bytes = update
-        .download(
-            move |chunk, total| {
-                let state = handle.state::<Updates>();
-                let mut state = state.lock();
-                if state.generation != generation {
-                    return;
-                }
+    let bytes = with_network_retry("下载应用更新", RETRY_DELAY, || {
+        let mut bytes = 0;
+        let progress = move |chunk, total| {
+            bytes += chunk as u64;
+            let state = app.state::<Updates>();
+            let mut state = state.lock();
+            if state.generation == generation {
                 if let Stage::Downloading { received, total: known, .. } = &mut state.stage {
-                    *received += chunk as u64;
+                    *received = bytes;
                     *known = total;
                 }
-            },
-            || {},
-        )
-        .await
-        .map_err(describe)?;
+            }
+        };
+        update.download(progress, || {})
+    })
+    .await?;
     Ok((update, bytes))
+}
+
+/// 只重试下载清单和更新包时的暂时性网络错误。插件每次独立下载并验签，取消任务也会取消退避。
+async fn with_network_retry<T, F>(
+    stage: &'static str,
+    delay: Duration,
+    mut request: impl FnMut() -> F,
+) -> Result<T, String>
+where
+    F: Future<Output = Result<T, tauri_plugin_updater::Error>>,
+{
+    use tauri_plugin_updater::Error as E;
+    let mut retries = 0;
+    loop {
+        let (retryable, detail) = match request().await {
+            Ok(value) => return Ok(value),
+            Err(E::Reqwest(error)) => {
+                let error = error.without_url();
+                let mut retryable = error.is_connect()
+                    || error.is_timeout()
+                    || error.is_body()
+                    || error.is_request()
+                    || error.is_decode();
+                let mut detail = format!("Reqwest: {error}");
+                let mut cause = error.source();
+                while let Some(inner) = cause {
+                    // JSON 格式错误也用 reqwest 的 decode 表示，重新下载不会修好它。
+                    if inner.is::<serde_json::Error>() {
+                        retryable = false;
+                    }
+                    detail.push_str(&format!(": {inner}"));
+                    cause = inner.source();
+                }
+                (retryable, detail)
+            }
+            // 锁定的 updater 插件用这一格式返回更新包的非成功 HTTP 状态。
+            Err(E::Network(message)) => {
+                let status = message
+                    .strip_prefix("Download request failed with status: ")
+                    .and_then(|s| s.split_ascii_whitespace().next())
+                    .and_then(|s| s.parse::<u16>().ok());
+                (matches!(status, Some(408 | 429 | 500..=599)), format!("Network: {message}"))
+            }
+            Err(other) => return Err(describe(other)),
+        };
+        illustash_terms::diagnostics::logs::update_network(stage, &detail);
+        if !retryable || retries == 3 {
+            return Err(tr("下载没有完成，请检查网络后再试"));
+        }
+        tokio::time::sleep(delay * (1 << retries)).await;
+        retries += 1;
+    }
 }
 
 /// POST /platform/update/cancel：停下正在进行的下载，或丢掉下好的、失败的结果。
@@ -362,6 +417,65 @@ fn describe(error: tauri_plugin_updater::Error) -> String {
             tr_with("没有装上，旧版本也没能放回原处，留在了 {path}", &[("path", &path.display())])
         }
         other => tr_with("没有装上：{error}", &[("error", &other)]),
+    }
+}
+
+#[cfg(test)]
+mod retry_tests {
+    use super::*;
+    use std::io::{BufRead, BufReader, Write};
+    use std::net::TcpListener;
+    use tauri_plugin_updater::Error as E;
+
+    #[test]
+    fn interrupted_response_is_requested_again_with_clean_bytes() {
+        let server = TcpListener::bind(("127.0.0.1", 0)).unwrap();
+        let url = format!("http://{}/test", server.local_addr().unwrap());
+        let peer = thread::spawn(move || {
+            for payload in ["x", "good"] {
+                let (mut socket, _) = server.accept().unwrap();
+                // 读完请求头后关写端，模拟一个声明四字节却只发了一字节的响应。
+                for line in BufReader::new(&socket).lines() {
+                    if line.unwrap().is_empty() {
+                        break;
+                    }
+                }
+                write!(socket, "HTTP/1.1 200 OK\r\nContent-Length: 4\r\nConnection: close\r\n\r\n{payload}").unwrap();
+            }
+        });
+        tauri::async_runtime::block_on(async {
+            let client = reqwest::Client::builder().no_proxy().build().unwrap();
+            let bytes = with_network_retry("下载应用更新", Duration::ZERO, || async {
+                Ok(client.get(&url).send().await?.bytes().await?)
+            })
+            .await
+            .unwrap();
+            assert_eq!(bytes.as_ref(), b"good");
+        });
+        peer.join().unwrap();
+    }
+
+    #[test]
+    fn retries_are_bounded_and_signed_version_failure_is_final() {
+        for (status, expected) in [(503, 4), (404, 1)] {
+            let mut calls = 0;
+            let result =
+                tauri::async_runtime::block_on(with_network_retry("下载应用更新", Duration::ZERO, || {
+                    calls += 1;
+                    std::future::ready(Err::<(), _>(E::Network(format!(
+                        "Download request failed with status: {status}"
+                    ))))
+                }));
+            assert_eq!(calls, expected);
+            assert_eq!(result.unwrap_err(), tr("下载没有完成，请检查网络后再试"));
+        }
+        let mut calls = 0;
+        let result = tauri::async_runtime::block_on(with_network_retry("下载应用更新", Duration::ZERO, || {
+            calls += 1;
+            std::future::ready(Err::<(), _>(E::MissingSignedVersion))
+        }));
+        assert_eq!(calls, 1);
+        assert_eq!(result.unwrap_err(), tr("更新包的签名不对，没有安装"));
     }
 }
 

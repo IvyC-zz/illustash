@@ -172,15 +172,21 @@ fn cause_text(cause: Cause) -> &'static str {
     }
 }
 
-enum Kind {
+/// 桌面更新器记录一次网络失败。调用方先剥去请求地址，保留传输错误的原因链。
+pub fn update_network(stage: &'static str, detail: &str) {
+    record(Source::Host, stage, None, Kind::UpdateNetwork(detail));
+}
+
+enum Kind<'a> {
     Stderr,
     Status,
     WorkerExit(Option<&'static str>),
+    UpdateNetwork(&'a str),
     WorkerDetail(&'static str),
     Panic(PanicSite),
 }
 
-fn record(source: Source, reason: &'static str, code: Option<i32>, kind: Kind) {
+fn record(source: Source, reason: &'static str, code: Option<i32>, kind: Kind<'_>) {
     if root().is_none() {
         return;
     }
@@ -198,6 +204,10 @@ fn record(source: Source, reason: &'static str, code: Option<i32>, kind: Kind) {
     let detail = match kind {
         Kind::WorkerExit(Some(failure)) => format!("：{failure}"),
         Kind::WorkerDetail(kind) => format!("：{kind}"),
+        Kind::UpdateNetwork(text) => {
+            let detail: String = text.chars().take(2048).map(|c| if c.is_control() { ' ' } else { c }).collect();
+            format!("：{detail}")
+        }
         Kind::Panic(site) => format!("（native/terms/{}:{}:{}）", site.file, site.line, site.column),
         _ => String::new(),
     };

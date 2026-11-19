@@ -1934,6 +1934,7 @@ dependencies = [
  "objc2-app-kit",
  "objc2-foundation",
  "objc2-user-notifications",
+ "reqwest",
  "serde",
  "serde_json",
  "tauri",
@@ -1942,6 +1943,7 @@ dependencies = [
  "tauri-plugin-single-instance",
  "tauri-plugin-updater",
  "tiny_http",
+ "tokio",
  "windows",
 ]
 

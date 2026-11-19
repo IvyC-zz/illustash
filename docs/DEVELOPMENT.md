@@ -64,7 +64,7 @@ cargo build --release --manifest-path native/terms/Cargo.toml
 
 HTTP 错误保留原有状态码与 `error` 正文，额外通过 `X-Illustash-Diagnostic` 返回 `id/stored/publication/retry`；后台失败在状态中附加 `diagnostic`。读取失败标记不涉及提交；传输层无法证明写入边界时标记未知，导入任务依据发布点区分未提交与已提交，其余分批任务保守标记可能部分提交。记录失败不改变业务 `Result`。认证后的 `/api/diagnostics` 和仅启动页有权调用的 `startup_diagnostics` 提供同一份脱敏报告。
 
-滚动运行日志默认开启，位于应用支持目录的 `diagnostics/logs/`。它记录桌面宿主的启动失败、退出、超时和 stderr 告警，以及识别（含自检）、索引、研究和溯源 worker 的 stderr 与异常结束。IQDB 签名子进程的告警经溯源 worker 转交。每条记录写 UTC 时间和固定进程标签。已知告警保留固定原因，例如模型或锚点无法读取、加速回退、OpenBLAS 不可用和 IQDB 签名失败。相邻同类告警在一秒内合并，空行或不同类别重置。
+滚动运行日志默认开启，位于应用支持目录的 `diagnostics/logs/`。它记录桌面宿主的启动失败、退出、超时和 stderr 告警，以及识别（含自检）、索引、研究和溯源 worker 的 stderr 与异常结束。IQDB 签名子进程的告警经溯源 worker 转交。每条记录写 UTC 时间和固定进程标签。已知告警保留固定原因，例如模型或锚点无法读取、加速回退、OpenBLAS 不可用和 IQDB 签名失败。桌面更新器在获取版本清单或更新包时将传输错误类型及底层原因写入本机滚动日志。reqwest 错误在记录前移除请求 URL，界面保留简短的失败提示。暂时性连接或传输中断最多重试三次，分别退避 1、2、4 秒，每次重新下载并验签。相邻同类告警在一秒内合并，空行或不同类别重置。
 
 自有 worker 使用宿主传入的绝对诊断根向共享日志直接记录受控字段。读取、解析及校验研究与溯源请求时记录预定义阶段及错误类型。解析、初始化识别运行库及加载 ONNX 模型时记录可用的系统错误码、固定的 ONNX Runtime 错误类型或加载器崩溃。宿主和自有 worker 从进程自身的 Rust panic hook 获取位置，只记录已核验的第一方源码相对位置和行列。文件清单在 `native/terms/src/diagnostics/logs/details.rs`。stderr 不提供错误码或 panic 位置。
 

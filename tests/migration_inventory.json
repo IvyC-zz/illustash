@@ -199,7 +199,7 @@
 
  "desktop/src/server.rs":"e47bf5e33f38258356c777382bd7cc8e61188bc5ca1edcbc36b8d361282ee8cf",
 
- "desktop/src/updater.rs":"eb5c53f5025e9db4e1179988de11d276d9395da2841d79da2c6278fd77929fb9",
+ "desktop/src/updater.rs":"7a793ec922185190d97ebb623857cc62bb609d552fb3aaf42d2c378a1de24c14",
 
  "desktop/src/welcome.rs":"79c4c120ab8e4e6fef3459e8452655c00ecd0b9a328f894df911474cd3a2b80b",
 
@@ -371,7 +371,7 @@
 
  "native/terms/src/diagnostics.rs":"0791b6496bfa790dbc11635b57fc79e1ce1cec8f6fd6ad4db9c119b8a05b8f34",
 
- "native/terms/src/diagnostics/logs.rs":"da41a06cc4dbc6135a9b6dece7769373250dbb9d585c2087dd166b1c4115e14e",
+ "native/terms/src/diagnostics/logs.rs":"32a850e281f017f3591a59ced675feccd0b78deba14c402adc69fad82e6f4fea",
 
  "native/terms/src/diagnostics/logs/details.rs":"49daaeae10eaaf1275776734b97432d01d14b14855d0cfdcc2ed87a1b97b07d9",
 
