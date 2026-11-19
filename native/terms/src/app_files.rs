@@ -363,7 +363,7 @@ fn thumbnail_rgb(source: &Path, bound: u32) -> io::Result<image::RgbImage> {
     })
 }
 
-fn jpeg_rgb(reader: impl BufRead, bound: u32) -> io::Result<image::RgbImage> {
+fn jpeg_rgb(reader: impl BufRead + std::panic::UnwindSafe, bound: u32) -> io::Result<image::RgbImage> {
     // mozjpeg 的错误管理器遇到损坏的 JPEG 会展开栈；在进入 HTTP worker 和键锁之前兜住它，
     // 这样失败返回 404，从不毒化共享状态。
     std::panic::catch_unwind(|| -> io::Result<image::RgbImage> {

@@ -651,7 +651,11 @@ pub fn read(context: &LibraryContext, url: &str) -> Result<Option<(Json, u16)>> 
                 tx.commit()?;
                 Ok(Some((payload, 200)))
             }
-            Err(Error::Invalid(m)) if path == ARTIST_DIRECTORY || path == "/api/works" => Ok(refused(m)),
+            Err(Error::Invalid(m))
+                if path == ARTIST_DIRECTORY || (path == "/api/works" && crate::app_colors::requested(&q)) =>
+            {
+                Ok(refused(m))
+            }
             Err(e) => Err(e),
         };
     }
