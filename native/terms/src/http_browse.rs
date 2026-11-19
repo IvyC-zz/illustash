@@ -486,7 +486,9 @@ pub(crate) fn selection(
     condition_filter(c, context, f, &mut filter)?;
     let like = crate::http_example_search::Search::parse(f)?;
     let order = f.get("order").map(String::as_str).unwrap_or(if like.is_some() { "similar" } else { "newest" });
-    let ordering = if like.is_some() {
+    let ordering = if order == "color" {
+        crate::app_colors::ordering(c, context)
+    } else if like.is_some() {
         match order {
             "similar" => "(SELECT rank FROM temp.like_rank WHERE uuid=a.uuid)".into(),
             "oldest" => "a.added_at ASC,a.uuid".into(),
@@ -1592,9 +1594,10 @@ fn assets(c: &Connection, context: &LibraryContext, path: &str, q: &HashMap<Stri
         && f.iter().all(|(k, v)| k == "nsfw" || k == "order" || v.is_empty())
         && date_page_pays(c, offset, limit)?;
     let (total, sql) = if total_needed && !nsfw.is_empty() && !date_page && !f.contains_key("like") {
+        let source = if value(&f, "order") == "color" { ",a.src_path" } else { "" };
         let copy = format!(
             "CREATE TEMP TABLE selected_assets AS
-             SELECT a.uuid,a.width,a.height,a.added_at FROM assets a WHERE {where_}"
+             SELECT a.uuid,a.width,a.height,a.added_at{source} FROM assets a WHERE {where_}"
         );
         c.execute(&copy, rusqlite::params_from_iter(&args))?;
         let n = count(c, "SELECT count(*) FROM selected_assets", &[])?;

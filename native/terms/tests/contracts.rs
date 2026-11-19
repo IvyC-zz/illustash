@@ -35,6 +35,9 @@ mod library_50k;
 #[path = "contracts/library_scale.rs"]
 mod library_scale;
 
+#[path = "contracts/colors.rs"]
+mod colors;
+
 const DATABASES: [&str; 3] = ["source.sqlite", "library.sqlite", "provenance.sqlite"];
 
 struct Sandbox(PathBuf);
