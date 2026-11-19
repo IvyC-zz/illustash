@@ -106,12 +106,12 @@ class SyntheticWdLibrary:
     def fixture(self, address, *, tags=b'synthetic tags'):
         # 两个命中让无归属图得到一个主归属及一个可见的扩展候选。
         head = [2.] + [0.] * 1023
-        self.manifest = wd_extension_spec(self.root / 'download', tags, [
+        manifest = wd_extension_spec(self.root / 'download', tags, [
             ('synthetic_extension_primary', head, 0.),
             ('synthetic_extension_alternate', head, -.3),
         ], address)
-        self.env['ILLUSTASH_TEST_WD_EXTENSION'] = str(self.manifest)
-        return self.manifest.with_name(FILENAME)
+        self.env['ILLUSTASH_TEST_WD_EXTENSION'] = str(manifest)
+        return manifest.with_name(FILENAME)
 
     def restart(self):
         if hasattr(self, 'process'):
