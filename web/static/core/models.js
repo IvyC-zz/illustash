@@ -41,11 +41,12 @@ export async function characterBasePost(enable) {
 }
 // 基础角色索引的文件在识别模型清单里的路径；这个版本不带时为空。
 export const characterBasePath = (b = state.characterBase) => b?.included ? b.file?.path || '' : '';
-// 首次准备等同一次模型下载结束才启动识别。已经就位后补下载索引不属于首次准备。
-export function waitingForBaseDownload(m = state.models) {
+// 首次准备要等同一次模型下载结束。重载后若开始状态未知，只显示当前下载。
+export function baseDownloadStatus(m = state.models) {
   const base = characterBasePath();
-  return !!base && started !== true && m?.status === 'ready' && m.job?.status === 'running'
-    && m.job.kind === 'download' && m.job.file === base;
+  if (started === true || !base || m?.status !== 'ready' || m.job?.status !== 'running'
+    || m.job.kind !== 'download' || m.job.file !== base) return null;
+  return started === false ? 'waiting' : 'downloading';
 }
 // 模型就位后还缺的可选文件：WD 加速文件（Apple 芯片的 macOS）和基础角色索引。
 export function optionalGaps(m = state.models) {
@@ -62,13 +63,16 @@ export async function saveAcceleration(on) {
 export const modelsWaiting = (m = state.models) => !!m?.on_demand && m.status !== 'ready';
 // 刚结束的任务及其结局：只在读到的状态说它不再运行时返回一次。
 export const modelsFinished = (before, after = state.models) => before?.job?.status === 'running' && after?.job?.status !== 'running' ? after.job : null;
-// 任务开始时模型是否已就位（#375）：第一次看到它在运行时取改动前的状态，之后沿用 `known`；没有任务在运行时为 null。
-// 页面中途打开、没有改动前的状态时无从判断，记为没就位：宁可多识别一次，不漏掉。
-export const readyWhenStarted = (before, after, known) =>
-  after?.job?.status !== 'running' ? null : before?.job?.status === 'running' ? known : before?.status === 'ready';
+// 任务开始时模型是否已就位（#375）。重载后第一次看到任务在运行，如果模型也已就位，就无法判定它何时就位。
+export function readyWhenStarted(before, after, known) {
+  if (after?.job?.status !== 'running') return null;
+  if (before?.job?.status === 'running') return known;
+  if (before) return before.status === 'ready';
+  return after.status === 'ready' ? null : false;
+}
 // 刚结束的任务让模型从没就位变成就位：图库里等着的图现在可以识别了。首次下载在同一个任务里先激活原始模型、再下 WD
 // 加速文件，所以看的是任务开始时（`start`），不是结束前一刻；加速文件成功、失败还是取消都算。模型本来就在、只补或修
-// 加速文件或导入的，不算。
+// 加速文件或导入的，不算。中途打开页面时仍按可能首次准备处理，免得漏掉识别。
 export const modelsArrived = (before, start, after = state.models) => !!modelsFinished(before, after) && start !== true && after?.status === 'ready';
 // 上次识别里各模型写了原因的回退记录（#375），只在开着加速时算。WD 加速文件装好之前留下的那条 WD 记录，宿主已经不报
 // （native/terms/src/app_models.rs 的 drop_superseded_wd），下一次识别写入新记录后照常报告。

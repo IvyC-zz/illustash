@@ -5,7 +5,7 @@ import {esc, bytes, home, number} from '../core/format.js';
 import {state} from '../core/state.js';
 import {SYNC_ACTIVE, INDEX_ACTIVE, startSync, pollSync, pollIndex, onJob, indexEndText} from '../core/jobs.js';
 import {loadModels, modelsPost, modelsWaiting, modelsFinished, modelsArrived, onModels, saveAcceleration, fallbacks,
-  loadCharacterBase, characterBasePost, characterBasePath, optionalGaps, waitingForBaseDownload} from '../core/models.js';
+  loadCharacterBase, characterBasePost, characterBasePath, optionalGaps, baseDownloadStatus} from '../core/models.js';
 import {$, toast, redraw, busy} from './dom.js';
 import {confirmAction} from './dialog.js';
 import {loadPack} from '../core/packs.js';
@@ -83,12 +83,13 @@ export function importSummary(job) {
 
 // 识别等待模型期间向导的横条，出现在这个安装的每个图库里。
 export function modelsNotice() {
-  const m = state.models, waitingIndex = waitingForBaseDownload(m) && !SYNC_ACTIVE.includes(state.sync?.status);
-  if (!modelsWaiting(m) && !waitingIndex) return '';
+  const m = state.models;
+  const baseDownload = SYNC_ACTIVE.includes(state.sync?.status) ? null : baseDownloadStatus(m);
+  if (!modelsWaiting(m) && !baseDownload) return '';
   // 有事发生之后，这一行才说明现状：下载在进行、已停止，或者已经有一部分在这里。
   const line = running(m) || m.job || m.have ? esc(modelsLine(m)) : '';
   const note = running(m) ? '' : t('识别要用的模型还没下载（约 {size}）。图片会先加入图库，可以浏览和手动整理；首次准备结束后会自动开始识别。', {size: bytes(m.total)});
-  const wait = waitingIndex ? t('下载结束后开始识别。') : '';
+  const wait = baseDownload === 'waiting' ? t('下载结束后开始识别。') : '';
   return `<div class="models-notice"><span>${[esc(note), line, esc(wait)].filter(Boolean).join(' ')}</span>
     ${modelsBar(m)}${running(m) ? '' : modelsFailures(m)}<div class="models-acts">${modelsActions(m)}${running(m) ? '' : manualLink(m)}</div>${running(m) ? '' : importSummary(m.job)}</div>`;
 }

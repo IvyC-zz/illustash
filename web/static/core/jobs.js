@@ -9,7 +9,7 @@ import {session, api, post, shared} from './session.js';
 import {state} from './state.js';
 import {listeners} from './events.js';
 import {poller} from './poll.js';
-import {waitingForBaseDownload} from './models.js';
+import {baseDownloadStatus} from './models.js';
 const changed = listeners();
 // /api/index 的最新回应（关注列表、作品、检查与添加的状态）。资料库、设置页、引导读到新的回应也经这里换上。
 export function setIndex(value) { state.index = value; }
@@ -71,7 +71,7 @@ export function syncLine(s) {
   // 自己下载模型的安装（#168）在等模型；否则就是识别服务没有启动。
   if (s.status === 'needs_recognition') {
     const vars = {n: number(s.total || 0)};
-    if (waitingForBaseDownload()) return t('有 {n} 张图等待识别（正在下载基础角色索引）', vars) + kept;
+    if (baseDownloadStatus() === 'waiting') return t('有 {n} 张图等待识别（正在下载基础角色索引）', vars) + kept;
     return (state.models?.on_demand && state.models.status !== 'ready'
       ? t('有 {n} 张图等待识别（识别模型还没下载）', vars) : t('有 {n} 张图等待识别（识别服务未启动）', vars)) + kept;
   }

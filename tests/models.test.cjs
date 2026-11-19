@@ -95,11 +95,12 @@ test('pictures waiting for the models say so in the sync line', () => {
   assert.equal(context.syncLine({status: 'needs_recognition', total: 3}), '有 3 张图等待识别（识别服务未启动）');
 });
 
-test('slow initial base index download is reported in the guide and the sync task', async () => {
+test('base index progress mentions waiting only during known initial setup', async () => {
   const fetch = globalThis.fetch, setTimeout = globalThis.setTimeout;
   const previous = {models: context.state.models, characterBase: context.state.characterBase, sync: context.state.sync};
   const file = 'character-index/synthetic.bin';
   const ready = models({status: 'ready'});
+  const downloading = {...ready, job: {status: 'running', kind: 'download', file, done: MB, total: 2 * MB}};
   context.state.characterBase = {included: true, file: {path: file}};
   context.state.sync = {status: 'needs_recognition', total: 3};
   let response = models();
@@ -107,7 +108,7 @@ test('slow initial base index download is reported in the guide and the sync tas
   globalThis.fetch = async () => ({ok: true, json: async () => response});
   try {
     await context.loadModels();
-    response = {...ready, job: {status: 'running', kind: 'download', file, done: MB, total: 2 * MB}};
+    response = downloading;
     await context.loadModels();
     assert.match(context.modelsNotice(), /正在下载基础角色索引.*下载结束后开始识别。/);
     assert.equal(context.syncLine(context.state.sync), '有 3 张图等待识别（正在下载基础角色索引）');
@@ -115,9 +116,22 @@ test('slow initial base index download is reported in the guide and the sync tas
     await context.loadModels();
     assert.equal(context.modelsNotice(), '');
     await context.loadModels();
-    response = {...ready, job: {status: 'running', kind: 'download', file, done: MB, total: 2 * MB}};
+    response = downloading;
     await context.loadModels();
     assert.equal(context.modelsNotice(), '', '补下载索引不会让再次识别进入首次准备等待');
+
+    response = ready;
+    await context.loadModels();
+    context.state.models = null;
+    response = downloading;
+    await context.loadModels();
+    await context.loadModels();
+    assert.match(context.modelsNotice(), /正在下载基础角色索引/);
+    assert.doesNotMatch(context.modelsNotice(), /下载结束后开始识别/);
+    assert.doesNotMatch(context.syncLine(context.state.sync), /正在下载基础角色索引/);
+    context.state.sync = {status: 'recognising', done: 2, total: 3};
+    assert.equal(context.modelsNotice(), '');
+    assert.match(context.syncLine(context.state.sync), /正在识别新图片 2\/3/);
   } finally {
     globalThis.fetch = async () => ({ok: true, json: async () => ready});
     await context.loadModels();
