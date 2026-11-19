@@ -9,6 +9,7 @@ import {session, api, post, shared} from './session.js';
 import {state} from './state.js';
 import {listeners} from './events.js';
 import {poller} from './poll.js';
+import {baseDownloadStatus} from './models.js';
 const changed = listeners();
 // /api/index 的最新回应（关注列表、作品、检查与添加的状态）。资料库、设置页、引导读到新的回应也经这里换上。
 export function setIndex(value) { state.index = value; }
@@ -45,7 +46,8 @@ function remaining(ms) {
 }
 // 识别和导入分开计数：done/total 是已识别或已放弃的图片，import_done/import_total 是已识别并写进图库的。
 export function syncLine(s) {
-  if (s.status === 'waiting') return t('等后台任务结束后开始同步');
+  if (s.status === 'waiting') return state.characterBase?.running
+    ? t('基础角色索引更新结束后开始同步') : t('等后台任务结束后开始同步');
   if (s.status === 'scanning') return s.scan_total == null ? t('正在检查来源…') : t('正在检查文件 {done}/{total}', {done: number(s.scanned || 0), total: number(s.scan_total)});
   if (s.status === 'importing') {
     if (!s.import_total) return t('正在导入…');
@@ -67,8 +69,12 @@ export function syncLine(s) {
     + (s.damaged ? ' · ' + t('{n} 张已损坏或格式不支持，未识别', {n: number(s.damaged)}) : '');
   if (s.status === 'done') return t('上次同步：{time}', {time: stamp(s.finished_at)}) + kept + gave;
   // 自己下载模型的安装（#168）在等模型；否则就是识别服务没有启动。
-  if (s.status === 'needs_recognition') return (state.models?.on_demand && state.models.status !== 'ready'
-    ? t('有 {n} 张图等待识别（识别模型还没下载）', {n: number(s.total || 0)}) : t('有 {n} 张图等待识别（识别服务未启动）', {n: number(s.total || 0)})) + kept;
+  if (s.status === 'needs_recognition') {
+    const vars = {n: number(s.total || 0)};
+    if (baseDownloadStatus() === 'waiting') return t('有 {n} 张图等待识别（正在下载基础角色索引）', vars) + kept;
+    return (state.models?.on_demand && state.models.status !== 'ready'
+      ? t('有 {n} 张图等待识别（识别模型还没下载）', vars) : t('有 {n} 张图等待识别（识别服务未启动）', vars)) + kept;
+  }
   if (s.status === 'interrupted') return s.message ? t('同步已中断（{reason}），可重新扫描', {reason: tb(s.message)}) : t('同步已中断，可重新扫描');
   if (s.status === 'error') return photosRefused(s) ? t('同步失败：没有访问照片图库的权限') : t('同步失败');
   return t('本地图库');
