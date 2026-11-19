@@ -309,6 +309,47 @@ class NativePackCatalogTest(unittest.TestCase):
             self.assertEqual(packs['catalog']['serial'], 1)
             self.assertIn('签名', packs['catalog']['error'])
 
+    def test_bad_zip_reports_the_file_and_reason(self):
+        files = {}
+        with github(files) as (origin, _):
+            files.update(self.serve(origin))
+            self.restart()
+            invalid = self.root / 'bad.zip'
+            invalid.write_bytes(b'not an archive')
+            self.packs({'action': 'import', 'paths': [str(invalid)]})
+            result = self.settle('download')['download']
+            self.assertEqual((result['kind'], result['status']), ('import', 'failed'))
+            self.assertEqual(result['message'], 'bad.zip 不是有效的 ZIP 文件')
+
+    def test_failed_download_and_offline_import_remove_empty_partials(self):
+        files = {}
+        with github(files) as (origin, _):
+            files.update(self.serve(origin))
+            names = ('wd-extension-v1.bin', 'A-longtail-p75.zip')
+            for name in names:
+                del files[f'/builtin/{name}']
+            self.restart()
+            extensions = self.root / 'shared' / 'extensions'
+            partials = [extensions / f'{name}.partial' for name in ('wd-extension-v1', 'ccip-longtail-v1')]
+
+            self.packs({'action': 'download'})
+            failed = self.settle('download')
+            self.assertEqual(failed['download']['status'], 'failed')
+            self.assertEqual(failed['current']['status'], 'missing')
+            self.assertTrue(all(not partial.exists() for partial in partials))
+
+            # 第一份留的是旧版下载残留，第二份仍有可续传的字节。
+            for partial, name, data in zip(partials, names, [b'', b'partial-download']):
+                partial.mkdir(parents=True)
+                (partial / f'{name}.part').write_bytes(data)
+            archive = FIXTURES / 'character-pack-1.0-offline.zip'
+            self.packs({'action': 'import', 'paths': [str(archive)]})
+            imported = self.settle('download')
+            self.assertEqual(imported['download']['status'], 'done')
+            self.assertEqual(imported['current']['status'], 'ready')
+            self.assertFalse(partials[0].exists())
+            self.assertEqual((partials[1] / f'{names[1]}.part').read_bytes(), b'partial-download')
+
     def test_offline_bundle_carries_the_signed_catalog(self):
         files = {}
         with github(files) as (origin, seen):
