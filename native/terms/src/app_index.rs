@@ -133,17 +133,24 @@ fn fingerprint_rows(c: &Connection, mut progress: impl FnMut() -> Result<()>) ->
 }
 
 fn fingerprint(c: &Connection, ctx: &TaskContext) -> Result<String> {
-    // SQLite 在第一行出来前可能要排序。进度回调让取消在这段期间也能中断查询。
-    let stop = ctx.clone();
-    c.progress_handler(16_384, Some(move || stop.check().is_err()))?;
-    let result = fingerprint_rows(c, || {
+    fingerprint_rows(c, || {
         ctx.check()?;
         ctx.progressed();
         Ok(())
-    });
+    })
+}
+
+fn with_index_progress<T>(
+    c: &mut Connection,
+    ctx: &TaskContext,
+    read: impl FnOnce(&mut Connection) -> Result<T>,
+) -> Result<T> {
+    // SQLite 在第一行出来前可能要排序。进度回调让取消在这段期间也能中断查询。
+    let stop = ctx.clone();
+    c.progress_handler(16_384, Some(move || stop.check().is_err()))?;
+    let result = read(c);
     c.progress_handler(0, None::<fn() -> bool>)?;
-    ctx.check()?;
-    result
+    result.or_else(|error| ctx.check().and(Err(error)))
 }
 // 关注列表存的是作品 ID（docs/DATA_MODEL.md），它们只在所属的图库里存在，
 // 所以每个图库在自己的 prefs 里保存自己的列表和阈值（#205）。没有列表的图库从旧版本共用的 `watch.json` 开始：
@@ -1210,9 +1217,9 @@ fn snapshot_library(lib: &Library, folder: &Path, ctx: &TaskContext) -> Result<S
     } else {
         write(&folder.join("album-char-map.json"), &json!({"map":{}}))?;
     }
-    let snapshot = crate::app_library::read_connection(&folder.join("pi.db"))?;
+    let mut snapshot = crate::app_library::read_connection(&folder.join("pi.db"))?;
     crate::app_recognition::require_published_inputs(&crate::app_library::read_connection(&lib.db())?, &snapshot)?;
-    fingerprint(&snapshot, ctx)
+    with_index_progress(&mut snapshot, ctx, |c| fingerprint(c, ctx))
 }
 /// 为每个新角色下载最多二十张 Danbooru 参考图，除非它的索引已经打过补丁。写下了图片列表的角色就算完成；
 /// 同一任务后来的运行会跳过它，并复用停下时那个角色的图片（#287）。还要下载的角色需要联网、
@@ -1529,7 +1536,7 @@ fn commit_source(
         let _ = std::fs::remove_dir_all(&folder);
         invalid(message)
     };
-    if fingerprint(src, ctx)? != job.before {
+    if with_index_progress(src, ctx, |c| fingerprint(c, ctx))? != job.before {
         return changed_inputs("索引计算输入已改变，请重试检查");
     };
     let result = job
@@ -1547,19 +1554,24 @@ fn commit_source(
             std::fs::copy(shared.join(name), backup.join(name))?;
         }
     }
-    let tx = src.transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)?;
-    if fingerprint(&tx, ctx)? != job.before {
-        return changed_inputs("索引计算输入已改变");
-    };
-    crate::app_recognition::require_published_inputs(&crate::app_library::read_connection(&lib.db())?, &tx)?;
-    let result = job.result.as_ref().ok_or_else(|| Error::Invalid("ready job 缺少结果".into()))?;
-    write_result(&tx, result, &job.job_id)?;
-    let result = job.result.take();
-    tx.execute("INSERT INTO native_index_runs VALUES (?,?)", params![job.job_id, protocol::value(&job)?.to_string()])?;
-    job.result = result;
-    ctx.check()?;
-    tx.commit()?;
-    Ok(())
+    with_index_progress(src, ctx, |src| {
+        let tx = src.transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)?;
+        if fingerprint(&tx, ctx)? != job.before {
+            return changed_inputs("索引计算输入已改变");
+        };
+        crate::app_recognition::require_published_inputs(&crate::app_library::read_connection(&lib.db())?, &tx)?;
+        let result = job.result.as_ref().ok_or_else(|| Error::Invalid("ready job 缺少结果".into()))?;
+        write_result(&tx, result, &job.job_id)?;
+        let result = job.result.take();
+        tx.execute(
+            "INSERT INTO native_index_runs VALUES (?,?)",
+            params![job.job_id, protocol::value(&job)?.to_string()],
+        )?;
+        job.result = result;
+        ctx.check()?;
+        tx.commit()?;
+        Ok(())
+    })
 }
 /// 结果改变了索引标签的那些图片。
 fn changed_labels(src: &Connection, result: &protocol::IndexResponse) -> Result<BTreeSet<String>> {
