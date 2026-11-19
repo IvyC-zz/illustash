@@ -243,7 +243,8 @@ details[open].inspector-section summary::before{transform:rotate(90deg)}
 .viewer-bar .identity{border-color:#ffffff24;background:#ffffff0d}
 .viewer-bar .identity-name{color:#ebebef}
 .viewer-bar .icon{color:#c3c3cd}
-.viewer-bar .icon:hover{background:#ffffff1a}
+/* .alt 也要写：通用的 .alt:hover 是 var(--soft)，浅色主题下在深色查看器上压住浅色文字（#599）。 */
+.viewer-bar .icon:hover,.viewer-bar .alt:hover{background:#ffffff1a}
 .viewer-bar .add-identity{color:#b3b3c0}
 .viewer-bar .none-yet{color:#9696a2}
 .viewer-bar .alts{margin:0}
