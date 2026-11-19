@@ -164,16 +164,24 @@ fn maintain(library: &Library, stop: &Receiver<()>) -> Result<()> {
                 [],
                 |row| Ok((row.get(0)?, row.get(1)?)),
             )?;
+            previous_version = Some(version);
             if previous_input != Some(input) || removed_cache {
                 match backfill(library, stop) {
                     Ok(()) => {
                         had_cache = path.is_file();
                         previous_input = Some(input);
                     }
-                    Err(e) => eprintln!("图片颜色补算失败：{e}"),
+                    Err(e) => {
+                        // 缓存写入可能正和图片请求重叠。暂时锁住时下轮重试，权限等持久错误等下一次输入变化。
+                        if matches!(&e, crate::Error::Sql(sql) if
+                            matches!(sql.sqlite_error_code(), Some(rusqlite::ErrorCode::DatabaseBusy | rusqlite::ErrorCode::DatabaseLocked)))
+                        {
+                            previous_version = None;
+                        }
+                        eprintln!("图片颜色补算失败：{e}");
+                    }
                 }
             }
-            previous_version = Some(version);
         }
         if stop.recv_timeout(POLL) != Err(RecvTimeoutError::Timeout) {
             return Ok(());

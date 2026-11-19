@@ -611,6 +611,21 @@ mod tests {
         fs::remove_dir_all(root).unwrap();
     }
     #[test]
+    fn color_backfill_uses_the_real_cached_jpeg_without_reading_the_source() {
+        let root = std::env::temp_dir().join(format!("illustash-color-{}", crate::store::new_key().unwrap()));
+        fs::create_dir(&root).unwrap();
+        let thumbnail = root.join("cached.jpg");
+        let source = root.join("unavailable.png");
+        let blue = image::RgbImage::from_pixel(32, 24, image::Rgb([0, 0, 200]));
+        fs::write(&thumbnail, encode_jpeg(&blue).unwrap()).unwrap();
+        let from_thumbnail = color_input(&source, &thumbnail).unwrap();
+        assert_eq!(from_thumbnail.dimensions(), (32, 24));
+        assert!(from_thumbnail.pixels().all(|p| p[0] < 4 && p[1] < 4 && p[2] > 195));
+        assert!(color_input(&source, &root.join("missing.jpg")).is_err());
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
     fn concurrent_cache_miss_generates_once_and_drops_key_owners() {
         let mut nonce = [0u8; 12];
         getrandom::fill(&mut nonce).unwrap();
