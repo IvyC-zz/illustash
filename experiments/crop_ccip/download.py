@@ -79,18 +79,26 @@ def main():
             return rec
         original = next(((name, item) for name, item in indices.get(bucket, {}).items()
                          if name.partition('.')[0] == str(i)), None)
+        data = None
+        original_failure = None
         if original:
             _, item = original
-            data = ranged(f'{ORIGINAL}/images/{bucket:04}.tar', item['offset'], item['size'])
-            if hashlib.md5(data).hexdigest() != row['md5'] or hashlib.sha256(data).hexdigest() != item['sha256']:
-                raise ValueError('原文件与冻结或镜像清单不一致')
-            source = 'original'
-        elif 'mirror' in row:
+            try:
+                data = ranged(f'{ORIGINAL}/images/{bucket:04}.tar', item['offset'], item['size'])
+            except requests.RequestException as error:
+                if 'mirror' not in row:
+                    raise
+                original_failure = type(error).__name__
+            if data is not None:
+                if hashlib.md5(data).hexdigest() != row['md5'] or hashlib.sha256(data).hexdigest() != item['sha256']:
+                    raise ValueError('原文件与冻结或镜像清单不一致')
+                source = 'original'
+        if data is None:
+            if 'mirror' not in row:
+                return {'id': i, 'source': 'unavailable'}
             shard, offset, length = row['mirror']
             data = ranged(f'{MIRROR}/original/data-{shard:04}.tar', offset, length)
             source = 'webp_4m'
-        else:
-            return {'id': i, 'source': 'unavailable'}
         with Image.open(BytesIO(data)) as im:
             size = list(im.size)
             im.verify()
@@ -98,6 +106,8 @@ def main():
         temp.write_bytes(data)
         temp.replace(filename)
         rec = {'id': i, 'source': source, 'size': size, 'sha256': hashlib.sha256(data).hexdigest()}
+        if original_failure:
+            rec['original_network_error'] = original_failure
         save(receipt, rec)
         return rec
 

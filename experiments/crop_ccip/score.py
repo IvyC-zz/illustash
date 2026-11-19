@@ -33,7 +33,7 @@ def read_features(rows, directory, receipts):
     data = {}
     for row in rows:
         i = row['id']
-        if receipts[i]['source'] not in ('original', 'webp_4m'):
+        if receipts[i]['source'] not in ('original', 'webp_4m', 'gel_webp_4m'):
             continue
         path = directory / f'{i}.npz'
         if not path.is_file():
@@ -64,10 +64,14 @@ def strata(row, receipt):
     pixels = width * height
     size = 'under_1mp' if pixels < 1_000_000 else '1_to_4mp' if pixels <= 4_000_000 else 'over_4mp'
     source = receipt['source']
-    return ['all', group(row), source, f'{source}/{size}', f'{source}/{size}/{group(row)}']
+    flags = set(row.get('flags', [])) | set(row.get('gender', []))
+    multiple = bool(flags & {'multiple_girls', 'multiple_boys', 'multiple_others'}) or {'1girl', '1boy'} <= flags
+    people = 'multiple_count' if multiple and not row['solo'] else 'single_marked' if row['solo'] else 'count_unknown'
+    cohort = group(row)
+    return ['all', cohort, people, f'{people}/{cohort}', source, f'{source}/{size}', f'{source}/{size}/{cohort}']
 
 
-def measure(rows, receipts, predictions, roster):
+def measure(rows, receipts, predictions, roster, baseline):
     counts = defaultdict(Counter)
     role_counts = defaultdict(Counter)
     for row in rows:
@@ -75,10 +79,19 @@ def measure(rows, receipts, predictions, roster):
         identified = predictions[i] & roster
         expected = set(row['characters']) & roster
         hit, wrong = identified & expected, identified - expected
+        original = baseline[i] & roster
+        gained = hit - original
+        lost = (original & expected) - hit
+        added_wrong = wrong - original
+        removed_wrong = (original - expected) - wrong
         for name in strata(row, receipts[i]):
             counts[name].update(images=1, targets=len(expected), true_pairs=len(hit), false_pairs=len(wrong),
                                 false_images=int(bool(wrong)), complete_target_images=int(bool(expected) and hit == expected),
-                                target_images=int(bool(expected)))
+                                target_images=int(bool(expected)), annotated_pairs=len(set(row['characters'])),
+                                gained_pairs=len(gained), lost_pairs=len(lost),
+                                added_false_pairs=len(added_wrong), removed_false_pairs=len(removed_wrong),
+                                newly_false_images=int(bool(wrong) and not original - expected),
+                                cleared_false_images=int(bool(original - expected) and not wrong))
         for role in expected | identified:
             role_counts[role].update(targets=int(role in expected), correct=int(role in hit), wrong=int(role in wrong))
     return {'groups': dict(counts), 'roles': dict(role_counts)}
@@ -194,6 +207,7 @@ def main():
     parser.add_argument('--index', type=Path, required=True)
     parser.add_argument('--pack', type=Path, required=True)
     parser.add_argument('--output', type=Path, required=True)
+    parser.add_argument('--allow-partial', action='store_true', help='仅用于验证未完成的提取流水线')
     args = parser.parse_args()
     sys.path.insert(0, str(args.legacy.resolve()))
     from evaluate import baseline_entries, matrix_file, native_scan
@@ -207,6 +221,9 @@ def main():
     anchors = load(args.directory / 'anchors.json')
     receipts = {r['id']: r for r in load(args.directory / 'downloads.json')}
     data = read_features(sample, args.features, receipts)
+    available = {i for i, receipt in receipts.items() if receipt['source'] not in ('unavailable', 'network_error')}
+    if not args.allow_partial and set(data) != available:
+        raise ValueError(f'仍有 {len(available - data.keys())} 张可用图片缺特征')
     rows = [r for r in rows if r['id'] in data]
     if not rows:
         raise ValueError('没有可评分的评测图')
@@ -214,15 +231,24 @@ def main():
     predictions, receipt, all_roles = published_predictions(
         args, rows, data, aliases, baseline_entries, matrix_file, native_scan, canonical)
     result = {'native': receipt, 'available': len(data), 'evaluation': len(rows), 'shared_panels': {}}
+    tail = set(anchors)
     for name, roster in [('published_all', all_roles), ('published_longtail', set(anchors))]:
-        result[name] = {k: measure(rows, receipts, p, roster) for k, p in predictions.items()}
+        result[name] = {k: measure(rows, receipts, p, roster, predictions['whole']) for k, p in predictions.items()}
+    # 带完整精选索引的实际候选只从整图取，额外裁图只补长尾角色。
+    result['whole_index_with_crop_longtail'] = {}
+    for kind in ('whole', 'whole+person', 'whole+head', 'whole+person_if_multiple', 'whole+head_if_multiple'):
+        rollout = {i: original | (predictions[kind][i] & tail) for i, original in predictions['whole'].items()}
+        result['whole_index_with_crop_longtail'][kind] = measure(rows, receipts, rollout, all_roles, predictions['whole'])
     for crop in ('person', 'head'):
         training = shared_reference_ids(anchors, references, data, crop)
         panel = {'reference_counts': {k: len(v) for k, v in training.items()}}
+        baseline = None
         for model in MODELS:
             if training:
                 preds = panel_predictions(rows, model, crop, training, data, reference_stats)
-                panel[model] = {k: measure(rows, receipts, p, set(training)) for k, p in preds.items()}
+                if model == 'current':
+                    baseline = preds['whole']
+                panel[model] = {k: measure(rows, receipts, p, set(training), baseline) for k, p in preds.items()}
         result['shared_panels'][crop] = panel
     save(args.output, result)
     print(f'已评分 {len(rows)} 张，生产索引扫描 {receipt["features"]} 个视图')
