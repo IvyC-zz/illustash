@@ -12,7 +12,7 @@ use std::{
     time::Duration,
 };
 
-const CACHE: &str = "colors-v1.sqlite";
+const CACHE: &str = ".illustash-colors-v1.sqlite";
 const BATCH: usize = 128;
 const POLL: Duration = Duration::from_secs(2);
 const DATE_ORDER: &str = "a.added_at DESC,a.uuid";
@@ -39,17 +39,10 @@ impl Asset {
 }
 
 fn cache_path(package: &Path) -> PathBuf {
-    package.join("thumbnails").join(CACHE)
+    package.join(CACHE)
 }
 fn writer(package: &Path) -> Result<Connection> {
-    let path = cache_path(package);
-    let dir = path.parent().expect("color cache has a parent");
-    if let Err(e) = fs::create_dir(dir) {
-        if e.kind() != std::io::ErrorKind::AlreadyExists {
-            return Err(e.into());
-        }
-    }
-    let c = crate::sqlite::open(path)?;
+    let c = crate::sqlite::open(cache_path(package))?;
     c.busy_timeout(Duration::from_millis(250))?;
     c.execute_batch(
         "CREATE TABLE IF NOT EXISTS colors(
@@ -208,20 +201,22 @@ fn backfill(library: &Library, stop: &Receiver<()>) -> Result<()> {
     let c =
         crate::sqlite::open_with_flags(library.db(), OpenFlags::SQLITE_OPEN_READ_ONLY | OpenFlags::SQLITE_OPEN_URI)?;
     c.busy_timeout(Duration::from_millis(250))?;
-    let nonempty: bool = c.query_row("SELECT EXISTS(SELECT 1 FROM assets WHERE src_path<>'')", [], |row| row.get(0))?;
-    if !nonempty {
-        return Ok(());
-    }
     let package = library.instance_path();
     let thumbnails = library.thumbnails();
-    let mut cache = writer(package)?;
-    attach(&c, package)?;
+    // 空库和来源全部离线的库，不为了补算先创建缓存。已有缓存才用它过滤掉已算且仍有效的图片。
+    let mut cache = cache_path(package).is_file().then(|| writer(package)).transpose()?;
+    let missing = if cache.is_some() {
+        attach(&c, package)?;
+        format!(
+            " AND NOT EXISTS (
+                SELECT 1 FROM asset_colors.colors z WHERE z.id=a.uuid AND z.source=a.src_path AND z.hash={HASH})"
+        )
+    } else {
+        String::new()
+    };
     let mut after = String::new();
     let sql = format!(
-        "SELECT {ASSET_FIELDS} FROM assets a
-         WHERE a.uuid>?1 AND a.src_path<>'' AND NOT EXISTS (
-           SELECT 1 FROM asset_colors.colors z WHERE z.id=a.uuid AND z.source=a.src_path AND z.hash={HASH})
-         ORDER BY a.uuid LIMIT ?2"
+        "SELECT {ASSET_FIELDS} FROM assets a WHERE a.uuid>?1 AND a.src_path<>''{missing} ORDER BY a.uuid LIMIT ?2"
     );
     let mut batch = c.prepare(&sql)?;
     loop {
@@ -242,7 +237,13 @@ fn backfill(library: &Library, stop: &Receiver<()>) -> Result<()> {
         if !matches!(stop.try_recv(), Err(TryRecvError::Empty)) {
             return Ok(());
         }
-        write(&mut cache, &records)?;
+        if !records.is_empty() {
+            let conn = match &mut cache {
+                Some(conn) => conn,
+                None => cache.insert(writer(package)?),
+            };
+            write(conn, &records)?;
+        }
     }
     Ok(())
 }

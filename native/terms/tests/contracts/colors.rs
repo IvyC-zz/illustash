@@ -3,7 +3,7 @@ use image::{Rgb, RgbImage};
 use rusqlite::params;
 use serde_json::Value;
 
-const CACHE: &str = "thumbnails/colors-v1.sqlite";
+const CACHE: &str = ".illustash-colors-v1.sqlite";
 
 fn wait_for(mut predicate: impl FnMut() -> bool) {
     let deadline = wait::deadline();
@@ -159,6 +159,13 @@ fn image_colors_http_contract() {
     let mut magic = [0; 2];
     jpeg.into_reader().read_exact(&mut magic).unwrap();
     assert_eq!(magic, [0xff, 0xd8]);
+    assert_eq!(get(fresh_detail)["color"], "#009b00");
+
+    let (status, cleared, _) = request_json(&origin, "/api/cache", Some(&json!({"action":"clear"})), &token);
+    assert_eq!(status, 200, "{cleared}");
+    assert_eq!(cleared["removed"], 1);
+    fs::remove_dir(package.join("thumbnails")).unwrap();
+    assert!(package.join(CACHE).is_file());
     assert_eq!(get(fresh_detail)["color"], "#009b00");
 
     // 同步用已发布的内容哈希和路径做一致性检查。源文件替换后，恢复任务会重新补算。

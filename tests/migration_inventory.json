@@ -227,7 +227,7 @@
 
  "native/terms/src/app_characters.rs":"6c9e9e080970dce30092747ebcf6bdcaee7d99a8463500888e5dab278f4a0cbd",
 
- "native/terms/src/app_colors.rs":"b30d9220bf5bc8e57f6bf919b50352a968f5cada590b8e2e8b1a323b72b7557d",
+ "native/terms/src/app_colors.rs":"90c1f2037c2e5f43f3427ba5e8c1b755b1aca917a907ef2445b12ebcbbd48f01",
 
  "native/terms/src/app_colors/palette.rs":"db2645476768766de99d58ee7fbb4ade268a75cbf2d0fb55cfe1dd65511e1412",
 
@@ -589,7 +589,7 @@
  "native/terms/src/example_cache.rs":{"policy":"assets","current_runtime":"rust-native","storage_domain":"source-ro+memory-cache","boundary_notes":{"authorization":"源库以只读连接固定特征快照，事务不会写入源库。"}},
  "native/terms/src/http_example_search.rs":{"policy":"application","current_runtime":"rust-native","storage_domain":"app-ro+connection-temp","boundary_notes":{"authorization":"#449 现有读路由和筛选写事务的会话临时选集，只写 temp.like_rank。"}},
  "native/terms/src/app_similar_seen.rs":{"policy":"application","current_runtime":"rust-native-similar-seen","storage_domain":"app","boundary_notes":{"authorization":"#427 明确记下、取消和撤销相似组的「看过了」。"}},
- "native/terms/src/app_colors.rs":{"policy":"assets","current_runtime":"rust-native-image-color-cache","storage_domain":"app-ro+thumbnail-cache","boundary_notes":{"authorization":"#717 按需返回颜色并补算可重建缓存，表与事务只写 thumbnails/colors-v1.sqlite。","ATTACH":"按图库实例路径以 mode=ro 挂载派生缓存，只按 UUID、来源路径与同步哈希匹配。","dynamic-or-wrapper":"一处初始化派生缓存表，其余为读取或仅在缓存事务中写入。"},"kind_overrides":{"http-branch":{"policy":"application","current_runtime":"rust-optional-color-marks"}}}
+ "native/terms/src/app_colors.rs":{"policy":"assets","current_runtime":"rust-native-image-color-cache","storage_domain":"app-ro+thumbnail-cache","boundary_notes":{"authorization":"#717 按需返回颜色并补算可重建缓存，表与事务只写 .illustash-colors-v1.sqlite。","ATTACH":"按图库实例路径以 mode=ro 挂载派生缓存，只按 UUID、来源路径与同步哈希匹配。","dynamic-or-wrapper":"一处初始化派生缓存表，其余为读取或仅在缓存事务中写入。"},"kind_overrides":{"http-branch":{"policy":"application","current_runtime":"rust-optional-color-marks"}}}
 },
 "limitations":[
  "审计生产 HTTP/DB/事务/动态执行/启动/CLI；保留研究/测试/生成代码。",
