@@ -113,7 +113,7 @@
 
  "crates/core/src/package.rs":"2c951060a10859148705790dd270f5bb15112970f0888dc31de126bc74471220",
 
- "crates/core/src/schema.rs":"c209b0bcb6f7d6b97d8557565042f5e2c3c8c71c78a54b94896e132def1620d3",
+ "crates/core/src/schema.rs":"03134d9b3224cfbf2e641388b9478b59794daddd15ab6481f2087f5304c58d65",
 
  "crates/core/src/store.rs":"359adce05ae8dd383981c4c8c23edee6615e2d395e7b8b97731021529a08798c",
 
@@ -217,7 +217,7 @@
 
  "native/terms/src/app_activity.rs":"0b1bf47c69df7d53a7767ac7f549dbbed9b9d57ab461f63e78649be2d539e0a1",
 
- "native/terms/src/app_archives.rs":"b53c8d13d07577ac3136626ca5278dbc1293d20abc06931d2fc31f6d63d0c388",
+ "native/terms/src/app_archives.rs":"fe963def08e9d529fbc4490fa52306d35a35ff4001fc03c43ed8ddb4543a2f49",
 
  "native/terms/src/app_asset_export.rs":"014df09aa76c4b147be91b92e53b4d668c6003c2e9ff9234c97973fbba0108d2",
 
@@ -247,7 +247,7 @@
 
  "native/terms/src/app_folder_identity.rs":"eaa10fa5a6b070f16af32d25f23e7c5437f629a15b11ea577315cdb8c43cb791",
 
- "native/terms/src/app_galleries.rs":"4fbf4093715ede0c1670b860de1925c5360bb028b44c7b581c322cbfdaae028e",
+ "native/terms/src/app_galleries.rs":"4432eeddd6c8b9e5ba616471f0f9dd0ed391670914c9b783945cf94caef423f4",
 
  "native/terms/src/app_http.rs":"fafcd0c487432c66a9df41c2a70674c2ccbafc80f9a04e25c59da96af059bc61",
 
@@ -333,7 +333,7 @@
 
  "native/terms/src/app_rescue.rs":"64c0f0053e36a32da153031a2203d5fe3a66a3cc1ac7c811b0331102b24449c3",
 
- "native/terms/src/app_research.rs":"d03a0d63c700cae4dd12585efec16028ef67e13e86f2b2519156aace6c02644a",
+ "native/terms/src/app_research.rs":"66369ec140b26bbc3dfd8d96cd3b378ab3e75b01493a8d164db76297d7f7e4b1",
 
  "native/terms/src/app_resources.rs":"d691ec21499b906972a02d49a21790f2a301c34eb4dea0bd9c301675dd9e2c0a",
 
@@ -355,7 +355,7 @@
 
  "native/terms/src/app_updates.rs":"b049743279f9a605c3506c95903f6d153cab795f72f658960210156d85571877",
 
- "native/terms/src/app_upgrade.rs":"a54111dd23542c882a5ac02a2a0913b0333625af44950108d8af33a2dbd1c5e6",
+ "native/terms/src/app_upgrade.rs":"6e4ad40e954505cfc85eb6abf2c4394ca35d4b2429ccc06dec2df9914153d82f",
 
  "native/terms/src/app_wd_extension.rs":"cd49205d8320d34f21d780e2f38561b8984bfaa7f62bc902eead7ad7d6aac49e",
 
@@ -391,7 +391,7 @@
 
  "native/terms/src/http_artists.rs":"2fec7a75db8c4448c9d442d256d5dc52ab19eab1c19be4f54a6b71ad94092577",
 
- "native/terms/src/http_browse.rs":"44243a4dda6061d11bbad1bb04cf1168c3e49b5fb66b8b163cc84c81cdb8890d",
+ "native/terms/src/http_browse.rs":"40c1bc14ae30af1a1d304a7ddf7b49d9ca71e8d731df8a04e0bad33af1707a32",
 
  "native/terms/src/http_characters.rs":"03e4c82c04a2708b576a26a6c8dbbd49834f7bf4126240f06e17da4827478f9e",
 
@@ -546,7 +546,7 @@
  "native/terms/build.rs":{"policy":"application","current_runtime":"rust-build","storage_domain":"app"},
  "native/terms/src/app_migrate.rs":{"policy":"lifecycle","current_runtime":"rust","storage_domain":"app","scope_overrides":{"source":{"storage_domain":"source"}}},
  "native/terms/src/app_resources.rs":{"policy":"lifecycle","current_runtime":"rust-installed-resource-discovery","storage_domain":"no-db"},
- "crates/core/src/schema.rs":{"policy":"application","current_runtime":"rust-core","storage_domain":"app","scope_overrides":{"backup_before_upgrade":{"policy":"lifecycle","current_runtime":"rust-upgrade-snapshot"}}},
+ "crates/core/src/schema.rs":{"policy":"application","current_runtime":"rust-core","storage_domain":"app","boundary_notes":{"authorization":"#727 词条 v11 随既有升级流程迁移画廊，新增手选成员表。"},"scope_overrides":{"backup_before_upgrade":{"policy":"lifecycle","current_runtime":"rust-upgrade-snapshot"}}},
  "crates/platform/src/platform_credentials.rs":{"policy":"coordination","current_runtime":"rust-credential-platform","storage_domain":"accounts-and-research"},
  "crates/platform/src/platform_filesystem.rs":{"policy":"lifecycle","current_runtime":"rust-filesystem-platform","storage_domain":"filesystem"},
  "crates/platform/src/platform_time.rs":{"policy":"lifecycle","current_runtime":"rust-time-platform","storage_domain":"no-db"},
@@ -581,7 +581,7 @@
  "crates/core/src/ccip_longtail.rs":{"policy":"application","current_runtime":"rust-core-ccip-longtail-state","storage_domain":"app","boundary_notes":{"authorization":"#559 按图库启用或撤回独立长尾证据和包摘要。"}},
  "crates/core/src/character_extension.rs":{"policy":"application","current_runtime":"rust-core-extension-evidence","storage_domain":"app","boundary_notes":{"authorization":"沿用 WD 扩展发布和补空归属，#559 在同一事务附独立的 CCIP 长尾来源。"}},
  "native/terms/src/app_ccip_longtail.rs":{"policy":"result-import","current_runtime":"rust-native-ccip-longtail","storage_domain":"source-read+app","boundary_notes":{"authorization":"#559 只读已存 CCIP 向量，通过经校验的索引快照生成并提交独立证据，启用与撤回写每图库状态。"}},
- "native/terms/src/app_galleries.rs":{"policy":"application","current_runtime":"rust-native-galleries","storage_domain":"app","boundary_notes":{"authorization":"#445 明确保存、编辑、删除和撤销本图库画廊。"}},
+ "native/terms/src/app_galleries.rs":{"policy":"application","current_runtime":"rust-native-galleries","storage_domain":"app","boundary_notes":{"authorization":"#445 明确保存、编辑、删除和撤销本图库画廊。#727 新增手选画廊和图片成员的存取、增删与撤销。"}},
  "native/terms/src/example_cache.rs":{"policy":"assets","current_runtime":"rust-native","storage_domain":"source-ro+memory-cache","boundary_notes":{"authorization":"源库以只读连接固定特征快照，事务不会写入源库。"}},
  "native/terms/src/http_example_search.rs":{"policy":"application","current_runtime":"rust-native","storage_domain":"app-ro+connection-temp","boundary_notes":{"authorization":"#449 现有读路由和筛选写事务的会话临时选集，只写 temp.like_rank。"}},
  "native/terms/src/app_similar_seen.rs":{"policy":"application","current_runtime":"rust-native-similar-seen","storage_domain":"app","boundary_notes":{"authorization":"#427 明确记下、取消和撤销相似组的「看过了」。"}}
@@ -628,7 +628,7 @@
  "crates/core/src/character_structure.rs":{"database-write":{"dynamic-or-wrapper":15,"INSERT INTO:term_links":3,"UPDATE:term_names":2,"DELETE FROM:term_names":1,"UPDATE:term_tree":10,"UPDATE:term_links":2,"UPDATE:set":1,"INSERT OR IGNORE INTO:term_links":1}},
  "native/terms/src/http_json.rs":{"database-write":[[11,6]]},
  "native/terms/src/bin/illustash-terms.rs":{"entrypoint":[10]},
- "crates/core/src/schema.rs":{"database-write":{"dynamic-or-wrapper":27,"DROP TABLE IF EXISTS:identity_claims":1,"DROP TABLE IF EXISTS:identity_calibration":1,"DELETE FROM:meta":5,"ALTER TABLE:actions":1,"UPDATE:actions":1,"CREATE TABLE:terms_compact_new":1,"INSERT INTO:terms_compact_new":1,"ALTER TABLE:terms_compact_new":1,"INSERT OR REPLACE INTO:meta":3,"VACUUM":1,"CREATE TABLE IF NOT EXISTS:meta":1,"CREATE TABLE IF NOT EXISTS:actions":1,"CREATE TABLE:term_assets":1,"CREATE INDEX:term_assets_md5":1,"CREATE TABLE:terms":1,"CREATE INDEX:terms_kind":1,"CREATE TRIGGER:terms_kind_insert":2,"BEGIN":29,"CREATE TRIGGER:terms_kind_update|UPDATE:of":2,"CREATE TRIGGER:terms_key_permanent|UPDATE:of":1,"CREATE TABLE:term_names":1,"CREATE INDEX:term_names_value":1,"CREATE TABLE:term_links":1,"CREATE INDEX:term_links_term":1,"CREATE TABLE:term_relations":1,"CREATE INDEX:term_relations_b":1,"CREATE TABLE:term_packages":1,"CREATE TABLE:term_evidence":1,"CREATE INDEX:term_evidence_term":1,"CREATE TRIGGER:term_evidence_append_only_update|UPDATE:on":1,"CREATE TRIGGER:term_evidence_append_only_delete":1,"CREATE TABLE:term_verdicts":1,"CREATE INDEX:term_verdicts_image":2,"CREATE INDEX:term_verdicts_relation":2,"CREATE INDEX:term_verdicts_action":2,"CREATE TRIGGER:term_verdicts_append_only_update|UPDATE:on":2,"CREATE TRIGGER:term_verdicts_append_only_delete":2,"CREATE TABLE:term_projection":1,"CREATE INDEX:term_projection_term":1,"CREATE VIEW:term_effective_verdicts":2,"CREATE VIEW:term_relation_states":2,"DROP TABLE IF EXISTS:artist_verdicts":1,"DROP TABLE IF EXISTS:legacy_asset_tags":1,"DROP TABLE:if":1,"INSERT INTO:term_evidence_sets":1,"INSERT INTO:term_evidence_set_rows":1,"CREATE TABLE:term_evidence_sets_v3":1,"CREATE TABLE:term_evidence_set_assets_v3":1,"CREATE TABLE:term_evidence_set_rows_v3":1,"CREATE TABLE:term_active_evidence_v3":1,"INSERT INTO:term_evidence_sets_v3":1,"INSERT INTO:term_evidence_set_assets_v3":1,"INSERT INTO:term_evidence_set_rows_v3":1,"INSERT INTO:term_active_evidence_v3":1,"DROP VIEW:term_current_evidence":1,"DROP TABLE:term_active_evidence":1,"DROP TABLE:term_evidence_set_rows":1,"DROP TABLE:term_evidence_set_assets":1,"DROP TABLE:term_evidence_sets":1,"ALTER TABLE:term_evidence_sets_v3":1,"ALTER TABLE:term_evidence_set_assets_v3":1,"ALTER TABLE:term_evidence_set_rows_v3":1,"ALTER TABLE:term_active_evidence_v3":1,"CREATE INDEX:term_evidence_set_rows_evidence":2,"CREATE TRIGGER:term_evidence_set_rows_match":2,"CREATE TRIGGER:term_evidence_sets_append_only_update|UPDATE:on":2,"CREATE TRIGGER:term_evidence_sets_append_only_delete":2,"CREATE TRIGGER:term_evidence_set_assets_append_only_update|UPDATE:on":2,"CREATE TRIGGER:term_evidence_set_assets_append_only_delete":2,"CREATE TRIGGER:term_evidence_set_rows_append_only_update|UPDATE:on":2,"CREATE TRIGGER:term_evidence_set_rows_append_only_delete":2,"CREATE VIEW:term_current_evidence":2,"COMMIT":2,"CREATE TABLE:term_batches":1,"CREATE TRIGGER:term_batches_append_only_update|UPDATE:on":1,"CREATE TRIGGER:term_batches_append_only_delete":1,"CREATE TABLE:term_verdicts_v2":1,"INSERT INTO:term_verdicts_v2":1,"DROP VIEW:term_relation_states":1,"DROP VIEW:term_effective_verdicts":1,"DROP TABLE:term_verdicts":1,"ALTER TABLE:term_verdicts_v2":1,"CREATE INDEX:term_verdicts_batch":1,"CREATE TRIGGER:term_verdicts_batch_anchor":1,"CREATE VIEW:term_relation_latest":1,"CREATE TABLE:term_evidence_sets":1,"CREATE TABLE:term_evidence_set_assets":1,"CREATE TABLE:term_evidence_set_rows":1,"CREATE TABLE:term_active_evidence":1,"CREATE TABLE:term_identity_baseline":1,"CREATE TABLE:term_tree":1,"CREATE INDEX:term_tree_parent":1,"CREATE INDEX:term_tree_work":1,"CREATE TABLE:term_legacy_ids":1,"DROP VIEW:variant_memberships":2,"DROP TRIGGER:terms_kind_insert":1,"DROP TRIGGER:terms_kind_update":1,"CREATE TABLE:galleries":1,"CREATE TABLE:similar_seen":1,"CREATE INDEX:similar_seen_uuid":1}},
+ "crates/core/src/schema.rs":{"database-write":{"dynamic-or-wrapper":28,"DROP TABLE IF EXISTS:identity_claims":1,"DROP TABLE IF EXISTS:identity_calibration":1,"DELETE FROM:meta":5,"ALTER TABLE:actions":1,"UPDATE:actions":1,"CREATE TABLE:terms_compact_new":1,"INSERT INTO:terms_compact_new":1,"ALTER TABLE:terms_compact_new":1,"INSERT OR REPLACE INTO:meta":3,"VACUUM":1,"CREATE TABLE IF NOT EXISTS:meta":1,"CREATE TABLE IF NOT EXISTS:actions":1,"CREATE TABLE:term_assets":1,"CREATE INDEX:term_assets_md5":1,"CREATE TABLE:terms":1,"CREATE INDEX:terms_kind":1,"CREATE TRIGGER:terms_kind_insert":2,"BEGIN":29,"CREATE TRIGGER:terms_kind_update|UPDATE:of":2,"CREATE TRIGGER:terms_key_permanent|UPDATE:of":1,"CREATE TABLE:term_names":1,"CREATE INDEX:term_names_value":1,"CREATE TABLE:term_links":1,"CREATE INDEX:term_links_term":1,"CREATE TABLE:term_relations":1,"CREATE INDEX:term_relations_b":1,"CREATE TABLE:term_packages":1,"CREATE TABLE:term_evidence":1,"CREATE INDEX:term_evidence_term":1,"CREATE TRIGGER:term_evidence_append_only_update|UPDATE:on":1,"CREATE TRIGGER:term_evidence_append_only_delete":1,"CREATE TABLE:term_verdicts":1,"CREATE INDEX:term_verdicts_image":2,"CREATE INDEX:term_verdicts_relation":2,"CREATE INDEX:term_verdicts_action":2,"CREATE TRIGGER:term_verdicts_append_only_update|UPDATE:on":2,"CREATE TRIGGER:term_verdicts_append_only_delete":2,"CREATE TABLE:term_projection":1,"CREATE INDEX:term_projection_term":1,"CREATE VIEW:term_effective_verdicts":2,"CREATE VIEW:term_relation_states":2,"DROP TABLE IF EXISTS:artist_verdicts":1,"DROP TABLE IF EXISTS:legacy_asset_tags":1,"DROP TABLE:if":1,"INSERT INTO:term_evidence_sets":1,"INSERT INTO:term_evidence_set_rows":1,"CREATE TABLE:term_evidence_sets_v3":1,"CREATE TABLE:term_evidence_set_assets_v3":1,"CREATE TABLE:term_evidence_set_rows_v3":1,"CREATE TABLE:term_active_evidence_v3":1,"INSERT INTO:term_evidence_sets_v3":1,"INSERT INTO:term_evidence_set_assets_v3":1,"INSERT INTO:term_evidence_set_rows_v3":1,"INSERT INTO:term_active_evidence_v3":1,"DROP VIEW:term_current_evidence":1,"DROP TABLE:term_active_evidence":1,"DROP TABLE:term_evidence_set_rows":1,"DROP TABLE:term_evidence_set_assets":1,"DROP TABLE:term_evidence_sets":1,"ALTER TABLE:term_evidence_sets_v3":1,"ALTER TABLE:term_evidence_set_assets_v3":1,"ALTER TABLE:term_evidence_set_rows_v3":1,"ALTER TABLE:term_active_evidence_v3":1,"CREATE INDEX:term_evidence_set_rows_evidence":2,"CREATE TRIGGER:term_evidence_set_rows_match":2,"CREATE TRIGGER:term_evidence_sets_append_only_update|UPDATE:on":2,"CREATE TRIGGER:term_evidence_sets_append_only_delete":2,"CREATE TRIGGER:term_evidence_set_assets_append_only_update|UPDATE:on":2,"CREATE TRIGGER:term_evidence_set_assets_append_only_delete":2,"CREATE TRIGGER:term_evidence_set_rows_append_only_update|UPDATE:on":2,"CREATE TRIGGER:term_evidence_set_rows_append_only_delete":2,"CREATE VIEW:term_current_evidence":2,"COMMIT":2,"CREATE TABLE:term_batches":1,"CREATE TRIGGER:term_batches_append_only_update|UPDATE:on":1,"CREATE TRIGGER:term_batches_append_only_delete":1,"CREATE TABLE:term_verdicts_v2":1,"INSERT INTO:term_verdicts_v2":1,"DROP VIEW:term_relation_states":1,"DROP VIEW:term_effective_verdicts":1,"DROP TABLE:term_verdicts":1,"ALTER TABLE:term_verdicts_v2":1,"CREATE INDEX:term_verdicts_batch":1,"CREATE TRIGGER:term_verdicts_batch_anchor":1,"CREATE VIEW:term_relation_latest":1,"CREATE TABLE:term_evidence_sets":1,"CREATE TABLE:term_evidence_set_assets":1,"CREATE TABLE:term_evidence_set_rows":1,"CREATE TABLE:term_active_evidence":1,"CREATE TABLE:term_identity_baseline":1,"CREATE TABLE:term_tree":1,"CREATE INDEX:term_tree_parent":1,"CREATE INDEX:term_tree_work":1,"CREATE TABLE:term_legacy_ids":1,"DROP VIEW:variant_memberships":2,"DROP TRIGGER:terms_kind_insert":1,"DROP TRIGGER:terms_kind_update":1,"CREATE TABLE:galleries":2,"ALTER TABLE:galleries":1,"INSERT INTO:galleries":1,"DROP TABLE:galleries_v10":1,"CREATE TABLE:gallery_members":1,"CREATE TABLE:similar_seen":1,"CREATE INDEX:similar_seen_uuid":1}},
  "crates/core/src/character_merge.rs":{"database-write":[[326,4],[311,2],190,[0,6],[327,4],59,315]},
  "crates/core/src/names_view.rs":{"database-write":{"CREATE TABLE IF NOT EXISTS:term_name_display":1,"CREATE TABLE IF NOT EXISTS:term_name_choice":1,"DELETE FROM:term_name_display|DELETE FROM:term_name_choice":1,"INSERT INTO:term_name_display":1,"dynamic-or-wrapper":8,"INSERT INTO:term_name_choice":1,"INSERT INTO:names_scope_ids":1,"INSERT INTO:names_scope_keys":1,"INSERT OR REPLACE INTO:term_name_display":1,"DELETE FROM:term_name_display":1,"INSERT OR REPLACE INTO:term_name_choice":1,"DELETE FROM:term_name_choice":1}},
  "desktop/src/server.rs":{"entrypoint":[[4,3]]},
@@ -728,7 +728,7 @@
  "crates/core/src/ccip_longtail.rs":{"database-write":{"INSERT OR REPLACE INTO:meta":1,"DELETE FROM:meta":1}},
  "crates/core/src/character_extension.rs":{"database-write":{"dynamic-or-wrapper":1,"INSERT INTO:memberships":1}},
  "native/terms/src/app_ccip_longtail.rs":{"database-write":{"dynamic-or-wrapper":9,"COMMIT":1,"INSERT OR REPLACE INTO:meta":3,"INSERT INTO:meta":2,"UPDATE:set":2,"DELETE FROM:meta":3}},
- "native/terms/src/app_galleries.rs":{"database-write":{"dynamic-or-wrapper":4,"INSERT INTO:galleries":2,"UPDATE:galleries":1,"DELETE FROM:galleries":2,"INSERT INTO:actions":1,"COMMIT":1,"UPDATE:set":1}},
+ "native/terms/src/app_galleries.rs":{"database-write":{"dynamic-or-wrapper":4,"INSERT INTO:galleries":2,"UPDATE:galleries":1,"DELETE FROM:galleries":2,"INSERT INTO:actions":1,"COMMIT":1,"UPDATE:set":1,"INSERT INTO:gallery_members":1,"DELETE FROM:gallery_members":1}},
  "native/terms/src/example_cache.rs":{"database-write":{"dynamic-or-wrapper":1,"COMMIT":1}},
  "native/terms/src/http_example_search.rs":{"database-write":{"dynamic-or-wrapper":2,"DELETE FROM:temp.like_rank":1,"INSERT INTO:temp.like_rank":1}},
  "native/terms/src/app_similar_seen.rs":{"database-write":{"dynamic-or-wrapper":4,"INSERT INTO:similar_seen":2,"DELETE FROM:similar_seen":2,"INSERT INTO:actions":1,"COMMIT":1}},

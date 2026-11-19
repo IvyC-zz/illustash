@@ -247,7 +247,7 @@
 - `GET /api/assets/count`：使用图库相同筛选参数（搜索使用 `q`，不接收分页参数），仅返回 `{total}`，不加载图片附属信息。
 - 组合筛选（#445）在原筛选上叠加 `has`、`not`、`from` 和 `to`。`has` 与 `not` 是 URL 编码的 JSON 字符串数组，分别要求全部满足和全部排除。可用 `char:<id>`、`work:<id>`、`artist:<key>`、`tag:<WD 标签>`、`utag:<我的标签>`、`source:pixiv|x|other` 和 `fav`。条件只按首个冒号分隔，重复项去重，合计至多 20 条，每条至多 160 字符。日期区间沿用加入日期，两端包含，可只提供一端。无出处的图归入 `other`。列表、计数、ID、按筛选选图的写入及画廊封面使用同一选区。
 - `GET /api/user-tags?limit=` 可指定 1–1,000 条，默认 60 条。
-- `GET /api/galleries` 按 `position,id` 返回 `[{id,name,params,position,cover_manual}]`，`position` 是保存的整数顺序值，可能不连续；创建和更新回复的 `gallery` 同样带 `position`。保存的条件失效时仍返回该画廊。
+- `GET /api/galleries` 按 `position,id` 返回 `[{id,name,params,position,cover_manual}]`，`position` 是保存的整数顺序值，可能不连续；创建和更新回复的 `gallery` 同样带 `position`。保存的条件失效时仍返回该画廊。手选画廊另带 `kind:"manual"`，`params.has` 是包含 `gallery:<id>` 的 JSON 数组字符串。条件画廊沿用原字段。
 - `GET /api/galleries/covers?ids=&nsfw=` 按需读取当前封面。`ids` 为 URL 编码的 JSON 整数数组。按画廊顺序返回 `[{id,cover}]`，重复 ID 去重、缺失的 ID 跳过。手动封面仍在当前选区且符合调用方的 `nsfw` 时使用它，否则取排序第一张。空选区或失效的保存条件返回 `cover:null`，打开图片列表时沿用筛选错误响应。
 - `GET /api/similar?kind=&nsfw=&seen=1`（#427）：带 `seen=1` 时每组多一个 `seen` 布尔值，表示这组看得到的成员是否都在某一次「看过了」里；不带时回复和以前相同。
 - `GET /api/identity/count?nsfw=...`：复用身份待判断队列的筛选、去重与跳过规则，仅返回 `{total}`，不排序或加载展示名称、样例图。
@@ -279,7 +279,7 @@ change/reassign 的选择方式二选一：
 
 相似组的「看过了」（#427）：`POST /api/similar/seen {"gid":组号,"size":张数,"nsfw":"","seen":true}` 记下这组现在看得到的成员（按 `nsfw` 筛选，和列表同一口径），`seen:false` 把这组的图从覆盖它的标记里去掉。`size` 是界面显示的张数，和现在的成员数对不上时回 409（组刚变过），组不存在或只剩一张回 400，已经是要的状态也回 400。返回 `undo`，撤销恢复原来的行，不触发学习。存储见 [词条 schema](TERMS_SCHEMA.md#相似组的看过了427)。
 
-画廊将当前筛选保存到图库。对 `POST /api/galleries` 传 `action=create` 和 `params`，可带 `name`，省略时由条件生成。传 `action=update`、`id` 和待改字段 `name,params,cover,position`，其中 `cover:null` 恢复自动封面。传 `action=delete` 与 `id` 可删除。每次操作随 `undo` 返回一步历史，创建和更新另返回 `gallery`，写入回复中的封面按隐藏 R18 解析。现行存储和备份口径见 [词条 schema](TERMS_SCHEMA.md#画廊445)。
+条件画廊将当前筛选保存到图库。对 `POST /api/galleries` 传 `action=create` 和 `params`，可带 `name`，省略时由条件生成。传 `action=update`、`id` 和待改字段 `name,params,cover,position`，其中 `cover:null` 恢复自动封面。传 `action=delete` 与 `id` 可删除。每次操作随 `undo` 返回一步历史，创建和更新另返回 `gallery`，写入回复中的封面按隐藏 R18 解析。手选画廊用 `action=create, kind=manual, name` 新建，可带 `ids` 或整批筛选选区。传 `action=add` 或 `action=remove` 与 `id`，目标按 `/api/change` 的 `ids` 或 `filter` 加 `exclude` 给出，超过 500 张以 `confirm:true` 确认。放入已在画廊里的图时成员保持唯一。增删成员各返回 `gallery`、`undo`。条件和手选画廊共用改名、排序、封面和删除操作，手选画廊的成员通过 `add`、`remove` 改动。图库的 `has` 和 `not` 接受 `gallery:<id>`，其中 `id` 是手选画廊编号。现行存储和备份口径见 [词条 schema](TERMS_SCHEMA.md#17-第-11-版04)。
 
 ## 阶段 1.5–3（2026-09-23，Claude 直接实现）
 

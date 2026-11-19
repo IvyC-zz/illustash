@@ -742,7 +742,6 @@ fn v11(conn: &Connection) -> Result<()> {
            kind TEXT NOT NULL DEFAULT 'condition' CHECK(kind IN ('condition','manual')));
          INSERT INTO galleries(id,name,params,cover,position,created_at,updated_at)
            SELECT id,name,params,cover,position,created_at,updated_at FROM galleries_v10;
-         DELETE FROM sqlite_sequence WHERE name='galleries' AND seq=0;
          DROP TABLE galleries_v10;
          CREATE TABLE gallery_members(
            gallery_id INTEGER NOT NULL REFERENCES galleries(id) ON DELETE CASCADE,
