@@ -593,14 +593,13 @@ fn job_fingerprint(c: &Connection, job: &Job, rows: &[Entity], index: &Value) ->
     let kind = if job.character() { "work" } else { job.kind };
     let mut inputs = vec![json!(crate::app_migrate_data::rows_with(
         c,
-        "SELECT lang,source,value FROM term_key_names WHERE kind=?1 AND key=?2
-           AND (source IN ('user','index') OR (?3 AND source IN ('bangumi','wiki')))
+        "SELECT lang,source,value FROM term_key_names
+         WHERE kind=?1 AND key=?2 AND source IN ('user','index')
          ORDER BY lang,source,value",
-        rusqlite::params![kind, key, job.character()],
+        [kind, key],
     )?)];
     if job.character() {
         inputs.push(json!(fingerprint_with(c, rows, index, false)?));
-        inputs.push(json!(aliases(c, "work", key, false)?));
     } else if kind == "work" {
         inputs.push(json!(crate::app_migrate_data::rows_with(
             c,
