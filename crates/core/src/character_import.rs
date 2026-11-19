@@ -152,7 +152,17 @@ fn entity(c: &Connection, ids: &Ids, system: &str, key: &str, name: &str, work: 
     }
     let ident = ids.get(system, key)?;
     let work_id = work_of(c, ids, work)?;
-    let new = New { id: &ident, kind: "character", work, work_id: work_id.as_deref(), ..New::default() };
+    // 识别证据可以在索引安装或启动之后才首次写入这个 WD 标签。
+    let default_mascot = system == "wd" && DEFAULT_TAG_KEYS.contains(&key);
+    let new = New {
+        id: &ident,
+        kind: "character",
+        work,
+        work_id: work_id.as_deref(),
+        mascot: i64::from(default_mascot),
+        mascot_origin: default_mascot.then_some("default"),
+        ..New::default()
+    };
     character_entities::create(c, &new, origin)?;
     link(c, &ident, system, key)?;
     if !name.is_empty() && name != key {
