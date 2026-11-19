@@ -1935,6 +1935,7 @@ dependencies = [
  "objc2-foundation",
  "objc2-user-notifications",
  "reqwest",
+ "rustls",
  "serde",
  "serde_json",
  "tauri",

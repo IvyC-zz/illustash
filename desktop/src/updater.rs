@@ -444,6 +444,8 @@ mod retry_tests {
             }
         });
         tauri::async_runtime::block_on(async {
+            // 测试直接构造客户端；生产入口由更新插件在 check 时安装同一提供者。
+            let _ = rustls::crypto::ring::default_provider().install_default();
             let client = reqwest::Client::builder().no_proxy().build().unwrap();
             let bytes = with_network_retry("下载应用更新", Duration::ZERO, || async {
                 Ok(client.get(&url).send().await?.bytes().await?)

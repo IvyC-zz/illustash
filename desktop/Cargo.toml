@@ -42,6 +42,7 @@ windows = { version = "0.62", features = ["Data_Xml_Dom", "Foundation", "UI_Noti
 [dev-dependencies]
 # 本机 HTTP 服务器模拟更新包在响应中途断开，使用更新插件相同的客户端。
 reqwest = { version = "0.13", default-features = false }
+rustls = { version = "0.23", default-features = false, features = ["ring"] }
 
 [profile.release]
 strip = true
