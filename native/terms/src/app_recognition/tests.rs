@@ -102,7 +102,7 @@ impl Fixture {
         let cancel = AtomicBool::new(false);
         let inputs = WorkerInputs::load(&self.library, &self.identity, &self.resources, &cancel)?;
         let prepared = prepare_worker_package(&self.library, path, sidecar, &inputs, &cancel)?;
-        import_worker_package(&self.library, &prepared, &inputs, &cancel, &|_, _| Ok(())).map(Recovery::response)
+        import_worker_package(&self.library, &prepared, &inputs, &cancel, &|_, _| Ok(()), None).map(Recovery::response)
     }
 }
 impl Drop for Fixture {
@@ -203,9 +203,14 @@ fn source_commit_projection_crash_and_dispatch_failure_use_existing_resume() {
         let cancel = AtomicBool::new(false);
         let inputs = WorkerInputs::load(&f.library, &f.identity, &f.resources, &cancel).unwrap();
         let prepared = prepare_worker_package(&f.library, &path, &sidecar, &inputs, &cancel).unwrap();
-        let result = import_worker_package(&f.library, &prepared, &inputs, &cancel, &|_, _| {
-            Err(Error::Invalid("synthetic dispatch crash".into()))
-        })
+        let result = import_worker_package(
+            &f.library,
+            &prepared,
+            &inputs,
+            &cancel,
+            &|_, _| Err(Error::Invalid("synthetic dispatch crash".into())),
+            None,
+        )
         .unwrap();
         assert_eq!(result.response()["status"], "pending");
         assert_eq!(count(&f.source(), "SELECT count(*) FROM recognition_imports WHERE status='pending'"), 1);
@@ -244,7 +249,10 @@ fn task_preflight_reuses_snapshot_and_commit_refuses_late_changes() {
             "cancel" => cancel.store(true, Ordering::SeqCst),
             _ => unreachable!(),
         }
-        assert!(import_worker_package(&f.library, &prepared, &inputs, &cancel, &|_, _| Ok(())).is_err(), "{case}");
+        assert!(
+            import_worker_package(&f.library, &prepared, &inputs, &cancel, &|_, _| Ok(()), None).is_err(),
+            "{case}"
+        );
         assert_no_wd(&f);
     }
 }
@@ -314,12 +322,13 @@ fn external_model_root_is_authoritative_for_producer_and_importer() {
     let inputs = WorkerInputs::load(&f.library, &f.identity, &f.resources, &cancel).unwrap();
     let prepared = prepare_worker_package(&f.library, &path, &sidecar, &inputs, &cancel).unwrap();
     assert_eq!(
-        import_worker_package(&f.library, &prepared, &inputs, &cancel, &|_, _| Ok(())).unwrap().response()["status"],
+        import_worker_package(&f.library, &prepared, &inputs, &cancel, &|_, _| Ok(()), None).unwrap().response()
+            ["status"],
         "done"
     );
     let before = count(&f.source(), "SELECT count(*) FROM recognition_imports");
     fs::write(external.join("ccip/model_feat.onnx"), b"external-model-changed").unwrap();
-    assert!(import_worker_package(&f.library, &prepared, &inputs, &cancel, &|_, _| Ok(())).is_err());
+    assert!(import_worker_package(&f.library, &prepared, &inputs, &cancel, &|_, _| Ok(()), None).is_err());
     assert_eq!(count(&f.source(), "SELECT count(*) FROM recognition_imports"), before);
 }
 #[test]

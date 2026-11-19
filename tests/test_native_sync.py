@@ -189,10 +189,12 @@ if mode in ('classify','classify-legacy'):
     if not kept:
         Path(sys.argv[2]).write_text(json.dumps(dict(identity=r['identity'],packages=[],failed=failures)))
         sys.exit(0)
-if mode in ('stream','stream-hang'):
+if mode in ('stream','stream-hang','stream-gated'):
     # 每张图单独成批，全部文件落盘后才标记完成。
     specs=SPECS
     for i,a in enumerate(r['assets']):
+        if mode=='stream-gated':
+            wait_for(f'release-batch-{i}')
         if mode=='stream-hang' and i==2:
             time.sleep(60)
         dest=Path(r['output'])/f'batch-{i}';dest.mkdir()

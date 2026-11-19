@@ -1,6 +1,7 @@
 """WD 扩展包走原生 HTTP 与同步入口，包、图片和底座指纹均为合成数据。"""
-from contextlib import contextmanager
+from contextlib import closing, contextmanager
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+import hashlib
 import json
 import shutil
 from pathlib import Path
@@ -14,6 +15,7 @@ import unittest
 from tests.folder_fixture import image
 from tests.fixed_expectations import Library
 from tests import test_native_lifecycle as lifecycle, test_native_sync as sync_fixture
+from tests import test_native_recognition as recognition_fixture
 from tests.test_read_http import free_port, wait_until
 from tools.dev_preview import isolated_env
 from tools.wait_limit import WAIT
@@ -104,12 +106,12 @@ class SyntheticWdLibrary:
     def fixture(self, address, *, tags=b'synthetic tags'):
         # 两个命中让无归属图得到一个主归属及一个可见的扩展候选。
         head = [2.] + [0.] * 1023
-        self.manifest = wd_extension_spec(self.root / 'download', tags, [
+        manifest = wd_extension_spec(self.root / 'download', tags, [
             ('synthetic_extension_primary', head, 0.),
             ('synthetic_extension_alternate', head, -.3),
         ], address)
-        self.env['ILLUSTASH_TEST_WD_EXTENSION'] = str(self.manifest)
-        return self.manifest.with_name(FILENAME)
+        self.env['ILLUSTASH_TEST_WD_EXTENSION'] = str(manifest)
+        return manifest.with_name(FILENAME)
 
     def restart(self):
         if hasattr(self, 'process'):
@@ -232,25 +234,170 @@ class NativeWdExtensionTest(SyntheticWdLibrary, unittest.TestCase):
 class NativeWdExtensionSyncTest(SyntheticWdLibrary, unittest.TestCase):
     worker = sync_fixture.NativeSyncTest.worker
 
-    def test_native_library_new_scopes_auto_to_finished_delivery(self):
+    incoming = recognition_fixture.NativeRecognitionTest.incoming
+    manifest = recognition_fixture.NativeRecognitionTest.manifest
+
+    def sync_state(self):
+        return json.loads(self.request('/api/sync')['body'])['state']
+
+    def candidates(self):
+        with closing(sqlite3.connect(self.lib.db)) as db:
+            return db.execute(
+                "SELECT uuid,entity,score FROM candidates WHERE source='WD_EXT' ORDER BY uuid,entity"
+            ).fetchall()
+
+    def enable_for_sync(self):
         self.worker()
         self.assertEqual(self.request('/api/sync', {})['status'], 200)
-        wait_until(lambda: json.loads(self.request('/api/sync')['body'])['state']['status'] == 'done')
+        wait_until(lambda: self.sync_state()['status'] == 'done')
         package = self.fixture('http://127.0.0.1:1', tags=(self.resources / 'tags' / 'tags_v3.csv').read_bytes())
         self.restart()
-        # 首次启用检查当前全部向量。
         self.state('/package', {'action': 'import', 'paths': [str(package)]})
         self.assertEqual(self.finish('import', key='download')['package']['status'], 'ready')
         self.state('/enable', {})
         manual = self.finish('enable')
         self.assertEqual(manual['task']['status'], 'done', manual)
-        self.assertGreater(manual['task']['result']['changed'], 0)
+        self.assertEqual(manual['library']['scored'], 1)
+        return manual
 
-        image(self.new_folder / 'auto.png', 'orange')
+    def test_sync_scores_each_batch_and_preserves_committed_results_after_cancellation(self):
+        manual = self.enable_for_sync()
+        before = self.candidates()
+
+        for i, color in enumerate(('orange', 'green', 'purple')):
+            image(self.new_folder / f'auto-{i}.png', color)
+        self.worker('stream-gated')
+        (self.root / 'last-request').unlink()
         self.assertEqual(self.request('/api/sync', {})['status'], 200)
-        auto = self.finish('auto')
-        self.assertEqual(auto['task']['status'], 'done', auto)
-        self.assertEqual(auto['task']['result']['changed'], 1)
-        self.assertEqual(auto['task']['result']['scored'], 1)
-        self.assertEqual(auto['library']['images'], manual['library']['images'] + 1)
-        self.assertEqual(auto['library']['checked_at'], manual['library']['checked_at'])
+        request = self.root / 'last-request'
+        ids = wait_until(lambda: json.loads(request.read_text()) if request.exists() else None)
+        self.assertEqual(len(ids), 3)
+        for i in range(2):
+            (self.root / f'release-batch-{i}').touch()
+            wait_until(lambda: self.sync_state().get('import_done') == i + 1)
+            self.assertEqual(self.sync_state()['status'], 'recognising')
+            self.assertEqual(self.state()['library']['scored'], manual['library']['scored'] + i + 1)
+            self.assertEqual({u for u, _, _ in self.candidates()}, {u for u, _, _ in before} | set(ids[:i + 1]))
+        committed = self.candidates()
+
+        # 第三批没有交付，停止宿主，确认重新打开后已交付的候选和计数都保留。
+        self.worker('stream')
+        self.assertEqual(self.candidates(), committed)
+        self.assertEqual(self.state()['library']['scored'], 3)
+        request.unlink()
+        self.assertEqual(self.request('/api/sync', {})['status'], 200)
+        wait_until(lambda: self.sync_state()['status'] == 'done')
+        self.assertEqual(json.loads(request.read_text()), ids[2:])
+        self.assertEqual(self.state()['library']['scored'], 4)
+        self.assertEqual(self.state()['library']['checked_at'], manual['library']['checked_at'])
+
+        # 用同一包重新检查全部图，批次路径和原来整库路径得出同样的角色和分数。
+        streamed = self.candidates()
+        self.state('/enable', {})
+        self.assertEqual(self.finish('enable')['task']['status'], 'done')
+        self.assertEqual(self.candidates(), streamed)
+
+
+    def test_recovery_routes_publish_only_pinned_sync_wd_and_keep_projection_idempotent(self):
+        manual = self.enable_for_sync()
+        active = manual['library']['package_sha256']
+        self.env['ILLUSTASH_ROOT'] = str(self.resources)
+        recognition_cli = ('recognition-import', '--library', str(self.lib.path), '--root', str(self.resources))
+
+        def interrupt_projection():
+            with closing(sqlite3.connect(self.lib.db)) as db, db:
+                db.execute("""CREATE TRIGGER interrupt_projection BEFORE INSERT ON meta
+                    WHEN NEW.key LIKE 'recognition_projection:%'
+                    BEGIN SELECT RAISE(ABORT,'synthetic projection failure'); END""")
+
+        def unblock_projection():
+            with closing(sqlite3.connect(self.lib.db)) as db, db:
+                db.execute("DROP TRIGGER interrupt_projection")
+
+        def pending():
+            with closing(sqlite3.connect(self.lib.source)) as db:
+                _, assets, manifest = db.execute(
+                    "SELECT digest,assets,manifest FROM recognition_imports WHERE status='pending'"
+                ).fetchone()
+                return json.loads(assets)[0], json.loads(manifest)
+
+        def recover_http(body):
+            reply = lifecycle.import_task(self, '/api/recognition/import', body)
+            self.assertEqual(reply['status'], 200, reply)
+            return json.loads(reply['body'])
+
+        def settled():
+            self.assertEqual(self.request('/api/sync', {})['body'], b'{"started": true}')
+            wait_until(lambda: self.sync_state()['status'] == 'done')
+
+        for i, (route, color) in enumerate((('cli', 'orange'), ('http', 'green'), ('scan', 'purple')), 1):
+            with self.subTest(route=route):
+                before = self.candidates()
+                interrupt_projection()
+                image(self.new_folder / f'{route}.png', color)
+                self.assertEqual(self.request('/api/sync', {})['body'], b'{"started": true}')
+                wait_until(lambda: self.sync_state()['status'] == 'error')
+                asset, receipt = pending()
+                self.assertEqual(receipt['sync_wd_package_sha256'], active)
+                self.assertEqual(receipt['recognition']['format'], 'illustash-recognition/2')
+                self.assertEqual(self.candidates(), before)
+                self.assertEqual(self.state()['library']['scored'], i)
+                unblock_projection()
+                if route == 'http':
+                    self.assertEqual(recover_http({'resume': True})['status'], 'done')
+                else:
+                    self.stop(self.process)
+                    if route == 'cli':
+                        self.cli(*recognition_cli, '--resume')
+                    else:
+                        self.cli('library-scan', '--library', str(self.lib.path))
+                    self.restart()
+                after = self.candidates()
+                self.assertIn(asset, {u for u, _, _ in after})
+                self.assertEqual(self.state()['library']['scored'], i + 1)
+                settled()
+                self.assertEqual(self.candidates(), after)
+                self.assertEqual(self.state()['library']['scored'], i + 1)
+
+        # 独立结果包即使附带同名字段，恢复时也不取得同步宿主的评分权限。
+        image(self.new_folder / 'manual.png', 'orange', (63, 41))
+        self.stop(self.process)
+        self.cli('library-scan', '--library', str(self.lib.path))
+        self.restart()
+        with closing(sqlite3.connect(self.lib.source)) as db:
+            (asset,) = db.execute("SELECT uuid FROM assets WHERE filename='manual.png'").fetchone()
+        synthetic = lambda name: hashlib.sha256(f'synthetic {name}'.encode()).hexdigest()
+        self.specs = {
+            'wd': dict(version='swinv2_448', dimension=1024, sha256=synthetic('WD'),
+                       tags_sha256=hashlib.sha256((self.resources / 'tags' / 'tags_v3.csv').read_bytes()).hexdigest()),
+            'ccip': dict(version='ccip-model_feat', dimension=768, sha256=synthetic('CCIP')),
+        }
+        package = self.incoming((asset,))
+        path = package / 'manifest.json'
+        manifest = json.loads(path.read_bytes())
+        manifest['sync_wd_package_sha256'] = active
+        path.write_text(json.dumps(manifest))
+        interrupt_projection()
+        self.assertEqual(recover_http({'path': str(package)})['status'], 'pending')
+        self.assertEqual(pending(), (asset, manifest))
+        unblock_projection()
+        self.assertEqual(recover_http({'resume': True})['status'], 'done')
+        settled()
+        self.assertNotIn(asset, {u for u, _, _ in self.candidates()})
+        self.assertEqual(self.state()['library']['scored'], 4)
+
+
+        # 待投影期间撤回原包。显式恢复仍交付基础识别结果，但不恢复已撤回的扩展证据。
+        interrupt_projection()
+        image(self.new_folder / 'after-withdraw.png', 'yellow', (75, 46))
+        self.assertEqual(self.request('/api/sync', {})['body'], b'{"started": true}')
+        wait_until(lambda: self.sync_state()['status'] == 'error')
+        _, receipt = pending()
+        self.assertEqual(receipt['sync_wd_package_sha256'], active)
+        unblock_projection()
+        self.state('/withdraw', {})
+        self.assertEqual(self.finish('withdraw')['task']['status'], 'done')
+        self.assertEqual(recover_http({'resume': True})['status'], 'done')
+        settled()
+        self.assertEqual(self.candidates(), [])
+        self.assertEqual(self.state()['library']['scored'], 0)

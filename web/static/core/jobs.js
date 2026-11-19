@@ -73,16 +73,14 @@ export function syncLine(s) {
   if (s.status === 'error') return photosRefused(s) ? t('同步失败：没有访问照片图库的权限') : t('同步失败');
   return t('本地图库');
 }
-let lastImported = 0;
 // 同步进行中每 2 s 读一次；读失败 10 s 后再试。重叠的轮询由 core/poll.js 的序号守卫。
 export const pollSync = poller(async fresh => {
   const {state: s, history, damaged} = await api('/api/sync');
   if (!fresh()) return 0;
-  const was = state.sync.status, ended = SYNC_ACTIVE.includes(was) && !SYNC_ACTIVE.includes(s.status);
+  const previous = state.sync, was = previous.status, ended = SYNC_ACTIVE.includes(was) && !SYNC_ACTIVE.includes(s.status);
   state.sync = s; state.syncHistory = history; state.syncDamaged = damaged;
-  // 有新图片，或一次运行已落定：图库显示的内容可能变了。
-  const arrived = (s.imported || 0) > lastImported || ended;
-  if (arrived) lastImported = s.imported || 0;
+  // 文件夹里的图片可在扫描时计入 imported，后续用 import_done 判断识别结果何时交付。
+  const arrived = (s.imported || 0) > (previous.imported || 0) || (s.import_done || 0) > (previous.import_done || 0) || ended;
   await changed.emit('sync', {was, ended, arrived});
   return SYNC_ACTIVE.includes(s.status) ? 2000 : 0;
 });

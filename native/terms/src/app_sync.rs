@@ -17,7 +17,6 @@ use std::{
 pub(crate) struct Syncer {
     state: Arc<Mutex<State>>,
     task: Option<crate::app_tasks::Task>,
-    wd_delivered: Arc<Mutex<HashSet<String>>>,
     pub resource_root: std::path::PathBuf,
     pub per_run: usize,
     pub enabled: bool,
@@ -30,7 +29,6 @@ impl Default for Syncer {
         Self {
             state: Arc::new(Mutex::new(State::from(json!({"status":"idle"})))),
             task: None,
-            wd_delivered: Arc::default(),
             resource_root: std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../.."),
             per_run: 0,
             enabled: true,
@@ -41,9 +39,6 @@ impl Default for Syncer {
 impl Syncer {
     pub fn running(&self) -> bool {
         self.task.as_ref().is_some_and(crate::app_tasks::Task::running)
-    }
-    pub(crate) fn take_wd_deliveries(&self) -> Vec<String> {
-        self.wd_delivered.lock().expect("WD 扩展交付队列锁中毒").drain().collect()
     }
     /// 先记下这次同步请求，等挡着的后台任务结束（#607）。同步关着时和 [`Self::start`] 一样拒绝。
     pub(crate) fn queue(&mut self, library: &Library) -> Result<()> {
@@ -180,17 +175,12 @@ impl Syncer {
         let (library, state) = (library.clone(), self.state.clone());
         let root = self.resource_root.clone();
         let per_run = self.per_run;
-        let delivered = self.wd_delivered.clone();
         self.task = Some(crate::app_tasks::Task::start_with(identity, deadline(), move |ctx| {
             let cancel = ctx.cancellation();
             // 新图库默认启用角色资料包（#602）：还没有任何识别向量时，在这次同步之前记成启用。
             if let Err(error) = crate::app_packs::default_enable(&root, &library) {
                 eprintln!("无法默认启用角色资料包：{error}");
             }
-            let window = crate::app_wd_extension::DeliveryWindow::start(&library).unwrap_or_else(|error| {
-                eprintln!("无法记录本次同步的 WD 扩展范围：{error}");
-                None
-            });
             let result = run_with(&library, cancel, Some(&ctx), &root, per_run, &|fields| {
                 if ctx.check().is_err() {
                     return;
@@ -204,12 +194,6 @@ impl Syncer {
                 };
                 let _ = apply();
             });
-            if let Some(window) = window.filter(|_| ctx.check().is_ok() || ctx.timed_out()) {
-                match window.delivered(&library) {
-                    Ok(ids) => delivered.lock().expect("WD 扩展交付队列锁中毒").extend(ids),
-                    Err(error) => eprintln!("无法读取本次同步的 WD 识别交付：{error}"),
-                }
-            }
             match result {
                 Ok(_) => Ok(()),
                 Err(e) => {
@@ -308,7 +292,7 @@ fn writer(path: &std::path::Path) -> Result<Connection> {
 }
 /// 可供 M4 复用：文件盘点后本地刷新；imported 事件与应用变更同事务提交，保留 pending 给 M4 消费。
 pub(crate) fn run(library: &Library, cancel: &AtomicBool, update: &dyn Fn(Value)) -> Result<Value> {
-    run_with(library, cancel, None, &std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../.."), 0, update)
+    run_with(library, cancel, None, &crate::app_resources::default_root(), 0, update)
 }
 fn run_with(
     library: &Library,
@@ -321,6 +305,12 @@ fn run_with(
     if !Syncer::available(library) {
         return Err(Error::Invalid("原生同步没有支持的来源".into()));
     }
+    let wd = context.and_then(|_| {
+        crate::app_wd_extension::Delivery::load(root, library).unwrap_or_else(|error| {
+            eprintln!("无法加载本次同步的 WD 扩展包：{error}");
+            None
+        })
+    });
     let terminal = std::cell::RefCell::new(None);
     let publish = update;
     let update = |fields: Value| {
@@ -408,7 +398,7 @@ fn run_with(
         // 先扫描，避免已删除/换内容的图片被旧 pending 永久挡住；仍有效的结果再恢复。
         step.set("recognition resume, source.sqlite and library.sqlite");
         let deferred = retry_recognition_write(active, || {
-            crate::app_recognition::resume_sync(library, root, cancel)?.unavailable_inputs()
+            crate::app_recognition::resume_sync(library, root, cancel, wd.as_ref())?.unavailable_inputs()
         })?;
         unreadable += deferred.len() as u64;
         step.set("sync record, library.sqlite");
@@ -456,7 +446,7 @@ fn run_with(
                         library,
                         ctx,
                         &worker,
-                        RecognitionRun { root, per_run, already_counted: &refreshed, run_id },
+                        RecognitionRun { root, per_run, already_counted: &refreshed, run_id, wd: wd.as_ref() },
                         &mut counts,
                         &update,
                     )?;
@@ -760,6 +750,7 @@ struct RecognitionRun<'a> {
     per_run: usize,
     already_counted: &'a HashSet<String>,
     run_id: i64,
+    wd: Option<&'a crate::app_wd_extension::Delivery>,
 }
 /// 在打开首张输入前报告准备阶段，随后按完成文件推进；失败输入单独留待下次同步。
 fn prepare_inputs(
@@ -806,7 +797,7 @@ fn recognise(
     update: &dyn Fn(Value),
 ) -> Result<()> {
     use std::{fs, process::Command};
-    let RecognitionRun { root, per_run, already_counted, run_id } = options;
+    let RecognitionRun { root, per_run, already_counted, run_id, wd } = options;
     let c = crate::app_library::read_connection(&library.source())?;
     let mut assets = to_recognise(&c)?;
     drop(c);
@@ -887,6 +878,7 @@ fn recognise(
         require_claims: native_adapter,
         ctx,
         root,
+        wd,
         folder: crate::app_paths::canonical(&folder)?,
         expected: readable.iter().map(|r| r.id.clone()).collect(),
         expected_inputs: readable.iter().map(|r| (r.id.clone(), r.input_sha256.clone())).collect(),
@@ -1005,6 +997,7 @@ struct Batches<'a> {
     require_claims: bool,
     ctx: &'a crate::app_tasks::TaskContext,
     root: &'a std::path::Path,
+    wd: Option<&'a crate::app_wd_extension::Delivery>,
     folder: std::path::PathBuf,
     expected: HashSet<String>,
     expected_inputs: HashMap<String, String>,
@@ -1128,10 +1121,15 @@ impl Batches<'_> {
                             self.inputs.as_ref().expect("claims task snapshot"),
                             ctx.cancellation(),
                             &crate::app_research::dispatch,
+                            self.wd,
                         ),
-                        None => {
-                            crate::app_recognition::import_sync_package(library, package, self.root, ctx.cancellation())
-                        }
+                        None => crate::app_recognition::import_sync_package(
+                            library,
+                            package,
+                            self.root,
+                            ctx.cancellation(),
+                            self.wd,
+                        ),
                     }?
                     .unavailable_inputs()
                 })

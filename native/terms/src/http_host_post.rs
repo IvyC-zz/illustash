@@ -351,7 +351,7 @@ fn wd_extension(url: &str, host: &Host, session: &mut Session, body: &Json) -> R
         };
         let path = crate::app_models::extension_file(&host.root, &pack)?
             .ok_or_else(|| Error::Conflict("扩展包还没就位".into()))?;
-        Action::Enable(pack, path)
+        Action::Enable(Box::new(pack), path)
     };
     let identity = crate::app_tasks::TaskIdentity::new(&session.library, session.generation, &session.token)?;
     snapshot["task"] = session.wd_extension.start_for(&session.library, identity, action)?;

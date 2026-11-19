@@ -158,7 +158,7 @@ fn writer(path: &Path) -> Result<Connection> {
 
 const IN_SCOPE: &str = "v.model='wd' AND a.in_scope=1 AND coalesce(a.trashed,0)=0";
 const VECTORS: &str = "FROM embeddings v JOIN assets a ON a.uuid=v.uuid";
-const SCOPE: &str = "AND (?1 IS NULL OR v.uuid IN (SELECT value FROM json_each(?1)))";
+const SCOPE: &str = "AND v.uuid IN (SELECT value FROM json_each(?1))";
 const META_KEY: &str = "wd_extension";
 /// 角色资料包默认启用以后（#602），本图库明确不用：提示里选了不用，或撤回过。启用时清掉。
 const DECLINED_KEY: &str = "character_pack_declined";
@@ -222,13 +222,19 @@ fn vector_count(src: &Connection, scope: Option<&str>) -> Result<usize> {
     if !has_table(src, "embeddings")? {
         return Ok(0);
     }
-    Ok(src.query_row(&format!("SELECT count(*) {VECTORS} WHERE {IN_SCOPE} {SCOPE}"), [scope], |r| r.get(0))?)
+    let filter = if scope.is_some() { SCOPE } else { "" };
+    Ok(src.query_row(
+        &format!("SELECT count(*) {VECTORS} WHERE {IN_SCOPE} {filter}"),
+        rusqlite::params_from_iter(scope),
+        |r| r.get(0),
+    )?)
 }
 
 fn scan(
     src: &Connection,
     package: &Package,
     scope: Option<&str>,
+    expected_delivery: Option<&str>,
     progress: &Progress<'_>,
 ) -> Result<(usize, Vec<Hit>)> {
     let total = vector_count(src, scope)?;
@@ -240,14 +246,15 @@ fn scan(
     if has_ledger != has_table(src, "recognition_imports")? {
         return Err(Error::Schema("WD 识别账本不完整".into()));
     }
+    let filter = if scope.is_some() { SCOPE } else { "" };
     let sql = if has_ledger {
         format!(
             "SELECT v.uuid,v.vec,r.package,i.manifest,i.status {VECTORS}
                  LEFT JOIN recognition_assets r ON r.asset=a.uuid LEFT JOIN recognition_imports i ON i.digest=r.package
-                 WHERE {IN_SCOPE} {SCOPE} ORDER BY v.uuid"
+                 WHERE {IN_SCOPE} {filter} ORDER BY v.uuid"
         )
     } else {
-        format!("SELECT v.uuid,v.vec,NULL,NULL,NULL {VECTORS} WHERE {IN_SCOPE} {SCOPE} ORDER BY v.uuid")
+        format!("SELECT v.uuid,v.vec,NULL,NULL,NULL {VECTORS} WHERE {IN_SCOPE} {filter} ORDER BY v.uuid")
     };
     let mut seen = std::collections::HashSet::new();
     let mut hits = Vec::new();
@@ -256,14 +263,17 @@ fn scan(
     let rows_per_block = heads.block_rows();
     let (mut uuids, mut block) = (Vec::with_capacity(rows_per_block), Vec::with_capacity(rows_per_block * DIM));
     let mut stmt = src.prepare(&sql)?;
-    let mut rows = stmt.query([scope])?;
+    let mut rows = stmt.query(rusqlite::params_from_iter(scope))?;
     while let Some(row) = rows.next()? {
         progress.check()?;
         if let Some(delivery) = row.get::<_, Option<String>>(2)? {
-            if row.get::<_, Option<String>>(4)?.as_deref() != Some("done") {
+            let status: Option<String> = row.get(4)?;
+            if status.as_deref() != Some("done")
+                && !(expected_delivery == Some(delivery.as_str()) && status.as_deref() == Some("pending"))
+            {
                 return Err(Error::Conflict("WD 识别交付尚未完成，请先恢复这次交付".into()));
             }
-            if seen.insert(delivery) {
+            if expected_delivery != Some(delivery.as_str()) && seen.insert(delivery) {
                 package.compatible(&row.get::<_, String>(3)?)?;
             }
         }
@@ -300,6 +310,12 @@ fn enabled(c: &Connection) -> Result<Option<Enabled>> {
         .transpose()
 }
 
+fn save_enabled(app: &Connection, enabled: &Enabled) -> Result<()> {
+    let value = serde_json::to_string(enabled).expect("WD 扩展状态可序列化");
+    app.execute("INSERT OR REPLACE INTO meta(key,value) VALUES (?,?)", (META_KEY, value))?;
+    Ok(())
+}
+
 /// 命令行（`wd-extension --package`）：按文件的 SHA-256 找它是哪个可用版本，用它检查整个图库。
 pub fn apply(library: &Library, path: &Path) -> Result<Value> {
     ensure_writable(library)?;
@@ -308,26 +324,19 @@ pub fn apply(library: &Library, path: &Path) -> Result<Value> {
     let sha = crate::strict_json::sha256_hex(&bytes);
     let pack = crate::app_packs::component_by_sha(&resources, crate::app_packs::Kind::Wd, &sha)?
         .ok_or_else(|| Error::invalid("WD 扩展包与可用的版本都不符"))?;
-    apply_loaded(library, &Package::load(path, &pack)?, &pack.file.sha256, None, &Progress::silent())
+    apply_loaded(library, &Package::load(path, &pack)?, &pack.file.sha256, &Progress::silent())
 }
 
-fn apply_loaded(
-    library: &Library,
-    package: &Package,
-    sha256: &str,
-    scope: Option<&[String]>,
-    progress: &Progress<'_>,
-) -> Result<Value> {
+fn apply_loaded(library: &Library, package: &Package, sha256: &str, progress: &Progress<'_>) -> Result<Value> {
     let mut source = writer(&library.source())?;
-    let scope_json = scope.map(|ids| json!(ids).to_string());
     // 先读取版本，再打开评分快照。取得写锁后再核对版本，评分无需占用来源库写锁。
     let version =
         |c: &Connection| -> rusqlite::Result<i64> { c.pragma_query_value(None, "data_version", |r| r.get(0)) };
     let before = version(&source)?;
     let snapshot = source.transaction()?;
-    let (checked, hits) = scan(&snapshot, package, scope_json.as_deref(), progress)?;
+    let (checked, hits) = scan(&snapshot, package, None, None, progress)?;
     snapshot.commit()?;
-    if checked == 0 && scope.is_none() {
+    if checked == 0 {
         return Err(Error::Conflict("这个图库没有已保存的 WD 向量".into()));
     }
     progress.check()?;
@@ -341,24 +350,15 @@ fn apply_loaded(
     let tx = app.transaction_with_behavior(TransactionBehavior::Immediate)?;
     crate::schema::begin_writing(&tx)?;
     let current = enabled(&tx)?;
-    let changed = if let Some(ids) = scope {
-        if current.as_ref().is_some_and(|state| state.package_sha256 == sha256) {
-            wd_extension::apply_scoped(&tx, sha256, ids, &hits)?
-        } else {
-            0
-        }
-    } else {
-        let now: String = tx.query_row("SELECT datetime('now')", [], |r| r.get(0))?;
-        let entry = Enabled {
-            package_sha256: sha256.into(),
-            enabled_at: current.map_or_else(|| now.clone(), |state| state.enabled_at),
-            checked_at: now,
-            scored: checked,
-        };
-        let value = serde_json::to_string(&entry).expect("WD 扩展状态可序列化");
-        tx.execute("INSERT OR REPLACE INTO meta(key,value) VALUES (?,?)", (META_KEY, value))?;
-        wd_extension::apply(&tx, sha256, &hits)?
+    let now: String = tx.query_row("SELECT datetime('now')", [], |r| r.get(0))?;
+    let entry = Enabled {
+        package_sha256: sha256.into(),
+        enabled_at: current.map_or_else(|| now.clone(), |state| state.enabled_at),
+        checked_at: now,
+        scored: checked,
     };
+    save_enabled(&tx, &entry)?;
+    let changed = wd_extension::apply(&tx, sha256, &hits)?;
     crate::schema::commit_writing(tx)?;
     Ok(json!({"package_sha256":sha256,"scored":checked,"hits":hits.len(),"changed":changed}))
 }
@@ -402,25 +402,33 @@ fn ensure_writable(library: &Library) -> Result<()> {
 }
 
 use crate::app_tasks::{lock_ignoring_poison, Task, TaskContext, TaskIdentity, TaskOutcome};
-use std::sync::{atomic::Ordering, Arc, Mutex};
+use std::sync::{
+    atomic::{AtomicBool, Ordering},
+    Arc, Mutex,
+};
 
-struct Progress<'a>(Option<(&'a TaskContext, &'a Mutex<Value>)>);
+enum Progress<'a> {
+    Silent,
+    Task(&'a TaskContext, &'a Mutex<Value>),
+    Delivery(&'a AtomicBool),
+}
 
 impl Progress<'_> {
     fn silent() -> Self {
-        Self(None)
+        Self::Silent
     }
 
     fn check(&self) -> Result<()> {
-        if let Some((ctx, _)) = self.0 {
-            crate::app_sync::check(ctx.cancellation())?;
+        match self {
+            Self::Silent => Ok(()),
+            Self::Task(ctx, _) => crate::app_sync::check(ctx.cancellation()),
+            Self::Delivery(cancel) => crate::app_sync::check(cancel),
         }
-        Ok(())
     }
 
     fn count(&self, done: usize, total: usize) -> Result<()> {
         self.check()?;
-        if let Some((_, state)) = self.0 {
+        if let Self::Task(_, state) = self {
             let mut state = lock_ignoring_poison(state);
             state["done"] = done.into();
             state["total"] = total.into();
@@ -429,7 +437,7 @@ impl Progress<'_> {
     }
 
     fn begin_write(&self) -> Result<()> {
-        if let Some((_, state)) = self.0 {
+        if let Self::Task(_, state) = self {
             let mut state = lock_ignoring_poison(state);
             // 此锁也保护 HTTP 取消。先进入写入的任务必须完成提交或回滚。
             self.check()?;
@@ -494,7 +502,6 @@ impl Tasks {
         }
         let (kind, phase) = match &operation {
             Action::Enable(..) | Action::Pack { .. } => ("enable", "scan"),
-            Action::Auto(..) => ("auto", "scan"),
             Action::Withdraw | Action::PackWithdraw { .. } => ("withdraw", "write"),
         };
         // `part` 是角色资料包正在处理的组成部分（`wd`、`ccip`），只给 WD 部分的旧任务也写 `wd`。
@@ -506,12 +513,11 @@ impl Tasks {
         let shared = state.clone();
         let library = library.clone();
         let task = Task::start(identity, None, move |ctx| {
-            let progress = Progress(Some((&ctx, &shared)));
+            let progress = Progress::Task(&ctx, &shared);
             // 角色资料包分两步提交：WD 部分提交以后 CCIP 部分失败或取消时，结果里留着 WD 部分的（`result.wd`）。
             let mut done = Value::Null;
             let result = match operation {
-                Action::Enable(pack, path) => check_file(&library, &pack, &path, None, &progress),
-                Action::Auto(pack, path, ids) => check_file(&library, &pack, &path, Some(&ids), &progress),
+                Action::Enable(pack, path) => check_file(&library, &pack, &path, &progress),
                 Action::Withdraw => withdraw(&library),
                 Action::Pack { root, wd, ccip } => pack_enable(&library, &root, wd, ccip, &progress, &mut done),
                 Action::PackWithdraw { wd, ccip } => pack_withdraw(&library, wd, ccip, &progress, &mut done),
@@ -551,9 +557,7 @@ impl Tasks {
 
 pub(crate) enum Action {
     /// 用这个版本检查整个图库：启用、重新检查，或换成另一个版本（#602）。
-    Enable(Pack, PathBuf),
-    /// 同步后用本图库启用的版本检查新识别的图。
-    Auto(Pack, PathBuf, Vec<String>),
+    Enable(Box<Pack>, PathBuf),
     Withdraw,
     /// 角色资料包（#602）：先用 WD 部分、再用 CCIP 部分检查整个图库，各自提交。图库里还没有对应向量的组成部分
     /// （`Part::scan` 为假）只记下启用了哪个文件，等识别结果交付时再检查。
@@ -580,7 +584,7 @@ impl Progress<'_> {
     /// 换到角色资料包的下一个组成部分：回到扫描阶段，计数清零。
     fn part(&self, part: &str) -> Result<()> {
         self.check()?;
-        if let Some((_, state)) = self.0 {
+        if let Self::Task(_, state) = self {
             let mut state = lock_ignoring_poison(state);
             state["part"] = part.into();
             state["phase"] = "scan".into();
@@ -620,7 +624,7 @@ fn pack_enable(
     if let Some(part) = wd {
         progress.part("wd")?;
         let result = if part.scan {
-            check_file(library, &part.pack, &part.path, None, progress)?
+            check_file(library, &part.pack, &part.path, progress)?
         } else {
             mark_enabled(library, &part.pack)?
         };
@@ -653,7 +657,7 @@ fn pack_withdraw(library: &Library, wd: bool, ccip: bool, progress: &Progress<'_
         *done = out.clone();
     }
     if ccip {
-        if let Some((_, state)) = progress.0 {
+        if let Progress::Task(_, state) = progress {
             lock_ignoring_poison(state)["part"] = "ccip".into();
         }
         let result = crate::app_ccip_longtail::withdraw(library, progress)?;
@@ -687,21 +691,14 @@ pub(crate) fn mark_enabled(library: &Library, pack: &Pack) -> Result<Value> {
         checked_at: now,
         scored: 0,
     };
-    let value = serde_json::to_string(&entry).expect("WD 扩展状态可序列化");
-    tx.execute("INSERT OR REPLACE INTO meta(key,value) VALUES (?,?)", (META_KEY, value))?;
+    save_enabled(&tx, &entry)?;
     crate::schema::commit_writing(tx)?;
     Ok(json!({"package_sha256":pack.file.sha256,"scored":0,"hits":0,"changed":changed}))
 }
 
-fn check_file(
-    library: &Library,
-    pack: &Pack,
-    path: &Path,
-    scope: Option<&[String]>,
-    progress: &Progress<'_>,
-) -> Result<Value> {
+fn check_file(library: &Library, pack: &Pack, path: &Path, progress: &Progress<'_>) -> Result<Value> {
     progress.check()?;
-    apply_loaded(library, &Package::load(path, pack)?, &pack.file.sha256, scope, progress)
+    apply_loaded(library, &Package::load(path, pack)?, &pack.file.sha256, progress)
 }
 
 /// 卡片上的角色资料包里的 WD 部分（`app_packs::library_pack`）。
@@ -745,53 +742,48 @@ pub(crate) fn status(resources: &Path, library: &Library, tasks: &Tasks, busy: O
     Ok(info)
 }
 
-/// 本图库启用了 WD 角色扩展（不论哪个版本）。用哪个包、包在不在本机，到真正检查时再看（`enabled_pack`）。
-pub(crate) fn auto_enabled(library: &Library) -> Result<bool> {
-    let app = crate::app_library::read_connection(&library.db())?;
-    Ok(enabled(&app)?.is_some())
+/// 同步任务固定的一份 WD 扩展包。批次沿用手动检查的评分与证据写入，投影提交前复核启用版本。
+pub(crate) struct Delivery {
+    sha256: String,
+    package: Package,
 }
 
-/// 识别账本的水位和本次同步可恢复的交付。已经完成的旧批次不会被重新评分。
-pub(crate) struct DeliveryWindow {
-    rowid: i64,
-    pending: Vec<String>,
-}
-
-impl DeliveryWindow {
-    pub(crate) fn start(library: &Library) -> Result<Option<Self>> {
-        if !auto_enabled(library)? {
-            return Ok(None);
-        }
-        let source = crate::app_library::read_connection(&library.source())?;
-        if !has_table(&source, "recognition_imports")? {
-            return Ok(Some(Self { rowid: 0, pending: Vec::new() }));
-        }
-        let rowid = source.query_row("SELECT coalesce(max(rowid),0) FROM recognition_imports", [], |r| r.get(0))?;
-        let pending = source
-            .prepare("SELECT digest FROM recognition_imports WHERE status NOT IN ('done','superseded')")?
-            .query_map([], |r| r.get(0))?
-            .collect::<rusqlite::Result<_>>()?;
-        Ok(Some(Self { rowid, pending }))
+impl Delivery {
+    pub(crate) fn sha256(&self) -> &str {
+        &self.sha256
     }
 
-    pub(crate) fn delivered(self, library: &Library) -> Result<Vec<String>> {
-        let source = crate::app_library::read_connection(&library.source())?;
-        if !has_table(&source, "recognition_imports")? {
-            return Ok(Vec::new());
+    pub(crate) fn load(resources: &Path, library: &Library) -> Result<Option<Self>> {
+        let app = crate::app_library::read_connection(&library.db())?;
+        let Some((pack, path)) = enabled_pack(resources, &app)? else { return Ok(None) };
+        let package = Package::load(&path, &pack)?;
+        Ok(Some(Self { sha256: pack.file.sha256, package }))
+    }
+
+    pub(crate) fn score(
+        &self,
+        src: &Connection,
+        digest: &str,
+        manifest: &str,
+        ids: &[String],
+        cancel: &AtomicBool,
+    ) -> Result<Option<(usize, Vec<Hit>)>> {
+        if let Err(error) = self.package.compatible(manifest) {
+            eprintln!("WD 扩展跳过不兼容的识别交付：{error}");
+            return Ok(None);
         }
-        let mut q = source.prepare(
-            "WITH batches AS (
-               SELECT digest FROM recognition_imports WHERE rowid>?1 AND status='done'
-               UNION
-               SELECT i.digest FROM json_each(?2) p JOIN recognition_imports i ON i.digest=p.value WHERE i.status='done'
-             )
-             SELECT r.asset FROM batches b JOIN recognition_assets r ON r.package=b.digest
-             JOIN embeddings v ON v.uuid=r.asset AND v.model='wd'",
-        )?;
-        let ids = q
-            .query_map((self.rowid, json!(self.pending).to_string()), |r| r.get(0))?
-            .collect::<rusqlite::Result<_>>()?;
-        Ok(ids)
+        let scope = json!(ids).to_string();
+        scan(src, &self.package, Some(&scope), Some(digest), &Progress::Delivery(cancel)).map(Some)
+    }
+
+    pub(crate) fn publish(&self, app: &Connection, ids: &[String], (checked, hits): (usize, Vec<Hit>)) -> Result<()> {
+        let Some(mut active) = enabled(app)?.filter(|active| active.package_sha256 == self.sha256) else {
+            return Ok(());
+        };
+        wd_extension::apply_scoped(app, &self.sha256, ids, &hits)?;
+        // 每次识别投影只会提交一次，已发布的回执恢复通知时不再累加。
+        active.scored += checked;
+        save_enabled(app, &active)
     }
 }
 
@@ -1009,7 +1001,7 @@ mod tests {
             let blob = vector.iter().flat_map(|v| v.to_le_bytes()).collect::<Vec<_>>();
             source.execute("INSERT INTO embeddings VALUES (?1,'wd',?2)", rusqlite::params![uuid, blob]).unwrap();
         }
-        let (checked, hits) = scan(&source, &package, None, &Progress::silent()).unwrap();
+        let (checked, hits) = scan(&source, &package, None, None, &Progress::silent()).unwrap();
         assert_eq!(checked, images);
 
         // 改前的逐图逐头实现（#614 的 `Package::hits`），按 `scan` 的 uuid 顺序。
@@ -1081,7 +1073,7 @@ mod tests {
 
         // v1：一个头，只认第一张图。
         let v1 = synthetic(&[("role_one", 0, 0.8, false)]);
-        assert_eq!(apply_loaded(&f.library, &v1, "v1", None, &Progress::silent()).unwrap()["changed"], 1);
+        assert_eq!(apply_loaded(&f.library, &v1, "v1", &Progress::silent()).unwrap()["changed"], 1);
         assert_eq!(state().as_deref(), Some("v1"));
         let after_v1 = (snapshot(&app, members), snapshot(&app, candidates), snapshot(&app, active));
         let one = key("one");
@@ -1089,7 +1081,7 @@ mod tests {
 
         // 新版本：原来的头加一个一级头（第二张图）和一个二级头（第三张图）。二级头只进候选，不补归属。
         let v2 = synthetic(&[("role_one", 0, 0.8, false), ("role_two", 1, 0.8, false), ("role_three", 2, 0.8, true)]);
-        assert_eq!(apply_loaded(&f.library, &v2, "v2", None, &Progress::silent()).unwrap()["changed"], 3);
+        assert_eq!(apply_loaded(&f.library, &v2, "v2", &Progress::silent()).unwrap()["changed"], 3);
         assert_eq!(state().as_deref(), Some("v2"));
         let (two, three) = (key("two"), key("three"));
         assert_eq!(snapshot(&app, members), vec![json!(["one", one, "WD_EXT"]), json!(["two", two, "WD_EXT"])]);
@@ -1119,7 +1111,7 @@ mod tests {
 
         // 换回 v1：恢复成 v1 那时的样子（证据行复用，没有新行）。
         let rows = snapshot(&app, "SELECT count(*) FROM term_evidence").pop();
-        assert_eq!(apply_loaded(&f.library, &v1, "v1", None, &Progress::silent()).unwrap()["changed"], 3);
+        assert_eq!(apply_loaded(&f.library, &v1, "v1", &Progress::silent()).unwrap()["changed"], 3);
         assert_eq!(state().as_deref(), Some("v1"));
         assert_eq!((snapshot(&app, members), snapshot(&app, candidates), snapshot(&app, active)), after_v1);
         assert_eq!(snapshot(&app, "SELECT count(*) FROM term_evidence").pop(), rows);
@@ -1142,7 +1134,7 @@ mod tests {
             let (ready, entered) = std::sync::mpsc::channel();
             let (release, resume) = std::sync::mpsc::channel();
             let task = Task::start(identity, None, move |ctx| {
-                let progress = Progress(Some((&ctx, &shared)));
+                let progress = Progress::Task(&ctx, &shared);
                 if in_write {
                     progress.begin_write()?;
                 }
@@ -1283,7 +1275,7 @@ mod tests {
         let old_projection = snapshot(&app, projection);
         assert_eq!(old_members.len(), 2);
         assert_eq!(withdraw(&f.library).unwrap()["changed"], 0);
-        let applied = apply_loaded(&f.library, &package, "test", None, &Progress::silent()).unwrap();
+        let applied = apply_loaded(&f.library, &package, "test", &Progress::silent()).unwrap();
         assert_eq!(applied["changed"], 5);
         assert_eq!(applied["hits"], 5);
         assert_eq!(
@@ -1297,7 +1289,7 @@ mod tests {
         let evidence =
             snapshot(&app, "SELECT id,asset_id,term_id,version,score FROM term_current_evidence ORDER BY id");
         let sets = snapshot(&app, "SELECT * FROM term_evidence_sets ORDER BY id");
-        assert_eq!(apply_loaded(&f.library, &package, "test", None, &Progress::silent()).unwrap()["changed"], 0);
+        assert_eq!(apply_loaded(&f.library, &package, "test", &Progress::silent()).unwrap()["changed"], 0);
         assert_eq!(snapshot(&app, "SELECT * FROM term_evidence_sets ORDER BY id"), sets);
 
         // 模拟批次生效途中数据库写入失败。上一个有效集和投影不动，重试仍能完成。
@@ -1323,7 +1315,7 @@ mod tests {
         assert_eq!(snapshot(&app, "SELECT id FROM term_evidence WHERE source='wd_extension'").len(), 5);
         let reopened = Library::open(&f.root.join("test.pilib")).unwrap();
         assert_eq!(snapshot(&writer(&reopened.db()).unwrap(), members), old_members);
-        assert_eq!(apply_loaded(&reopened, &package, "test", None, &Progress::silent()).unwrap()["changed"], 5);
+        assert_eq!(apply_loaded(&reopened, &package, "test", &Progress::silent()).unwrap()["changed"], 5);
         assert_eq!(
             snapshot(&app, "SELECT id,asset_id,term_id,version,score FROM term_current_evidence ORDER BY id"),
             evidence
@@ -1331,7 +1323,7 @@ mod tests {
 
         // 装错底座和向量损坏时，已有的有效集不被空结果覆盖。
         source.execute("UPDATE embeddings SET vec=X'00' WHERE uuid='weak'", []).unwrap();
-        assert!(apply_loaded(&reopened, &package, "test", None, &Progress::silent()).is_err());
+        assert!(apply_loaded(&reopened, &package, "test", &Progress::silent()).is_err());
         assert_eq!(
             snapshot(&app, "SELECT id,asset_id,term_id,version,score FROM term_current_evidence ORDER BY id"),
             evidence
