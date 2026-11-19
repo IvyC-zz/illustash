@@ -28,7 +28,7 @@ export async function modelsPost(body) {
   return value.cancelled ? value : adopt(value);
 }
 // 「检查新角色」的轮询可能只看到索引任务的终态。只要这张卡自己读到正在更新，就跟到它结束。
-let baseTimer = 0, baseRequest = 0;
+let baseTimer = 0, baseRequest = 0, baseWrite = null;
 function watchCharacterBase() {
   clearTimeout(baseTimer);
   if (!state.characterBase?.running || session.stale) return;
@@ -48,8 +48,18 @@ async function readCharacterBase(options) {
     if (request === baseRequest) watchCharacterBase();
   }
 }
-export const loadCharacterBase = () => readCharacterBase();
-export const characterBasePost = enable => readCharacterBase({method: 'POST', body: JSON.stringify({enable})});
+export async function loadCharacterBase() {
+  // 其他任务发起的刷新要等启用或撤回的回应，避免读到变更前的状态并丢掉轮询起点。
+  while (baseWrite) await baseWrite.catch(() => {});
+  return readCharacterBase();
+}
+export function characterBasePost(enable) {
+  const write = readCharacterBase({method: 'POST', body: JSON.stringify({enable})}).finally(() => {
+    if (baseWrite === write) baseWrite = null;
+  });
+  baseWrite = write;
+  return write;
+}
 // 基础角色索引的文件在识别模型清单里的路径；这个版本不带时为空。
 export const characterBasePath = (b = state.characterBase) => b?.included ? b.file?.path || '' : '';
 // 模型就位后还缺的可选文件：WD 加速文件（Apple 芯片的 macOS）和基础角色索引。
