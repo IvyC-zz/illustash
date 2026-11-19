@@ -9,6 +9,7 @@ use crate::{
 use rusqlite::{Connection, OptionalExtension};
 use serde_json::{json, Value};
 use std::{
+    cell::Cell,
     collections::{BTreeMap, BTreeSet, HashMap, VecDeque},
     sync::{
         atomic::{AtomicBool, AtomicI64, Ordering},
@@ -656,7 +657,7 @@ fn keep(first: &mut Option<Error>, e: Error) {
         *first = Some(e);
     }
 }
-fn run(source: &mut Source, entity: Option<&str>, state: &Mutex<Value>) -> Result<i64> {
+fn run(source: &mut Source, entity: Option<&str>, state: &Mutex<Value>, published: &Cell<bool>) -> Result<i64> {
     let mut c = net::db(&source.path)?;
     // 先记事件序号，再读名称范围。并发提交至多触发一次额外刷新，不能越过新批次。
     let mut imported = if entity.is_none() { latest_import(&c)? } else { 0 };
@@ -709,7 +710,7 @@ fn run(source: &mut Source, entity: Option<&str>, state: &Mutex<Value>) -> Resul
             "done":attempted.len(),"total":attempted.len()+pending.len()
         });
         let Some(job) = pending.pop_front() else { break };
-        let result = lookup(&mut c, source, &rows, &job, done.get(&job.marker()), legacy_current);
+        let result = lookup(&mut c, source, &rows, &job, done.get(&job.marker()), legacy_current, published);
         if let Err(e) = result {
             if source.cancel.load(Ordering::SeqCst) {
                 return Err(e);
@@ -735,6 +736,7 @@ fn lookup(
     job: &Job,
     marker: Option<&String>,
     legacy_current: bool,
+    published: &Cell<bool>,
 ) -> Result<()> {
     let Job { kind, key, work } = job;
     let planned: Vec<_> =
@@ -762,9 +764,10 @@ fn lookup(
     };
     if let Some(name) = builtin {
         command(c, vec![json!({"op":"put","kind":kind,"key":key,"lang":"zh","source":"builtin","value":name})])?;
+        published.set(true);
     }
-    if job.character() {
-        seed_index_names(c, &before, &index)?;
+    if job.character() && seed_index_names(c, &before, &index)? {
+        published.set(true);
     }
     let ops = if *kind == "skin" { translate_skin(source, key)? } else { enrich(source, kind, key, work)? };
     net::check(&source.cancel)?;
@@ -780,6 +783,7 @@ fn lookup(
         return invalid("名称来源已改变，请重试");
     }
     crate::schema::begin_writing(&tx)?;
+    let has_ops = !ops.is_empty();
     for op in ops {
         crate::names_commands::one(&tx, &op)?;
     }
@@ -787,6 +791,9 @@ fn lookup(
     net::check(&source.cancel)?;
     // 别名镜像和显示投影在提交时跟着更新一次（legacy_names::after_write）。
     crate::schema::commit_writing(tx)?;
+    if has_ops {
+        published.set(true);
+    }
     Ok(())
 }
 fn enqueue(c: &Connection, entity: Option<&str>, refresh: bool) -> Result<(i64, String)> {
@@ -1026,6 +1033,7 @@ impl Updater {
         self.thread = Some(crate::app_tasks::Task::start(identity, None, move |ctx| {
             ctx.receive(ctx.identity(), || {
                 let mut completed = BTreeSet::new();
+                let published = Cell::new(false);
                 let (mut final_error, mut waiting) = (None, false);
                 for (id, kind) in pending {
                     if ctx.check().is_err() || net::check(&cancel).is_err() {
@@ -1046,7 +1054,7 @@ impl Updater {
                         if !completed.contains(&request_key) {
                             let mut source =
                                 Source::new(path.clone(), cancel.clone(), authorized, refresh)?.granted(grant.clone());
-                            let imported = run(&mut source, entity, &state)?;
+                            let imported = run(&mut source, entity, &state, &published)?;
                             if entity.is_none() {
                                 processed_import.store(imported, Ordering::SeqCst);
                             }
@@ -1068,37 +1076,40 @@ impl Updater {
                             waiting = true;
                         }
                         Err(e) => {
-                            let d = crate::diagnostics::failure(
-                                crate::diagnostics::Operation::Names,
-                                crate::diagnostics::Stage::Background,
-                                &e,
-                                crate::diagnostics::Publication::MayBePartial,
-                            );
-                            s["diagnostic"] = d.value();
-                            s["status"] = json!("error");
-                            let message = match e {
-                                Error::Invalid(s) | Error::Network(s) => s,
+                            let message = match &e {
+                                Error::Invalid(s) | Error::Network(s) => s.clone(),
                                 e => {
                                     // 名称只写 library.sqlite；读 source.sqlite 失败在发生的地方记日志。
                                     eprintln!("名称获取失败：{e:?}");
                                     format!("名称数据库操作失败：{error}", error = e)
                                 }
                             };
-                            s["error"] = json!(message);
-                            final_error = Some(message.clone());
                             if let Ok(c) = net::db(&path) {
                                 let _ = c.execute(
                                     "UPDATE backend_effects SET error=? WHERE id=? AND status='pending'",
-                                    rusqlite::params![message, id],
+                                    rusqlite::params![&message, id],
                                 );
                             }
+                            final_error = Some((e, message));
                         }
                     }
                 }
                 let mut s = state.lock().expect("app_names mutex poisoned");
-                if let Some(error) = final_error {
+                if let Some((error, message)) = final_error {
+                    // 同一轮可能在一次失败之后继续提交名称。最终回执要覆盖整轮的写入。
+                    let diagnostic = crate::diagnostics::failure(
+                        crate::diagnostics::Operation::Names,
+                        crate::diagnostics::Stage::Background,
+                        &error,
+                        if published.get() {
+                            crate::diagnostics::Publication::MayBePartial
+                        } else {
+                            crate::diagnostics::Publication::NotCommitted
+                        },
+                    );
                     s["status"] = json!("error");
-                    s["error"] = json!(error);
+                    s["error"] = json!(message);
+                    s["diagnostic"] = diagnostic.value();
                 } else if waiting {
                     s["status"] = json!("unauthorized");
                 }
@@ -1590,7 +1601,7 @@ mod matching_tests {
             let mut source =
                 Source::new(self.root.join("library.sqlite"), Arc::new(AtomicBool::new(false)), true, force)?
                     .with_bases(&provider.base, &provider.base);
-            run(&mut source, Some(&self.tag), &Mutex::new(json!({}))).map(|_| ())
+            run(&mut source, Some(&self.tag), &Mutex::new(json!({})), &Cell::new(false)).map(|_| ())
         }
         fn choice(&self, kind: &str, key: &str) -> crate::names_view::Choice {
             crate::names_view::View::load(&self.db()).unwrap().choose(kind, key).unwrap()
@@ -2046,7 +2057,7 @@ mod sources_tests {
             let mut source =
                 Source::new(self.root.join("library.sqlite"), Arc::new(AtomicBool::new(false)), true, force)?
                     .with_bases(&p.base, &p.base);
-            run(&mut source, entity, &Mutex::new(json!({}))).map(|_| ())
+            run(&mut source, entity, &Mutex::new(json!({})), &Cell::new(false)).map(|_| ())
         }
         fn configure_model(&self, p: &Providers) {
             self.db()
@@ -2320,7 +2331,7 @@ mod sources_tests {
             // 回环提供方算作本地；同意保护的是远端地址。
             .with_bases("https://names.invalid", "https://names.invalid")
             .granted(Arc::new(AtomicBool::new(false)));
-        let e = run(&mut source, None, &Mutex::new(json!({}))).unwrap_err();
+        let e = run(&mut source, None, &Mutex::new(json!({})), &Cell::new(false)).unwrap_err();
         assert!(unauthorized(&e), "{e:?}");
         assert!(p.calls().is_empty());
         lib.run(&p, None, false).unwrap();

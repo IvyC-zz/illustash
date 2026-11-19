@@ -86,5 +86,6 @@ test('任务面板：有下载或任务时才列出，失败时打警告', () =>
   state.pack = {...READY, task: {id: 't', kind: 'withdraw', status: 'failed', message: '磁盘已满', diagnostic: {id: 'D-1', stored: true}}};
   const failed = tasks.taskList().find(x => x.key === 'pack');
   assert.equal(failed.warn, true);
-  assert.match(failed.line, /^撤回没有完成，图库没有改动：磁盘已满 · /);
+  assert.equal(failed.line, '撤回没有完成，图库没有改动：磁盘已满');
+  assert.match(failed.body, /<p class="task-side">错误编号：D-1<\/p>/);
 });

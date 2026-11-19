@@ -222,7 +222,7 @@ class NativeNamesTest(unittest.TestCase):
         self.stop(self.process);self.process,self.log=self.start(self.lib.path);self.finish()
         wait_until(lambda:all(s=='done' for _,s,_ in self.events()))
     def enable_error(self):
-        self.stop(self.process);self.enabled=True;self.process,self.log=self.start(self.lib.path);self.finish('error')
+        self.stop(self.process);self.enabled=True;self.process,self.log=self.start(self.lib.path);return self.finish('error')
 
     def start_blocked_refresh(self):
         self.env['ILLUSTASH_TEST_TRACE_NAMES_CANCEL'] = '1'
@@ -294,7 +294,8 @@ class NativeNamesTest(unittest.TestCase):
     def test_ack_failure_replays_without_false_completion(self):
         with sqlite3.connect(self.lib.db) as c:
             c.execute("CREATE TRIGGER synthetic_ack_failure BEFORE UPDATE OF status ON backend_effects WHEN NEW.kind LIKE 'names:%' BEGIN SELECT RAISE(ABORT,'synthetic ack failure'); END")
-        self.enable_error()
+        state = self.enable_error()
+        self.assertEqual(state['diagnostic']['publication'], 'may_be_partial')
         self.assertTrue(any(s=='pending' for _,s,_ in self.events()))
         with closing(sqlite3.connect(self.lib.db)) as c:
             formal=c.execute(NAMES+' ORDER BY t.key,n.role,n.source,n.value').fetchall()
@@ -324,11 +325,32 @@ class NativeNamesTest(unittest.TestCase):
         self.enable()
         with sqlite3.connect(self.lib.db) as c:
             c.execute("INSERT INTO backend_effects(kind) VALUES ('names:malformed')")
-        self.finish('error')
+        state = self.finish('error')
+        self.assertEqual(state['diagnostic']['publication'], 'not_committed')
         ident=self.alice
         self.assertEqual(self.request('/api/names',{'action':'refresh','entity':ident})['status'],200)
         wait_until(lambda:self.events()[-1][1]=='done')
         self.assertTrue(any(s=='pending' and e for _,s,e in self.events()))
+
+    def test_diagnostic_includes_names_committed_after_an_earlier_failure(self):
+        # 禁用名称时先排好两个事件，重启后由同一轮恢复按顺序处理。
+        learned = NAMES + " WHERE t.key=? AND n.source='danbooru' AND n.value='爱丽丝'"
+        with closing(sqlite3.connect(self.lib.db)) as c, c:
+            c.execute("UPDATE backend_effects SET status='done' WHERE kind LIKE 'names:%'")
+            failed = c.execute("INSERT INTO backend_effects(kind) VALUES ('names:malformed')").lastrowid
+            request = 'names:' + json.dumps({'entity': self.alice, 'refresh': True})
+            succeeded = c.execute("INSERT INTO backend_effects(kind) VALUES (?)", [request]).lastrowid
+            before = c.execute(learned, [self.alice]).fetchall()
+        self.assertEqual(before, [])
+
+        state = self.enable_error()
+        self.assertEqual(state['error'], '名称事件格式不正确')
+        self.assertEqual(state['diagnostic']['publication'], 'may_be_partial')
+        events = {event: (status, error) for event, status, error in self.events()}
+        self.assertEqual(events[failed], ('pending', state['error']))
+        self.assertEqual(events[succeeded], ('done', ''))
+        with closing(sqlite3.connect(self.lib.db)) as c:
+            self.assertTrue(c.execute(learned, [self.alice]).fetchall())
 
     def test_explicit_no_network_and_key_save_cannot_authorize(self):
         self.request('/api/names',{'action':'model_api','key':'synthetic-secret'})

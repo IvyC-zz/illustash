@@ -3,6 +3,7 @@ use crate::error::invalid;
 use crate::{
     app_library::Library,
     app_tasks::{Task, TaskContext, TaskIdentity},
+    diagnostics::Publication,
     http_json::Json,
     Error, Result,
 };
@@ -14,6 +15,7 @@ use rusqlite::{params, Connection, OptionalExtension};
 use serde_json::{json, Value};
 use sha2::{Digest, Sha256};
 use std::{
+    cell::Cell,
     collections::BTreeSet,
     io::Read,
     path::{Path, PathBuf},
@@ -873,6 +875,7 @@ impl Updater {
         }
         *state.lock().expect("index state mutex poisoned") = initial.into();
         self.task = Some(Task::start_with(identity, deadline(), move |ctx| {
+            let progress = PatchProgress { state: &state, publication: Cell::new(Publication::NotCommitted) };
             let run = || {
                 let net = crate::app_name_sources::Source::new(lib.db(), ctx.cancellation_arc(), network, true)?;
 
@@ -893,7 +896,7 @@ impl Updater {
                         &rows,
                         &net,
                         &ctx,
-                        &state,
+                        &progress,
                     )
                 }
             };
@@ -905,7 +908,7 @@ impl Updater {
                     crate::diagnostics::Operation::Index,
                     crate::diagnostics::Stage::Background,
                     e,
-                    crate::diagnostics::Publication::MayBePartial,
+                    progress.publication.get(),
                 );
                 update(
                     &state,
@@ -1046,6 +1049,11 @@ struct PatchPaths<'a> {
     dir: &'a Path,
     journal: &'a Path,
 }
+struct PatchProgress<'a> {
+    state: &'a Mutex<State>,
+    publication: Cell<Publication>,
+}
+
 fn patch(
     lib: &Library,
     paths: &PatchPaths<'_>,
@@ -1053,7 +1061,7 @@ fn patch(
     rows: &[Value],
     net: &crate::app_name_sources::Source,
     ctx: &TaskContext,
-    state: &Mutex<State>,
+    progress: &PatchProgress<'_>,
 ) -> Result<()> {
     let (shared, dir, journal) = (paths.shared, paths.dir, paths.journal);
     let _lock = SharedLock::acquire(dir, ctx)?;
@@ -1076,22 +1084,24 @@ fn patch(
             job.before = snapshot_library(lib, &folder, ctx)?;
         }
         write(journal, &protocol::value(&job)?)?;
-        if job.action == protocol::IndexAction::Apply && !fetch_references(&job.rows, &folder, net, ctx, state)? {
+        if job.action == protocol::IndexAction::Apply
+            && !fetch_references(&job.rows, &folder, net, ctx, progress.state)?
+        {
             let done = job.rows.iter().filter(|r| fetched(&folder, &r.short_tag)).count();
             let paused =
                 json!({"status":"paused","kind":"add","done":done,"total":job.rows.len(),"message":NETWORK_PAUSE});
             job.extra.insert(PAUSED.into(), paused.clone());
             write(journal, &protocol::value(&job)?)?;
-            *state.lock().expect("index state mutex poisoned") = paused.into();
+            *progress.state.lock().expect("index state mutex poisoned") = paused.into();
             return Ok(());
         }
-        let response = compute(&job, &folder, ctx, state)?;
+        let response = compute(&job, &folder, ctx, progress.state)?;
         validate(lib, &response, &folder.join("response.json"))?;
         job.result = Some(response);
         job.phase = protocol::JobPhase::Ready;
         write(journal, &protocol::value(&job)?)?;
     }
-    ctx.receive(ctx.identity(), || commit(lib, shared, dir, journal, &mut job, ctx, state))?;
+    ctx.receive(ctx.identity(), || commit(lib, shared, dir, journal, &mut job, ctx, progress))?;
     Ok(())
 }
 /// 新任务：它自己的文件夹，里面有 source.sqlite 的快照和 worker 要读的每个输入，以及它的任务日志。
@@ -1446,7 +1456,7 @@ fn commit(
     journal: &Path,
     job: &mut protocol::IndexJob,
     ctx: &TaskContext,
-    state: &Mutex<State>,
+    progress: &PatchProgress<'_>,
 ) -> Result<()> {
     ctx.check()?;
     let id = job.job_id.clone();
@@ -1461,6 +1471,7 @@ fn commit(
         } else {
             commit_source(lib, shared, dir, journal, job, ctx, &mut src)?;
         }
+        progress.publication.set(Publication::MayBePartial);
     }
     // 已提交源结果的重放仍可能遇到新的识别回执；在发布共享文件和应用候选之前再检查。
     let app = crate::app_library::read_connection(&lib.db())?;
@@ -1472,23 +1483,25 @@ fn commit(
         crate::app_recognition::require_published_inputs(&app, &src)?;
     }
     drop(app);
-    publish(shared, dir, &folder, job)?;
-    update(state, json!({"status":"importing"}));
+    publish(shared, dir, &folder, job, &progress.publication)?;
+    update(progress.state, json!({"status":"importing"}));
     let changed = if write_source { import(lib, &src, job, ctx)? } else { 0 };
     if job.action == protocol::IndexAction::Base {
         if write_source {
             prune_backups(dir)?;
         }
         record_base(lib, job)?;
+        progress.publication.set(Publication::Committed);
         std::fs::remove_file(journal)?;
         let _ = std::fs::remove_dir_all(&folder);
         update(
-            state,
+            progress.state,
             json!({"status":"done","kind":"base","enabled":base["enable"] == true,"changed":changed,"finished_at":now()}),
         );
         pause_after_done();
         return Ok(());
     }
+    progress.publication.set(Publication::Committed);
     let drop = job.action == protocol::IndexAction::Drop;
     let chars = outcomes(job, shared, dir, &src)?;
     record(dir, &id, &chars, changed, drop)?;
@@ -1498,7 +1511,7 @@ fn commit(
     std::fs::remove_file(journal)?;
     let _ = std::fs::remove_dir_all(&folder);
     update(
-        state,
+        progress.state,
         json!({"status":"done","kind":if drop{"drop"}else{"add"},"added":added,"changed":changed,"finished_at":now()}),
     );
     pause_after_done();
@@ -1653,7 +1666,13 @@ fn sourced_label(c: &Connection, r: &(String, String, f64), id: &str) -> Result<
 /// 文件从一个不可变、已校验的任务复制过来。崩溃后重复这一边界是安全的。
 /// 共享文件先暂存在各自目标的旁边：复制失败或磁盘写满时，已发布的那一组不受影响。
 /// 之后才在同一次发布 generation 内把它们改名到位，所以读方从不会拿到新旧混杂的文件（index_generation）。
-fn publish(shared: &Path, dir: &Path, folder: &Path, job: &protocol::IndexJob) -> Result<()> {
+fn publish(
+    shared: &Path,
+    dir: &Path,
+    folder: &Path,
+    job: &protocol::IndexJob,
+    publication: &Cell<Publication>,
+) -> Result<()> {
     let allowed = job.rows.iter().map(|r| r.short_tag.as_str()).collect::<BTreeSet<_>>();
     if job.action == protocol::IndexAction::Base {
         let base = job.extra.get("base").cloned().unwrap_or(Value::Null);
@@ -1672,6 +1691,7 @@ fn publish(shared: &Path, dir: &Path, folder: &Path, job: &protocol::IndexJob) -
         return Err(e);
     }
     let generation = crate::index_generation::start(shared)?;
+    publication.set(Publication::MayBePartial);
     for (tmp, to) in &staged {
         std::fs::rename(tmp, to)?;
     }
@@ -2163,10 +2183,12 @@ mod tests {
             src.execute_batch("CREATE TABLE native_index_runs(id TEXT PRIMARY KEY,result TEXT NOT NULL)")?;
             src.execute("INSERT INTO native_index_runs VALUES ('test',?)", [protocol::value(&job)?.to_string()])?;
             let state = Mutex::new(State::from(json!({"status":"importing"})));
-            assert!(commit(&lib, &shared, &dir, &journal, &mut job, &ctx, &state)
+            let progress = PatchProgress { state: &state, publication: Cell::new(Publication::NotCommitted) };
+            assert!(commit(&lib, &shared, &dir, &journal, &mut job, &ctx, &progress)
                 .unwrap_err()
                 .to_string()
                 .contains("尚未完成发布"));
+            assert!(matches!(progress.publication.get(), Publication::MayBePartial));
             assert!(import(&lib, &src, &job, &ctx).unwrap_err().to_string().contains("尚未完成发布"));
             assert!(!app.query_row("SELECT EXISTS(SELECT 1 FROM meta WHERE key='index_job:test')", [], |r| r
                 .get::<_, bool>(0))?);

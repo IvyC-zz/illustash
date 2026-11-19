@@ -2,7 +2,7 @@
 // 页面属于它启动时的那个会话。另一个窗口或调用方切换（或重新打开）图库会开始新的会话；采用它的 token 会把这个页面的
 // 选择、对话框和排队的工作发到那个图库去。所以页面改为停下，并丢掉之后才到的回应。
 // 只有本模块写 session.token 和 session.stale；其他地方只读。
-import {t, tb, said, I18N} from './i18n.js';
+import {t, tb, said, I18N, sentences} from './i18n.js';
 import {listeners} from './events.js';
 export const session = {token: '', stale: false};
 export let lastDiagnostic = null;
@@ -37,8 +37,8 @@ export async function api(path, options = {}) {
     let d = null;
     try { d = JSON.parse(response.headers?.get('X-Illustash-Diagnostic') || 'null'); } catch {}
     if (d?.id) lastDiagnostic = d;
-    const note = d?.id ? ' · ' + t('错误编号：{id}', {id: d.id}) + (d.stored ? '' : ' · ' + t('诊断记录未保存')) : '';
-    throw Object.assign(new Error((tb(result.error) || t('请求失败')) + note), {said: result.error, diagnostic: d, status: response.status});
+    const message = sentences(tb(result.error) || t('请求失败'), d?.id && t('错误编号：{id}', {id: d.id}), d?.id && !d.stored && t('诊断记录未保存'));
+    throw Object.assign(new Error(message), {said: result.error, diagnostic: d, status: response.status});
   }
   return result;
 }

@@ -38,11 +38,11 @@ fn has_column(c: &Connection, table: &str, column: &str) -> Result<bool> {
 /// 像素结果描述的是计算时用的那份字节。每张图片的内容哈希都会记下；同一 UUID 下字节变了时，丢弃它的查询、
 /// 匹配到的帖子、归属和 OCR 标记，让下一次运行重新计算；那次运行之后交付的快照替换按旧字节算出的证据。
 /// 第一次见到的图片只记下哈希。这些都是机器结果；裁决在核心里。
-pub(super) fn forget_changed_content(c: &Connection, library: &Library) -> Result<()> {
+pub(super) fn forget_changed_content(c: &Connection, library: &Library) -> Result<bool> {
     let src = crate::app_library::read_connection(&library.source())?;
     // 打开时不要求有这一列；这样的源库没有可比较的内容版本。
     if src.prepare("SELECT stable_hash FROM assets LIMIT 0").is_err() {
-        return Ok(());
+        return Ok(false);
     }
     c.execute_batch("CREATE TABLE IF NOT EXISTS content_versions(asset TEXT PRIMARY KEY, hash TEXT NOT NULL)")?;
     let current = src
@@ -54,14 +54,15 @@ pub(super) fn forget_changed_content(c: &Connection, library: &Library) -> Resul
         .query_map([], |r| Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?)))?
         .collect::<rusqlite::Result<std::collections::HashMap<_, _>>>()?;
     let tx = c.unchecked_transaction()?;
+    let mut changed = false;
     for (asset, hash) in current {
         match seen.get(&asset) {
             Some(old) if *old == hash => continue,
             Some(_) => {
                 tx.execute("DELETE FROM lookups WHERE target=?", [&asset])?;
-                tx.execute("DELETE FROM image_sources WHERE asset=?", [&asset])?;
-                tx.execute("DELETE FROM image_artists WHERE asset=?", [&asset])?;
-                tx.execute("DELETE FROM marks WHERE asset=?", [&asset])?;
+                changed |= tx.execute("DELETE FROM image_sources WHERE asset=?", [&asset])? != 0;
+                changed |= tx.execute("DELETE FROM image_artists WHERE asset=?", [&asset])? != 0;
+                changed |= tx.execute("DELETE FROM marks WHERE asset=?", [&asset])? != 0;
             }
             None => {}
         }
@@ -71,7 +72,7 @@ pub(super) fn forget_changed_content(c: &Connection, library: &Library) -> Resul
         )?;
     }
     tx.commit()?;
-    Ok(())
+    Ok(changed)
 }
 pub(super) fn backup(from: &Path, to: &Path) -> Result<()> {
     let c = crate::app_library::read_connection(from)?;
