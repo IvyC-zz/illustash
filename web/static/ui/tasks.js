@@ -7,7 +7,7 @@ import {state} from '../core/state.js';
 import {api, post, shared, readError} from '../core/session.js';
 import {SYNC_ACTIVE, INDEX_ACTIVE, NAMES_ACTIVE, SIMILAR_ACTIVE, PROV_ACTIVE, RUN_STATUS, onJob, syncLine, syncBar, syncDoneText, indexLine, indexEndText, resumeIndex, discardIndex,
   namesLine, taskSimilar, pollSync, pollIndex, pollNames, loadProvenance, startSync, checkIndex, refreshNames, provenanceAction, PHOTOS_PRIVACY, photosHelp, photosRefused,
-  importActive, importLine, cancelImport, pollImports} from '../core/jobs.js';
+  importActive, importSummary, cancelImport, pollImports} from '../core/jobs.js';
 import {loadLibraries, setSettings, updatesTick} from '../core/settings.js';
 import {$, toast, error, fold, wireFolds, redraw, setDrawn, busy} from './dom.js';
 import {confirmAction} from './dialog.js';
@@ -91,12 +91,12 @@ export function taskList() {
   const im = state.importTask;
   if (['running', 'stopping', 'done', 'error', 'cancelled'].includes(im?.status)) list.push({key: 'import',
     name: im.kind === 'recognition' ? t('导入识别结果') : im.kind === 'human_conclusions' ? t('导入人工结论') : t('导入图库'), busy: t('导入中'),
-    active: importActive(), warn: im.status === 'error', line: importLine(im), body: '',
+    active: importActive(), warn: im.status === 'error', line: importSummary(im), body: '',
     action: im.status === 'running' ? `<button class="quiet small" data-task="import-cancel">${t('取消导入')}</button>` : ''});
   const diagnoses = {sync: s, index: ix, names: nm, similar: sim, provenance: ps, models: m?.job, export: ex, import: im, ...Object.fromEntries(packs.map(p => [p.key, p]))};
   for (const task of list) {
     const note = diagnosticLine(diagnoses[task.key]?.diagnostic);
-    if (note && task.warn) task.line += ' · ' + note;
+    if (note && task.warn) task.body += `<p class="task-side">${esc(note)}</p>`;
   }
   return list;
 }

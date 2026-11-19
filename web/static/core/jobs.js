@@ -3,7 +3,7 @@
 // syncHistory、syncDamaged、index、names、provenance、importTask），由这里写入；别的模块要换掉 index、names 时调用
 // 这里的 setIndex、setNames（#344）。相似图片的状态随 settings 一起来，settings 由 core/settings.js 写。任务运行期间轮询会自己重新排上；重叠的轮询绝不会让状态倒退（#34）。
 import {diagnosticLine} from './diagnostics.js';
-import {t, tb} from './i18n.js';
+import {t, tb, sentences} from './i18n.js';
 import {home, isMac, megabytes, number, stamp} from './format.js';
 import {session, api, post, shared} from './session.js';
 import {state} from './state.js';
@@ -220,10 +220,9 @@ export function importCount(job) {
   return ' ' + t('{done}/{total} 张', {done: number(job.done), total: number(job.total)});
 }
 export function importLine(job) {
-  const line = importSummary(job), note = diagnosticLine(job?.diagnostic);
-  return line + (note ? ' · ' + note : '');
+  return sentences(importSummary(job), diagnosticLine(job?.diagnostic));
 }
-function importSummary(job) {
+export function importSummary(job) {
   if (!job || job.status === 'idle') return '';
   const recognition = job.kind === 'recognition';
   if (job.kind === 'human_conclusions') return humanSummary(job);

@@ -1,5 +1,5 @@
 // 诊断导出只取原生白名单和当前错误回执；不从 DOM、路径、请求或异常原文拼接。
-import {t} from './i18n.js';
+import {t, sentences} from './i18n.js';
 import {api, lastDiagnostic} from './session.js';
 const changes = () => ({
   not_committed: t('图库没有改动'),
@@ -10,7 +10,7 @@ const changes = () => ({
 const retries = () => ({retry: t('可以重试'), after_fix: t('处理原因后重试'), check_state: t('核对结果后再重试'), restart: t('重启后核对结果')});
 export function diagnosticLine(d) {
   if (!d?.id) return '';
-  return [t('错误编号：{id}', {id: d.id}), changes()[d.publication], retries()[d.retry], d.stored === false ? t('诊断记录未保存') : ''].filter(Boolean).join(' · ');
+  return sentences(t('错误编号：{id}', {id: d.id}), changes()[d.publication], retries()[d.retry], d.stored === false && t('诊断记录未保存'));
 }
 export async function diagnosticReport() {
   const report = await api('/api/diagnostics');

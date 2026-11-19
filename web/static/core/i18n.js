@@ -4,3 +4,12 @@
 // 可以用上它们的名字。
 const translate = t, backend = tb, sent = said, language = I18N;
 export {translate as t, backend as tb, sent as said, language as I18N};
+
+// 纯文本提示中的多段消息，用界面语言的句号和留白连接，已有句末标点则保留。
+export function sentences(...parts) {
+  const text = parts.filter(Boolean);
+  if (text.length < 2) return text[0] || '';
+  const chinese = language.language === 'zh-CN';
+  const end = chinese ? '。' : '.';
+  return text.map(line => /[.!?。！？…][”’"'）)]*$/u.test(line) ? line : line + end).join(chinese ? '' : ' ');
+}

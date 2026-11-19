@@ -320,7 +320,7 @@ async function renderAbout() {
           {license: '<a class="link" href="https://bigscience.huggingface.co/blog/bigscience-openrail-m" target="_blank" rel="noreferrer noopener">BigScience Open RAIL-M</a>'})}</p>`)}
     ${fold('diagnostics', t('诊断信息'), `<p class="settings-note">${t('运行错误仅保存在本机，最多 128 条、保留 14 天；不会自动上传，不含图片、文件名、路径或账号凭据。')}</p>
       <p class="settings-note">${report.available ? t('最近的错误记录') : t('诊断记录暂不可读')}</p>
-      ${(report.records || []).slice(0, 8).map(r => `<p class="muted-note">${esc(new Date(r.at * 1000).toLocaleString())} · ${esc(diagnosticLine(r))}</p>`).join('')}
+      ${(report.records || []).slice(0, 8).map(r => `<p class="muted-note"><time>${esc(new Date(r.at * 1000).toLocaleString(I18N.locale))}</time><br>${esc(diagnosticLine(r))}</p>`).join('')}
       <table class="settings-table">${diag.map(([k, v]) => `<tr><td>${esc(k)}</td><td class="mono">${esc(v)}</td></tr>`).join('')}</table>`)}`;
   wireFolds(card);
   $('aboutKeys').onclick = () => openModal($('help'), {backdropClose: true, id: 'help'});
