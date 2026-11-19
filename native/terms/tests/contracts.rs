@@ -32,6 +32,7 @@ mod wait;
 mod library_50k;
 #[path = "contracts/library_scale.rs"]
 mod library_scale;
+
 #[path = "contracts/colors.rs"]
 mod colors;
 
