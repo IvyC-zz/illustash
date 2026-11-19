@@ -65,11 +65,13 @@ fn image_colors_http_contract() {
          INSERT INTO memberships(uuid,entity,status,origin,sources,score,source_count,ccip_only,skey)
               VALUES ('color-red-a','tone-character','machine','fixture','WD',0.9,1,0,'color-red-a');
          INSERT INTO term_assets(namespace,key) VALUES ('library','color-red-a');
-         INSERT INTO term_projection(asset_id,term_id,state)
-              SELECT a.id,t.id,'machine' FROM terms t JOIN term_assets a ON a.key='color-red-a'
-              WHERE t.key='tone-artist';",
+         INSERT INTO term_evidence(asset_id,term_id,source,method,version,fingerprint)
+              SELECT a.id,t.id,'synthetic','pixel_hash','fixture',zeroblob(16)
+              FROM terms t JOIN term_assets a ON a.key='color-red-a' WHERE t.key='tone-artist';",
     )
     .unwrap();
+    let red = illustash_terms::store::library_asset(&tx, "color-red-a").unwrap().unwrap();
+    illustash_terms::store::project(&tx, &[red]).unwrap();
     illustash_terms::schema::commit_writing(tx).unwrap();
 
     let binary = Path::new(env!("CARGO_BIN_EXE_illustash-terms"));
@@ -118,6 +120,8 @@ fn image_colors_http_contract() {
     let artist = artists["items"].as_array().unwrap().iter().find(|a| a["id"] == "tone-artist").unwrap();
     assert_eq!(artist["cover"], "color-red-a");
     assert_eq!(artist["color"], "#eb0000");
+    assert_eq!(request(&origin, "/api/works?marks=color&nsfw=bad", None, &token).0, 400);
+    assert_eq!(raw("/api/works?nsfw=bad"), raw("/api/works"));
     let works = get("/api/works?marks=color");
     for id in ["tone-work", "tone-child"] {
         let row = works.as_array().unwrap().iter().find(|w| w["id"] == id).unwrap();
