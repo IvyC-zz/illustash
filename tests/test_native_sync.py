@@ -1,6 +1,7 @@
 """M4 同步验收：只用测试自己的合成照片数据库、文件夹和图库包。"""
 from tests.native_worker_fixture import command as worker_command, source as worker_source, exists as worker_exists
 
+from contextlib import closing
 import json
 import sqlite3
 import subprocess
@@ -724,17 +725,17 @@ if failures: Path(sys.argv[2]).write_text(json.dumps(dict(identity=r['identity']
             self.assertIn(text, json.loads((self.root / 'last-request').read_text()))
             self.assertEqual(value['state']['message'], '1 张暂时无法识别，下次同步重试')
 
-    def test_recognition_import_recovers_from_app_database_busy_in_same_sync(self):
+    def test_native_library_new_recognition_import_recovers_from_app_database_busy_in_same_sync(self):
         self.worker('wait-for-import')
         self.assertEqual(self.request('/api/sync', {})['body'], b'{"started": true}')
         wait_until(lambda: (self.root / 'last-request').exists())
 
-        with sqlite3.connect(self.lib.db) as app:
+        with closing(sqlite3.connect(self.lib.db)) as app, app:
             app.execute('BEGIN IMMEDIATE')
             (self.root / 'release-import').touch()
 
             def busy_receipt():
-                with sqlite3.connect(self.lib.source) as source:
+                with closing(sqlite3.connect(self.lib.source)) as source:
                     table = source.execute("SELECT count(*) FROM sqlite_master WHERE name='recognition_imports'")
                     if not table.fetchone()[0]:
                         return False
@@ -749,10 +750,10 @@ if failures: Path(sys.argv[2]).write_text(json.dumps(dict(identity=r['identity']
         self.assertEqual(value['state']['status'], 'done', value)
         self.assertNotIn('diagnostic', value['state'])
         self.assertEqual(value['state']['import_done'], 1)
-        with sqlite3.connect(self.lib.source) as source:
+        with closing(sqlite3.connect(self.lib.source)) as source:
             self.assertEqual(source.execute("SELECT status,error FROM recognition_imports").fetchall(), [('done', '')])
             self.assertEqual(source.execute("SELECT count(*) FROM recognition_assets").fetchone()[0], 1)
-        with sqlite3.connect(self.lib.db) as app:
+        with closing(sqlite3.connect(self.lib.db)) as app, app:
             self.assertEqual(app.execute("SELECT count(*) FROM meta WHERE key LIKE 'recognition_projection:%'").fetchone()[0], 1)
 
     def test_native_library_new_batch_commit_then_failure_recovers_once(self):
