@@ -355,7 +355,7 @@
 
  "native/terms/src/app_upgrade.rs":"a54111dd23542c882a5ac02a2a0913b0333625af44950108d8af33a2dbd1c5e6",
 
- "native/terms/src/app_wd_extension.rs":"0514f9d86e5c41ce56f85ec835c239ef52d2422cee854a6414260782a769d201",
+ "native/terms/src/app_wd_extension.rs":"d158a7a204c610593576bf52e7d3ffb1fcddd8462f01a01e4e96a0ecfd208ec4",
 
  "native/terms/src/app_wd_extension/scoring.rs":"c486e27eae74356b12c836caee045adb61e164c5ffb433171327df47e55b1221",
 
@@ -397,7 +397,7 @@
 
  "native/terms/src/http_host_get.rs":"0822c28279b46643a344e7bacd2ab85bb4d9dba6a5096231a95c4111054da486",
 
- "native/terms/src/http_host_post.rs":"2be5e574beb78dfbcf1144497c91d0350ebbd7e2364b2e2b33e350d35d3db76c",
+ "native/terms/src/http_host_post.rs":"ba14c2d98125c59717673fb22a554748fd7c3eab785463bac9e12fa58960251e",
 
  "native/terms/src/http_json.rs":"42ec65687fad69e430186543d3ef27b8141030e6694b07f683ee91f678478d6b",
 

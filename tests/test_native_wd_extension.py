@@ -261,8 +261,7 @@ class NativeWdExtensionSyncTest(SyntheticWdLibrary, unittest.TestCase):
         (self.root / 'last-request').unlink()
         self.assertEqual(self.request('/api/sync', {})['status'], 200)
         request = self.root / 'last-request'
-        wait_until(request.exists)
-        ids = json.loads(request.read_text())
+        ids = wait_until(lambda: json.loads(request.read_text()) if request.exists() else None)
         self.assertEqual(len(ids), 3)
         for i in range(2):
             (self.root / f'release-batch-{i}').touch()

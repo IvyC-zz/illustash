@@ -557,7 +557,7 @@ impl Tasks {
 
 pub(crate) enum Action {
     /// 用这个版本检查整个图库：启用、重新检查，或换成另一个版本（#602）。
-    Enable(Pack, PathBuf),
+    Enable(Box<Pack>, PathBuf),
     Withdraw,
     /// 角色资料包（#602）：先用 WD 部分、再用 CCIP 部分检查整个图库，各自提交。图库里还没有对应向量的组成部分
     /// （`Part::scan` 为假）只记下启用了哪个文件，等识别结果交付时再检查。
