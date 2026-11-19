@@ -14,7 +14,7 @@ import {api, post, readError} from '../core/session.js';
 import {currentLibraryId, remoteNames, remoteNote} from '../core/settings.js';
 import {state} from '../core/state.js';
 import {refreshLocalLinks} from './catalog.js';
-import {$, namesAllowButton, toast, written} from './dom.js';
+import {$, charOption, namesAllowButton, toast, written} from './dom.js';
 import {openDialog} from './dialog.js';
 import {openModal} from './overlay.js';
 import {combo, listNav} from './combo.js';
@@ -109,10 +109,10 @@ function renderPalette(sections, q, keep = false) {
   let n = 0;
   $('pickerResults').innerHTML = sections.filter(s => s.items.length || s.note).map(s => (s.label ? `<div class="palette-label">${s.label}</div>` : '') + (s.note && !s.items.length ? `<p class="palette-note">${esc(s.note)}${s.allow ? ' ' + namesAllowButton : ''}</p>` : '') + s.items.map(e => {
     const i = n++, char = e.id && state.charMap.get(e.id), cover = char?.cover;
-    const work = p.tagMode || e.create || e.remove ? '' : e.remote ? e.work_name || '' : e.id ? workLabel(e) : '';
+    const work = p.tagMode || e.create || e.remove ? '' : e.remote ? e.work_name || '' : e.id ? workLabel(e) : '';   // 标签、新建、移除这几种不是角色
     const staged = p.multi && p.staged.some(x => stageKey(x) === stageKey(e));
     const add = p.multi ? `<span class="palette-add${staged ? ' on' : ''}" data-add="${i}" title="${staged ? t('已加入，再点一次取消') : t('再加一个角色（⇧+点击）')}">${staged ? '✓' : '＋'}</span>` : '';
-    return `<button class="palette-item${staged ? ' staged' : ''}" data-i="${i}" role="option">${cover ? `<img src="/image?id=${encodeURIComponent(cover)}" alt="" loading="lazy">` : e.remote ? `<img class="remote" src="/api/entity-preview?tag=${encodeURIComponent(e.tag)}" alt="" loading="lazy" title="${t('Danbooru 上评分最高的一张全年龄图')}">` : `<span class="palette-glyph${e.remote ? ' remote' : ''}">${e.remote ? 'D' : e.create ? '＋' : e.remove ? '−' : e.tag ? '#' : '◌'}</span>`}<span class="palette-text"><span class="palette-name">${e.create ? (e.oc ? t('新建原创角色「{name}」', {name: esc(e.name)}) : t('新建「{name}」', {name: esc(e.name)})) : esc(e.name)}${work ? `<small class="char-work">${esc(work)}</small>` : ''}</span><small>${esc(e.hint || '')}${char && !e.counted ? ' ' + t('{n} 张', {n: number(char.count)}) : ''}</small></span>${i < 9 && !q ? `<kbd>${i + 1}</kbd>` : ''}${add}</button>`;
+    return `<button class="palette-item${staged ? ' staged' : ''}" data-i="${i}" role="option">${cover ? `<img src="/image?id=${encodeURIComponent(cover)}" alt="" loading="lazy">` : e.remote ? `<img class="remote" src="/api/entity-preview?tag=${encodeURIComponent(e.tag)}" alt="" loading="lazy" title="${t('Danbooru 上评分最高的一张全年龄图')}">` : `<span class="palette-glyph${e.remote ? ' remote' : ''}">${e.remote ? 'D' : e.create ? '＋' : e.remove ? '−' : e.tag ? '#' : '◌'}</span>`}<span class="palette-text"><span class="palette-name">${e.create ? (e.oc ? t('新建原创角色「{name}」', {name: esc(e.name)}) : t('新建「{name}」', {name: esc(e.name)})) : charOption(e, work)}</span><small>${esc(e.hint || '')}${char && !e.counted ? ' ' + t('{n} 张', {n: number(char.count)}) : ''}</small></span>${i < 9 && !q ? `<kbd>${i + 1}</kbd>` : ''}${add}</button>`;
   }).join('')).join('') || `<p class="palette-empty">${q ? t('没有匹配的角色') : t('输入角色 tag 或别名')}</p>`;
   for (const img of $('pickerResults').querySelectorAll('img')) img.addEventListener('error', () => img.replaceWith(Object.assign(document.createElement('span'), img.classList.contains('remote') ? {className: 'palette-glyph remote', textContent: 'D'} : {className: 'palette-glyph', textContent: '◌'})), {once: true});
   highlight();

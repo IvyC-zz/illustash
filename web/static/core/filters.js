@@ -28,11 +28,16 @@ export function conditions(r) {
   return {has, not, from: r.from || '', to: r.to || '', day: r.day || ''};
 }
 export const count = r => { const x = conditions(r); return x.has.length + x.not.length; };
-// 路由上的条件只有这一条（没有别的条件、日期、搜索词和角色）：侧栏「收藏」（#447）按 only(r, 'fav') 判断亮不亮。
-export function only(r, c) {
+// 路由上唯一的条件（没有别的条件、日期和角色；搜索词不算）：图库标题按它写（#644）。没有时返回 ''。
+export function sole(r) {
   const x = conditions(r);
-  return x.has.length === 1 && x.has[0] === c && !x.not.length && !x.from && !x.to && !x.day && !r.q && !r.char;
+  return x.has.length === 1 && !x.not.length && !x.from && !x.to && !x.day && !r.char ? x.has[0] : '';
 }
+// 路由上的条件只有这一条，也没有搜索词：侧栏「收藏」（#447）按 only(r, 'fav') 判断亮不亮。
+export const only = (r, c) => sole(r) === c && !r.q;
+// 一张图有没有条件 c 改成 present 以后，是不是离开这一页（#644）：去掉的正是「含」的条件，或加上的正是「不含」的条件。
+// 两种写法（旧的单值参数、条件数组）都按 conditions(r) 算。
+export function leaves(r, c, present) { const x = conditions(r); return present ? x.not.includes(c) : x.has.includes(c); }
 // 换成这组条件以后的路由：旧的单值参数整体改写成 has。
 function rewrite(r, x) { return {...r, ...CLEARED, has: x.has, not: x.not, from: x.from, to: x.to, day: x.day}; }
 const without = (list, c) => list.filter(y => y !== c);
