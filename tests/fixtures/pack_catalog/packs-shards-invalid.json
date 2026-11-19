@@ -1,0 +1,192 @@
+{
+  "format": "illustash-packs/1",
+  "serial": 3,
+  "packs": [
+    {
+      "kind": "character-pack",
+      "revision": 10,
+      "version": "2.0",
+      "min_app": "0.3.0",
+      "license": "Apache-2.0 AND MIT",
+      "components": {
+        "wd": {
+          "format": "illustash-wd-extension/2",
+          "heads": 3,
+          "candidate_only": 1,
+          "file": {
+            "name": "wd-extension-shards-first.bin",
+            "size": 12646,
+            "sha256": "a20d208015bffe18789803954261bee9df3bc29cf6640011ed4a073be85e191b",
+            "url": "https://github.com/shio-vinyl/illustash/releases/download/character-pack-2.0/wd-extension-shards-first.bin"
+          },
+          "base": {
+            "wd_model_sha256": "ae25f5f12b2d5891728fb7768fa63d65bf13a83d6d4823e3a1bf7b42875c74ff",
+            "wd_tags_sha256": "298633d94d0031d2081c0893f29c82eab7f0df00b08483ba8f29d1e979441217"
+          },
+          "license": "Apache-2.0",
+          "shards": {
+            "header": {
+              "name": "wd-shard-567c3e28cc350d82d247584dd4f3e291b599a77f32122d25e55b63729bab2214.bin",
+              "size": 346,
+              "sha256": "567c3e28cc350d82d247584dd4f3e291b599a77f32122d25e55b63729bab2214",
+              "url": "https://github.com/shio-vinyl/illustash/releases/download/character-pack-2.0/wd-shard-567c3e28cc350d82d247584dd4f3e291b599a77f32122d25e55b63729bab2214.bin"
+            },
+            "coefficients": [
+              {
+                "name": "wd-shard-e424f6ae9322bf303098835531ee4d28d2d01082622b522149b870f0887e577e.bin",
+                "size": 8200,
+                "sha256": "e424f6ae9322bf303098835531ee4d28d2d01082622b522149b870f0887e577e",
+                "url": "https://github.com/shio-vinyl/illustash/releases/download/character-pack-2.0/wd-shard-e424f6ae9322bf303098835531ee4d28d2d01082622b522149b870f0887e577e.bin"
+              },
+              {
+                "name": "wd-shard-72885c768c2601728e2e9e555b566da32da809a315815170593172c0d760605e.bin",
+                "size": 4100,
+                "sha256": "72885c768c2601728e2e9e555b566da32da809a315815170593172c0d760605e",
+                "url": "https://github.com/shio-vinyl/illustash/releases/download/character-pack-2.0/wd-shard-72885c768c2601728e2e9e555b566da32da809a315815170593172c0d760605e.bin"
+              }
+            ]
+          }
+        },
+        "ccip": {
+          "format": "illustash-557-ccip-offline/1",
+          "heads": 2,
+          "candidate_only": 0,
+          "file": {
+            "name": "A-longtail-p75.zip",
+            "size": 7102,
+            "sha256": "8f824917803460224f6a71496d62d101d2f6f83bbfc9b75583d5d60038909f52",
+            "url": "https://github.com/shio-vinyl/illustash/releases/download/ccip-longtail-v1/A-longtail-p75.zip"
+          },
+          "base": {
+            "ccip_model_sha256": "4ea118d16496274f4f6e08d3afc768cc592389e8f7f32f8732ce2215c228ac5f"
+          },
+          "license": "MIT"
+        }
+      }
+    },
+    {
+      "kind": "character-pack",
+      "revision": 11,
+      "version": "2.1",
+      "min_app": "0.3.0",
+      "license": "Apache-2.0 AND MIT",
+      "components": {
+        "wd": {
+          "format": "illustash-wd-extension/2",
+          "heads": 3,
+          "candidate_only": 1,
+          "file": {
+            "name": "wd-extension-shards-second.bin",
+            "size": 12646,
+            "sha256": "e5e8f34938dc702f5a6bc0d1ac87adca5da13378260a4da866950987fda296ab",
+            "url": "https://github.com/shio-vinyl/illustash/releases/download/character-pack-2.1/wd-extension-shards-second.bin"
+          },
+          "base": {
+            "wd_model_sha256": "ae25f5f12b2d5891728fb7768fa63d65bf13a83d6d4823e3a1bf7b42875c74ff",
+            "wd_tags_sha256": "298633d94d0031d2081c0893f29c82eab7f0df00b08483ba8f29d1e979441217"
+          },
+          "license": "Apache-2.0",
+          "shards": {
+            "header": {
+              "name": "wd-shard-567c3e28cc350d82d247584dd4f3e291b599a77f32122d25e55b63729bab2214.bin",
+              "size": 346,
+              "sha256": "567c3e28cc350d82d247584dd4f3e291b599a77f32122d25e55b63729bab2214",
+              "url": "https://github.com/shio-vinyl/illustash/releases/download/character-pack-2.0/wd-shard-567c3e28cc350d82d247584dd4f3e291b599a77f32122d25e55b63729bab2214.bin"
+            },
+            "coefficients": [
+              {
+                "name": "wd-shard-e424f6ae9322bf303098835531ee4d28d2d01082622b522149b870f0887e577e.bin",
+                "size": 8200,
+                "sha256": "e424f6ae9322bf303098835531ee4d28d2d01082622b522149b870f0887e577e",
+                "url": "https://github.com/shio-vinyl/illustash/releases/download/character-pack-2.0/wd-shard-e424f6ae9322bf303098835531ee4d28d2d01082622b522149b870f0887e577e.bin"
+              },
+              {
+                "name": "wd-shard-754b2db83524bb11c25909838e9a865bbcaa899d6b6738d36d27bd4739488042.bin",
+                "size": 4100,
+                "sha256": "754b2db83524bb11c25909838e9a865bbcaa899d6b6738d36d27bd4739488042",
+                "url": "https://github.com/shio-vinyl/illustash/releases/download/character-pack-2.1/wd-shard-754b2db83524bb11c25909838e9a865bbcaa899d6b6738d36d27bd4739488042.bin"
+              }
+            ]
+          }
+        },
+        "ccip": {
+          "format": "illustash-557-ccip-offline/1",
+          "heads": 2,
+          "candidate_only": 0,
+          "file": {
+            "name": "A-longtail-p75.zip",
+            "size": 7102,
+            "sha256": "8f824917803460224f6a71496d62d101d2f6f83bbfc9b75583d5d60038909f52",
+            "url": "https://github.com/shio-vinyl/illustash/releases/download/ccip-longtail-v1/A-longtail-p75.zip"
+          },
+          "base": {
+            "ccip_model_sha256": "4ea118d16496274f4f6e08d3afc768cc592389e8f7f32f8732ce2215c228ac5f"
+          },
+          "license": "MIT"
+        }
+      }
+    },
+    {
+      "kind": "character-pack",
+      "revision": 12,
+      "version": "2.2",
+      "min_app": "0.3.0",
+      "license": "Apache-2.0 AND MIT",
+      "components": {
+        "wd": {
+          "format": "illustash-wd-extension/2",
+          "heads": 3,
+          "candidate_only": 1,
+          "file": {
+            "name": "wd-extension-shards-invalid.bin",
+            "size": 12646,
+            "sha256": "5c00b0e5015198def568d4daaae58fb2d055cd31ea2e8c113bb04b8647248754",
+            "url": "https://github.com/shio-vinyl/illustash/releases/download/character-pack-2.2/wd-extension-shards-invalid.bin"
+          },
+          "base": {
+            "wd_model_sha256": "ae25f5f12b2d5891728fb7768fa63d65bf13a83d6d4823e3a1bf7b42875c74ff",
+            "wd_tags_sha256": "298633d94d0031d2081c0893f29c82eab7f0df00b08483ba8f29d1e979441217"
+          },
+          "license": "Apache-2.0",
+          "shards": {
+            "header": {
+              "name": "wd-shard-567c3e28cc350d82d247584dd4f3e291b599a77f32122d25e55b63729bab2214.bin",
+              "size": 346,
+              "sha256": "567c3e28cc350d82d247584dd4f3e291b599a77f32122d25e55b63729bab2214",
+              "url": "https://github.com/shio-vinyl/illustash/releases/download/character-pack-2.0/wd-shard-567c3e28cc350d82d247584dd4f3e291b599a77f32122d25e55b63729bab2214.bin"
+            },
+            "coefficients": [
+              {
+                "name": "wd-shard-e424f6ae9322bf303098835531ee4d28d2d01082622b522149b870f0887e577e.bin",
+                "size": 8200,
+                "sha256": "e424f6ae9322bf303098835531ee4d28d2d01082622b522149b870f0887e577e",
+                "url": "https://github.com/shio-vinyl/illustash/releases/download/character-pack-2.0/wd-shard-e424f6ae9322bf303098835531ee4d28d2d01082622b522149b870f0887e577e.bin"
+              },
+              {
+                "name": "wd-shard-754b2db83524bb11c25909838e9a865bbcaa899d6b6738d36d27bd4739488042.bin",
+                "size": 4100,
+                "sha256": "754b2db83524bb11c25909838e9a865bbcaa899d6b6738d36d27bd4739488042",
+                "url": "https://github.com/shio-vinyl/illustash/releases/download/character-pack-2.1/wd-shard-754b2db83524bb11c25909838e9a865bbcaa899d6b6738d36d27bd4739488042.bin"
+              }
+            ]
+          }
+        },
+        "ccip": {
+          "format": "illustash-557-ccip-offline/1",
+          "heads": 2,
+          "candidate_only": 0,
+          "file": {
+            "name": "A-longtail-p75.zip",
+            "size": 7102,
+            "sha256": "8f824917803460224f6a71496d62d101d2f6f83bbfc9b75583d5d60038909f52",
+            "url": "https://github.com/shio-vinyl/illustash/releases/download/ccip-longtail-v1/A-longtail-p75.zip"
+          },
+          "base": {
+            "ccip_model_sha256": "4ea118d16496274f4f6e08d3afc768cc592389e8f7f32f8732ce2215c228ac5f"
+          },
+          "license": "MIT"
+        }
+      }
+    }
+  ]
+}

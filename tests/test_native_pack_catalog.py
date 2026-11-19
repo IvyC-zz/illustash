@@ -23,7 +23,7 @@ import zipfile
 
 from tests.folder_fixture import image
 from tests.fixed_expectations import Library
-from tests.pack_shards_fixture import shard_fixture
+from tests.pack_shards_fixture import invalid_assembly, shard_fixture
 from tests import test_native_lifecycle as lifecycle
 from tests.test_read_http import free_port, wait_until
 from tools import pack_catalog
@@ -316,93 +316,6 @@ class NativePackCatalogTest(unittest.TestCase):
             self.assertEqual(packs['catalog']['serial'], 1)
             self.assertIn('签名', packs['catalog']['error'])
 
-    def test_incremental_shards_keep_the_active_pack_until_the_update_is_verified(self):
-        files = {}
-        ccip = FIXTURES / 'ccip-longtail-v1.zip'
-        (old_wd, new_wd), (older, newer) = shard_fixture(self.root)
-        old_files = pack_catalog.shard_files(older['packs'][0]['components']['wd']['shards'])
-        new_files = pack_catalog.shard_files(newer['packs'][1]['components']['wd']['shards'])
-        self.assertEqual(old_files[:-1], new_files[:-1])
-
-        def publish(code, catalog):
-            name = f'packs-shards-{code}.json'
-            payload = (FIXTURES / name).read_bytes()
-            self.assertEqual(payload, pack_catalog.dumps(catalog))
-            files[DOWNLOAD + 'packs/packs.json'] = payload
-            files[DOWNLOAD + 'packs/packs.json.sig'] = (FIXTURES / (name + '.sig')).read_bytes()
-            self.post('/api/updates', {'action': 'check'})
-            self.assertEqual(self.packs()['catalog']['serial'], catalog['serial'])
-
-        def route(file):
-            return urlsplit(file['url']).path
-
-        def assert_old_unchanged():
-            self.assertEqual(self.packs()['library']['version'], '2.0')
-            self.assertEqual(self.packs()['wd']['library']['package_sha256'], sha(old_wd.read_bytes()))
-            self.assertEqual(self.members(), (self.ids[:2], self.ids))
-            self.packs({'action': 'enable', 'version': '2.1'}, 409)
-
-        with github(files) as (origin, seen):
-            files.update(self.serve(origin))
-            self.restart()
-            for part in old_files:
-                files[route(part)] = (self.root / 'first' / part['name']).read_bytes()
-            publish('a', older)
-            seen.clear()
-            self.packs({'action': 'download', 'version': '2.0'})
-            installed = self.settle('download')
-            self.assertEqual(installed['download']['status'], 'done', installed)
-            self.assertCountEqual(seen, [route(f) for f in old_files] + ['/builtin/A-longtail-p75.zip'])
-            self.packs({'action': 'enable', 'version': '2.0'})
-            self.assertEqual(self.settle('task')['task']['status'], 'done')
-
-            publish('b', newer)
-            changed = route(new_files[-1])
-            payload = (self.root / 'second' / new_files[-1]['name']).read_bytes()
-            seen.clear()
-            files[changed] = False
-            self.packs({'action': 'download', 'version': '2.1'})
-            failed = self.settle('download')
-            self.assertEqual(failed['download']['status'], 'failed', failed)
-            self.assertNotEqual(failed['offer']['status'], 'ready')
-            self.assertEqual(seen, [changed] * 4)
-            assert_old_unchanged()
-
-            seen.clear()
-            files[changed] = bytes([payload[0] ^ 1]) + payload[1:]
-            self.packs({'action': 'download', 'version': '2.1'})
-            failed = self.settle('download')
-            self.assertEqual(failed['download']['status'], 'failed', failed)
-            self.assertIn('SHA-256', failed['download']['message'])
-            self.assertEqual(seen, [changed])
-            assert_old_unchanged()
-
-            seen.clear()
-            files[changed] = payload
-            self.packs({'action': 'download', 'version': '2.1'})
-            state = self.settle('download')
-            self.assertEqual((state['download']['status'], state['offer']['status']), ('done', 'ready'), state)
-            self.assertEqual((state['download']['done'], state['download']['total']), (len(payload), len(payload)))
-            self.assertEqual(seen, [changed])
-            installed_path = self.root / 'shared' / 'extensions' / ('wd-extension-' + sha(new_wd.read_bytes())[:12])
-            self.assertEqual((installed_path / new_wd.name).read_bytes(), new_wd.read_bytes())
-            self.packs({'action': 'enable', 'version': '2.1'})
-            self.assertEqual(self.settle('task')['library']['version'], '2.1')
-            self.packs({'action': 'withdraw'})
-            self.assertFalse(self.settle('task')['library']['enabled'])
-            self.assertEqual(self.members(), ([], []))
-
-            # 本机仍有等长的旧版，从完整离线包导入，不能把新版误认成旧版。
-            self.packs({'action': 'delete'})
-            offline = self.root / 'shards-offline.zip'
-            pack_catalog.offline(FIXTURES / 'packs-shards-b.json', [new_wd, ccip], offline)
-            seen.clear()
-            self.packs({'action': 'import', 'paths': [str(offline)]})
-            imported = self.settle('download')
-            self.assertEqual((imported['download']['status'], imported['current']['version']), ('done', '2.1'))
-            self.assertEqual((installed_path / new_wd.name).read_bytes(), new_wd.read_bytes())
-            self.assertEqual(seen, [])
-
     def test_offline_bundle_carries_the_signed_catalog(self):
         files = {}
         with github(files) as (origin, seen):
@@ -629,6 +542,103 @@ class NativePackCatalogTest(unittest.TestCase):
             self.assertEqual(packs['download']['status'], 'done', packs['download'])
             self.assertEqual((packs['current']['version'], packs['current']['status']), ('0.1', 'ready'))
             self.assertNotIn(DOWNLOAD + 'character-pack-1.0/wd-extension-v3.bin', seen)
+
+    def test_incremental_shards_keep_the_active_pack_until_the_update_is_verified(self):
+        files = {}
+        ccip = FIXTURES / 'ccip-longtail-v1.zip'
+        (old_wd, new_wd), (older, newer) = shard_fixture(self.root)
+        old_files = pack_catalog.shard_files(older['packs'][0]['components']['wd']['shards'])
+        new_files = pack_catalog.shard_files(newer['packs'][1]['components']['wd']['shards'])
+        self.assertEqual(old_files[:-1], new_files[:-1])
+
+        def publish(code, catalog):
+            name = f'packs-shards-{code}.json'
+            payload = (FIXTURES / name).read_bytes()
+            self.assertEqual(payload, pack_catalog.dumps(catalog))
+            files[DOWNLOAD + 'packs/packs.json'] = payload
+            files[DOWNLOAD + 'packs/packs.json.sig'] = (FIXTURES / (name + '.sig')).read_bytes()
+            self.post('/api/updates', {'action': 'check'})
+            self.assertEqual(self.packs()['catalog']['serial'], catalog['serial'])
+
+        def route(file):
+            return urlsplit(file['url']).path
+
+        def assert_old_unchanged():
+            self.assertEqual(self.packs()['library']['version'], '2.0')
+            self.assertEqual(self.packs()['wd']['library']['package_sha256'], sha(old_wd.read_bytes()))
+            self.assertEqual(self.members(), (self.ids[:2], self.ids))
+            self.packs({'action': 'enable', 'version': '2.1'}, 409)
+
+        with github(files) as (origin, seen):
+            files.update(self.serve(origin))
+            self.restart()
+            for part in old_files:
+                files[route(part)] = (self.root / 'first' / part['name']).read_bytes()
+            publish('a', older)
+            seen.clear()
+            self.packs({'action': 'download', 'version': '2.0'})
+            installed = self.settle('download')
+            self.assertEqual(installed['download']['status'], 'done', installed)
+            self.assertCountEqual(seen, [route(f) for f in old_files] + ['/builtin/A-longtail-p75.zip'])
+            self.packs({'action': 'enable', 'version': '2.0'})
+            self.assertEqual(self.settle('task')['task']['status'], 'done')
+
+            publish('b', newer)
+            changed = route(new_files[-1])
+            payload = (self.root / 'second' / new_files[-1]['name']).read_bytes()
+            seen.clear()
+            files[changed] = False
+            self.packs({'action': 'download', 'version': '2.1'})
+            failed = self.settle('download')
+            self.assertEqual(failed['download']['status'], 'failed', failed)
+            self.assertNotEqual(failed['offer']['status'], 'ready')
+            self.assertEqual(seen, [changed] * 4)
+            assert_old_unchanged()
+
+            seen.clear()
+            files[changed] = bytes([payload[0] ^ 1]) + payload[1:]
+            self.packs({'action': 'download', 'version': '2.1'})
+            failed = self.settle('download')
+            self.assertEqual(failed['download']['status'], 'failed', failed)
+            self.assertIn('SHA-256', failed['download']['message'])
+            self.assertEqual(seen, [changed])
+            assert_old_unchanged()
+
+            seen.clear()
+            files[changed] = payload
+            self.packs({'action': 'download', 'version': '2.1'})
+            state = self.settle('download')
+            self.assertEqual((state['download']['status'], state['offer']['status']), ('done', 'ready'), state)
+            self.assertEqual((state['download']['done'], state['download']['total']), (len(payload), len(payload)))
+            self.assertEqual(seen, [changed])
+            installed_path = self.root / 'shared' / 'extensions' / ('wd-extension-' + sha(new_wd.read_bytes())[:12])
+            self.assertEqual((installed_path / new_wd.name).read_bytes(), new_wd.read_bytes())
+            self.packs({'action': 'enable', 'version': '2.1'})
+            self.assertEqual(self.settle('task')['library']['version'], '2.1')
+            self.packs({'action': 'withdraw'})
+            self.assertFalse(self.settle('task')['library']['enabled'])
+            self.assertEqual(self.members(), ([], []))
+
+            # 所有单片都合法，但完整包摘要不符也不能就位。
+            publish('invalid', invalid_assembly(newer))
+            seen.clear()
+            self.packs({'action': 'download', 'version': '2.2'})
+            invalid = self.settle('download')
+            self.assertEqual(invalid['download']['status'], 'failed', invalid)
+            self.assertEqual(invalid['download']['message'], 'WD 扩展包校验失败')
+            self.assertEqual(seen, [])
+            self.packs({'action': 'enable', 'version': '2.2'}, 409)
+
+            # 本机仍有等长的旧版，从完整离线包导入，不能把新版误认成旧版。
+            self.packs({'action': 'delete'})
+            offline = self.root / 'shards-offline.zip'
+            pack_catalog.offline(FIXTURES / 'packs-shards-b.json', [new_wd, ccip], offline)
+            seen.clear()
+            self.packs({'action': 'import', 'paths': [str(offline)]})
+            imported = self.settle('download')
+            self.assertEqual((imported['download']['status'], imported['current']['version']), ('done', '2.1'))
+            self.assertEqual((installed_path / new_wd.name).read_bytes(), new_wd.read_bytes())
+            self.assertEqual(seen, [])
 
 
 if __name__ == '__main__':

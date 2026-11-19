@@ -143,7 +143,7 @@ impl Download {
             });
             check_stopped(models)?;
             if !has_candidate(&temporary, target) || !actual.is_ok_and(|digest| digest == target.sha256) {
-                return Err(Stop::Failed("组装后的 WD 扩展包校验失败".into()));
+                return Err(Stop::Failed("WD 扩展包校验失败".into()));
             }
             fs::rename(&temporary, partial.join(&target.path))?;
             activate(&place.root, &partial, place.manifest)?;

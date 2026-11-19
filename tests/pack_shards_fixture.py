@@ -1,4 +1,5 @@
 """分片走查用的两份合成 WD 文件。第二份只替换最后一个头的偏置，仍和旧包等长。"""
+from copy import deepcopy
 from pathlib import Path
 import struct
 from unittest.mock import patch
@@ -22,3 +23,14 @@ def shard_fixture(directory):
         entry_b = pack_catalog.entry(version='2.1', revision=11, wd=second, wd_shards=directory / 'second', previous=old, **options)
         new = pack_catalog.build([entry_b], old)
     return (first, second), (old, new)
+
+def invalid_assembly(previous):
+    """所有分片都有效，但签名目录的完整包摘要故意不符。"""
+    entry = deepcopy(previous['packs'][-1])
+    entry['version'] = '2.2'
+    entry['revision'] = 12
+    whole = entry['components']['wd']['file']
+    whole['name'] = 'wd-extension-shards-invalid.bin'
+    whole['url'] = f"{pack_catalog.RELEASE_PREFIX}character-pack-2.2/{whole['name']}"
+    whole['sha256'] = pack_catalog.sha256(b'not the reconstructed file')
+    return pack_catalog.build([entry], previous)
